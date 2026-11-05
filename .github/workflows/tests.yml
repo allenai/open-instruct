@@ -30,22 +30,30 @@ jobs:
       - name: Run unit tests
         run: uv run --frozen pytest
 
-  # DISABLED: both GPU-test jobs below are switched off with `if: false` and
-  # report as skipped. The Beaker job rarely got a GPU within the wait, so the
-  # check was red for reasons unrelated to the code (see PR #2182). Until they
-  # are back, run the GPU tests by hand with
+  # DEACTIVATED ON PURPOSE: contention for Beaker GPUs makes these jobs time out
+  # perennially (53 attempts and not one test result between 2026-10-27 and
+  # 2026-11-05, see PR #2182), so both GPU-test jobs report as skipped. Please
+  # re-activate when appropriate by deleting the `if: false` line on
+  # `gpu-tests-launch`; the `gpu-tests` job follows it automatically.
+  #
+  # Skipping is the intended behaviour and does not weaken a merge gate: branch
+  # protection on main requires only `Run unit tests` and `Code Quality`, so
+  # neither GPU job is a required check. While they are off, run the GPU tests
+  # by hand with
   #   ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
   # and record `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)`
-  # in the PR body. To re-enable, delete the two `if: false` lines.
+  # in the PR body.
   #
-  # The GPU tests run on Beaker. The large runner only builds the image and
-  # launches the Beaker job; waiting for Beaker happens in the small
+  # Layout when active: the GPU tests run on Beaker. The large runner only builds
+  # the image and launches the Beaker job; waiting for Beaker happens in the small
   # `gpu-tests` job below so the large runner is not billed while idle.
   gpu-tests-launch:
     name: Build and launch GPU tests
     if: false
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 30
+    # Shared with `gpu-tests` on purpose: a newer push cancels the older run's wait,
+    # whose cleanup step then stops the stale Beaker experiment.
     concurrency:
       group: gpu-tests-${{ github.head_ref || github.run_id }}
       cancel-in-progress: true
@@ -130,7 +138,8 @@ jobs:
         run: ./scripts/test/launch_gpu_tests_on_beaker.sh "${{ github.sha }}"
 
       - name: Stop GPU test experiment on cancellation or failure
-        # Covers a run that is cancelled or fails after launching but before the wait job starts.
+        # Best effort: it only helps once the launch script has recorded the experiment ID, which is
+        # its last action. A run cancelled while the experiment is being submitted can still leave one.
         if: (cancelled() || failure()) && env.RUN_GPU_TESTS == 'true'
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
@@ -141,8 +150,10 @@ jobs:
 
   gpu-tests:
     name: Run GPU tests
-    if: false
     needs: gpu-tests-launch
+    # Skipped whenever the launch job is skipped (the deactivated state). Otherwise it always
+    # runs, so a failed build or launch fails this check instead of leaving it skipped.
+    if: ${{ !cancelled() && needs.gpu-tests-launch.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
@@ -157,6 +168,12 @@ jobs:
       OVERRIDE_EXPERIMENT_ID: ${{ needs.gpu-tests-launch.outputs.override_experiment_id }}
       EXPERIMENT_ID: ${{ needs.gpu-tests-launch.outputs.experiment_id }}
     steps:
+
+      - name: Fail if build and launch did not succeed
+        if: needs.gpu-tests-launch.result != 'success'
+        run: |
+          echo "Build and launch GPU tests ended with: ${{ needs.gpu-tests-launch.result }}"
+          exit 1
 
       - name: Checkout code (for scripts)
         if: env.RUN_GPU_TESTS == 'true' || env.SKIP_REASON == 'override'

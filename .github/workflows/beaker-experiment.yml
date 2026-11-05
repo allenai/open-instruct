@@ -30,6 +30,8 @@ jobs:
       experiment_ids: ${{ steps.launch.outputs.experiment_ids }}
       experiment_names: ${{ steps.launch.outputs.experiment_names }}
       integration_image: ${{ steps.launch.outputs.integration_image }}
+      integration_image_id: ${{ steps.launch.outputs.integration_image_id }}
+      short_sha: ${{ steps.launch.outputs.short_sha }}
 
     steps:
       - name: Checkout repository
@@ -217,6 +219,23 @@ jobs:
             exit 1
           fi
 
+          # Record the immutable ID of the image these experiments ran on. The image name is shared
+          # (merge-queue checkouts are detached, so every run uses `...-head-cuda12`) and another run
+          # can reassign it while this one waits; the publish job pulls this ID, never the name.
+          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          IMAGE_JSON=$(beaker image get "$BEAKER_USER/$INTEGRATION_IMAGE" --format json)
+          IMAGE_ID=$(jq -r '.[0].id // ""' <<< "$IMAGE_JSON")
+          IMAGE_DESCRIPTION=$(jq -r '.[0].description // ""' <<< "$IMAGE_JSON")
+          if [ -z "$IMAGE_ID" ] || [[ "$IMAGE_DESCRIPTION" != *"$SHORT_SHA"* ]]; then
+            echo "ERROR: Beaker image $BEAKER_USER/$INTEGRATION_IMAGE (${IMAGE_ID:-no id}) is described as"
+            echo "       '$IMAGE_DESCRIPTION', not commit $SHORT_SHA. Another run replaced the shared name."
+            exit 1
+          fi
+          echo "Tested image: $IMAGE_ID ($IMAGE_DESCRIPTION)"
+          echo "integration_image_id=${IMAGE_ID}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
           echo "experiment_ids=${EXPERIMENT_IDS[*]}" >> $GITHUB_OUTPUT
           echo "experiment_names=${EXPERIMENT_NAMES[*]}" >> $GITHUB_OUTPUT
           echo "integration_image=${INTEGRATION_IMAGE}" >> $GITHUB_OUTPUT
@@ -267,9 +286,13 @@ jobs:
               ]
             }
 
+  # None of the jobs in this workflow is a required check (branch protection on main requires
+  # only `Run unit tests` and `Code Quality`). This job still always runs, so a failed build or
+  # launch shows up as a failed wait instead of a skipped one.
   wait-experiment:
     name: Wait for Beaker experiments
     needs: launch-experiment
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -283,6 +306,12 @@ jobs:
       EXPERIMENT_NAMES: ${{ needs.launch-experiment.outputs.experiment_names }}
 
     steps:
+      - name: Fail if build and launch did not succeed
+        if: needs.launch-experiment.result != 'success'
+        run: |
+          echo "Build and launch Beaker experiments ended with: ${{ needs.launch-experiment.result }}"
+          exit 1
+
       - name: Checkout scripts
         uses: actions/checkout@v4
         with:
@@ -297,10 +326,10 @@ jobs:
       - name: Wait for all Beaker experiments completion
         id: wait
         run: |
-          EXPERIMENT_IDS=($EXPERIMENT_IDS)
-          EXPERIMENT_NAMES=($EXPERIMENT_NAMES)
+          IDS=($EXPERIMENT_IDS)
+          NAMES=($EXPERIMENT_NAMES)
 
-          if [ ${#EXPERIMENT_IDS[@]} -eq 0 ]; then
+          if [ ${#IDS[@]} -eq 0 ]; then
             echo "ERROR: No experiments detected despite launch job succeeding."
             exit 1
           fi
@@ -309,9 +338,9 @@ jobs:
           ERRORED_FILE=$(mktemp)
           declare -A PIDS
 
-          for i in "${!EXPERIMENT_IDS[@]}"; do
-            EXP_ID="${EXPERIMENT_IDS[$i]}"
-            EXP_NAME="${EXPERIMENT_NAMES[$i]:-experiment_$i}"
+          for i in "${!IDS[@]}"; do
+            EXP_ID="${IDS[$i]}"
+            EXP_NAME="${NAMES[$i]:-experiment_$i}"
 
             (
               echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
@@ -349,7 +378,8 @@ jobs:
             while IFS='|' read -r EXP_ID EXP_NAME; do
               echo ""
               echo "=== Error logs for ${EXP_NAME} (${EXP_ID}) ==="
-              beaker experiment logs "$EXP_ID" | tail -n 200 || true
+              # Bounded so that fetching logs after a timeout cannot push the job past its own cap.
+              timeout 60 beaker experiment logs "$EXP_ID" | tail -n 200 || true
               FAILED_EXP_IDS+=("$EXP_ID")
               FAILED_EXP_NAMES+=("$EXP_NAME")
             done < "$FAILED_FILE"
@@ -367,8 +397,9 @@ jobs:
           echo "✅ All experiments completed successfully!"
 
       - name: Stop experiments on cancellation or failure
-        # Stopping an experiment that has already finished is a no-op.
-        if: cancelled() || failure()
+        # Stopping an experiment that has already finished is a no-op. A failed launch is cleaned
+        # up by the launch job itself.
+        if: (cancelled() || failure()) && needs.launch-experiment.result == 'success'
         run: |
           if [ -n "$EXPERIMENT_IDS" ]; then
             beaker experiment stop $EXPERIMENT_IDS || true
@@ -383,8 +414,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Experiments Launched:" >> $GITHUB_STEP_SUMMARY
 
-          EXPERIMENT_IDS=($EXPERIMENT_IDS)
-          EXPERIMENT_NAMES=($EXPERIMENT_NAMES)
+          IDS=($EXPERIMENT_IDS)
+          NAMES=($EXPERIMENT_NAMES)
           FAILED_EXP_IDS="${{ steps.wait.outputs.failed_experiment_ids }}"
           FAILED_EXP_NAMES="${{ steps.wait.outputs.failed_experiment_names }}"
 
@@ -397,9 +428,9 @@ jobs:
             done
           fi
 
-          for i in "${!EXPERIMENT_IDS[@]}"; do
-            EXP_ID="${EXPERIMENT_IDS[$i]}"
-            EXP_NAME="${EXPERIMENT_NAMES[$i]}"
+          for i in "${!IDS[@]}"; do
+            EXP_ID="${IDS[$i]}"
+            EXP_NAME="${NAMES[$i]}"
             if [ -n "${FAILED_MAP[$EXP_NAME]:-}" ]; then
               echo "- **$EXP_NAME** ❌: [View on Beaker](https://beaker.org/ex/$EXP_ID)" >> $GITHUB_STEP_SUMMARY
             else
@@ -418,7 +449,8 @@ jobs:
 
       - name: Determine failure reason
         id: failure-reason
-        if: failure()
+        # A failed build or launch is reported to Slack by the launch job itself.
+        if: failure() && needs.launch-experiment.result == 'success'
         run: |
           FAILED_EXPERIMENTS="${{ steps.wait.outputs.failed_experiment_names }}"
           ERRORED_EXPERIMENTS="${{ steps.wait.outputs.errored_experiment_names }}"
@@ -436,7 +468,7 @@ jobs:
           fi
 
       - name: Notify Slack on Failure
-        if: failure() && steps.failure-reason.outputs.is_timeout != 'true'
+        if: failure() && needs.launch-experiment.result == 'success' && steps.failure-reason.outputs.is_timeout != 'true'
         uses: slackapi/slack-github-action@v2.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -480,43 +512,46 @@ jobs:
         shell: bash -euo pipefail {0}
     env:
       BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
-      INTEGRATION_IMAGE: ${{ needs.launch-experiment.outputs.integration_image }}
+      # The immutable Beaker ID of the image the experiments ran on, recorded by the launch job.
+      IMAGE_ID: ${{ needs.launch-experiment.outputs.integration_image_id }}
+      SHORT_SHA: ${{ needs.launch-experiment.outputs.short_sha }}
+      LOCAL_IMAGE: open-instruct-integration-test:tested
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Setup Beaker
         uses: allenai/setup-beaker@v2
         with:
           token: ${{ secrets.BEAKER_TOKEN }}
           workspace: ai2/open-instruct-dev
 
-      - name: Pull integration image from Beaker
+      - name: Pull the tested image from Beaker by ID
         run: |
-          if [ -z "$INTEGRATION_IMAGE" ]; then
-            echo "ERROR: No integration image specified"
+          if [ -z "$IMAGE_ID" ] || [ -z "$SHORT_SHA" ]; then
+            echo "ERROR: The launch job did not record the tested image ID and commit."
             exit 1
           fi
-          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-          beaker image pull "$BEAKER_USER/$INTEGRATION_IMAGE"
-          for CANDIDATE in "$BEAKER_USER/$INTEGRATION_IMAGE" "ai2/$BEAKER_USER/$INTEGRATION_IMAGE"; do
-            if docker image inspect "$CANDIDATE" >/dev/null 2>&1; then
-              docker tag "$CANDIDATE" "$INTEGRATION_IMAGE"
-              break
-            fi
-          done
-          if ! docker image inspect "$INTEGRATION_IMAGE" >/dev/null 2>&1; then
-            echo "ERROR: Integration image ${INTEGRATION_IMAGE} unavailable locally after pull."
+          DESCRIPTION=$(beaker image get "$IMAGE_ID" --format json | jq -r '.[0].description // ""')
+          if [[ "$DESCRIPTION" != *"$SHORT_SHA"* ]]; then
+            echo "ERROR: Image $IMAGE_ID is described as '$DESCRIPTION', not commit $SHORT_SHA."
             exit 1
+          fi
+          beaker image pull "$IMAGE_ID" "$LOCAL_IMAGE"
+          if ! docker image inspect "$LOCAL_IMAGE" >/dev/null 2>&1; then
+            # The runner starts with no images, so the pulled one is the only candidate.
+            mapfile -t PULLED < <(docker images -q | sort -u)
+            if [ "${#PULLED[@]}" -ne 1 ]; then
+              echo "ERROR: Expected exactly one local image after the pull, found ${#PULLED[@]}."
+              docker images
+              exit 1
+            fi
+            docker tag "${PULLED[0]}" "$LOCAL_IMAGE"
           fi
 
       - name: Check image
-        run: docker run --rm "$INTEGRATION_IMAGE"
+        run: docker run --rm "$LOCAL_IMAGE"
 
       - name: Push CUDA 12 images to Beaker
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
           DESCRIPTION="Created from commit: ${SHORT_SHA}; CUDA: 12 (GitHub run ${GITHUB_RUN_ID})"
           BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
 
@@ -527,14 +562,14 @@ jobs:
             beaker image rename "${BEAKER_USER}/${TARGET_IMAGE}" "" || true
 
             echo "Publishing ${TARGET_IMAGE} with updated image and description."
-            beaker image create --name "$TARGET_IMAGE" --description "$DESCRIPTION" "$INTEGRATION_IMAGE"
+            beaker image create --name "$TARGET_IMAGE" --description "$DESCRIPTION" "$LOCAL_IMAGE"
           }
 
           publish_image open_instruct_auto
           publish_image open_instruct_auto_cuda12
 
       - name: Summary
-        run: echo "CUDA 12 images published as \`open_instruct_auto\` and \`open_instruct_auto_cuda12\`." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "CUDA 12 images published as \`open_instruct_auto\` and \`open_instruct_auto_cuda12\` from Beaker image \`${IMAGE_ID}\`." >> "$GITHUB_STEP_SUMMARY"
 
   publish-cuda13-image:
     name: Publish CUDA 13 image
@@ -628,3 +663,44 @@ jobs:
 
       - name: Summary
         run: echo "CUDA 13 image published as \`open_instruct_auto_cuda13\`." >> "$GITHUB_STEP_SUMMARY"
+
+  # The published images stop updating if a publish job fails, so tell Slack.
+  notify-publish-failure:
+    name: Notify Slack on publish failure
+    needs: [publish-cuda12-image, publish-cuda13-image]
+    if: ${{ always() && (needs.publish-cuda12-image.result == 'failure' || needs.publish-cuda13-image.result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Notify Slack on Failure
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "📦 Beaker image publish failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "📦 *Beaker image publish* failed on `${{ github.ref_name }}`\n\n*Reason:* CUDA 12 publish: ${{ needs.publish-cuda12-image.result }}; CUDA 13 publish: ${{ needs.publish-cuda13-image.result }}. `open_instruct_auto*` may be stale.\n*Triggered by:* ${{ github.actor }}\n*Commit:* `${{ github.sha }}`"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Run"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }

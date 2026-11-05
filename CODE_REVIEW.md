@@ -25,6 +25,11 @@ previous blockers are resolved and no new blockers remain, approve explicitly
 rather than only commenting that the code looks good. If a decision still cannot
 be made, explain the specific unresolved concern.
 
+While the automatic GPU-test jobs are deactivated (see `.github/workflows/tests.yml`),
+their skipped status is intended and CI does not verify a `GPU_TESTS=[...]` line in a
+PR body. For a change that touches GPU code paths, open the linked Beaker experiment
+and confirm it ran `scripts/test/run_gpu_pytest.sh` on the PR's commit and exited 0.
+
 ## Review output
 
 For each finding, give a severity, the repository path and line at the PR head,

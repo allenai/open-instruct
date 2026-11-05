@@ -6,8 +6,8 @@ set -euo pipefail
 
 GIT_SHA="${1:?Usage: $0 <git_sha>}"
 
-output=$(bash scripts/test/launch_gpu_tests_on_beaker.sh "$GIT_SHA" 2>&1)
-echo "$output"
+# tee shows the build and launch as they happen, including the error if the launch fails.
+output=$(bash scripts/test/launch_gpu_tests_on_beaker.sh "$GIT_SHA" 2>&1 | tee /dev/stderr)
 exp_id=$(echo "$output" | grep -oP 'Launched GPU tests: https://beaker.org/ex/\K[^\s]+' | head -1)
 
 # Stop the experiment if we exit before it finishes (for example Ctrl-C), so it does
