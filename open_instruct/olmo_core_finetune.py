@@ -264,13 +264,14 @@ def _check_extra_numpy_dir(
                 f"{token_path} does not end with EOS ({tokenizer.eos_token_id}); OLMo-core's EOS scan "
                 "drops the tokens after a file's last EOS."
             )
-        # The boundaries OLMo-core's packer finds in a local file.
+        # The boundaries OLMo-core's packer uses: the metadata rows with --document_boundaries_from_metadata,
+        # otherwise the EOS positions in the token file.
         doc_lengths = np.array(
             [
                 end - start
                 for start, end in oc_data_utils.iter_document_indices(
                     token_path,
-                    use_array_if_local=True,
+                    use_array_if_local=not require_metadata,
                     eos_token_id=tokenizer.eos_token_id,
                     bos_token_id=tokenizer.bos_token_id,
                     dtype=token_dtype,

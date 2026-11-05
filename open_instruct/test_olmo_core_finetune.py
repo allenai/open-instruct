@@ -305,6 +305,18 @@ class ExtraNumpyDirsTest(unittest.TestCase):
             finally:
                 os.remove(stray)
 
+    def test_stats_follow_the_selected_boundary_source(self) -> None:
+        # One 12-token row with an EOS inside: two documents by EOS, one by metadata.
+        _write_parts(self.extra_a, [[([50_000, 50_001, 50_002, 50_003, 50_004, _EXTRA_EOS] * 2, True)]])
+        by_eos = self._check([self.extra_a])[self.extra_a]
+        self.assertEqual((by_eos.num_docs, by_eos.num_docs_over_length), (2, 0))
+        by_metadata = olmo_core_finetune._check_extra_numpy_dirs(
+            [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+        )[self.extra_a]
+        self.assertEqual(
+            (by_metadata.num_docs, by_metadata.num_docs_over_length, by_metadata.num_tokens_truncated), (1, 1, 4)
+        )
+
     def test_metadata_required_with_metadata_boundaries(self) -> None:
         os.remove(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"))
         self._check([self.extra_a])
