@@ -2,8 +2,7 @@
 BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
 
 uv run python mason.py \
-    --cluster ai2/saturn \
-    --cluster ai2/jupiter \
+    --cluster ai2/saturn ai2/jupiter \
     --description "Single GPU DPO run with OLMo-core, for debugging purposes." \
     --workspace ai2/open-instruct-dev \
     --priority urgent \

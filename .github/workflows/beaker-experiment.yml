@@ -488,7 +488,7 @@ jobs:
     name: Publish CUDA 12 images
     needs: [launch-experiment, wait-experiment]
     # A manual dispatch from a branch tests the workflow without replacing the published images.
-    if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
+    if: success() && (github.event_name == 'merge_group' || github.ref == 'refs/heads/main')
     # Large runner for its disk: the image is about 26 GB, and the standard runner guarantees 14 GB.
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 30
@@ -559,7 +559,7 @@ jobs:
   publish-cuda13-image:
     name: Publish CUDA 13 image
     needs: wait-experiment
-    if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
+    if: success() && (github.event_name == 'merge_group' || github.ref == 'refs/heads/main')
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 45
     defaults:
