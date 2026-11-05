@@ -283,6 +283,53 @@ class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
         self.assertEqual(verifier([], "not JSON", {"func_name": "validate_json_format"}).score, 0.0)
 
 
+class TestIFEvalGDegenerateConstraints(unittest.TestCase):
+    """Regression tests for constraints that rewarded degenerate answers (marin-community/marin#10320).
+
+    count:lowercase_counting capped the total number of lowercase words at N (2-3), so only an empty, all-caps
+    or non-Latin answer passed; letters:letter_counting counted only ASCII letters, so a non-Latin answer met
+    "less than N letters"; length_constraints:nth_paragraph_first_word redrew an out-of-range paragraph index
+    at random on every check."""
+
+    @staticmethod
+    def _checker(key, **kwargs):
+        checker = instructions_registry.INSTRUCTION_DICT[key](key)
+        checker.build_description(**kwargs)
+        return checker
+
+    def test_lowercase_counting_caps_each_word(self):
+        checker = self._checker("count:lowercase_counting", N=2)
+        self.assertTrue(checker.check_following("The cat sat on a mat, then the dog sat."))
+        self.assertFalse(checker.check_following("the cat and the dog and the bird"))
+        self.assertTrue(checker.check_following(""))
+
+    def test_letter_counting_counts_every_script(self):
+        less = self._checker("letters:letter_counting", N=3, relation="less than")
+        self.assertTrue(less.check_following("42"))
+        self.assertFalse(less.check_following("答案是四十二"))
+        self.assertFalse(less.check_following("Forty-two"))
+        at_least = self._checker("letters:letter_counting", N=3, relation="at least")
+        self.assertTrue(at_least.check_following("答案是四十二"))
+
+    def test_out_of_range_paragraph_is_kept_and_fails(self):
+        key = "length_constraints:nth_paragraph_first_word"
+        response = "\n\n".join(["guest one"] * 7)
+        for _ in range(50):
+            checker = self._checker(key, num_paragraphs=7, nth_paragraph=8, first_word="guest")
+            self.assertEqual(checker.get_instruction_args()["nth_paragraph"], 8)
+            self.assertFalse(checker.check_following(response))
+        self.assertTrue(
+            self._checker(key, num_paragraphs=7, nth_paragraph=7, first_word="guest").check_following(response)
+        )
+
+    def test_random_paragraph_index_is_in_range(self):
+        for _ in range(200):
+            args = self._checker(
+                "length_constraints:nth_paragraph_first_word", num_paragraphs=3
+            ).get_instruction_args()
+            self.assertLessEqual(args["nth_paragraph"], 3)
+
+
 class TestIFEvalGWordCounting(unittest.TestCase):
     """Regression tests: `count:counting_composition` and `count:count_unique` used
     nltk.word_tokenize, which emits punctuation (".", ",") as standalone tokens. That

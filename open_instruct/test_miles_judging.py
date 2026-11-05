@@ -184,7 +184,7 @@ def test_invalid_judge_contracts_fail_before_gpu_submission(document, mutate):
 
 @pytest.mark.parametrize("mode", ["managed", "external"])
 @pytest.mark.parametrize("section", ["core", "training"])
-def test_final_answer_only_with_named_judges_fails_before_submission(document, mode, section):
+def test_final_answer_only_with_named_judges_compiles(document, mode, section):
     if mode == "external":
         document["judges"]["general"] = {
             "mode": "external",
@@ -193,8 +193,7 @@ def test_final_answer_only_with_named_judges_fails_before_submission(document, m
         }
     assert RunSpec.from_dict(document).compile().core.reward_final_answer_only is False
     document[section] = {"reward_final_answer_only": True}
-    with pytest.raises(InputError, match=r"core.reward_final_answer_only.*judging.bindings"):
-        RunSpec.from_dict(document)
+    assert RunSpec.from_dict(document).compile().core.reward_final_answer_only is True
 
 
 def test_final_answer_only_without_named_judges_remains_supported(document):
@@ -280,7 +279,19 @@ def test_transport_failure_is_not_reward_zero(server):
         general_judge._request(config, "input")
 
 
-def test_named_reward_uses_full_query_and_keeps_diagnostics(document, monkeypatch, tmp_path, server):
+@pytest.mark.parametrize("final_only", [False, True])
+@pytest.mark.parametrize(
+    "response, extracted",
+    [
+        ("Answer", None),
+        ("scratch </think> Answer", " Answer"),
+        ("scratch </think>   ", None),
+        ("<answer>scratch answer</answer> </think> draft </think> submitted answer", " submitted answer"),
+    ],
+)
+def test_named_reward_uses_full_query_and_keeps_diagnostics(
+    document, monkeypatch, tmp_path, server, final_only, response, extracted
+):
     config, state = server
     value = judging.registry(judging.parse(document))
     value["judges"]["general"]["endpoint"] = config.api_url.removesuffix("/chat/completions")
@@ -299,7 +310,7 @@ def test_named_reward_uses_full_query_and_keeps_diagnostics(document, monkeypatc
     sample = SimpleNamespace(
         tokens=[1],
         response_length=1,
-        response="Answer",
+        response=response,
         prompt="rendered",
         metadata={
             "query": "last user message",
@@ -307,9 +318,23 @@ def test_named_reward_uses_full_query_and_keeps_diagnostics(document, monkeypatc
             "verifiers": [{"name": "general-quality", "target": "", "weight": 1}],
         },
     )
-    args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(path)), seed=17)
-    assert asyncio.run(rewards.registered_reward(args, sample)) == 0.8
+    args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(path), reward_final_answer_only=final_only), seed=17)
+    score = asyncio.run(rewards.registered_reward(args, sample))
+    assert sample.response == response
+    assert sample.tokens == [1]
+    if final_only and extracted is None:
+        assert score == 0.0
+        assert sample.metadata["reward_gate"] == "missing_final_answer"
+        assert state["requests"] == []
+        return
+    assert score == 0.8
     request = state["requests"][-1][1]["messages"][0]["content"]
+    expected, _ = general_judge.build_judge_prompt(
+        "general-quality", query="entire conversation", prediction=extracted if final_only else response, target=""
+    )
+    assert request == expected
+    if final_only:
+        assert "scratch answer" not in request and " draft " not in request
     assert "entire conversation" in request and "last user message" not in request
     assert sample.metadata["verifier_diagnostics"]["general-quality"]["raw_reply"]
 

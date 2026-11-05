@@ -14,7 +14,15 @@ from open_instruct.miles.infrastructure import gpu_hardware
 MEASURED_CONTEXT = 34816
 MEASURED_RESPONSE = 32768
 MINIMUM_MEMORY_MIB = {"b300": 270000, "h100": 80000}
-PROFILES = {"olmo35-b300-v1": "b300", "olmo35-h100-v1": "h100"}
+PROFILES = {
+    "olmo35-b300-v1": "b300",
+    "olmo35-b300-12.5@0.8": "b300",
+    "olmo35-h100-12.5@0.8": "h100",
+    "olmo35-h100-v1": "h100",  # Compatibility alias; not another recommendation.
+}
+# Suffix is total@active parameters in billions, rounded for the measured model.
+# One recommended starting point per GPU; old names remain reproducible.
+RECOMMENDED_PROFILES = {"b300": "olmo35-b300-12.5@0.8", "h100": "olmo35-h100-12.5@0.8"}
 PROFILE_KEYS = (
     "sglang_disable_radix_cache",
     "sglang_mamba_radix_cache_strategy",
@@ -93,7 +101,7 @@ PRESETS = {
         "sglang_max_mamba_cache_size": 3072,
         "sglang_mem_fraction_static": 0.7,
     },
-    "olmo35-h100-v1": _COMMON
+    "olmo35-h100-12.5@0.8": _COMMON
     | {
         "sglang_disable_radix_cache": True,
         "sglang_max_total_tokens": 192 * MEASURED_CONTEXT,
@@ -101,6 +109,13 @@ PRESETS = {
         "sglang_mem_fraction_static": 0.9,
     },
 }
+
+# Preserve the original cached preset for existing configs. The recommendation
+# keeps its qualified pools and graphs, but forbids cross-request reuse. The
+# 3,072 slots remain an explicit allocation with radix off; extra_buffer is inert.
+# Pool reduction is a separate qualification, not part of this mode change.
+PRESETS["olmo35-b300-12.5@0.8"] = PRESETS["olmo35-b300-v1"] | {"sglang_disable_radix_cache": True}
+PRESETS["olmo35-h100-v1"] = PRESETS["olmo35-h100-12.5@0.8"]
 
 
 def editable_toml(name):
@@ -115,8 +130,13 @@ def incompatibility(name, cluster, model, options):
     gpu = PROFILES[name]
     cluster_gpu = gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu")
     if cluster_gpu not in (None, gpu):
-        alternative = next((key for key, value in PROFILES.items() if value == cluster_gpu), "generic")
+        alternative = RECOMMENDED_PROFILES.get(cluster_gpu, "generic")
         return f"Preset expects {gpu.upper()}, but {cluster} uses {cluster_gpu.upper()}; choose {alternative} or change the cluster"
+    if options.get("pause_generation_mode") == "in_place" and not PRESETS[name]["sglang_disable_radix_cache"]:
+        return (
+            "Core in_place publication requires sglang_disable_radix_cache=true; "
+            f"use {RECOMMENDED_PROFILES[gpu]} on {gpu.upper()}"
+        )
     if options.get("colocate") or options.get("rollout_num_gpus_per_engine", 1) != 1:
         return "Measured presets require dedicated TP1 inference engines"
     if any(options.get(key) for key in ("rollout_external_engine_addrs", "custom_inference_engine_provider_path")):
@@ -187,16 +207,22 @@ def advise(report, cluster, model, options, explicit_keys):
     selected = report["selected"]
     if selected == "generic":
         cluster_gpu = gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu")
-        for name, preset in PRESETS.items():
+        for name in RECOMMENDED_PROFILES.values():
+            preset = PRESETS[name]
             if (
                 model is not None
                 and cluster_gpu == PROFILES[name]
                 and not incompatibility(name, cluster, model, options)
             ):
+                cache_note = (
+                    " This preset disables cross-request prefix caching; retract mode does not restore prefix reuse."
+                    if preset["sglang_disable_radix_cache"] and options.get("pause_generation_mode") != "in_place"
+                    else ""
+                )
                 tips.append(
                     {
                         "code": "inference_profile_available",
-                        "message": f'Your model, hardware and topology are compatible with measured preset {name}. To adopt it whole, add inference.profile = "{name}" and remove its explicit serving keys. Your current settings are unchanged.',
+                        "message": f'Your model, hardware and topology are compatible with measured preset {name}. To adopt it whole, add inference.profile = "{name}" and remove its explicit serving keys. Your current settings are unchanged.{cache_note}',
                     }
                 )
             pool_keys = ("sglang_max_total_tokens", "sglang_max_mamba_cache_size")
