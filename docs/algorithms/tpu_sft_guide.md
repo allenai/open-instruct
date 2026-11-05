@@ -332,6 +332,9 @@ Each of these trained silently on wrong data or a wrong model before it was foun
 - **An HBM OOM at compile names its buffers only in libtpu's log.** The pod log gives the total;
   `/tmp/tpu_logs/tpu_driver.ERROR` in the container lists the largest buffers and the ops that made them. Copy it out
   in the launcher's EXIT trap, since it dies with the pod.
+- **Narrowed mounts hide `scratch/`.** Overlays mount only `data/` and `tokenizers/`, so a launcher reading
+  `/mnt/post-training/scratch/...` finds no file and its pods exit at startup. Add a read-only gcsfuse volume for that
+  folder alone (`only-dir=post-training/scratch/<dir>`, mounted at the same path), never all of `post-training/`.
 - **GCS egress quota.** Two big slices loading the base checkpoint at once hit `google_egress_bandwidth` (us-central2)
   and failed at startup. Stagger big-slice launches.
 - **The control host is a single point of failure.** Watchers and log tailers die with the host they run on (a Beaker
