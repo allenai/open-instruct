@@ -14,13 +14,22 @@ env:
   DOCKER_BUILDKIT: "1"
 
 jobs:
+  # The large runner builds the image and launches the Beaker experiments, then
+  # exits. Waiting for Beaker happens in the small `wait-experiment` job so the
+  # large runner is not billed while idle, and the images are published by
+  # separate jobs only once the experiments have passed.
   launch-experiment:
-    name: Launch Beaker Experiment
+    name: Build and launch Beaker experiments
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 75
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash -euo pipefail {0}
+    outputs:
+      trigger_info: ${{ steps.get-trigger-info.outputs.trigger_info }}
+      experiment_ids: ${{ steps.launch.outputs.experiment_ids }}
+      experiment_names: ${{ steps.launch.outputs.experiment_names }}
+      integration_image: ${{ steps.launch.outputs.integration_image }}
 
     steps:
       - name: Checkout repository
@@ -214,17 +223,85 @@ jobs:
           echo "All experiments launched successfully!"
           echo "Experiment IDs: ${EXPERIMENT_IDS[*]}"
 
-      - name: Wait for all Beaker experiments completion
-        id: wait
-        if: success() && steps.launch.outputs.experiment_ids != ''
+      - name: Stop experiments on cancellation or failure
+        # Covers a failed later launch, or a cancellation before the wait job starts.
+        # Stopping an experiment that has already finished is a no-op.
+        if: cancelled() || failure()
         env:
           BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
-          EXPERIMENT_IDS=(${{ steps.launch.outputs.experiment_ids }})
-          EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
+          if [ -s "$RUNNER_TEMP/beaker_experiment_ids" ]; then
+            beaker experiment stop $(cat "$RUNNER_TEMP/beaker_experiment_ids") || true
+          fi
+
+      - name: Notify Slack on Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "🔨 Beaker Experiment Launch failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "🔨 *Beaker Experiment Launch* failed on `${{ github.ref_name }}`\n\n*Reason:* Build or launch failed\n*Triggered by:* ${{ github.actor }}\n*Commit:* `${{ github.sha }}`"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Run"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+
+  wait-experiment:
+    name: Wait for Beaker experiments
+    needs: launch-experiment
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    env:
+      BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+      # Kept under the job's timeout-minutes so the script, not the runner, ends the wait.
+      BEAKER_WAIT_TIMEOUT: 18m
+      EXPERIMENT_IDS: ${{ needs.launch-experiment.outputs.experiment_ids }}
+      EXPERIMENT_NAMES: ${{ needs.launch-experiment.outputs.experiment_names }}
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/test
+
+      - name: Setup Beaker
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ secrets.BEAKER_TOKEN }}
+          workspace: ai2/open-instruct-dev
+
+      - name: Wait for all Beaker experiments completion
+        id: wait
+        run: |
+          EXPERIMENT_IDS=($EXPERIMENT_IDS)
+          EXPERIMENT_NAMES=($EXPERIMENT_NAMES)
 
           if [ ${#EXPERIMENT_IDS[@]} -eq 0 ]; then
-            echo "ERROR: No experiments detected despite launch step succeeding."
+            echo "ERROR: No experiments detected despite launch job succeeding."
             exit 1
           fi
 
@@ -238,23 +315,24 @@ jobs:
 
             (
               echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
-              if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 30m --interval 30s; then
-                EXIT_CODE=$(beaker experiment get "$EXP_ID" --format json | jq -r '.[0].jobs[0].status.exitCode')
-                if [ "$EXIT_CODE" = "0" ]; then
+              RESULT=0
+              ./scripts/test/wait_for_beaker_experiment.sh "$EXP_ID" "$BEAKER_WAIT_TIMEOUT" || RESULT=$?
+              case "$RESULT" in
+                0)
                   echo "  [${EXP_NAME}] ✅ succeeded"
-                else
-                  echo "  [${EXP_NAME}] ❌ failed with exit code ${EXIT_CODE}"
+                  ;;
+                1)
+                  echo "  [${EXP_NAME}] ❌ failed with a non-zero exit code"
                   echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
-                  # A preempted or cancelled job has no exit code; treat it like a timeout.
-                  if [[ "$EXIT_CODE" =~ ^[0-9]+$ ]]; then
-                    echo "${EXP_NAME}" >> "$ERRORED_FILE"
-                  fi
-                fi
-              else
-                echo "  [${EXP_NAME}] ❌ did not reach finalized status within timeout; stopping it"
-                beaker experiment stop "$EXP_ID" || true
-                echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
-              fi
+                  echo "${EXP_NAME}" >> "$ERRORED_FILE"
+                  ;;
+                *)
+                  # A queue timeout (the script stops the experiment), or a preempted or
+                  # cancelled job with no exit code; neither is a test failure.
+                  echo "  [${EXP_NAME}] ❌ did not finish (queue timeout, preemption or cancellation)"
+                  echo "${EXP_ID}|${EXP_NAME}" >> "$FAILED_FILE"
+                  ;;
+              esac
             ) &
             PIDS[$i]=$!
           done
@@ -291,58 +369,22 @@ jobs:
       - name: Stop experiments on cancellation or failure
         # Stopping an experiment that has already finished is a no-op.
         if: cancelled() || failure()
-        env:
-          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
         run: |
-          if [ -s "$RUNNER_TEMP/beaker_experiment_ids" ]; then
-            beaker experiment stop $(cat "$RUNNER_TEMP/beaker_experiment_ids") || true
+          if [ -n "$EXPERIMENT_IDS" ]; then
+            beaker experiment stop $EXPERIMENT_IDS || true
           fi
-
-      - name: Check image
-        if: success()
-        run: |
-          IMAGE="${{ steps.launch.outputs.integration_image }}"
-          if [ -z "$IMAGE" ]; then
-            echo "ERROR: No integration image specified"
-            exit 1
-          fi
-          docker run --rm "$IMAGE"
-
-      - name: Push CUDA 12 images to Beaker
-        id: push-cuda12
-        # A manual dispatch from a branch tests the workflow without replacing the published images.
-        if: success() && (github.event_name == 'merge_group' || github.ref == 'refs/heads/main')
-        env:
-          SOURCE_IMAGE: ${{ steps.launch.outputs.integration_image }}
-        run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          DESCRIPTION="Created from commit: ${SHORT_SHA}; CUDA: 12 (GitHub run ${GITHUB_RUN_ID})"
-          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
-
-          publish_image() {
-            local TARGET_IMAGE="$1"
-
-            echo "Renaming ${BEAKER_USER}/${TARGET_IMAGE} to release prior alias (if present)."
-            beaker image rename "${BEAKER_USER}/${TARGET_IMAGE}" "" || true
-
-            echo "Publishing ${TARGET_IMAGE} with updated image and description."
-            beaker image create --name "$TARGET_IMAGE" --description "$DESCRIPTION" "$SOURCE_IMAGE"
-          }
-
-          publish_image open_instruct_auto
-          publish_image open_instruct_auto_cuda12
 
       - name: Summary
         if: always()
         run: |
           echo "## Beaker Experiment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Trigger:** ${{ steps.get-trigger-info.outputs.trigger_info }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ needs.launch-experiment.outputs.trigger_info }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Experiments Launched:" >> $GITHUB_STEP_SUMMARY
 
-          EXPERIMENT_IDS=(${{ steps.launch.outputs.experiment_ids }})
-          EXPERIMENT_NAMES=(${{ steps.launch.outputs.experiment_names }})
+          EXPERIMENT_IDS=($EXPERIMENT_IDS)
+          EXPERIMENT_NAMES=($EXPERIMENT_NAMES)
           FAILED_EXP_IDS="${{ steps.wait.outputs.failed_experiment_ids }}"
           FAILED_EXP_NAMES="${{ steps.wait.outputs.failed_experiment_names }}"
 
@@ -366,8 +408,8 @@ jobs:
           done
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ job.status }}" = "success" ] && [ "${{ steps.push-cuda12.outcome }}" = "success" ]; then
-            echo "✅ **Status:** All experiments completed successfully and CUDA 12 images pushed!" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ] && [ "${{ github.event_name == 'merge_group' || github.ref == 'refs/heads/main' }}" = "true" ]; then
+            echo "✅ **Status:** All experiments completed successfully; the publish jobs push the images next." >> $GITHUB_STEP_SUMMARY
           elif [ "${{ job.status }}" = "success" ]; then
             echo "✅ **Status:** All experiments completed successfully (images not pushed: only merge_group and main publish)" >> $GITHUB_STEP_SUMMARY
           else
@@ -388,9 +430,6 @@ jobs:
           elif [ -n "$FAILED_EXPERIMENTS" ]; then
             echo "is_timeout=true" >> $GITHUB_OUTPUT
             echo "Skipping Slack notification - experiments timed out: ${FAILED_EXPERIMENTS}"
-          elif [ "${{ steps.launch.outcome }}" = "failure" ]; then
-            echo "reason=Build or launch failed" >> $GITHUB_OUTPUT
-            echo "emoji=🔨" >> $GITHUB_OUTPUT
           else
             echo "reason=Workflow failed (see logs for details)" >> $GITHUB_OUTPUT
             echo "emoji=❌" >> $GITHUB_OUTPUT
@@ -429,9 +468,77 @@ jobs:
               ]
             }
 
+  publish-cuda12-image:
+    name: Publish CUDA 12 images
+    needs: [launch-experiment, wait-experiment]
+    # A manual dispatch from a branch tests the workflow without replacing the published images.
+    if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    env:
+      BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+      INTEGRATION_IMAGE: ${{ needs.launch-experiment.outputs.integration_image }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Beaker
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ secrets.BEAKER_TOKEN }}
+          workspace: ai2/open-instruct-dev
+
+      - name: Pull integration image from Beaker
+        run: |
+          if [ -z "$INTEGRATION_IMAGE" ]; then
+            echo "ERROR: No integration image specified"
+            exit 1
+          fi
+          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+          beaker image pull "$BEAKER_USER/$INTEGRATION_IMAGE"
+          for CANDIDATE in "$BEAKER_USER/$INTEGRATION_IMAGE" "ai2/$BEAKER_USER/$INTEGRATION_IMAGE"; do
+            if docker image inspect "$CANDIDATE" >/dev/null 2>&1; then
+              docker tag "$CANDIDATE" "$INTEGRATION_IMAGE"
+              break
+            fi
+          done
+          if ! docker image inspect "$INTEGRATION_IMAGE" >/dev/null 2>&1; then
+            echo "ERROR: Integration image ${INTEGRATION_IMAGE} unavailable locally after pull."
+            exit 1
+          fi
+
+      - name: Check image
+        run: docker run --rm "$INTEGRATION_IMAGE"
+
+      - name: Push CUDA 12 images to Beaker
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DESCRIPTION="Created from commit: ${SHORT_SHA}; CUDA: 12 (GitHub run ${GITHUB_RUN_ID})"
+          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+
+          publish_image() {
+            local TARGET_IMAGE="$1"
+
+            echo "Renaming ${BEAKER_USER}/${TARGET_IMAGE} to release prior alias (if present)."
+            beaker image rename "${BEAKER_USER}/${TARGET_IMAGE}" "" || true
+
+            echo "Publishing ${TARGET_IMAGE} with updated image and description."
+            beaker image create --name "$TARGET_IMAGE" --description "$DESCRIPTION" "$INTEGRATION_IMAGE"
+          }
+
+          publish_image open_instruct_auto
+          publish_image open_instruct_auto_cuda12
+
+      - name: Summary
+        run: echo "CUDA 12 images published as \`open_instruct_auto\` and \`open_instruct_auto_cuda12\`." >> "$GITHUB_STEP_SUMMARY"
+
   publish-cuda13-image:
     name: Publish CUDA 13 image
-    needs: launch-experiment
+    needs: wait-experiment
     if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 45
