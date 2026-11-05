@@ -54,14 +54,22 @@ nodes. The layout changes as the cluster's admins reslice it, so check it before
 `kubectl get nodes -L cloud.google.com/gke-tpu-topology --no-headers | awk '{print $NF}' | sort | uniq -c` (hosts per
 topology, 32 per `4x4x8`; the 2026-11-03 layout prints 96 `4x4x8`, 128 `8x8x8` and 768 `8x8x48`). A slice runs one job at a time. Kueue admits jobs from four queues in one cohort:
 
-| Queue | Who | Preempted by |
+| Queue | Who | Nominal quota (chips) |
 |---|---|---|
-| `hero` | the main pretraining run; owns all the quota | nothing |
-| `dev` | tests | hero |
-| `post-training`, `data-adaptation` | us; share what is left | hero, dev |
+| `hero` | the main pretraining run | `8x8x48`: 3,072 |
+| `dev` | tests | one `4x4x8`: 128 |
+| `post-training` | us | the `8x8x8`: 512; two `4x4x8`s: 256 |
+| `data-adaptation` | | none |
 
-**Use `post-training`.** Its jobs run on borrowed quota and are preempted whenever hero or dev needs the slice, so
-checkpoint often enough to lose little. Never hold a slice in a way that delays hero.
+Every queue has `reclaimWithinCohort: Any`, `borrowWithinCohort: Never` and `withinClusterQueue: Never`, so a job
+running within its own queue's nominal quota is never preempted, and a queue can reclaim only quota that another has
+borrowed from it. Dev may borrow an idle post-training `4x4x8`, which we reclaim when we need it; a post-training job
+on quota borrowed from hero or dev is preempted when they want it back. Read from
+`kubectl get clusterqueues -o json` (`spec.resourceGroups[].flavors[].resources[].nominalQuota`) on 2026-11-05 at
+11:30 PST; re-read it before planning, since the admins change it.
+
+**Use `post-training`.** Checkpoint often enough to lose little on a preemption, and never hold a slice in a way that
+delays hero.
 
 The recipe needs exactly a `4x4x8`: its mesh puts one 64K row on 8 chips, so 128 chips hold its 16 rows. The
 `8x8x8` ran the same mesh at 64 rows per step, which is a different recipe (H078's 4x batch). Its measured 16-row
@@ -84,7 +92,8 @@ Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on ei
 resume.
 
 - **Use a `4x4x8` for this recipe.** Among the measured configurations it used the fewest chip-hours per token.
-  The `8x8x8` rows above date from before its 2026-10-21 split; it was recreated on 2026-11-03 and they have not been re-measured since. The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
+  The `8x8x8` rows above date from before its 2026-10-21 split. On the slice recreated on 2026-11-03, opt-b's config
+  measured 4.24 s and 1,934 tokens/s/chip (median of steps 3-14, 2026-11-05; see [Changing the recipe](#changing-the-recipe)). The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
   differs from the `4x4x8` recipe's, so an arm on it needed a control on the same slice and config. Without the shim
   the `8x8x8` is projected at ~1.09x the chip-hours of the `4x4x8`, finishing a run ~3.6x sooner (H088, allenai/open-instruct#2020). This is a steady-state projection,
   not a measured cost. Both rates come from stall-free 70-step windows on different days (`4x4x8` 10-14, `8x8x8`
@@ -357,8 +366,25 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   fsdp 16 x context 4 x expert 8, `remat_policy=full`, image `-ks5932379d`: 6.5 s/step, 315 tokens/s/chip. At
   `ragged_buffer_factor=3.0` it dropped 1.1% of routed assignments (up to 9.2% in one layer); dropping none would need `ragged_buffer_factor` up to 8.5 in the worst layer.
 
-  Each mesh was picked to keep r2's per-device layout, not tuned. No sweep of the parallelism split, remat policy or
-  per-device batch has been run, so these are known-good points, not optima. Any other slice or mesh needs its own
-  same-slice control.
+  Each mesh was picked to keep r2's per-device layout. A short sweep on the `8x8x8` on 2026-11-05 (12-30 steps per
+  config, profiler off, median of steps from 3) found nothing reliably faster than these points:
+
+  | tiny, 64 rows, change from the recipe | s/step | tokens/s/chip | result |
+  |---|---|---|---|
+  | none (fsdp 64 x expert 8) | 4.24 | 1,934 | ~3.6% MFU (TFLOP/s/device ÷ 275) |
+  | data 8 x fsdp 8 x expert 8 | 3.95 | 2,073 | +7%, but NaN at step 13; repeat pending |
+  | `num_vocab_tiling=4` (from 16) | 4.15 | 1,972 | NaN at step 10 |
+  | async collective-fusion `LIBTPU_INIT_ARGS` | 4.24 | 1,930 | no gain |
+  | 128 rows (per-device batch 0.25) | - | - | compile OOM (33.8 of 31.75 GB) |
+  | data 16 or 32 | - | - | OOM |
+
+  - Small's config is the only one that fits in HBM; other meshes, remat policies and vocab tiling ran out of memory.
+    The collective-fusion flags left it at 6.47 s/step; every fourth step takes ~7.4 s.
+  - libtpu on v4 rejects `--xla_tpu_enable_async_collective_fusion_fuse_all_gather=true` ("not supported" outside
+    Viperlite); the rest of that flag set loads.
+  - Tiny hit NaN in 3 of the 5 runs that passed step 10 on this slice (the unchanged config once, in the xprof
+    run), so a finite run of a few steps does not clear a config.
+
+  Speedups beyond these need code changes. Any other slice or mesh needs its own same-slice control.
 - **Comparing against a GPU result.** TPU and GPU runs of the same recipe differ in data order and numerics. Compare
   TPU arms with a TPU control on the same slice shape.
