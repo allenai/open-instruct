@@ -8,7 +8,7 @@
   "service_source_sha256": "4627e53f1c4901d95c6a36a5326c254ae620123b1469e5987579fcee3197726e",
   "dataset": "allenai/Dolci-RLZero-Code-7B",
   "dataset_revision": "054c0a1f9c5fd52566ad9124aa2e702924803cd3",
-  "training_status_at_record": "queued; no training result claimed",
+  "training_status_at_record": "complete; Beaker exit 0, both optimizer updates and publication completed",
   "preparation_result": "32 train and 8 eval prompts, full test suites; all 8 negative controls scored zero; 7 of 8 reference controls fully passed.",
   "known_dataset_issue": "Source row 125, ID a5925438d3e62914c536f63f49f40fed97856aa0da148a774df5dd5fcefffd73: a random password test rejects valid mixed letter-digit outputs. Preserved unchanged.",
   "registry_preflight": {
@@ -21,5 +21,54 @@
       "2081daa687bb42ad8a0fe98f7eeed800"
     ]
   },
-  "reuse": "Use a new output root for a new run. Launch with MILES_EXISTING_IMAGE set to the recorded image. Beaker resolves the secret name in run.toml; token values are never stored here."
+  "reuse": "Use a new output root for a new run. Launch with MILES_EXISTING_IMAGE set to the recorded image. Beaker resolves the secret name in run.toml; token values are never stored here.",
+  "audit_experiment": "01M6N5S1C3CXQGF7QBV0BAKCY5",
+  "training_diagnostics": {
+    "samples": 40,
+    "http_batches": 43,
+    "tests_graded": 420,
+    "statuses": {
+      "ok": 30,
+      "invalid_code": 10
+    },
+    "retries": 0,
+    "grad_norms": [
+      0.4409193992614746,
+      0.42048102617263794
+    ],
+    "phases": {
+      "0.pt": {
+        "samples": 16,
+        "mean_reward": 0.6458333333333334,
+        "statuses": {
+          "ok": 13,
+          "invalid_code": 3
+        }
+      },
+      "1.pt": {
+        "samples": 16,
+        "mean_reward": 0.3125,
+        "statuses": {
+          "invalid_code": 3,
+          "ok": 13
+        }
+      },
+      "eval_1.pt": {
+        "samples": 8,
+        "mean_reward": 0.0,
+        "statuses": {
+          "invalid_code": 4,
+          "ok": 4
+        }
+      }
+    }
+  },
+  "cloudwatch_training_window": {
+    "start_utc": "2026-11-05T05:43:00Z",
+    "end_utc": "2026-11-05T05:53:00Z",
+    "invocations": 43,
+    "errors": 0,
+    "throttles": 0,
+    "peak_concurrent_executions": 4
+  }
 }
