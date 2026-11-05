@@ -13,8 +13,9 @@ takes about 9 h. It is the `b1-c12r-gpu` arm of ledger hypothesis H182.
 
 - **Another base:** `--checkpoint <dir> --name <run>`. The checkpoint must be an
   OLMo-core DCP (the `model_and_optim` directory); HF checkpoints are not accepted.
-- **Output:** `/weka/olmo-3p5-post-checkpoints/<you>/sft/<name>`, with a permanent
-  checkpoint half way through and one at the end. The directory has no timestamp,
+- **Output:** `/weka/oe-adapt-default/allennlp/deletable_checkpoint/<you>/sft/<name>`,
+  with a permanent checkpoint half way through and one at the end. It is a deletable
+  scratch location: copy out anything you want to keep. The directory has no timestamp,
   so running the same command again resumes from its latest checkpoint. Beaker
   requeues the job after a preemption on its own.
 - **Other flags:** `--seed` (data order), `--steps`, `--workspace`, `--priority`, and

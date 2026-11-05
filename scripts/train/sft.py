@@ -129,7 +129,7 @@ def main():
             ["beaker", "account", "whoami", "--format", "json"], capture_output=True, text=True, check=True
         ).stdout
     )[0]["name"]
-    output_dir = f"/weka/olmo-3p5-post-checkpoints/{user}/sft/{name}"
+    output_dir = f"/weka/oe-adapt-default/allennlp/deletable_checkpoint/{user}/sft/{name}"
 
     nodes = recipe["nodes"]
     half = (steps + 1) // 2
