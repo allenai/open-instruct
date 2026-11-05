@@ -1,10 +1,10 @@
 # Dataset reward verifiers
 
 Candidate datasets need runtime rewards that implement their declared answer
-contracts. These adapters let MILES train on structured outputs, instruction
-constraints and calendar tasks using its existing registered reward path. This
-guide explains the supported contracts, runtime dependencies and limits needed
-to prepare and validate training data.
+contracts. The structured-output verifier lets MILES train on JSON, YAML, TOML,
+XML and CSV using its existing registered reward path. This guide explains the
+supported contracts, runtime dependencies and limits needed to prepare and
+validate these training sources.
 
 ## Structured output sources
 
@@ -37,6 +37,15 @@ XML preserves its root element: `<root><a>1</a><b>2</b></root>` needs a schema
 whose top-level `properties.root` contains the `a` and `b` properties. Coercion
 applies only to XML/CSV; `coerce_types` has no effect on JSON/YAML/TOML. Answers
 must contain the format itself, without Markdown code fences.
+
+YAML and TOML values must be JSON-compatible after parsing. Quote dates and times
+when the schema expects strings: `date: "2024-05-01"` in YAML and
+`date = "2024-05-01"` in TOML. Unquoted native dates/times become Python temporal
+objects and receive a `parse_error` score of zero; they are not implicitly
+converted to strings. PyYAML's YAML 1.1 resolution also treats unquoted
+`yes`/`no`/`on`/`off` as booleans. Quote those words for string fields; leave them
+unquoted only when boolean values are intended. Qualification controls should
+use the same representation expected in training responses.
 
 With `as_declared`, use `required` and `minItems` where the task demands nonempty
 objects or arrays: an empty TOML document or header-only CSV can otherwise satisfy

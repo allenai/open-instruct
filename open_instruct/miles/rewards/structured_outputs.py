@@ -11,6 +11,7 @@ import io
 import json
 import os
 import signal
+import time
 from dataclasses import dataclass
 
 import tomllib
@@ -19,10 +20,12 @@ import yaml
 from openapi_schema_validator import OAS31Validator
 from referencing import Registry
 
+from open_instruct import logger_utils
 from open_instruct.miles.rewards import candidate_verifiers as common
 from open_instruct.miles.rewards import nemo_structured_types, rewards
 
 FORMATS = {"json", "yaml", "toml", "xml", "csv"}
+logger = logger_utils.setup_logger(__name__)
 
 
 def validate_target(target):
@@ -120,7 +123,8 @@ def parse(text, kind, schema, coerce):
             raise ValueError("CSV row width differs from its header")
         if coerce:
             value = native.coerce_csv_types(value, schema)
-    # Reject nonfinite values, cyclic aliases and non-JSON scalar types explicitly.
+    # Reject nonfinite values and non-JSON scalars (dates, bytes, sets).
+    # YAML aliases are rejected earlier, before construction or expansion.
     json.dumps(value, allow_nan=False)
     return value
 
@@ -137,8 +141,18 @@ def timeout_policy():
     return policy
 
 
-def timeout_result(error):
-    return common.Result(0.0, diagnostics={"kind": "structured_v1", "status": "timeout", "error": str(error)})
+def timeout_result(error, start, policy):
+    logger.warning("Structured verifier timeout; assigning zero reward: %s", error)
+    return common.Result(
+        0.0,
+        diagnostics={
+            "kind": "structured_v1",
+            "status": "timeout",
+            "error": str(error),
+            "failure_policy": policy,
+            "elapsed_seconds": time.monotonic() - start,
+        },
+    )
 
 
 class StructuredOutputVerifier:
@@ -151,8 +165,9 @@ class StructuredOutputVerifier:
 
     async def async_call(self, tokenized_prediction, prediction, label, **kwargs):
         policy = timeout_policy()
+        start = time.monotonic()
         try:
-            return await rewards.isolated_verifier_call(
+            result = await rewards.isolated_verifier_call(
                 {
                     "factory": "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
                     "config": {"timeout_seconds": self.config.timeout_seconds},
@@ -165,7 +180,11 @@ class StructuredOutputVerifier:
         except rewards.MathVerifierTimeout as error:
             if policy == "raise":
                 raise
-            return timeout_result(error)
+            return timeout_result(error, start, policy)
+        if result.diagnostics.get("status") == "timeout":
+            # Worker stderr is suppressed by the pool; surface its timeout here.
+            logger.warning("Structured verifier timeout; assigning zero reward: %s", result.diagnostics["error"])
+        return result
 
     def __call__(self, tokenized_prediction, prediction, label, **kwargs):
         # This synchronous entry point executes on the verifier worker's main thread.
@@ -173,34 +192,41 @@ class StructuredOutputVerifier:
             raise TimeoutError("Structured response exceeded its verification budget")
 
         policy = timeout_policy()
+        start = time.monotonic()
         previous = signal.signal(signal.SIGALRM, expired)
         timer = signal.setitimer(signal.ITIMER_REAL, self.config.timeout_seconds)
         try:
-            schema = validate_target(label)  # Configuration errors must not become wrong answers.
-            text = common.answer_text(prediction)
             try:
-                value = parse(text, label["format"], schema, label.get("coerce_types", False))
-            except (
-                ValueError,
-                TypeError,
-                RecursionError,
-                yaml.YAMLError,
-                csv.Error,
-                xmltodict.expat.ExpatError,
-            ) as error:
+                schema = validate_target(label)  # Configuration errors must not become wrong answers.
+                text = common.answer_text(prediction)
+                try:
+                    value = parse(text, label["format"], schema, label.get("coerce_types", False))
+                except (
+                    ValueError,
+                    TypeError,
+                    RecursionError,
+                    yaml.YAMLError,
+                    csv.Error,
+                    xmltodict.expat.ExpatError,
+                ) as error:
+                    return common.Result(
+                        0.0, diagnostics={"kind": "structured_v1", "status": "parse_error", "error": str(error)}
+                    )
+                # An explicit empty Registry refuses retrieval by default, including
+                # network access. Do not use jsonschema's legacy default registry.
+                validator = OAS31Validator(schema, registry=Registry())
                 return common.Result(
-                    0.0, diagnostics={"kind": "structured_v1", "status": "parse_error", "error": str(error)}
+                    float(validator.is_valid(value)), diagnostics={"kind": "structured_v1", "status": "completed"}
                 )
-            # An explicit empty Registry refuses retrieval by default, including
-            # network access. Do not use jsonschema's legacy default registry.
-            validator = OAS31Validator(schema, registry=Registry())
-            return common.Result(
-                float(validator.is_valid(value)), diagnostics={"kind": "structured_v1", "status": "completed"}
-            )
+            finally:
+                # Disarming can itself receive the pending alarm. Always restore
+                # the handler/timer, then apply the timeout policy outside cleanup.
+                try:
+                    signal.setitimer(signal.ITIMER_REAL, 0)
+                finally:
+                    signal.signal(signal.SIGALRM, previous)
+                    signal.setitimer(signal.ITIMER_REAL, *timer)
         except TimeoutError as error:
             if policy == "raise":
                 raise
-            return timeout_result(error)
-        finally:
-            signal.setitimer(signal.ITIMER_REAL, *timer)
-            signal.signal(signal.SIGALRM, previous)
+            return timeout_result(error, start, policy)
