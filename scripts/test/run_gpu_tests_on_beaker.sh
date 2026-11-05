@@ -5,7 +5,8 @@ GIT_SHA="${1:?Usage: $0 <git_sha>}"
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 short_sha="${GIT_SHA::8}"
-image_name="open-instruct-gpu-tests-${short_sha}"
+# The run attempt keeps a rerun from colliding with the image an earlier attempt created.
+image_name="open-instruct-gpu-tests-${short_sha}-${GITHUB_RUN_ATTEMPT:-1}"
 
 beaker image create open-instruct-gpu-tests:latest -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: $GIT_SHA"
 
@@ -39,7 +40,8 @@ trap 'exit 130' INT TERM
 
 beaker experiment await "$exp_id" 0 --index finalized --timeout 40m
 finalized=true
-status=$(beaker experiment get "$exp_id" --format json | jq -r '.[0].jobs[0].status.exitCode')
+# The latest job: after a preemption, jobs[0] is the preempted job, which has no exit code.
+status=$(beaker experiment get "$exp_id" --format json | jq -r '.[0].jobs | max_by(.status.created) | .status.exitCode')
 if [ "$status" != "0" ]; then
     echo "GPU tests failed with exit code $status"
     exit 1

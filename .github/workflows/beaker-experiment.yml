@@ -239,7 +239,8 @@ jobs:
             (
               echo "Waiting for ${EXP_NAME} to succeed: https://beaker.org/ex/${EXP_ID}"
               if beaker experiment await "$EXP_ID" 0 finalized --index --timeout 30m --interval 30s; then
-                EXIT_CODE=$(beaker experiment get "$EXP_ID" --format json | jq -r '.[0].jobs[0].status.exitCode')
+                # The latest job: after a preemption, jobs[0] is the preempted job, which has no exit code.
+                EXIT_CODE=$(beaker experiment get "$EXP_ID" --format json | jq -r '.[0].jobs | max_by(.status.created) | .status.exitCode')
                 if [ "$EXIT_CODE" = "0" ]; then
                   echo "  [${EXP_NAME}] ✅ succeeded"
                 else
