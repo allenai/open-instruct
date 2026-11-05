@@ -27,6 +27,7 @@ from open_instruct.miles.datasets import run_data
 from open_instruct.miles.rewards import reasoning_gym, rewards
 
 FACTORIES = {
+    "open_instruct.miles.rewards.litmus.LitmusVerifier",
     "open_instruct.miles.rewards.nvidia_constraints.InstructionVerifier",
     "open_instruct.miles.rewards.nvidia_constraints.CalendarVerifier",
     "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
