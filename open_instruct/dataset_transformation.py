@@ -1757,7 +1757,7 @@ def sft_transform_fn_args(
     the default `[sft_tulu_tokenize_and_truncate_v1, sft_tulu_filter_v1]` this is the
     `[sft_tokenize_fn_args(...), {}]` the SFT entry points always passed, so existing dataset
     cache hashes are unchanged; it also lets a filter such as
-    `sft_added_token_strings_filter_v1` run ahead of the tokenizer.
+    `sft_added_token_strings_filter_v2` run ahead of the tokenizer.
     """
     return [
         sft_tokenize_fn_args(max_seq_length, over_length_strategy) if fn_name in _SFT_TRUNCATING_TOKENIZE_FNS else {}
@@ -1912,7 +1912,7 @@ DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT = (
     "<function_calls>",
     "</function_calls>",
 )
-"""Added-token strings that `sft_added_token_strings_filter_v1` leaves in message content."""
+"""Added-token strings that `sft_added_token_strings_filter_v2` leaves in message content."""
 
 
 @lru_cache(maxsize=16)
@@ -1970,7 +1970,7 @@ def find_added_token_strings(
     return sorted(found)
 
 
-def sft_added_token_strings_filter_v1(
+def sft_added_token_strings_filter_v2(
     row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
@@ -1993,7 +1993,7 @@ def sft_added_token_strings_filter_v1(
 
     Opt-in. It reads `messages`, which the SFT tokenizers drop, so it has to run before them:
 
-        --dataset_transform_fn sft_added_token_strings_filter_v1 sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1
+        --dataset_transform_fn sft_added_token_strings_filter_v2 sft_tulu_tokenize_and_truncate_v1 sft_tulu_filter_v1
 
     (`--transform_fn` for `olmo_core_finetune.py`). Enabling it changes the dataset cache hash;
     leaving it off keeps existing hashes. `get_dataset_v1` logs how many rows it removed per
@@ -2001,7 +2001,7 @@ def sft_added_token_strings_filter_v1(
     """
     if sft_messages_key not in row:
         raise KeyError(
-            f"sft_added_token_strings_filter_v1 needs the {sft_messages_key!r} column; list it before the "
+            f"sft_added_token_strings_filter_v2 needs the {sft_messages_key!r} column; list it before the "
             "tokenization function in the transform list, which drops that column."
         )
     if find_added_token_strings(row[sft_messages_key], tokenizer, allowed_strings):
@@ -2337,7 +2337,7 @@ TRANSFORM_FNS = {
     "sft_tulu_tokenize_without_truncation_v1": (sft_tulu_tokenize_without_truncation_v1, "map"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
-    "sft_added_token_strings_filter_v1": (sft_added_token_strings_filter_v1, "filter"),
+    "sft_added_token_strings_filter_v2": (sft_added_token_strings_filter_v2, "filter"),
     "last_turn_tulu_tokenize_and_truncate_v1": (last_turn_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),

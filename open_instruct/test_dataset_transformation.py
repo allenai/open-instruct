@@ -360,7 +360,7 @@ class TestCachedDataset(unittest.TestCase):
             for i, messages in enumerate(contaminated):
                 f.write(json.dumps({"id": f"contaminated_{i}", "messages": messages, "source": "test"}) + "\n")
         dataset_transform_fn = [
-            "sft_added_token_strings_filter_v1",
+            "sft_added_token_strings_filter_v2",
             "sft_tulu_tokenize_and_truncate_v1",
             "sft_tulu_filter_v1",
         ]
@@ -380,7 +380,7 @@ class TestCachedDataset(unittest.TestCase):
             )
         self.assertEqual(len(dataset), GOLD_SFT["count"])
         self.assertTrue(
-            any("sft_added_token_strings_filter_v1 filtered out 2 of 102 rows" in line for line in logs.output),
+            any("sft_added_token_strings_filter_v2 filtered out 2 of 102 rows" in line for line in logs.output),
             logs.output,
         )
 
@@ -1849,13 +1849,13 @@ class TestOverLengthStrategy(unittest.TestCase):
 
 
 class TestAddedTokenStringsFilter(unittest.TestCase):
-    """`sft_added_token_strings_filter_v1` on an Olmo-like vocabulary (ChatML specials + reserved slots)."""
+    """`sft_added_token_strings_filter_v2` on an Olmo-like vocabulary (ChatML specials + reserved slots)."""
 
     def setUp(self):
         self.tokenizer = test_reserved_slot_tokens.build_tokenizer()
 
     def keeps(self, messages, **kwargs):
-        return open_instruct.dataset_transformation.sft_added_token_strings_filter_v1(
+        return open_instruct.dataset_transformation.sft_added_token_strings_filter_v2(
             {"messages": messages}, self.tokenizer, **kwargs
         )
 
@@ -1949,13 +1949,13 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
 
     def test_missing_messages_column_explains_ordering(self):
         with self.assertRaisesRegex(KeyError, "before the tokenization function"):
-            open_instruct.dataset_transformation.sft_added_token_strings_filter_v1(
+            open_instruct.dataset_transformation.sft_added_token_strings_filter_v2(
                 {"input_ids": [1, 2]}, self.tokenizer
             )
 
     def test_is_registered_as_a_filter(self):
-        fn, fn_type = open_instruct.dataset_transformation.TRANSFORM_FNS["sft_added_token_strings_filter_v1"]
-        self.assertIs(fn, open_instruct.dataset_transformation.sft_added_token_strings_filter_v1)
+        fn, fn_type = open_instruct.dataset_transformation.TRANSFORM_FNS["sft_added_token_strings_filter_v2"]
+        self.assertIs(fn, open_instruct.dataset_transformation.sft_added_token_strings_filter_v2)
         self.assertEqual(fn_type, "filter")
 
     @parameterized.expand(
@@ -1972,10 +1972,12 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
     )
     def test_checks_fields_beyond_content(self, _name, assistant_fields, tools):
         messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok", **assistant_fields}]
-        v1 = open_instruct.dataset_transformation.sft_added_token_strings_filter_v1
-        self.assertFalse(v1({"messages": messages, "tools": tools}, self.tokenizer))
+        filter_fn = open_instruct.dataset_transformation.sft_added_token_strings_filter_v2
+        self.assertFalse(filter_fn({"messages": messages, "tools": tools}, self.tokenizer))
         clean = json.loads(json.dumps(messages).replace("<|im_end|>", "end"))
-        self.assertTrue(v1({"messages": clean, "tools": tools and tools.replace("im_end", "end")}, self.tokenizer))
+        self.assertTrue(
+            filter_fn({"messages": clean, "tools": tools and tools.replace("im_end", "end")}, self.tokenizer)
+        )
 
     def test_allows_think_tags_in_content_only(self):
         # The template wraps `reasoning_content` in think tags, so one inside it closes the block early.
@@ -1991,7 +1993,7 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
         # Identical to what the SFT entry points passed before, so default cache hashes are unchanged.
         self.assertEqual(sft_transform_fn_args(default, 4096, "keep"), [tokenize_args, {}])
         self.assertEqual(
-            sft_transform_fn_args(["sft_added_token_strings_filter_v1", *default], 4096, "keep"),
+            sft_transform_fn_args(["sft_added_token_strings_filter_v2", *default], 4096, "keep"),
             [{}, tokenize_args, {}],
         )
 
