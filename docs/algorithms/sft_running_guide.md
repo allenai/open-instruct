@@ -1,6 +1,33 @@
 # Running SFT: a known-good starting point
 
-Olmo 3 7B dense, **one epoch of Dolci-Instruct-SFT, one 8×H100 node**.
+## Olmo 3.5: one command
+
+```bash
+uv run python scripts/train/sft.py --recipe c12r
+```
+
+`c12r` is the current Olmo 3.5 small recipe: C12 SFT on base B1
+(`olmo35-small-mm-ckpt1-64k` step 20000) plus 10% long-context replay, peak LR 2e-4,
+half an epoch (18,410 steps). It runs on 2×8 B300 on `ai2/holmes` at `high` and
+takes about 9 h. It is the `b1-c12r-gpu` arm of ledger hypothesis H182.
+
+- **Another base:** `--checkpoint <dir> --name <run>`. The checkpoint must be an
+  OLMo-core DCP (the `model_and_optim` directory); HF checkpoints are not accepted.
+- **Output:** `/weka/olmo-3p5-post-checkpoints/<you>/sft/<name>`, with a permanent
+  checkpoint half way through and one at the end. The directory has no timestamp,
+  so running the same command again resumes from its latest checkpoint. Beaker
+  requeues the job after a preemption on its own.
+- **Other flags:** `--seed` (data order), `--steps`, `--workspace`, `--priority`, and
+  `--dry_run`, which prints the mason command without launching it.
+- **Nothing to build:** each recipe pins the Beaker image that trained it, so the
+  training code comes from that image, not from your checkout.
+
+Exporting these checkpoints to HF for evaluation is not yet one command; it follows
+ledger hypothesis H167's G4 step.
+
+## Olmo 3 7B dense (one node)
+
+**One epoch of Dolci-Instruct-SFT, one 8×H100 node.**
 
 Measured cost and outcome: ~1.5 h tokenization (CPU, 0 GPUs) + ~9.5 h training
 (~77 GPU-hours) + ~15 min per checkpoint to evaluate. IFBench +6.7 and GSM8K +1.8
@@ -12,21 +39,21 @@ Read its header before editing it: several flags look wrong and are not, and the
 reasons are recorded there rather than repeated here. For a flag-by-flag reference
 see [Supervised finetuning](finetune.md).
 
-## Example runs
+### Example runs
 
 | Report | What it is |
 |---|---|
 | [Olmo 3 7B SFT pipeline validation](https://wandb.ai/ai2-llm/open_instruct_internal/reports/Olmo-3-7B-SFT-pipeline-validation-and-eval-results--VmlldzoxNzcwOTIyMg) | This recipe, verbatim. [Beaker](https://beaker.org/ex/01KZHT32T30M2VHCWKRJS1G9P7) · [W&B run](https://wandb.ai/ai2-llm/open_instruct_internal/runs/ed453531) |
 | [Olmo-Hybrid-7B SFT](https://wandb.ai/ai2-llm/open_instruct_internal/reports/Olmo-Hybrid-7B-SFT-through-open-instruct-it-works-on-Blackwell--VmlldzoxNzcyMjMzOQ) | The same recipe pointed at the hybrid base model. [Beaker](https://beaker.org/ex/01M013HTEWJYVHAKPHHJ762YJW) |
 
-## Before you start
+### Before you start
 
 - Ai2-internal only: Beaker access, Docker, and `beaker account whoami` working.
 - `build_image_and_launch.sh` refuses to run with uncommitted changes, so commit first.
 - Steps 1–3 run from an open-instruct checkout; step 4 runs from an
   [olmo-eval](https://github.com/allenai/olmo-eval) checkout (`uv sync --frozen`).
 
-## 1. Tokenize (CPU job, ~1.5 h)
+### 1. Tokenize (CPU job, ~1.5 h)
 
 Training hard-fails if the pre-tokenized cache is missing, so tokenization is a
 separate job:
@@ -46,7 +73,7 @@ length.
 
 Wait for this job to reach exit 0 before launching step 2.
 
-## 2. Train (1×8 H100, ~9.5 h)
+### 2. Train (1×8 H100, ~9.5 h)
 
 ```bash
 ./scripts/train/build_image_and_launch.sh scripts/train/debug/oc_sft_olmo3_7b_1node.sh train
@@ -66,7 +93,7 @@ If the job stays queued, run `beaker job events <job-id>` and read the scheduler
 reason — the two common ones need opposite fixes, and both are spelled out in the
 script header. Do not guess from cluster docs.
 
-## 3. Convert checkpoints to HuggingFace
+### 3. Convert checkpoints to HuggingFace
 
 olmo-eval can serve a raw olmo-core checkpoint, but the verified path exports to HF
 first. One 0-GPU job per checkpoint:
@@ -96,7 +123,7 @@ uv run python mason.py \
 Pass the same tokenizer you trained with. The exported directory carries its chat
 template, which is what makes the model answer chat-formatted eval prompts at all.
 
-## 4. Evaluate
+### 4. Evaluate
 
 From an olmo-eval checkout, one job per checkpoint on 1 GPU (~15 min each).
 `$CKPT` and `$STEP` are the same as in step 3:
@@ -142,7 +169,7 @@ sampling variation.
     fails. It is almost always a missing chat template — check the `-m` directory has
     one, and that `provider.tokenizer` points at a tokenizer that does.
 
-## Changing the recipe
+### Changing the recipe
 
 - **Other base models.** `--config_name` must resolve to an olmo-core
   `TransformerConfig` preset; there is no fallback if it does not. Architectures
