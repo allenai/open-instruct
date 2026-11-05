@@ -1,0 +1,25 @@
+{
+  "purpose": "Exercise the authenticated OE-Data code verifier from a small Dolci MILES training run. This is integration validation, not a learning benchmark.",
+  "training_experiment": "01M6N13TWP4YANNZWZB3AMZSRB",
+  "preparation_experiment": "01M6N0S5GE956P2AGW1SBB3YM2",
+  "image": "01M6N0PEJTZRH3C2VEESQN76P0",
+  "image_open_instruct_revision": "7a35f535220feda6e9af80c9f56ffe3c44a16ba4",
+  "verifier_revision": "26fd653293fb5b29fcde5c1dad43f1f3194fa6fc",
+  "service_source_sha256": "4627e53f1c4901d95c6a36a5326c254ae620123b1469e5987579fcee3197726e",
+  "dataset": "allenai/Dolci-RLZero-Code-7B",
+  "dataset_revision": "054c0a1f9c5fd52566ad9124aa2e702924803cd3",
+  "training_status_at_record": "queued; no training result claimed",
+  "preparation_result": "32 train and 8 eval prompts, full test suites; all 8 negative controls scored zero; 7 of 8 reference controls fully passed.",
+  "known_dataset_issue": "Source row 125, ID a5925438d3e62914c536f63f49f40fed97856aa0da148a774df5dd5fcefffd73: a random password test rejects valid mixed letter-digit outputs. Preserved unchanged.",
+  "registry_preflight": {
+    "registry_score": 0.95,
+    "complete_tests": 20,
+    "batches": 2,
+    "auth_failure": "propagated; no reward",
+    "request_ids": [
+      "01a60bd8182040aa90ff7f5d0ec2d101",
+      "2081daa687bb42ad8a0fe98f7eeed800"
+    ]
+  },
+  "reuse": "Use a new output root for a new run. Launch with MILES_EXISTING_IMAGE set to the recorded image. Beaker resolves the secret name in run.toml; token values are never stored here."
+}

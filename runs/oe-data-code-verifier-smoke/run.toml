@@ -1,0 +1,106 @@
+schema_version = 1
+name = "oe-data-code-verifier-smoke-20261104"
+
+[model]
+source = "/weka/olmo-3p5-checkpoints/scratch/olmo35-14t600b-mt100b-lc-sft-20261014/olmo35-14t600b-mt100b-lc-sft-20261014-sft/emo/step5402/hf"
+format = "hf"
+
+[output]
+root = "/weka/oe-training-default/robertb/open-instruct/code-verifier-smoke-20261104/run"
+export_hf = false
+rollout_sample_rate = 1.0
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = 0
+timeout = "45m"
+auto_resume = false
+gpus_per_replica = 2
+memory = "256 GiB"
+shared_memory = "64 GiB"
+weka_mounts = [
+    { weka = "oe-training-default", mount_path = "/weka/oe-training-default" },
+    { weka = "olmo-3p5-checkpoints", mount_path = "/weka/olmo-3p5-checkpoints" },
+]
+
+[launch.env]
+OI_MILES_CODE_FAILURE_POLICY = "raise"
+OI_MILES_RAY_CPUS = "16"
+SGLANG_TIMEOUT_KEEP_ALIVE = "60"
+
+[launch.secrets]
+HF_TOKEN = "robertb_HF_TOKEN"
+CODE_EXECUTION_TOKEN = "robertb_CODE_EXECUTION_OE_DATA_STAGING"
+
+[data]
+prompt_data = "/weka/oe-training-default/robertb/open-instruct/code-verifier-smoke-20261104/inputs/train.jsonl"
+eval_prompt_data = ["dolci-code", "/weka/oe-training-default/robertb/open-instruct/code-verifier-smoke-20261104/inputs/eval.jsonl"]
+reward_config = "/weka/oe-training-default/robertb/open-instruct/code-verifier-smoke-20261104/inputs/verifiers.json"
+seed = 17
+shuffle = true
+
+[training]
+num_rollouts = 2
+filter_zero_std_groups = false
+save_checkpoints = false
+skip_eval_before_train = true
+eval_interval = 2
+
+[trainer]
+gpus = 1
+expert_parallel_size = 1
+micro_batch_size = 1
+activation_recompute = true
+sequence_packing = true
+packing_max_tokens = 10240
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 1
+rollout_tensor_parallel_size = 1
+profile = "generic"
+rollout_batch_size = 4
+samples_per_prompt = 4
+global_batch_size = 16
+max_response_length = 8192
+max_context_length = 10240
+sglang_server_concurrency = 8
+sglang_max_running_requests = 8
+sglang_max_total_tokens = 131072
+sglang_max_mamba_cache_size = 64
+sglang_mem_fraction_static = 0.6
+sglang_chunked_prefill_size = 8192
+radix_cache = false
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 8
+sglang_cuda_graph_backend_prefill = "disabled"
+check_weight_update_equal = true
+
+[optimizer]
+learning_rate = 0.000001
+
+[tracking]
+wandb_mode = "offline"
+wandb_project = "open-instruct-miles"
+wandb_group = "oe-data-code-verifier-smoke"
+
+[core]
+publication_mode = "barrier"
+attention_backend = "flash_4"
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+reward_zero_truncated = false
+scoring_check_interval = 0
+
+[miles]
+use_rollout_routing_replay = true
+n_samples_per_eval_prompt = 1
+rollout_temperature = 1.0
+rollout_top_p = 1.0
+rollout_top_k = -1
+
+[compiler_cache]
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
