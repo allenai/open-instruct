@@ -75,3 +75,39 @@ def test_actual_worker_path():
     label = target("count:lowercase_counting", {"N": 2})
     assert asyncio.run(native.InstructionVerifier().async_call([], "one two three", label)).score == 1
     assert asyncio.run(native.CalendarVerifier().async_call([], "[]", {})).score == 1
+
+
+@pytest.mark.parametrize(
+    "name,args",
+    [
+        ("keywords:keyword_specific_position", {"keyword": "apple", "n": "1", "m": 1}),
+        ("count:counting_composition", {"n_sent": "2", "n_words": 3}),
+        ("copy:copying_multiple", {"prompt_to_repeat": "apple", "N": ["2"]}),
+        ("copy:copy", {"prompt_to_repeat": 7}),
+        ("keywords:existence", {"keywords": "apple"}),
+        ("copy:repeat_phrase", {"phrase": "one two three", "small_n": True}),
+    ],
+)
+def test_malformed_argument_types_are_fatal_before_scoring(name, args):
+    label = target(name, args)
+    with pytest.raises(ValueError, match="must be"):
+        native.instruction_contract(json.dumps(label))
+    # Even an empty response must not mask a malformed target in the worker.
+    with pytest.raises(RuntimeError, match="must be"):
+        asyncio.run(native.InstructionVerifier().async_call([], "", label))
+
+
+def test_calendar_recursion_failure_through_worker():
+    async def check():
+        verifier = native.CalendarVerifier()
+        response = "[" * 10000 + "0" + "]" * 10000
+        result = await verifier.async_call([], response, {})
+        assert result.score == 0
+        assert result.diagnostics["status"] == "parse_error"
+        assert result.diagnostics["error_type"] == "RecursionError"
+        assert result.diagnostics["failure_policy"] == "zero"
+        assert (await verifier.async_call([], "[]", {})).score == 1
+        with pytest.raises(RuntimeError, match="Calendar duration must be positive"):
+            await verifier.async_call([], response, {"0": {"duration": 0}})
+
+    asyncio.run(check())

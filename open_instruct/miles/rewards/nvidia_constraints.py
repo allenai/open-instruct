@@ -9,6 +9,32 @@ from open_instruct.IFEvalG import instructions_registry
 from open_instruct.miles.rewards import candidate_verifiers as common
 from open_instruct.miles.rewards import rewards, task_verifiers
 
+# Native generators do not consistently validate types before storing arguments.
+# Validate their count/index parameters before invoking them; equality with the
+# returned arguments alone cannot distinguish a malformed but unchanged target.
+_INTEGER_ARGUMENTS = {
+    "N",
+    "capital_frequency",
+    "frequency",
+    "let_frequency",
+    "m",
+    "n",
+    "n_end",
+    "n_sent",
+    "n_start",
+    "n_words",
+    "nth_paragraph",
+    "num_bullets",
+    "num_highlights",
+    "num_paragraphs",
+    "num_placeholders",
+    "num_sections",
+    "num_sentences",
+    "num_words",
+    "small_n",
+}
+_LIST_ARGUMENTS = {"keywords", "forbidden_words"}
+
 
 def minutes(value):
     if not isinstance(value, str):
@@ -72,6 +98,18 @@ class CalendarVerifier:
         contract = calendar_contract(label)
         try:
             events = common.strict_json(common.answer_text(prediction))
+        except (ValueError, RecursionError) as error:
+            return common.Result(
+                0.0,
+                diagnostics={
+                    "kind": "calendar_v1",
+                    "status": "parse_error",
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                    "failure_policy": "zero",
+                },
+            )
+        try:
             if not isinstance(events, list) or len(events) != len(contract):
                 return common.Result(0.0)
             intervals, seen = [], set()
@@ -121,8 +159,9 @@ def instruction_contract(serialized):
         if set(args) != set(checker.get_instruction_args_keys()):
             raise ValueError(f"Missing or unexpected arguments for {name}")
         for key, value in args.items():
-            if isinstance(value, bool) or not isinstance(value, (str, int, list)):
-                raise ValueError(f"Unsupported argument {key}")
+            expected_type = int if key in _INTEGER_ARGUMENTS else list if key in _LIST_ARGUMENTS else str
+            if type(value) is not expected_type:
+                raise ValueError(f"Argument {key} for {name} must be {expected_type.__name__}")
             if isinstance(value, str) and not value.strip():
                 raise ValueError(f"Empty argument {key}")
             if isinstance(value, list) and (not value or not all(isinstance(v, str) and v.strip() for v in value)):

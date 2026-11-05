@@ -67,8 +67,10 @@ intended behavior. The qualification script uses the default one-second budget.
 `open_instruct.miles.rewards.nvidia_constraints.InstructionVerifier` uses the
 maintained `IFEvalG` instruction registry. Targets have `family="nemo"` and a
 `target` object with parallel `instruction_id_list` and `kwargs` arrays. The
-optional `grading_mode` is `all` (default) or `fraction`. Unknown modes and native
-argument repairs are errors, rather than silently changing the task. This
+optional `grading_mode` is `all` (default) or `fraction`. Unknown modes, invalid
+argument types, and native argument repairs are errors. Numeric counts/indices
+must be integers, text arguments must be strings, and keyword collections must
+be lists of strings. Target validation runs even when the response is empty. The
 adapter applies the existing IF training admission policy, including rejection
 of impossible paragraph positions and tiny total-letter limits. It admits the
 corrected lowercase-repetition and Unicode letter-counting checkers. Language
@@ -81,6 +83,9 @@ before/after/at/between constraints. Empty target calendars are supported. This
 version scores schedule feasibility, not event-name paraphrase or dialogue
 quality. Both adapters use the isolated verifier worker path. Their extraction
 uses the final answer after reasoning, like the other candidate verifiers.
+Calendar JSON parsing failures, including excessive nesting, score zero with
+`parse_error`, `error_type`, and `failure_policy: zero` diagnostics. Calendar target
+errors remain fatal and are checked before response parsing.
 
 Existing control replay: 112 positive/negative pairs across 36 native instruction
 families passed; one impossible paragraph constraint was rejected. The dedicated
