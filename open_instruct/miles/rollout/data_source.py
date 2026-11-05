@@ -33,7 +33,7 @@ from miles.dashboard import backend, hooks
 from miles.utils.types import Sample
 
 from open_instruct import logger_utils
-from open_instruct.miles.datasets import record_selection, recording
+from open_instruct.miles.datasets import record_selection, recording, replay_evidence
 from open_instruct.miles.rollout import prompt_provider, provider_source
 
 logger = logger_utils.setup_logger(__name__)
@@ -101,6 +101,9 @@ class DashboardDrainingRolloutDataSource:
                             for key in (
                                 prompt_provider.SELECTION_ID,
                                 prompt_provider.REVIEW,
+                                replay_evidence.SELECTION_ID,
+                                replay_evidence.REPLAY,
+                                replay_evidence.KEY,
                                 "mixture_source",
                                 "mixture_source_epoch",
                             )
@@ -109,6 +112,12 @@ class DashboardDrainingRolloutDataSource:
                     )
                     record["expected_group_size"] = len(group)
             self._delegate.provider.feedback(records)
+
+    def provider_metrics(self):
+        """Read feedback-provider metrics under the same lock as selection/checkpoints."""
+        with self._cursor_lock:
+            metrics = getattr(self._delegate.provider, "metrics", None)
+            return metrics() if metrics else {}
 
     def get_samples(self, num_samples: int) -> Any:
         """Return samples from the underlying MILES data source."""

@@ -299,6 +299,120 @@ measuring the realized allocation. Frozen exclusion tables are currently rejecte
 with ReMind to avoid silently consuming queued reviews without outcomes. This is a
 CPU-tested interface example, not a GPU-validated reproduction of ReMind's results.
 
+### Low-success history and length-triggered prompt replay
+
+A group with zero or one successful response and several truncations may become
+more productive as the policy changes its answer delivery or subject-matter
+ability. The opt-in prompt-replay layer records that history and
+can regenerate failed prompts after recent response length falls. It wraps the
+ordinary shuffle or mixture provider; it reuses the original prompt and verifier
+targets, never old completions. Existing configurations remain unchanged.
+
+Add these options to an existing fully async run:
+
+```toml
+[core]
+prompt_replay_enabled = true
+prompt_replay_fraction = 0.10
+prompt_replay_length_drop = 0.20
+prompt_replay_window = 256
+prompt_replay_max_successes = 1
+prompt_replay_truncation = "any"
+prompt_replay_answer_probe = true
+
+[records]
+enabled = true
+root = "/weka/your-workspace/inference-records"
+```
+
+| Option | Meaning |
+|---|---|
+| `prompt_replay_fraction` | Fraction of proposed prompt draws reserved for eligible retries. Zero enables tracking only. An empty eligible pool falls back to fresh draws; unused slots do not accumulate. |
+| `prompt_replay_length_drop` | Relative reduction since the failed attempt: 0.20 requires the recent mean to fall to at most 80% of its failure-time value. |
+| `prompt_replay_window` | Number of valid fresh groups in each source's rolling window. Require this many additional fresh groups after a failure before retrying. |
+| `prompt_replay_max_successes` | Maximum successful responses in a complete, valid binary-reward group. Default 1 includes 0/K and 1/K; set 0 for all-zero only. Graded nonbinary groups are tracked but excluded from replay eligibility. |
+| `prompt_replay_truncation` | `any` requires at least one capped response; `half` requires at least half; `all` requires every response capped; `none` imposes no truncation requirement. Default `any`. |
+| `prompt_replay_answer_probe` | Record a bounded literal-reference match for scalar `math` targets, including unfinished text. Unsupported targets are unknown. This is a diagnostic, **not verified correctness**, and never changes a reward. |
+
+The length statistic is mean generated tokens per response across the recent
+fresh groups **within the same source**, including intentional truncation zeroes.
+The failure baseline is that rolling mean when feedback arrives, rather than the
+failed prompt's own length. For example, a 20% threshold with a 10,000-token
+failure baseline permits a retry once a full fresh window has elapsed and the
+source mean is at most 8,000. Replay responses do not update this baseline. Sparse
+sources therefore take longer to become eligible. Shortening is a heuristic for
+when to retry, not evidence that the answer is now within reach.
+
+Complete all-zero groups are counted separately as no truncations, some
+truncations, or all truncations. A capped response deliberately assigned zero by
+`reward_zero_truncated` is valid evidence under that reward policy. Verifier
+errors, unknown outcomes, incomplete groups and aborted generations do not count
+as task failures. Historical IF diagnostics with the successful `ifeval: scored`
+status are recognized despite older recorder validity bookkeeping. Truncation
+membership does not establish that truncation caused an otherwise correct answer
+to fail.
+
+Eligible prompts are visited in first-observation order, without concurrent
+replays of the same prompt. A valid group outside the selected criteria retires the
+candidate; later qualifying fresh observations can enroll it again. A one-success
+group can already train through the normal zero-variance filter and also become a
+future replay candidate. A qualifying replay waits for another
+full fresh window and a further relative length drop. An invalid replay retains
+the candidate but also resets its cooldown. The first scored generation counts;
+staleness regeneration is not counted twice.
+
+History, length windows, pending reviews and base-provider cursor are checkpointed
+with the rollout ledger. Resume requires the same replay configuration and prompt
+catalog. Enabling replay on an old run requires an explicit new continuation;
+it cannot reconstruct unrecorded history from a legacy cursor. Frozen exclusions,
+ReMind, synchronous rollouts and nonglobal datasets are currently rejected.
+Like ReMind, this feature requires working recorder feedback and fails if the
+recorder cannot construct outcomes; disk queue drops remain separately reported.
+
+`rollout/prompt_replay/*` metrics report category counts, candidates, replay outcomes
+and literal-match counts (including zero-group and truncated-response subsets).
+Group records carry stable prompt identity, a replay flag, outcome classification,
+and the baseline/current source lengths. Prompt identity hashes all rendered turns
+and verifier targets, scoped by source. It is not semantic deduplication across
+sources. Both online feedback order and async policy lag affect future selections.
+
+Replay fractions refer to proposed groups, not accepted groups, tokens, or compute.
+The base mixture controls fresh draws; replays can change the overall source mix.
+Inspect source attribution and accepted-group/token costs when comparing runs.
+Even a fraction of 1 falls back to fresh draws when no candidate is eligible: this
+is not a finite, frozen-pool replay experiment.
+
+For a compact historical inventory, stream explicitly chosen record attempts:
+
+```bash
+python -m open_instruct.miles records replay-pool \
+  --manifest /records/run/manifest-ATTEMPT.json \
+  --manifest /records/resume/manifest-RESUME.json \
+  --max-policy-version 400 \
+  --max-successes 1 --truncation any \
+  --attempt-ranges attempt-ranges.json \
+  --output zero-reward-history
+```
+
+The optional ranges file maps attempt IDs to inclusive policy-version bounds,
+for example `{"ATTEMPT": [0, 100], "RESUME": [100, 400]}`. Select these from the
+actual checkpoint ancestry to exclude abandoned recovery branches. The CPU reader
+exports `summary.json`, the selected `replay-prompts.jsonl`, all ever-zero IDs in
+`zero-prompts.jsonl`, and `low-success-prompts.jsonl` for comparing alternate
+truncation thresholds locally. They contain per-source counts, stable IDs, success
+and truncation histograms, and each prompt's latest valid outcome. The latter file
+keeps both 0/K and 1/K observations, irrespective of the chosen pool threshold.
+A prompt is included if it **ever** qualified; later outcomes remain visible so
+you can choose a latest-outcome rule when preparing a historical experiment.
+These runs can have K=4 or K=8: do not label a 1/4 observation as 1/8. The reader does not
+copy response text or create a training dataset. Old records without answer probes
+remain unknown; this command does not retrospectively verify their text. Missing
+records and verifier errors are reported separately from valid zeroes.
+
+A 0/K-to-mixed transition alone does not show improvement: ordinary resampling can
+produce it at a frozen policy. Compare replay productivity and downstream evaluations
+against matched continuation controls before adopting this experimental sampler.
+
 <!-- Preserve the former section anchor for existing links. -->
 <a id="large-training-mixture"></a>
 

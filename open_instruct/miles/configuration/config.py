@@ -106,11 +106,30 @@ class CoreConfig:
     prompt_mixture: str | None = None
     remind_review_fraction: float = 0.02
     remind_enqueue_probability: float = 0.25
+    # Optional history/replay layer over the ordinary shuffle or mixture provider.
+    prompt_replay_enabled: bool = False
+    prompt_replay_fraction: float = 0.1
+    prompt_replay_length_drop: float = 0.1
+    prompt_replay_window: int = 256
+    prompt_replay_max_successes: int = 1
+    prompt_replay_truncation: str = "any"
+    prompt_replay_answer_probe: bool = False
     # Frozen prompt-exclusion table from `records select`, pinned by SHA-256.
     selection_table: str | None = None
     selection_sha256: str | None = None
 
     def __post_init__(self):
+        validation.boolean(self.prompt_replay_enabled, "core.prompt_replay_enabled")
+        validation.boolean(self.prompt_replay_answer_probe, "core.prompt_replay_answer_probe")
+        validation.number(self.prompt_replay_fraction, "core.prompt_replay_fraction", maximum=1)
+        validation.number(self.prompt_replay_length_drop, "core.prompt_replay_length_drop", maximum=1)
+        if self.prompt_replay_length_drop == 1:
+            raise constraints.error("core.prompt_replay_length_drop must be below 1")
+        validation.integer(self.prompt_replay_window, "core.prompt_replay_window", minimum=1)
+        validation.integer(self.prompt_replay_max_successes, "core.prompt_replay_max_successes", minimum=0)
+        validation.choice(
+            self.prompt_replay_truncation, "core.prompt_replay_truncation", ("none", "any", "half", "all")
+        )
         validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture"))
         validation.number(self.remind_review_fraction, "core.remind_review_fraction", maximum=1, exclusive_min=True)
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
@@ -432,6 +451,13 @@ class RunConfig:
                 "Mixtures cannot yet be combined with a frozen prompt-exclusion table; "
                 "remove [selection]. Exclusions must be applied within each source to preserve its allocation."
             )
+        if self.core.prompt_replay_enabled:
+            if not options.get("fully_async", False) or self.core.records_root is None:
+                raise constraints.error("Prompt replay requires fully_async=true and inference records")
+            if not options.get("rollout_global_dataset", True):
+                raise constraints.error("Prompt replay requires rollout_global_dataset=true")
+            if self.core.prompt_provider == "remind" or self.core.selection_table is not None:
+                raise constraints.error("Prompt replay supports shuffle/mixture without frozen exclusions or ReMind")
         if self.core.prompt_provider == "remind":
             if not options.get("fully_async", False) or self.core.records_root is None:
                 raise constraints.error("ReMind requires fully_async=true and inference records (core.records_root)")
