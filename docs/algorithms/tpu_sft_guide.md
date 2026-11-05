@@ -385,8 +385,9 @@ Each of these trained silently on wrong data or a wrong model before it was foun
     Viperlite); the rest of that flag set loads.
   - Tiny's loss went NaN in 5 of 8 runs on this slice, across four configs, between steps 3 and 13; the unchanged
     config went NaN in 2 of its 3 runs. H078 trained the unchanged config to the end on the `8x8x8` before its
-    2026-10-21 split. Whether the recreated slice or the newer image causes the NaN is not tested, so treat the
-    recreated `8x8x8` as unproven for training.
+    2026-10-21 split. The same image and per-device config stayed finite through step 30 in 3 of 3 runs on a `4x4x8`,
+    so the slice or its host software is the suspect (its pool is the only one on GKE `v1.35.8-gke.1796000`). Don't
+    train on the recreated `8x8x8` until it is cleared.
 
   Speedups beyond these need code changes. Any other slice or mesh needs its own same-slice control.
 - **Comparing against a GPU result.** TPU and GPU runs of the same recipe differ in data order and numerics. Compare
