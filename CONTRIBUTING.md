@@ -68,11 +68,22 @@ Track new large or binary test data files with `git lfs track "path/to/file"` an
 
 ## Running Tests
 
-**Unit tests**: `uv run pytest` runs the tests in `tests/` (test_environments.py, test_generic_sandbox.py, test_merge_models.py).
+**Unit tests**: `uv run pytest` discovers CPU tests in `open_instruct/`, `tests/`, and the repository root. CUDA-only files under `open_instruct/` are excluded when CUDA is unavailable.
+
+Data-loader sampling/resume/accounting (`test_hf_data_loader.py`), Beaker callbacks (`test_olmo_core_callbacks.py`), and DPO collation/forward/gradient checks (`test_dpo_forward.py`) run in ordinary unit-test CI even while automatic GPU tests are disabled. The DPO tests initialize tiny HF and OLMo-core models locally and use a local tokenizer, without model downloads. To run this coverage on CPU:
+
+```bash
+CUDA_VISIBLE_DEVICES="" HF_HUB_OFFLINE=1 uv run pytest \
+    open_instruct/test_hf_data_loader.py \
+    open_instruct/test_olmo_core_callbacks.py \
+    open_instruct/test_dpo_forward.py
+```
+
+These checks do not replace CUDA/BF16 kernels, FlashAttention packing, optimizer offload, real vLLM generation, or distributed weight-transfer validation.
 
 **Linting and formatting**: `make style` formats code with ruff, `make quality` runs ruff lint, compileall, and the `ty` type checker. Both target `open_instruct/` and `*mason.py`.
 
-**GPU tests**: The GPU test files live at `open_instruct/test_*_gpu.py` (5 files: data loader, DPO utils, GRPO fast, streaming data loader, OLMo-core callbacks). These require a GPU and are run via `uv run pytest open_instruct/test_*_gpu.py -xvs`. To run them on Beaker: `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
+**GPU tests**: The GPU test files live at `open_instruct/test_*_gpu.py` (5 files: DPO utils, GRPO CPUAdam offload, GRPO generation/packing, streaming data loader, and vLLM weight transfer). These require a GPU and are run via `uv run pytest open_instruct/test_*_gpu.py -xvs`. To run them on Beaker: `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
 
 ## CI Workflows
 
@@ -84,8 +95,9 @@ Four GitHub Actions workflows run on PRs:
 
 3. **GPU Tests** (`tests.yml` → `gpu-tests-launch` and `gpu-tests` jobs): **Currently disabled; both jobs report as skipped.** When enabled, the large runner builds a Docker image, uploads it to Beaker, and launches `open_instruct/test_*_gpu.py` on a single GPU; a small runner then waits up to 20 minutes for the result and stops the Beaker job if it gives up. Auto-skipped for fork PRs (no Beaker secrets). Can be overridden with `GPU_TESTS=[EXPERIMENT_ID]` or bypassed with `GPU_TESTS=bypass` in the PR body.
 
-4. **Integration Tests** (`beaker-experiment.yml`): Runs in the merge queue (not on every PR push). Launches up to 3 Beaker experiments:
-   - GRPO integration test (always runs)
+4. **Integration Tests** (`beaker-experiment.yml`): Runs in the merge queue (not on every PR push). Launches up to 4 Beaker experiments:
+   - OLMo-core SFT integration test (always runs)
+   - GRPO integration test (runs when GRPO-related code or runtime files change)
    - DPO integration test (runs if DPO-related files changed)
    - SFT integration test (runs if `finetune.py` changed)
 
