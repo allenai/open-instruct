@@ -241,3 +241,53 @@ def test_real_worker_timeout_logs_in_parent(monkeypatch):
     assert result.diagnostics["failure_policy"] == "zero"
     assert result.diagnostics["elapsed_seconds"] >= 0.05
     warning.assert_called_once()
+
+
+@pytest.mark.parametrize("timeout_policy", ["zero", "raise"])
+@pytest.mark.parametrize(
+    "schema,prediction,error_type",
+    [
+        (
+            {"anyOf": [{"type": "integer"}, {"type": "array", "items": {"$ref": "#"}}]},
+            "[" * 200 + "0" + "]" * 200,
+            "RecursionError",
+        ),
+        ({"type": "number", "multipleOf": 0.1}, "9" * 310, "OverflowError"),
+    ],
+    ids=["recursive-arrays", "huge-integer-multiple"],
+)
+def test_async_instance_validation_limits_score_zero(monkeypatch, timeout_policy, schema, prediction, error_type):
+    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", timeout_policy)
+    label = target(schema=schema)
+    # Both inputs pass parsing/serialization and target validation. The failure
+    # happens only when the schema validator traverses/calculates on the instance.
+    structured.parse(prediction, "json", structured.validate_target(label), False)
+
+    async def score_and_recover():
+        verifier = structured.StructuredOutputVerifier()
+        result = await verifier.async_call([], prediction, label)
+        assert result.score == 0
+        assert result.diagnostics["status"] == "validation_error"
+        assert result.diagnostics["error_type"] == error_type
+        assert result.diagnostics["failure_policy"] == "zero"
+        assert result.diagnostics["elapsed_seconds"] >= 0
+        assert result.diagnostics["error"]
+        assert (await verifier.async_call([], "1", label)).score == 1
+
+    asyncio.run(score_and_recover())
+
+
+@pytest.mark.parametrize(
+    "schema,error_type", [({"type": "invalid"}, "SchemaError"), ({"$ref": "#/$defs/missing"}, "PointerToNowhere")]
+)
+def test_async_invalid_schema_and_reference_remain_fatal(schema, error_type):
+    with pytest.raises(RuntimeError, match=error_type):
+        asyncio.run(structured.StructuredOutputVerifier().async_call([], "0", target(schema=schema)))
+
+
+@pytest.mark.parametrize("error_type", [RecursionError, OverflowError])
+@pytest.mark.parametrize("stage", ["validate_target", "OAS31Validator"])
+def test_target_and_constructor_resource_errors_remain_fatal(monkeypatch, error_type, stage):
+    monkeypatch.setattr(structured, stage, mock.Mock(side_effect=error_type("invalid target")))
+    with pytest.raises(error_type, match="invalid target"):
+        structured.StructuredOutputVerifier()([], "0", target())

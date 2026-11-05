@@ -33,6 +33,15 @@ timeout. The response budget includes target validation; slow targets can exhaus
 it. Invalid schema/configuration exceptions propagate, as do unexpected worker failures.
 The old `JSONSchemaVerifier` remains unchanged.
 
+After successful parsing and target checks, instance validation can still exceed
+Python's recursion or numeric limits (for example, deeply nested recursive arrays
+or a huge integer with a fractional `multipleOf`). `RecursionError` and
+`OverflowError` from instance validation receive zero with `status: validation_error`,
+`error_type`, `error`, `failure_policy: zero`, and `elapsed_seconds` diagnostics.
+This fixed policy is independent of the timeout policy and records a validator
+limit, not a completed schema mismatch. Target validation, validator construction,
+and unresolved-reference errors remain fatal.
+
 XML preserves its root element: `<root><a>1</a><b>2</b></root>` needs a schema
 whose top-level `properties.root` contains the `a` and `b` properties. Coercion
 applies only to XML/CSV; `coerce_types` has no effect on JSON/YAML/TOML. Answers

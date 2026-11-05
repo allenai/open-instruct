@@ -215,9 +215,24 @@ class StructuredOutputVerifier:
                 # An explicit empty Registry refuses retrieval by default, including
                 # network access. Do not use jsonschema's legacy default registry.
                 validator = OAS31Validator(schema, registry=Registry())
-                return common.Result(
-                    float(validator.is_valid(value)), diagnostics={"kind": "structured_v1", "status": "completed"}
-                )
+                try:
+                    valid = validator.is_valid(value)
+                except (RecursionError, OverflowError) as error:
+                    # A parsed response can exceed the validator's recursion or
+                    # numeric limits. Fail closed for this instance only; target
+                    # checks and validator construction stay outside this guard.
+                    return common.Result(
+                        0.0,
+                        diagnostics={
+                            "kind": "structured_v1",
+                            "status": "validation_error",
+                            "error_type": type(error).__name__,
+                            "error": str(error),
+                            "failure_policy": "zero",
+                            "elapsed_seconds": time.monotonic() - start,
+                        },
+                    )
+                return common.Result(float(valid), diagnostics={"kind": "structured_v1", "status": "completed"})
             finally:
                 # Disarming can itself receive the pending alarm. Always restore
                 # the handler/timer, then apply the timeout policy outside cleanup.
