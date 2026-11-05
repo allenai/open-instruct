@@ -18,16 +18,11 @@ import xmltodict
 import yaml
 from openapi_schema_validator import OAS31Validator
 from referencing import Registry
-from referencing.exceptions import NoSuchResource
 
 from open_instruct.miles.rewards import candidate_verifiers as common
 from open_instruct.miles.rewards import nemo_structured_types, rewards
 
 FORMATS = {"json", "yaml", "toml", "xml", "csv"}
-
-
-def no_external_resource(uri):
-    raise NoSuchResource(ref=uri)
 
 
 def validate_target(target):
@@ -89,6 +84,8 @@ class UniqueYAMLLoader(yaml.SafeLoader):
         mapping = {}
         for key, value in node.value:
             key = self.construct_object(key, deep=deep)
+            if not isinstance(key, str):
+                raise ValueError("YAML mapping keys must be strings for JSON Schema validation")
             if key in mapping:
                 raise ValueError("Duplicate YAML key")
             mapping[key] = self.construct_object(value, deep=deep)
@@ -177,7 +174,9 @@ class StructuredOutputVerifier:
                 return common.Result(
                     0.0, diagnostics={"kind": "structured_v1", "status": "parse_error", "error": str(error)}
                 )
-            validator = OAS31Validator(schema, registry=Registry(retrieve=no_external_resource))
+            # An explicit empty Registry refuses retrieval by default, including
+            # network access. Do not use jsonschema's legacy default registry.
+            validator = OAS31Validator(schema, registry=Registry())
             return common.Result(
                 float(validator.is_valid(value)), diagnostics={"kind": "structured_v1", "status": "completed"}
             )

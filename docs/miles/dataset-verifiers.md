@@ -16,9 +16,11 @@ a target with `format` (`json`, `yaml`, `toml`, `xml`, `csv`), `schema`, an expl
 These rewards measure structural compliance, not factual correctness. Preserve
 original messages; no JSON-only suffix is needed for non-JSON sources.
 
-`nemo_strict_v1` and XML/CSV type coercion preserve the pure helpers extracted from
+`nemo_strict_v1` and XML/CSV type coercion use the pure helpers extracted from
 NVIDIA NeMo Gym's Apache-2.0 `resources_servers/structured_outputs/app.py`
 (SHA256 `5e9d85edaa6743abcdf0fd80859321bb9ce386e461846399069e80bb25cbbc70`).
+CSV boolean subschemas are left unchanged for schema validation rather than type
+coercion. YAML mapping keys must be strings to match the JSON Schema data model.
 Unlike the legacy JSON-only slice, the contract does not silently strengthen a
 schema: the policy is part of every target and therefore the artifact hash.
 Duplicate mapping keys, nonfinite values, external schema references and XML

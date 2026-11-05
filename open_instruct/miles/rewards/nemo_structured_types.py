@@ -3,7 +3,8 @@
 """Pure helpers from NVIDIA NeMo Gym structured_outputs/app.py.
 
 Source SHA256: 5e9d85edaa6743abcdf0fd80859321bb9ce386e461846399069e80bb25cbbc70.
-Extracted without behavioral changes; see docs/miles/dataset-screening.md.
+Adapted to leave boolean CSV subschemas to validation; other helper behavior is
+unchanged. See docs/miles/dataset-verifiers.md.
 """
 
 from typing import Any
@@ -88,6 +89,8 @@ class NativeStructuredTypes:
         the original string is kept so that schema validation reports the error.
         """
         items_schema = schema.get("items", schema)
+        if not isinstance(items_schema, dict):
+            return rows
         properties = items_schema.get("properties", {})
 
         coerced_rows = []
@@ -95,7 +98,7 @@ class NativeStructuredTypes:
             coerced: dict[str, Any] = {}
             for key, value in row.items():
                 prop_schema = properties.get(key, {})
-                prop_type = prop_schema.get("type", "string")
+                prop_type = prop_schema.get("type", "string") if isinstance(prop_schema, dict) else "string"
                 coerced[key] = self._coerce_csv_scalar(value, prop_type)
             coerced_rows.append(coerced)
         return coerced_rows

@@ -4,6 +4,7 @@ import asyncio
 import time
 
 import pytest
+from referencing import exceptions
 
 pytest.importorskip("xmltodict")
 pytest.importorskip("openapi_schema_validator")
@@ -39,6 +40,21 @@ def test_csv_types_and_width():
     assert verifier([], "n,n\n3,4", label).score == 0
 
 
+@pytest.mark.parametrize("subschema", [True, False])
+@pytest.mark.parametrize("location", ["items", "property"])
+def test_csv_boolean_subschemas(subschema, location):
+    items = subschema if location == "items" else {"type": "object", "properties": {"n": subschema}}
+    label = target("csv", schema={"type": "array", "items": items})
+    assert structured.StructuredOutputVerifier()([], "n\n3", label).score == float(subschema)
+
+
+@pytest.mark.parametrize("key", ["1", "true", "null", ".nan"])
+@pytest.mark.parametrize("schema", [{"type": "object"}, {"patternProperties": {".*": {"type": "string"}}}])
+def test_yaml_nonstring_keys_are_parse_errors(key, schema):
+    result = structured.StructuredOutputVerifier()([], f"{key}: value", target("yaml", schema=schema))
+    assert result.score == 0 and result.diagnostics["status"] == "parse_error"
+
+
 def test_schema_strengthening_is_explicit_and_does_not_mutate_target():
     label = target(schema={"type": "object", "properties": {"n": {"type": "integer"}}})
     verifier = structured.StructuredOutputVerifier()
@@ -56,6 +72,13 @@ def test_local_references_and_property_names_are_not_confused():
     assert structured.StructuredOutputVerifier()([], '{"$ref":"literal","n":3}', target(schema=schema)).score == 1
     with pytest.raises(ValueError, match="local schema"):
         structured.validate_target(target(schema={"$ref": "https://example.invalid/schema"}))
+
+
+def test_registry_refuses_external_retrieval(monkeypatch):
+    # Defense in depth if a future schema keyword bypasses the target precheck.
+    monkeypatch.setattr(structured, "validate_target", lambda label: {"$ref": "https://example.invalid/schema"})
+    with pytest.raises(exceptions.Unresolvable):
+        structured.StructuredOutputVerifier()([], "{}", target())
 
 
 @pytest.mark.parametrize(
