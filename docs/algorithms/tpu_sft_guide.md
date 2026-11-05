@@ -162,6 +162,16 @@ The tokenizer is a directory on the bucket. For Olmo 3.5, `olmo35/tok_oi35.py` s
 (`allenai/dolma2-tokenizer-olmo35` @8b971706, `olmo35`). For Olmo 3, save
 `PreTrainedTokenizerFast.from_pretrained("allenai/olmo-3-tokenizer-instruct-dev")` (see Traps).
 
+Plain-text rows (long-context replay documents) need `scripts/tpu/maxtext/image-olmo35-dr/`: a conversation of exactly
+one `{"role": "document"}` message is tokenized without the chat template, gets one EOS and is trained on every token
+([1e612a76 → 1e23ebbc](https://github.com/abhishekraok/maxtext/compare/1e612a76e2e50e0ce86ef7b7280353248c3e0520...1e23ebbc88059cfdd062655a9d7e1911de9afe06));
+chat rows tokenize as before. Other images do not special-case the role. It is built on the same `...-dc88c6c7ea`
+base as the pooled image in section 6, not on top of it, so `MAXTEXT_SFT_TEMPLATE_WORKERS` does nothing there:
+
+```text
+us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3-dc88c6c7ea-dra35420de
+```
+
 ## 4. Launch
 
 Copy `k8s/olmo35-sft-4x4x8/` to a new directory. Then rename the JobSet and both ConfigMaps (in `jobset.yaml` and
