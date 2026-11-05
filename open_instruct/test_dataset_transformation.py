@@ -1954,10 +1954,9 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
             )
 
     def test_is_registered_as_a_filter(self):
-        for name in ["sft_added_token_strings_filter_v1", "sft_added_token_strings_filter_v2"]:
-            fn, fn_type = open_instruct.dataset_transformation.TRANSFORM_FNS[name]
-            self.assertIs(fn, getattr(open_instruct.dataset_transformation, name))
-            self.assertEqual(fn_type, "filter")
+        fn, fn_type = open_instruct.dataset_transformation.TRANSFORM_FNS["sft_added_token_strings_filter_v1"]
+        self.assertIs(fn, open_instruct.dataset_transformation.sft_added_token_strings_filter_v1)
+        self.assertEqual(fn_type, "filter")
 
     @parameterized.expand(
         [
@@ -1971,21 +1970,19 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
             ),
         ]
     )
-    def test_v2_checks_fields_beyond_content(self, _name, assistant_fields, tools):
+    def test_checks_fields_beyond_content(self, _name, assistant_fields, tools):
         messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok", **assistant_fields}]
-        self.assertTrue(self.keeps(messages))
-        v2 = open_instruct.dataset_transformation.sft_added_token_strings_filter_v2
-        self.assertFalse(v2({"messages": messages, "tools": tools}, self.tokenizer))
+        v1 = open_instruct.dataset_transformation.sft_added_token_strings_filter_v1
+        self.assertFalse(v1({"messages": messages, "tools": tools}, self.tokenizer))
         clean = json.loads(json.dumps(messages).replace("<|im_end|>", "end"))
-        self.assertTrue(v2({"messages": clean, "tools": tools and tools.replace("im_end", "end")}, self.tokenizer))
+        self.assertTrue(v1({"messages": clean, "tools": tools and tools.replace("im_end", "end")}, self.tokenizer))
 
-    def test_v2_allows_think_tags_in_content_only(self):
+    def test_allows_think_tags_in_content_only(self):
         # The template wraps `reasoning_content` in think tags, so one inside it closes the block early.
         self.promote_think_tags()
-        v2 = open_instruct.dataset_transformation.sft_added_token_strings_filter_v2
         inline = {"role": "assistant", "content": "<think>a</think>ok"}
-        self.assertTrue(v2({"messages": [inline]}, self.tokenizer))
-        self.assertFalse(v2({"messages": [{**inline, "reasoning_content": "a</think>b"}]}, self.tokenizer))
+        self.assertTrue(self.keeps([inline]))
+        self.assertFalse(self.keeps([{**inline, "reasoning_content": "a</think>b"}]))
 
     def test_transform_fn_args_follow_function_names(self):
         sft_transform_fn_args = open_instruct.dataset_transformation.sft_transform_fn_args

@@ -1976,16 +1976,20 @@ def sft_added_token_strings_filter_v1(
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
     allowed_strings: Sequence[str] | None = None,
 ) -> bool:
-    """Drop a row whose message content contains a literal added-token string.
+    """Drop a row whose message content, reasoning, tool calls or tools contain a literal added-token string.
 
     A string from the tokenizer's added vocabulary (`tokenizer.get_added_vocab()`) inside
     content encodes to that token's id, not to text: under the olmo35 tokenizer an
     `<|endoftext|>` in an assistant answer is an EOS mid-response, and an `<|im_start|>` in a
-    user turn opens a fake turn. `allowed_strings` (default
+    user turn opens a fake turn. The olmo35 template also renders `reasoning_content`,
+    `tool_calls` and the `tools` schemas, so those are checked too. `allowed_strings` (default
     `DEFAULT_ADDED_TOKEN_STRINGS_ALLOWED_IN_CONTENT`) lists the strings a chat template expects
-    inside content. The SFT entry points pass this filter no arguments (`sft_transform_fn_args`),
-    so training from the CLI always uses the default allowlist; `allowed_strings` is for direct
-    callers. Plain-text look-alikes such as `</s>` are not added tokens and are kept.
+    inside content; it applies to content only. The other fields allow no added token, since the
+    template wraps `reasoning_content` in `<think>`...`</think>` itself and a literal `</think>`
+    there would close the block early. The SFT entry points pass this filter no arguments
+    (`sft_transform_fn_args`), so training from the CLI always uses the default allowlist;
+    `allowed_strings` is for direct callers. Plain-text look-alikes such as `</s>` are not added
+    tokens and are kept.
 
     Opt-in. It reads `messages`, which the SFT tokenizers drop, so it has to run before them:
 
@@ -1997,10 +2001,13 @@ def sft_added_token_strings_filter_v1(
     """
     if sft_messages_key not in row:
         raise KeyError(
-            f"The added-token-strings filter needs the {sft_messages_key!r} column; list it before the "
+            f"sft_added_token_strings_filter_v1 needs the {sft_messages_key!r} column; list it before the "
             "tokenization function in the transform list, which drops that column."
         )
-    return not find_added_token_strings(row[sft_messages_key], tokenizer, allowed_strings)
+    if find_added_token_strings(row[sft_messages_key], tokenizer, allowed_strings):
+        return False
+    texts = _non_content_texts(row, sft_messages_key)
+    return not find_added_token_strings([{"content": text} for text in texts], tokenizer, allowed_strings=())
 
 
 def _non_content_texts(row: Mapping[str, Any], sft_messages_key: str) -> list[str]:
@@ -2019,27 +2026,6 @@ def _non_content_texts(row: Mapping[str, Any], sft_messages_key: str) -> list[st
     if tools:
         texts.append(json.dumps(tools, ensure_ascii=False))
     return texts
-
-
-def sft_added_token_strings_filter_v2(
-    row: dict[str, Any],
-    tokenizer: PreTrainedTokenizer,
-    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
-    allowed_strings: Sequence[str] | None = None,
-) -> bool:
-    """`sft_added_token_strings_filter_v1`, also checking `reasoning_content`, `tool_calls` and `tools`.
-
-    The olmo35 template renders all three, so a literal `<|im_end|>` in a tool-call argument
-    trains the control id just as one in content does. `allowed_strings` applies to content only:
-    these fields allow no added token, since the template wraps `reasoning_content` in
-    `<think>`...`</think>` itself and a literal `</think>` there would close the block early. v1 is
-    unchanged, so a v1 cache key still names the content-only rule. Use it in v1's place, ahead
-    of the tokenizer.
-    """
-    if not sft_added_token_strings_filter_v1(row, tokenizer, sft_messages_key, allowed_strings):
-        return False
-    texts = _non_content_texts(row, sft_messages_key)
-    return not find_added_token_strings([{"content": text} for text in texts], tokenizer, allowed_strings=())
 
 
 def preference_tokenize_v1(row: dict[str, Any], tokenizer: PreTrainedTokenizer):
@@ -2352,7 +2338,6 @@ TRANSFORM_FNS = {
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
     "sft_added_token_strings_filter_v1": (sft_added_token_strings_filter_v1, "filter"),
-    "sft_added_token_strings_filter_v2": (sft_added_token_strings_filter_v2, "filter"),
     "last_turn_tulu_tokenize_and_truncate_v1": (last_turn_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
