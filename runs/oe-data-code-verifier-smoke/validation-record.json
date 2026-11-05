@@ -70,5 +70,37 @@
     "errors": 0,
     "throttles": 0,
     "peak_concurrent_executions": 4
+  },
+  "extraction_followup": {
+    "finding": "The new client rejected closing code fences followed immediately by decoded EOS tokens. All ten Dolci invalid_code records were false extraction rejections.",
+    "owner": "code_execution_client.verifier.extract_python_code, not the existing Open Instruct extractor",
+    "fix_revision": "cc79571",
+    "fix_branch": "https://github.com/allenai/code-execution-service/tree/robertb/verifier-paired-replay",
+    "validation": "44 relevant client tests passed; all ten affected Dolci outputs fully pass after regrading.",
+    "corrected_saved_output_mean_rewards": {
+      "0.pt": 0.8333333333333334,
+      "1.pt": 0.5,
+      "eval_1.pt": 0.5
+    },
+    "caveat": "Saved-output regrading only. Original training used the incorrect rewards; its image still needs rebuilding with the fixed client before another run."
+  },
+  "paired_execution_followup": {
+    "responses": 104,
+    "prompts": 60,
+    "tests_per_endpoint": 1569,
+    "batches_per_endpoint": 245,
+    "http_200_each": 245,
+    "identical_per_test_grades": 102,
+    "differences": "Two set-to-list solutions vary across repeated calls under order-sensitive tests; order-preserving control passes on both.",
+    "scope": "Identical code and full tests; Python assert mode, batches of eight, one second per test, two workers.",
+    "latency_median_ms": {
+      "old": 111,
+      "new": 387
+    },
+    "latency_p95_ms": {
+      "old": 137,
+      "new": 433
+    },
+    "sample_export_experiment": "01M6N5Y2JY8XAVE7QYQHPPCCPC"
   }
 }
