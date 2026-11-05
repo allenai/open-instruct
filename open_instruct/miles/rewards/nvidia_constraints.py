@@ -41,6 +41,42 @@ _LIST_ARGUMENTS = {"keywords", "forbidden_words"}
 # These parameters use `if not value` in their native generators. In particular,
 # copy_span_idx can randomly choose zero again, defeating the repair comparison.
 _RANDOM_ZERO_ARGUMENTS = {"N", "small_n", "n_start", "n_end", "n_sent", "n_words", "n", "m"}
+_STRIPPED_ARGUMENTS = {
+    "detectable_format:multiple_sections": ("section_spliter",),
+    "detectable_content:postscript": ("postscript_marker",),
+    "startend:end_checker": ("end_phrase",),
+    "keywords:frequency": ("keyword",),
+    "keywords:word_once": ("keyword",),
+    "keywords:word_count_different_numbers": ("keyword",),
+    "keywords:exclude_word_harder": ("keyword",),
+    "keywords:keyword_specific_position": ("keyword",),
+    "count:count_increment_word": ("keyword1", "keyword2"),
+    "copy:repeat_phrase": ("phrase",),
+    "first_word:first_word_sent": ("first_word",),
+    "first_word:first_word_answer": ("first_word",),
+    "last_word:last_word_sent": ("last_word",),
+    "last_word:last_word_answer": ("last_word",),
+}
+
+
+def expected_native_args(name, args):
+    """Allow only the normalization performed by this native constructor."""
+    expected = dict(args)
+    for key in _STRIPPED_ARGUMENTS.get(name, ()):
+        expected[key] = args[key].strip()
+    if name == "length_constraints:nth_paragraph_first_word":
+        expected["first_word"] = args["first_word"].lower()
+    elif name in {"keywords:letter_frequency", "letters:letter_counting2"}:
+        # The native checker checks length before stripping and randomly replaces
+        # invalid letters. Do not let a coincidental random match pass admission.
+        if len(args["letter"]) != 1 or re.fullmatch("[a-z]", args["letter"].lower()) is None:
+            raise ValueError(f"Invalid letter for {name} triggers a native random default")
+        expected["letter"] = args["letter"].lower()
+    elif name == "keywords:existence":
+        expected["keywords"] = sorted(args["keywords"])
+    elif name == "keywords:forbidden_words":
+        expected["forbidden_words"] = sorted(set(args["forbidden_words"]))
+    return expected
 
 
 def validate_patterns(name, args):
@@ -220,18 +256,14 @@ def instruction_contract(serialized):
                 raise ValueError(f"Zero argument {key} for {name} triggers a native random default")
         if name == "copy:repeat_phrase" and len(args["phrase"].split()) < 3:
             raise ValueError("copy:repeat_phrase needs an interior word to replace")
-        validate_patterns(name, args)
+        expected_args = expected_native_args(name, args)
+        validate_patterns(name, expected_args)
         try:
             checker.build_description(**args)
         except (AttributeError, TypeError) as exc:
             raise ValueError(f"Invalid native checker arguments for {name}") from exc
-        # Native generators repair invalid arguments, sometimes randomly.
-        # Training targets must retain their explicit supplied parameters.
-        expected_args = dict(args)
-        if name == "keywords:existence":
-            expected_args["keywords"] = sorted(args["keywords"])
-        elif name == "keywords:forbidden_words":
-            expected_args["forbidden_words"] = sorted(set(args["forbidden_words"]))
+        # Known normalization preserves native grading; other changes (including
+        # random repairs) must not silently alter a training task.
         if (checker.get_instruction_args() or {}) != expected_args:
             raise ValueError(f"Native checker changed target arguments for {name}")
         compiled.append((name, checker, args))

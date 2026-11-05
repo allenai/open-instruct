@@ -324,3 +324,139 @@ def test_instruction_completed_diagnostics_through_worker():
             assert result.diagnostics == {"kind": "nemo_if_v1", "status": "completed"}
 
     asyncio.run(check())
+
+
+@pytest.mark.parametrize(
+    "name,args,normalized,gold,wrong",
+    [
+        (
+            "length_constraints:nth_paragraph_first_word",
+            {"num_paragraphs": 1, "nth_paragraph": 1, "first_word": "The"},
+            {"first_word": "the"},
+            "THE cat sleeps.",
+            "A cat sleeps.",
+        ),
+        *[
+            (name, {"letter": "A", "let_frequency": 2, "let_relation": "at least"}, {"letter": "a"}, "aA", "b")
+            for name in ["keywords:letter_frequency", "letters:letter_counting2"]
+        ],
+        (
+            "keywords:frequency",
+            {"keyword": " apple ", "frequency": 1, "relation": "at least"},
+            {"keyword": "apple"},
+            "apple",
+            "pear",
+        ),
+        ("keywords:word_once", {"keyword": " apple "}, {"keyword": "apple"}, "apple", "pear"),
+        (
+            "keywords:word_count_different_numbers",
+            {"keyword": " apple ", "frequency": 1, "relation": "at least"},
+            {"keyword": "apple"},
+            "apple",
+            "pear",
+        ),
+        (
+            "keywords:exclude_word_harder",
+            {"keyword": " apple "},
+            {"keyword": "apple"},
+            "a pear today",
+            "an apple today",
+        ),
+        (
+            "keywords:keyword_specific_position",
+            {"keyword": " apple ", "n": 1, "m": 1},
+            {"keyword": "apple"},
+            "apple today.",
+            "pear today.",
+        ),
+        (
+            "count:count_increment_word",
+            {"keyword1": " apple ", "keyword2": " pear "},
+            {"keyword1": "apple", "keyword2": "pear"},
+            "apple pear pear",
+            "apple pear",
+        ),
+        (
+            "copy:repeat_phrase",
+            {"phrase": " one two three ", "small_n": 1},
+            {"phrase": "one two three"},
+            "one four three",
+            "one two three",
+        ),
+        *[
+            (name, {"first_word": " The "}, {"first_word": "The"}, "The cat sleeps.", "A cat sleeps.")
+            for name in ["first_word:first_word_sent", "first_word:first_word_answer"]
+        ],
+        *[
+            (name, {"last_word": " cat "}, {"last_word": "cat"}, "A cat.", "A dog.")
+            for name in ["last_word:last_word_sent", "last_word:last_word_answer"]
+        ],
+        (
+            "detectable_format:multiple_sections",
+            {"section_spliter": " Section ", "num_sections": 1},
+            {"section_spliter": "Section"},
+            "Section 1 content",
+            "plain content",
+        ),
+        (
+            "detectable_content:postscript",
+            {"postscript_marker": " P.S. "},
+            {"postscript_marker": "P.S."},
+            "P.S. hello",
+            "plain content",
+        ),
+        ("startend:end_checker", {"end_phrase": " Goodbye "}, {"end_phrase": "Goodbye"}, "Goodbye", "Hello"),
+    ],
+)
+def test_native_normalization_preserves_rewards(name, args, normalized, gold, wrong):
+    normalized = {**args, **normalized}
+    checker = instructions_registry.INSTRUCTION_DICT[name](name)
+    checker.build_description(**args)
+
+    async def check():
+        verifier = nv.InstructionVerifier()
+        for response, expected in [(gold, 1), (wrong, 0)]:
+            assert float(checker.check_following(response)) == expected
+            original = await verifier.async_call([], response, target(name, args))
+            canonical = await verifier.async_call([], response, target(name, normalized))
+            assert original.score == canonical.score == expected
+
+    asyncio.run(check())
+
+
+def test_regex_validation_uses_native_stripped_pattern():
+    label = target("keywords:word_once", {"keyword": " (?i)apple "})
+    assert asyncio.run(nv.InstructionVerifier().async_call([], "APPLE", label)).score == 1
+    # Valid before stripping, but the native checker would see a dangling escape.
+    invalid = target("keywords:word_once", {"keyword": "apple\\ "})
+    with pytest.raises(RuntimeError, match="Invalid native regex"):
+        asyncio.run(nv.InstructionVerifier().async_call([], "apple", invalid))
+
+
+@pytest.mark.parametrize("letter", [" A ", "aa", "1", "İ"])
+def test_invalid_letters_cannot_be_randomly_repaired(letter, monkeypatch):
+    choice = mock.Mock(return_value="a")
+    monkeypatch.setattr(random, "choice", choice)
+    nv.instruction_contract.cache_clear()
+    label = target("keywords:letter_frequency", {"letter": letter, "let_frequency": 1, "let_relation": "at least"})
+    with pytest.raises(ValueError, match="native random default"):
+        nv.instruction_contract(json.dumps(label))
+    choice.assert_not_called()
+
+
+def test_normalization_does_not_allow_numeric_repairs(monkeypatch):
+    nv.instruction_contract.cache_clear()
+    monkeypatch.setattr(
+        instructions_registry.INSTRUCTION_DICT["keywords:frequency"],
+        "get_instruction_args",
+        lambda self: {"keyword": "apple", "frequency": 2, "relation": "at least"},
+    )
+    label = target("keywords:frequency", {"keyword": " apple ", "frequency": 1, "relation": "at least"})
+    with pytest.raises(ValueError, match="Native checker changed target arguments"):
+        nv.instruction_contract(json.dumps(label))
+
+
+def test_whitespace_is_not_normalized_for_unlisted_arguments():
+    label = target("keywords:existence", {"keywords": [" apple "]})
+    assert nv.InstructionVerifier()([], "apple", label).score == 0
+    assert nv.InstructionVerifier()([], "an apple today", label).score == 1

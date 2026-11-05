@@ -73,6 +73,14 @@ must be integers, text arguments must be strings, and keyword collections must
 be lists of strings. Target validation runs even when the response is empty. The
 adapter rejects zero parameters that trigger native random defaults, including
 `new:copy_span_idx.n_start=0`; admission must not depend on a worker's RNG seed.
+Known constructor normalization is accepted: lowercasing the paragraph's required
+first word or a frequency checker's letter, and trimming the specific text
+arguments that the native checker itself trims. For example, `first_word: "The"`
+and `letter: "A"` retain their native rewards. This is not blanket normalization:
+keyword-list entries retain their whitespace, and a padded letter such as `" A "`
+is rejected because the native checker randomly replaces it before trimming.
+Other argument changes, including numeric repairs, remain fatal. Regex validation
+uses the normalized pattern that the native checker will actually evaluate.
 Native regex arguments are compiled during admission and invalid patterns are
 fatal target errors. Regex matching semantics are retained, rather than treating
 keywords as literal text. The adapter applies the existing IF training admission
