@@ -5,7 +5,8 @@ GIT_SHA="${1:?Usage: $0 <git_sha>}"
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 short_sha="${GIT_SHA::8}"
-image_name="open-instruct-gpu-tests-${short_sha}"
+# The run attempt keeps a rerun from colliding with the image an earlier attempt created.
+image_name="open-instruct-gpu-tests-${short_sha}-${GITHUB_RUN_ATTEMPT:-1}"
 
 beaker image create open-instruct-gpu-tests:latest -n "$image_name" -w "ai2/$beaker_user" --description "Git commit: $GIT_SHA"
 
