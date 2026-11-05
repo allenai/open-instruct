@@ -65,8 +65,18 @@ def test_single_node_gpu_accounting(tmp_path, placement, serving, gpus):
     task = launch.specification(IMAGE_ID, run)["tasks"][0]
     assert task["resources"]["gpuCount"] == gpus
     assert task["constraints"]["cluster"] == ["ai2/holmes"]
+    assert task["resources"]["memory"] == "256 GiB"
     assert task["context"]["priority"] == "high"
     assert task["context"]["minRuntime"] == "0s"
+
+
+def test_host_memory_override_reaches_beaker_and_submitted_config(tmp_path):
+    run = spec(tmp_path, launch={"memory": "128 GiB", "shared_memory": "64 GiB"})
+    task = launch.specification(IMAGE_ID, run)["tasks"][0]
+    assert task["resources"]["memory"] == "128 GiB"
+    assert task["resources"]["sharedMemory"] == "64 GiB"
+    submitted = payload(task["arguments"][0])
+    assert RunSpec.from_dict(submitted).launch["memory"] == "128 GiB"
 
 
 @pytest.mark.parametrize("minimum", ["4h", 0, "0", "", "  ", None])
@@ -187,7 +197,7 @@ def test_credentials_are_secret_references_and_never_inherited_plaintext(tmp_pat
     assert "should-not-print" not in str(error.value)
 
 
-@pytest.mark.parametrize("cluster", ["ai2/jupiter", "ai2/holmes", "ai2/saturn"])
+@pytest.mark.parametrize("cluster", ["ai2/jupiter", "ai2/holmes", "ai2/saturn", "ai2/titan"])
 @pytest.mark.parametrize("override", [None, "/custom/lib:/usr/local/nvidia/lib64", ""])
 def test_compat_cuda_default_and_explicit_overrides_reach_workers(tmp_path, cluster, override):
     env = {"DEBUG_LABEL": "preserved"}
@@ -195,7 +205,7 @@ def test_compat_cuda_default_and_explicit_overrides_reach_workers(tmp_path, clus
         env["LD_LIBRARY_PATH"] = override
     run = spec(tmp_path, launch={"cluster": cluster, "env": env})
     expected = override
-    if cluster in ("ai2/jupiter", "ai2/saturn") and override is None:
+    if cluster in ("ai2/jupiter", "ai2/saturn", "ai2/titan") and override is None:
         expected = "/usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
     assert run.launch["env"].get("LD_LIBRARY_PATH") == expected
     assert run.plan()["launch"]["env"] == run.launch["env"]
@@ -214,6 +224,7 @@ def test_compat_cuda_default_and_explicit_overrides_reach_workers(tmp_path, clus
         ("ai2/jupiter", None, "flash_3"),
         ("ai2/saturn", None, "flash_2"),
         ("ai2/holmes", None, "flash_4"),
+        ("ai2/titan", None, "flash_4"),
         ("ai2/jupiter", "te", "te"),
         ("ai2/holmes", "flash_3", "flash_3"),
         ("ai2/saturn", "torch", "torch"),
@@ -230,7 +241,7 @@ def test_cluster_attention_defaults_and_the_preflight_checks_them(tmp_path, clus
     assert (f"preflight_attention --backend {expected}" in command) == (expected != "te")
 
 
-@pytest.mark.parametrize("cluster", ["ai2/jupiter", "ai2/saturn"])
+@pytest.mark.parametrize("cluster", ["ai2/jupiter", "ai2/saturn", "ai2/titan"])
 def test_compat_cuda_path_cli_override_and_secret_precedence(tmp_path, cluster):
     run = spec(tmp_path, launch={"cluster": cluster})
     overridden = RunSpec.from_dict(
@@ -286,7 +297,16 @@ def test_submit_resolves_image_and_records_exact_provenance(tmp_path, monkeypatc
         return json.dumps([{"id": f"experiment-{len(submitted)}"}])
 
     monkeypatch.setattr(launch.subprocess, "check_output", check_output)
+    original_compile = RunSpec.compile
+    compilations = []
+
+    def compile_once(*args, **kwargs):
+        compilations.append(1)
+        return original_compile(*args, **kwargs)
+
+    monkeypatch.setattr(RunSpec, "compile", compile_once)
     first = launch.submit("test-user/image-alias", run)
+    assert len(compilations) == 1
     assert first["image"] == IMAGE_ID and first["requested_image"] == "test-user/image-alias"
     assert first["revision"] == "source-revision"
     assert first["spec_sha256"] == workflow.fingerprint(run.to_dict())

@@ -17,9 +17,11 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from open_instruct import ifeval_constraints
 from open_instruct.miles.configuration import validation
+from open_instruct.miles.datasets import mixture, synlogic
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import task_verifiers
+from open_instruct.miles.rewards import judging, task_verifiers
 
 # Preserve factory paths in existing prepared datasets and reward registries.
 RewardConfig = task_verifiers.RewardConfig
@@ -37,9 +39,11 @@ TASKS = {
     "gsm8k_original": ("ai2-adapt-dev/rlvr_gsm8k_zs", "93ffaae6cd2acb8f821f6d4712651320a889b1b9", "gsm8k"),
     "math": ("ai2-adapt-dev/rlvr_open_reasoner_math", "2cdc4f9e67b426a693d19f11dcc05f1cb8f44793", "math"),
     "ifeval": ("allenai/RLVR-IFeval", "47c03c73621c4aab2b824b7818681117d662770e", "ifeval_old"),
+    "synlogic-sudoku": (synlogic.DATASET, synlogic.REVISION, "sudoku"),
     "multiplication": ("generated-multiplication-v1", None, "multiplication"),
 }
 FACTORIES = {
+    "sudoku": "open_instruct.miles.rewards.sudoku.SudokuVerifier",
     "gsm8k": "open_instruct.miles.rewards.verifiers.GSM8KVerifier",
     "math": "open_instruct.ground_truth_utils.MathVerifier",
     "strict_math": "open_instruct.ground_truth_utils.StrictMathVerifier",
@@ -118,6 +122,7 @@ def validate_data(data):
         "seed",
         "shuffle",
         "tasks",
+        "sources",
         "recipe",
         "rl_manifest",
         "prompt_data",
@@ -128,15 +133,23 @@ def validate_data(data):
         raise InputError(
             f"Unknown data fields: {sorted(unknown)}; use data.tasks, data.rl_manifest, or prepared data.prompt_data."
         )
-    modes = [name for name in ("tasks", "recipe", "rl_manifest", "prompt_data") if data.get(name) is not None]
+    modes = [
+        name for name in ("tasks", "sources", "recipe", "rl_manifest", "prompt_data") if data.get(name) is not None
+    ]
     if len(modes) != 1:
-        raise InputError("Choose exactly one of data.tasks, recipe, rl_manifest, or prompt_data")
+        raise InputError("Choose exactly one of data.tasks, sources, recipe, rl_manifest, or prompt_data")
     if "prompt_data" not in modes and any(data.get(key) is not None for key in ("eval_prompt_data", "reward_config")):
         raise InputError("eval_prompt_data and reward_config belong to prepared prompt_data mode")
     if "recipe" in modes:
         raise InputError("Named data recipes are not yet ported; use tasks or an immutable rl_manifest")
     if "prompt_data" in modes and not data.get("reward_config"):
         raise InputError("Prepared prompt_data requires a trusted reward_config")
+    if "sources" in modes:
+        mixture.validate_sources(data["sources"])
+        for source in data["sources"]:
+            if set(source) & {"sources", "seed", "shuffle"}:
+                raise InputError("Mixture sources cannot nest sources or override data.seed/shuffle")
+            validate_data(mixture.source_data(source, data))
     if "tasks" in modes:
         tasks = data["tasks"]
         if not isinstance(tasks, list) or not tasks:
@@ -149,6 +162,10 @@ def validate_data(data):
             if not isinstance(name, str) or name not in TASKS:
                 raise InputError(f"Unsupported task {name!r}; supported tasks: {sorted(TASKS)}")
             names.append(name)
+            if name == "synlogic-sudoku" and task.get("prompt_wrapper", "none") != "none":
+                raise InputError(
+                    "synlogic-sudoku requires prompt_wrapper=none (its answer format is JSON in answer tags)"
+                )
             for key in ("train_count", "eval_count"):
                 count = task.get(key)
                 if count is not None and (type(count) is not int or count < 1):
@@ -171,7 +188,10 @@ def _tokenizer(hf):
 
 def _source_rows(name):
     dataset, revision, _ = TASKS[name]
-    return importlib.import_module("datasets").load_dataset(dataset, revision=revision, split="train")
+    loader = importlib.import_module("datasets").load_dataset
+    if name == "synlogic-sudoku":
+        return synlogic.sudoku_rows(loader(dataset, "hard", revision=revision, split="train"))
+    return loader(dataset, revision=revision, split="train")
 
 
 def _messages(row, *, strip_answer):
@@ -237,6 +257,57 @@ def _verify_row(row, tokenizer, limit, known):
         raise InputError("Prepared prompt token IDs differ under this tokenizer/template")
     metadata["run_prompt_tokens"] = len(ids)
     metadata["run_prompt_token_ids_sha256"] = _sha(_encoded(ids))
+
+
+# Identify the implementation, not the user-chosen registry name. Legacy
+# ifeval_old targets use a different schema and are outside this screen.
+_IF_FACTORIES = frozenset(
+    {
+        "open_instruct.ground_truth_utils.IFEvalVerifier",
+        "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
+        "open_instruct.miles.datasets.run_data.ManifestIFVerifier",
+        # Former import path recorded in pre-reorganization reward registries.
+        "open_instruct.miles.run_data.ManifestIFVerifier",
+    }
+)
+
+
+def _if_verifier_names(known):
+    return {
+        name
+        for name, spec in known.items()
+        if (spec.get("factory") if isinstance(spec, dict) else spec) in _IF_FACTORIES
+    }
+
+
+def _verify_if_training_row(row, names):
+    for verifier in row["metadata"]["verifiers"]:
+        if verifier["name"] not in names:
+            continue
+        issues = ifeval_constraints.if_training_issues(verifier["target"])
+        if issues:
+            identity = row["metadata"].get("prepared_sample_id", "unknown sample")
+            raise InputError(
+                f"Unsafe IF training target for {identity} ({verifier['name']}): {', '.join(issues)}. "
+                "Audit/filter with scripts/data/filter_ifeval_constraints.py, then use the cleaned file "
+                "in a new run root; existing training data is never filtered in place."
+            )
+
+
+def _verify_resumed_if_training_data(result):
+    registry = _read_json_object(result["reward_config"], {})
+    names = _if_verifier_names(registry)
+    if not names:
+        return
+    for path in result.get("train_sources", [result["prompt_data"]]):
+        with Path(path).open(encoding="utf-8") as stream:
+            for index, line in enumerate(stream, 1):
+                if not line.strip():
+                    continue
+                try:
+                    _verify_if_training_row(json.loads(line), names)
+                except InputError as error:
+                    raise InputError(f"{path}: training row {index}: {error}") from error
 
 
 def _adopt(data, tokenizer, template, inputs):
@@ -370,6 +441,10 @@ def _tasks(data, tokenizer, template, seed):
             )
             if verifier in ("gsm8k", "multiplication"):
                 target = task_verifiers.scalar_target(target)
+            elif verifier == "sudoku":
+                # The source adapter checks givens against the supplied valid completion.
+                if not isinstance(target, str):
+                    raise InputError("Sudoku target must be a JSON grid")
             elif verifier == "math":
                 if isinstance(target, list) and len(target) == 1:
                     target = target[0]
@@ -395,6 +470,7 @@ def _tasks(data, tokenizer, template, seed):
                 "source_revision": revision,
                 "source_row": index,
                 **({"original_row": raw["original_row"]} if "original_row" in raw else {}),
+                **raw.get("source_metadata", {}),
                 "query": messages[-1]["content"],
                 "prompt_wrapper": wrapper,
                 "verifiers": [{"name": verifier, "target": target, "weight": 1.0}],
@@ -422,6 +498,41 @@ def _tasks(data, tokenizer, template, seed):
         for split, rows in partitions.items():
             random.Random(f"{seed}:{split}").shuffle(rows)
     return partitions, {"sources": provenance, "template_sha256": _sha(template.encode())}, None
+
+
+def _load(data, tokenizer, template, inputs, seed):
+    if data.get("rl_manifest") is not None:
+        return _adopt(data, tokenizer, template, inputs)
+    if data.get("prompt_data") is not None:
+        return _prepared(data, inputs)
+    return _tasks(data, tokenizer, template, seed)
+
+
+def _sources(data, tokenizer, template, inputs, seed):
+    partitions, provenance, registry = {}, {}, {}
+    training = []
+    for source in data["sources"]:
+        name = source["name"]
+        splits, origin, rewards = _load(mixture.source_data(source, data), tokenizer, template, inputs, seed)
+        if not splits.get("train"):
+            raise InputError(f"Source {name}: preparation requires nonempty training data")
+        if rewards is None:
+            names = {v["name"] for rows in splits.values() for row in rows for v in row["metadata"]["verifiers"]}
+            rewards = {key: {"factory": FACTORIES[key]} for key in names}
+        for key, spec in rewards.items():
+            if key in registry and registry[key] != spec:
+                raise InputError(
+                    f"Source {name}: conflicting reward registry entry {key!r}; use distinct verifier names"
+                )
+            registry[key] = spec
+        for split, rows in splits.items():
+            key = f"source-{name}" if split == "train" else f"eval-{name}-{split}"
+            if key in partitions:
+                raise InputError(f"Mixture partition name collision: {key}; rename sources/evaluation datasets")
+            partitions[key] = rows
+        training.append(f"source-{name}")
+        provenance[name] = origin
+    return partitions, provenance, registry, training
 
 
 def prepare_data(
@@ -478,38 +589,51 @@ def prepare_data(
         for filename, digest in validation.mapping(manifest["outputs"], f"{manifest_path}: outputs").items():
             if _sha(_read(output / filename, {})) != digest:
                 raise InputError(f"Prepared artifact changed: {filename}")
-        return _required_mapping(
+        result = _required_mapping(
             manifest["result"],
             f"{manifest_path}: result",
             ("prompt_data", "eval_prompt_data", "reward_config", "manifest"),
         )
+        # Older preparations may predate the constraint screen. Keep their bytes
+        # immutable, but do not silently bypass validation on resume.
+        _verify_resumed_if_training_data(result)
+        return result
     tokenizer = _tokenizer(hf_checkpoint)
     template = tokenizer.chat_template
-    if data.get("rl_manifest") is not None:
-        partitions, provenance, registry = _adopt(data, tokenizer, template, inputs)
-    elif data.get("prompt_data") is not None:
-        partitions, provenance, registry = _prepared(data, inputs)
+    training = ["train"]
+    if "sources" in data:
+        partitions, provenance, registry, training = _sources(data, tokenizer, template, inputs, contract["seed"])
     else:
-        partitions, provenance, registry = _tasks(data, tokenizer, template, contract["seed"])
+        partitions, provenance, registry = _load(data, tokenizer, template, inputs, contract["seed"])
     if registry_overrides:
         registry = (
             {name: {"factory": factory} for name, factory in FACTORIES.items()} if registry is None else registry
         ) | registry_overrides
     known = registry if registry is not None else FACTORIES
-    if not partitions.get("train"):
+    if_verifiers = _if_verifier_names(known)
+    if not all(partitions.get(split) for split in training):
         raise InputError("Preparation requires nonempty training data")
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
     for split, rows in partitions.items():
         for index, row in enumerate(rows, 1):
             try:
+                if registry_overrides is not None:
+                    metadata = row.get("metadata", {})
+                    verifiers = metadata.get("verifiers", []) if isinstance(metadata, dict) else []
+                    if isinstance(verifiers, list):
+                        for verifier in verifiers:
+                            if isinstance(verifier, dict) and isinstance(name := verifier.get("name"), str):
+                                judging.require_binding(name, registry_overrides, known.get(name))
                 _verify_row(row, tokenizer, max_prompt_length, known)
+                if split in training:
+                    _verify_if_training_row(row, if_verifiers)
             except InputError as error:
                 raise InputError(f"{split} row {index}: {error}") from error
-            (train_prompts if split == "train" else eval_prompts).add(row["input"])
+            (train_prompts if split in training else eval_prompts).add(row["input"])
             identity = row["metadata"].get("prepared_sample_id")
             if identity:
-                (train_ids if split == "train" else eval_ids).add(identity)
+                (train_ids if split in training else eval_ids).add(identity)
     if train_prompts & eval_prompts or train_ids & eval_ids:
         raise InputError("Training and held-out data overlap by prompt or source identity")
     if registry is None:
@@ -527,17 +651,40 @@ def prepare_data(
             filename = f"{split}.jsonl"
             (staging / filename).write_bytes(raw)
             outputs[filename] = _sha(raw)
-            if split != "train":
+            if split not in training:
                 evaluation.extend(["heldout" if split == "eval" else split, str(output / filename)])
         raw = _encoded(registry)
         (staging / "verifiers.json").write_bytes(raw)
         outputs["verifiers.json"] = _sha(raw)
         result = {
-            "prompt_data": str(output / "train.jsonl"),
+            "prompt_data": str(output / f"{training[0]}.jsonl"),
             "eval_prompt_data": evaluation,
             "reward_config": str(output / "verifiers.json"),
             "manifest": str(manifest_path),
         }
+        if "sources" in data:
+            sources = [
+                {
+                    "name": source["name"],
+                    "fraction": source["fraction"],
+                    "path": f"{split}.jsonl",
+                    "sha256": outputs[f"{split}.jsonl"],
+                    "rows": len(partitions[split]),
+                }
+                for source, split in zip(data["sources"], training, strict=True)
+            ]
+            raw = _encoded(
+                {
+                    "schema_version": 1,
+                    "seed": contract["seed"],
+                    "shuffle": data.get("shuffle", True),
+                    "sources": sources,
+                }
+            )
+            (staging / "mixture.json").write_bytes(raw)
+            outputs["mixture.json"] = _sha(raw)
+            result["prompt_mixture"] = str(output / "mixture.json")
+            result["train_sources"] = [str(output / f"{split}.jsonl") for split in training]
         manifest = {
             "schema_version": 1,
             "contract": contract,

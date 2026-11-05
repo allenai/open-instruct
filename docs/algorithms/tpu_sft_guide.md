@@ -1,11 +1,11 @@
 # Running SFT on TPU: a known-good starting point
 
-Olmo 3.5 small (the 4T EMO base) on Dolci-Think with H045's recipe, on **one TPU v4 `4x4x8` slice (128 chips)** of
+Olmo 3.5 tiny (`olmo35-tiny`, the 4T EMO base, called "small" before 2026-11) on Dolci-Think with H045's recipe, on **one TPU v4 `4x4x8` slice (128 chips)** of
 the `gke-tpu-v4` cluster, through MaxText + Tunix.
 
 Measured cost and outcome: 11,768 steps of 16 × 65,536 tokens at a median 3.94 s/step, 13.5 h wall clock from submit
 to the last step. The loss matches H045's GPU runs (parity windows in [open-instruct#1933](https://github.com/allenai/open-instruct/issues/1933)). The GPU recipe takes 5 h 54 m on
-2×8 H100, so the TPU path is slower per run. Its advantage is capacity: four of these runs fit at once without
+2×8 H100, so the TPU path is slower per run. Its advantage is capacity: three of these runs fit at once without
 touching Beaker.
 
 The recipe is `scripts/tpu/maxtext/k8s/olmo35-sft-4x4x8/`.
@@ -37,14 +37,22 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
   `CLOUDSDK_CORE_ACCOUNT` to it in every process, background watchers included. Move
   `~/.kube/gke_gcloud_auth_plugin_cache` aside when switching identity, or kubectl keeps the cached one. People log in
   with their own account.
+- **Agents.** Claude Code and Codex in this repo load a summary of this guide's rules from the
+  [`tpu` skill](https://github.com/allenai/open-instruct/blob/main/.claude/skills/tpu/SKILL.md). Update it when you change
+  a rule here.
 - **Where things live.** Everything is in `us-central2`. Data, tokenizers and checkpoints are in `gs://ai2-olmo-dev/post-training/`,
-  and the nodes mount it at `/mnt/post-training` through gcsfuse. Images are in
+  and the nodes mount its `data/` and `tokenizers/` subfolders, each on its own, under `/mnt/post-training` through
+  gcsfuse. Never mount a folder that holds checkpoints: the metadata prefetch lists all of it on every host at every
+  pod start (`k8s/narrow_mounts.py` narrows an overlay). Images are in
   `us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain`.
 
 ## What the cluster is
 
-`gke-tpu-v4` holds 2,048 reserved v4 chips at 4 per host: four `4x4x8` slices (128 chips), one `8x8x8` (512) and one
-`8x8x16` (1,024). A slice runs one job at a time. Kueue admits jobs from four queues in one cohort:
+`gke-tpu-v4` holds 4,096 reserved v4 chips at 4 per host. Since 2026-11-03 they are cut into three `4x4x8` slices
+(128 chips), one `8x8x8` (512) and hero's `8x8x48` (3,072), with 128 chips held back so GKE can auto-repair failed
+nodes. The layout changes as the cluster's admins reslice it, so check it before planning:
+`kubectl get nodes -L cloud.google.com/gke-tpu-topology --no-headers | awk '{print $NF}' | sort | uniq -c` (hosts per
+topology, 32 per `4x4x8`; the 2026-11-03 layout prints 96 `4x4x8`, 128 `8x8x8` and 768 `8x8x48`). A slice runs one job at a time. Kueue admits jobs from four queues in one cohort:
 
 | Queue | Who | Preempted by |
 |---|---|---|
@@ -55,9 +63,9 @@ own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2
 **Use `post-training`.** Its jobs run on borrowed quota and are preempted whenever hero or dev needs the slice, so
 checkpoint often enough to lose little. Never hold a slice in a way that delays hero.
 
-The recipe needs exactly a `4x4x8`: its mesh puts one 64K row on 8 chips, so 128 chips hold its 16 rows. The `8x8x8`
-runs the same mesh at 64 rows per step, which is a different recipe (H078's 4x batch). Running the 16-row recipe on a
-big slice needs `olmo35-cp-ep`, which splits each row 32 ways and changes the MoE load-balance term. Measured meshes are
+The recipe needs exactly a `4x4x8`: its mesh puts one 64K row on 8 chips, so 128 chips hold its 16 rows. The
+`8x8x8` ran the same mesh at 64 rows per step, which is a different recipe (H078's 4x batch). Its measured 16-row
+configuration used `olmo35-cp-ep`, splitting each row 32 ways and changing the MoE load-balance term. Measured meshes are
 in [Changing the recipe](#changing-the-recipe).
 
 ## Cost per slice
@@ -75,16 +83,15 @@ step time over steps 31-100, so a stalled step counts at its full cost.
 Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on either slice, paid again at every
 resume.
 
-- **Start on a `4x4x8`; take the `8x8x8` only when no `4x4x8` is free.** The `4x4x8` is the cheapest per chip-hour.
-  The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
-  differs from the `4x4x8` recipe's, so an arm on it needs a control on the same slice and config. Without the shim
+- **Use a `4x4x8` for this recipe.** Among the measured configurations it used the fewest chip-hours per token.
+  The `8x8x8` rows above date from before its 2026-10-21 split; it was recreated on 2026-11-03 and they have not been re-measured since. The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
+  differs from the `4x4x8` recipe's, so an arm on it needed a control on the same slice and config. Without the shim
   the `8x8x8` is projected at ~1.09x the chip-hours of the `4x4x8`, finishing a run ~3.6x sooner (H088, allenai/open-instruct#2020). This is a steady-state projection,
   not a measured cost. Both rates come from stall-free 70-step windows on different days (`4x4x8` 10-14, `8x8x8`
-  10-18). The `8x8x8`'s stall rate over a whole run without the shim is not measured. A same-day paired run would
-  establish it. The `8x8x8` cannot run the 16-row recipe at that rate (see
+  10-18). The `8x8x8`'s stall rate over a whole run without the shim is not measured. The `8x8x8` could not run the 16-row recipe at that rate (see
   [Changing the recipe](#changing-the-recipe)).
-- **On the `8x8x8`, don't run the data-order shim (`MAXTEXT_R2_DATA_EMULATION`) or `MAXTEXT_LOG_BATCH_HASH=1`,** (asynchronous
-  hash logging may be enough, untested; H088 removed both together). With both, one step in eight stalled for 20-35 s, at the same steps in
+- **`8x8x8` input stalls (H088).** H088 removed the data-order shim (`MAXTEXT_R2_DATA_EMULATION`) and
+  `MAXTEXT_LOG_BATCH_HASH=1` together, so their separate contributions are not isolated. With both, one step in eight stalled for 20-35 s, at the same steps in
   every run, and H078's runs cost 1.8-1.9x the chip-hours of a `4x4x8`. In xprof the stall is one host's input
   pipeline (grain `process_prefetch` waiting 29 s) while every TPU waits for its batch in `jit__device_put_reshard`.
   The HF input pipeline allows at most one grain worker, so more workers are not a fix.
@@ -104,8 +111,9 @@ us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e
 
 This tag is r2's image (`51f8cc4b-p907d86f3`, built from `image-olmo35/`) plus `image-olmo35-rf/`. That patch adds a
 fix for resuming from a checkpoint (without it, restore runs out of HBM) and batch-hash logging. Training numerics are
-unchanged: a replay produced bit-identical CE and 9,952 of 9,952 equal batch hashes. Use it for every new run. The
-Olmo 3 image is built by `image/build.sh <maxtext commit>`.
+unchanged: a replay produced bit-identical CE and 9,952 of 9,952 equal batch hashes. This is the default image for the
+recipe above. The optional [pooled resume image](#6-checkpoints-preemption-and-resume) includes additional patches;
+its parity checks compare against its own base image. The Olmo 3 image is built by `image/build.sh <maxtext commit>`.
 
 To build a new image, run `build.sh` from any host with `gcloud` (a Beaker session works). Cloud Build carries the context base64-encoded inside the build
 config. Builds use Cloud Build's default service account. Set `BUILD_SERVICE_ACCOUNT` to a full
@@ -124,7 +132,11 @@ The loader reads an Orbax parameter tree (`…/0/items`) from GCS.
   ```
 
   It keeps OLMo-core's padded 100,352 vocabulary, whose padded rows were trained. The 4T EMO base is already at
-  `gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-4t-emo-step5961/0/items`.
+  `gs://ai2-olmo-dev/post-training/checkpoints/olmo35-small-4t-emo-step5961/0/items` (named before the small→tiny
+  rename; it is the tiny base).
+- **Olmo 3.5 small (MaxText pretraining checkpoint).** No conversion: point `LOAD_PARAMETERS_PATH` at the run's
+  `checkpoints/<step>/items` with `scan_layers=False`, since the hero saves unscanned layers. It restores in ~94 s on
+  the `8x8x8`, also with fewer layers (`base_num_decoder_layers=16`) for a memory probe.
 - **Olmo 3 (HF).** Use MaxText's converter with `model_name=olmo3-7b`. `olmo3-7b-pt` has no YaRN, so it is wrong for
   the 1025 base.
 
@@ -204,7 +216,36 @@ if a rule needs every step's value, stream that pod with `kubectl logs -f` from 
   GCS; ask the run's owner.
 - After a preemption, JobSet restarts the run from the last checkpoint, on the same overlay. A resume replays the data
   pipeline to the restored step at ~1.4 s per skipped batch, which is hours late in a run. Resume only on the
-  restore-fix image (step 1).
+  restore-fix image (step 1), or a derivative that includes that fix, such as the pooled image below.
+
+`scripts/tpu/maxtext/image-olmo35-fs/` adds an optional spawned worker pool for the SFT chat-template map. The
+published image is:
+
+```text
+us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3-dc88c6c7ea-fse2555fa0
+```
+
+It includes the restore fix and these MaxText fork changes:
+
+| Image layer | Fork revisions | Changes |
+|---|---|---|
+| `bs3ec936c3` | [c469d980 → 736b296c](https://github.com/abhishekraok/maxtext/compare/c469d980f94f7d3571e5c0731f7af9bdb9d59cd2...736b296c50a2bfbcc9a44e9b4ad9abf37993ffed) | Big-slice mesh support, KDA sharding constraints, and optional r2 data-order emulation. |
+| `dc88c6c7ea` | [736b296c → 1e612a76](https://github.com/abhishekraok/maxtext/compare/736b296c50a2bfbcc9a44e9b4ad9abf37993ffed...1e612a76e2e50e0ce86ef7b7280353248c3e0520) | Optional MoE dropped-token logging, including the dropless fallback correction. |
+| `fse2555fa0` | [1e612a76 → e0e1c2a9](https://github.com/abhishekraok/maxtext/compare/1e612a76e2e50e0ce86ef7b7280353248c3e0520...e0e1c2a98c2700a1f606227d275950ac4060763a) | Pooled chat-template map; unset or zero workers keeps the serial map. |
+
+The `bs` and `dc` build recipes are not included here; `build.sh` depends on the published `...-dc88c6c7ea` base.
+For a late `4x4x8` resume of a run already using that base, set `images[].newTag` to the part after `:` above and
+add `MAXTEXT_SFT_TEMPLATE_WORKERS=32` to your recipe's environment ConfigMap (`configMapGenerator[].literals` in
+your copied `kustomization.yaml`, named `olmo35-sft-env` in the `4x4x8` example). Here 32 is the tested worker count
+per data-loading process, not a tuned optimum. The pool stays active during training as well as replay; leave it unset for fresh starts and short resumes unless measured
+input-pipeline savings justify its ~4-6 min startup cost. Steady-state TPU training gains have not been measured.
+
+Validation against the same `...-dc88c6c7ea` base: 10,000 rows identical on CPU, including file and epoch
+boundaries; on TPU, 2,144 of 2,144 batch hashes and steps 61-66 CE equal the serial resume. The CPU map was ~10x
+faster, but the 60-step TPU replay took 366 s pooled versus 63 s serial because of startup. Long-resume TPU
+throughput is still unmeasured. The checked-in examples use older images (`...-rfb46e215e` or `...-bs3ec936c3`);
+these checks do not establish parity when migrating them, since that also adds the layers above. Validate batches
+and CE against the run's current image before migrating those runs.
 
 ## 7. Export to HF and evaluate
 
@@ -245,14 +286,42 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   restore-fix image.
 - **Data order depends on slice shape.** Batches are packed per data host, so a different host count gives a
   different, still valid, data order. Keep every arm of a comparison, and its control, on the same slice shape.
+- **Context parallelism with load balancing gives a wrong forward.** With `ici_context_parallelism` > 1 and MaxText's
+  default `context_parallel_load_balance=True`, dense Olmo 3 7B's step-1 CE on a fixed packed batch was off by +0.39
+  (cp4) and +1.98 (cp8) against an HF forward; cp4 with `context_parallel_load_balance=False` matches it (0.919794 vs
+  0.919799). The suspected cause, from the code, is that the SFT input path never applies the load-balancing reorder
+  that attention then assumes; upstream confirmation is pending. Turn load balancing off, and check step-1
+  `LOSS-PARTS` CE against an HF forward of the same batch before trusting any new mesh. The recipe's
+  `olmo35-ep-as-cp` uses the expert axis rather than `ici_context_parallelism`; on Olmo 3.5 tiny its step-1 CE
+  matched an HF forward of the same 64 rows (1.077855 vs 1.077850).
+- **`enable_checkpointing=false` fails on TPU.** MaxText initializes `jax.distributed` on TPU only when checkpointing
+  is on, and Tunix builds its Orbax checkpoint manager regardless, so the run dies at trainer setup with
+  `Distributed system is not available`. For a short test, keep checkpointing on with a `checkpoint_period` it never
+  reaches, set `STEPS` above the test, and deactivate the workload once the steps you need are logged: Tunix saves the
+  full state when `train()` returns (Tunix's README), ~870 GB for Olmo 3.5 small (the pretraining hero).
+- **Keep the first failure of a gate run.** A JobSet restart deletes the failed pods and their logs. Render test
+  JobSets with `maxRestarts: 0` (patch `/spec/failurePolicy/maxRestarts` to 0; `k8s/instruct-sft-4x4x8/` shows the patch, with value 3) and save the failing pods' logs before cleanup.
 - **Zero steps, exit 0.** `train_sft` exits 0 with no steps when the data iterator fails. The launcher's step guard
   catches it; keep that guard.
 - **KDA all-gathers on a new mesh.** Under `olmo35-cp-ep` on the `8x8x8`, the KDA chunk scan's inputs and states were
   sharded on the chunk axis, so XLA all-gathered them inside every scan iteration: 97.6% of a 475 s step. Logical
   constraints in `_delta_rule_chunked_subblock` (abhishekraok/maxtext c5f1251d) bring the step to 3.33 s. CPU runs never
-  show in-loop gathers, so profile one TPU step with xprof before trusting a new mesh.
+  show in-loop gathers, so profile one TPU step with xprof before trusting a new mesh. On Olmo 3.5 small, the pretraining hero (40 layers, f32 KDA
+  state), two more gathers made the compile need 43.7 GB of HBM: the per-chunk readout gathered every chunk's states over
+  heads and value dim, and the reshard of q/k/v from (context, expert) on the sequence gathered the full `[B, T, H, dv]`.
+  Constraining the readout to the chunk axis and resharding in two steps (abhishekraok/maxtext e43a7ee3, image suffix
+  `-ks5932379d`) compiles, with 1.62 GiB per chip after init.
 - **Compile-time HBM.** At 64 rows on the `8x8x8`, `ragged_buffer_factor=4.0` failed to compile (HLO temporaries
   32.17 GB vs 31.75 GB of HBM); 3.0 compiles, and the runs peaked at 2.39-2.84.
+- **`shard_optimizer_over_data` does nothing under Tunix.** Small at data 8 x context 8 x expert 8 still held 12.69 GiB
+  per chip after trainer init (1.62 GiB at fsdp 16), and its step needed 8 GB more temporaries. Shard parameters and
+  optimizer state with fsdp instead.
+- **An expert group of 128 chips does not compile.** `olmo35-cp-ep` maps experts to context x expert; at context 16 x
+  expert 8, XLA fails with `Assigned barrier is not acceptable for opcode: ragged-all-to-all`. Keep context x expert at
+  64 or below (hero uses expert 64).
+- **An HBM OOM at compile names its buffers only in libtpu's log.** The pod log gives the total;
+  `/tmp/tpu_logs/tpu_driver.ERROR` in the container lists the largest buffers and the ops that made them. Copy it out
+  in the launcher's EXIT trap, since it dies with the pod.
 - **GCS egress quota.** Two big slices loading the base checkpoint at once hit `google_egress_bandwidth` (us-central2)
   and failed at startup. Stagger big-slice launches.
 - **The control host is a single point of failure.** Watchers and log tailers die with the host they run on (a Beaker
@@ -265,14 +334,18 @@ Each of these trained silently on wrong data or a wrong model before it was foun
 ## Changing the recipe
 
 - **Other slice sizes and meshes.** `olmo35-ep-as-cp` puts one 64K row on 8 chips (KDA's 8 heads). Measured on Olmo 3.5
-  small with 65,536-token rows:
+  tiny with 65,536-token rows:
 
   | slice | mesh | rows/step | s/step | tokens/s/chip | status |
   |---|---|---|---|---|---|
   | `4x4x8` | `olmo35-ep-as-cp`, fsdp 16 x expert 8 | 16 | 3.94 | 2,080 | r2 and A0'; the recipe |
   | `8x8x8` | `olmo35-ep-as-cp`, fsdp 64 x expert 8 | 64 | 4.28 | 1,910 | H078's 4x batch; `ragged_buffer_factor=3.0`; 1,887 tokens/s/chip without the shim, see [Cost](#cost-per-slice) |
   | `8x8x8` | `olmo35-cp-ep` + c5f1251d | 16 | 3.33 | 620 | runs, but numerics differ from the `4x4x8` (#1933) |
-  | `8x8x16` | `olmo35-cp-ep`, fsdp 64 x context 2 x expert 8 | 64 | - | - | never reached step 1 (egress quota, then a TPU core halt) |
+  | `8x8x16` | `olmo35-cp-ep`, fsdp 64 x context 2 x expert 8 | 64 | - | - | never reached step 1 (egress quota, then a TPU core halt); shape no longer in the cluster |
+
+  Olmo 3.5 small (hero step58000, 72.6B total, 4.1B active) on the `8x8x8`, 16 rows of 65,536 tokens, `olmo35-cp-ep`
+  fsdp 16 x context 4 x expert 8, `remat_policy=full`, image `-ks5932379d`: 6.5 s/step, 315 tokens/s/chip. At
+  `ragged_buffer_factor=3.0` it dropped 1.1% of routed assignments (up to 9.2% in one layer); dropping none would need `ragged_buffer_factor` up to 8.5 in the worst layer.
 
   Each mesh was picked to keep r2's per-device layout, not tuned. No sweep of the parallelism split, remat policy or
   per-device batch has been run, so these are known-good points, not optima. Any other slice or mesh needs its own

@@ -18,8 +18,7 @@ class TimedAwaits(ast.NodeTransformer):
             ("eval_dispatcher.dispatch(", "evaluation_dispatch"),
             ("eval_dispatcher.drain(", "evaluation_drain"),
             ("model.save_model(", "checkpoint_save"),
-            ("rollout_executor.save.remote(", "rollout_state_save"),
-            ("rollout_executor.dispose.remote(", "shutdown"),
+            ("rollout_executor.save(", "rollout_state_save"),
         ):
             if expression.startswith(prefix):
                 stage = label
@@ -62,6 +61,7 @@ def transform(source):
         "learner_train": 2,
         "weight_publication": 2,
         "checkpoint_save": 1,
+        "rollout_state_save": 1,
     }.items():
         if visitor.counts[stage] != expected:
             raise ValueError(
