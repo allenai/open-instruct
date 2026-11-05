@@ -18,6 +18,7 @@ import sys
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 C12_PARQUETS = "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/data/parquets-a3"
+SAVE_EVERY = 1000
 RECIPES = {
     # Olmo 3.5 small. C12 SFT on B1 at peak LR 2e-4 for half an epoch, plus 10% long-context replay: the arm
     # b1-c12r-gpu of ledger hypothesis H182, which serves as the control for H183-H186. 2 x 8 B300 on holmes,
@@ -69,8 +70,6 @@ RECIPES = {
             "budget",
             "--activation_memory_budget",
             "1",
-            "--ephemeral_save_interval",
-            "1000",
             "--keep_last_n_checkpoints",
             "2",
             "--dist_timeout_hours",
@@ -133,6 +132,7 @@ def main():
     output_dir = f"/weka/olmo-3p5-post-checkpoints/{user}/sft/{name}"
 
     nodes = recipe["nodes"]
+    half = (steps + 1) // 2
     train = [
         "torchrun", f"--nnodes={nodes}", "--node_rank=$BEAKER_REPLICA_RANK",
         "--master_addr=$BEAKER_LEADER_REPLICA_HOSTNAME", "--master_port=29400", "--nproc_per_node=8",
@@ -141,7 +141,9 @@ def main():
         *recipe["train_args"],
         "--max_train_steps", str(steps),
         # A permanent checkpoint half way through, plus the final one.
-        "--checkpointing_steps", str((steps + 1) // 2),
+        "--checkpointing_steps", str(half),
+        # Ephemeral saves for resuming; OLMo-core needs them strictly more frequent than the permanent ones.
+        "--ephemeral_save_interval", str(SAVE_EVERY if half > SAVE_EVERY else 0),
         "--data_loader_seed", str(seed), "--run_name", name, "--output_dir", output_dir,
     ]  # fmt: skip
     mason = [
@@ -157,7 +159,7 @@ def main():
         "--",
         *train,
     ]  # fmt: skip
-    print(f"Output: {output_dir}")
+    print(f"Output: {output_dir}", flush=True)
     if args.dry_run:
         print(shlex.join(mason))
         return
