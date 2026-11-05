@@ -591,3 +591,13 @@ because the random model generally earns zero; the separate controls test the
 real filter. Router auxiliary losses can produce optimizer updates even with
 zero task rewards. This is a training-machinery check, not evidence of learning,
 endpoint transfer, or a recommendation to use four samples in a real run.
+
+
+## Dataset integration
+
+Use [source preparation](source-preparation.md) to convert
+reviewed dataset exports into named training sources, preserving provenance and
+reporting unsupported rows. The [reward verifier guide](dataset-verifiers.md)
+describes their runtime contracts. CPU qualification checks the complete prepared
+pool and reviewed reward controls before a named source enters a MILES mixture;
+it does not require a separate inference study or establish downstream benefit.

@@ -234,6 +234,10 @@ def instruction_contract(serialized):
             raise ValueError(f"Unknown instruction family: {name}")
         checker = registry[name](name)
         args = {k: v for k, v in (args or {}).items() if v is not None}
+        # NeMo exports singleton keyword lists for this native scalar checker.
+        # Unwrap only this documented shape; multiple keywords are not guessed.
+        if name == "count:count_increment_word":
+            args = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in args.items()}
         if set(args) != set(checker.get_instruction_args_keys()):
             raise ValueError(f"Missing or unexpected arguments for {name}")
         for key, value in args.items():
