@@ -2,10 +2,16 @@
 
 The GPU suite retains device, BF16, and runtime smoke coverage. These tests use
 small, locally initialized models and an independent cross-entropy reference.
+
+The reference scores each example on its own, cut to its real length, without an
+attention mask. Matching it therefore also shows that right padding and
+chosen/rejected concatenation leave the scores and gradients unchanged. Keep the
+reference unpadded and unbatched; a padded, batched reference would lose that check.
 """
 
 import pytest
 import torch
+from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.transformer import TransformerConfig
 from tokenizers import Tokenizer, models
 from torch.nn import functional as F
@@ -46,10 +52,12 @@ def test_collator_preserves_indices_and_masks(tokenizer):
     ]
     batch = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, padding="longest")(samples)
     assert batch["index"].tolist() == [9, 3]
+    # Both branches are padded to the longest sequence across the two of them.
+    max_len = max(len(sample[f"{branch}_input_ids"]) for sample in samples for branch in ("chosen", "rejected"))
     for branch in ("chosen", "rejected"):
         for key, pad_value in (("input_ids", 0), ("labels", -100), ("attention_mask", 0)):
             field = f"{branch}_{key}"
-            expected = [sample[field] + [pad_value] * (4 - len(sample[field])) for sample in samples]
+            expected = [sample[field] + [pad_value] * (max_len - len(sample[field])) for sample in samples]
             torch.testing.assert_close(batch[field], torch.tensor(expected))
             assert batch[field].device.type == "cpu"
 
@@ -75,7 +83,12 @@ def model_and_backend(request):
             model = LlamaForCausalLM(config).float().cpu()
         else:
             model = TransformerConfig.llama_like(
-                d_model=16, vocab_size=32, n_layers=1, n_heads=2, hidden_size_multiple_of=16, use_flash=False
+                d_model=16,
+                vocab_size=32,
+                n_layers=1,
+                n_heads=2,
+                hidden_size_multiple_of=16,
+                attn_backend=AttentionBackendName.torch,
             ).build(init_device="cpu")
             model.init_weights(device=torch.device("cpu"))
             model.lm_head.__class__ = DPOLMHead
