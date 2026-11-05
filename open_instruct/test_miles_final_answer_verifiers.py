@@ -125,3 +125,15 @@ def test_legacy_text_verifiers_still_receive_only_final_text(monkeypatch):
     monkeypatch.setattr(rewards, "_registry", lambda path: {"ifeval": TextVerifier()})
     assert score("unused", sample("reasoning </think> computer"), True) == 1
     assert observed == [([], " computer")]
+
+
+@pytest.mark.parametrize("final_only", [False, True])
+def test_if_group_retains_reward_contrast_for_zero_variance_filter(qualified_if, final_only):
+    registry, _ = qualified_if
+    items = [sample("reasoning </think> " + answer) for answer in ["computer", "desk", "computer", "desk"]]
+    args = SimpleNamespace(
+        olmo_core=CoreConfig(
+            reward_config=str(registry), reward_final_answer_only=final_only, reward_zero_truncated=True
+        )
+    )
+    assert asyncio.run(rewards.registered_reward(args, items)) == [1.0, 0.0, 1.0, 0.0]
