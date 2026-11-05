@@ -25,8 +25,7 @@ SFT_ARGS=(
 # On Beaker the cache is the shared WEKA one, with no lock: two merge-queue runs that both start cold
 # could interleave writes. Tokenizing 100 rows takes seconds, so that risk is accepted.
 uv run python mason.py \
-    --cluster ai2/jupiter \
-    --cluster ai2/saturn \
+    --cluster ai2/jupiter ai2/saturn \
     --workspace ai2/open-instruct-dev \
     --priority high \
     --image "$BEAKER_IMAGE" \

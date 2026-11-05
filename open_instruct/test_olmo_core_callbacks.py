@@ -1,69 +1,15 @@
+"""CPU tests for Beaker callbacks; no training process or Beaker service is started."""
+
 import json
 import os
-import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import parameterized
 
-
-class MockCallback:
-    _trainer = None
-    _step = 0
-
-    @property
-    def trainer(self):
-        return self._trainer
-
-    @property
-    def step(self):
-        return self._step
-
-
-_MOCKED_MODULES = [
-    "olmo_core",
-    "olmo_core.distributed",
-    "olmo_core.distributed.utils",
-    "olmo_core.train",
-    "olmo_core.train.callbacks",
-    "olmo_core.train.callbacks.callback",
-    "olmo_core.train.callbacks.comet",
-    "olmo_core.train.callbacks.wandb",
-    "olmo_core.train.common",
-    "open_instruct.utils",
-]
-_original_modules = {k: sys.modules.get(k) for k in _MOCKED_MODULES}
-
-mock_olmo_core_distributed = MagicMock()
-mock_olmo_core_distributed.utils.get_rank = Mock(return_value=0)
-mock_callback = MagicMock()
-
-mock_utils = MagicMock()
-
-sys.modules["olmo_core"] = MagicMock()
-sys.modules["olmo_core.distributed"] = MagicMock()
-sys.modules["olmo_core.distributed.utils"] = mock_olmo_core_distributed
-sys.modules["olmo_core.train"] = MagicMock()
-sys.modules["olmo_core.train.callbacks"] = MagicMock()
-sys.modules["olmo_core.train.callbacks.callback"] = mock_callback
-sys.modules["olmo_core.train.callbacks.comet"] = MagicMock()
-sys.modules["olmo_core.train.callbacks.wandb"] = MagicMock()
-sys.modules["olmo_core.train.common"] = MagicMock()
-sys.modules["open_instruct.utils"] = mock_utils
-
-mock_callback.Callback = MockCallback
-sys.modules["olmo_core.train.callbacks.comet"].CometCallback = type("CometCallback", (), {"priority": 100})
-sys.modules["olmo_core.train.callbacks.wandb"].WandBCallback = type("WandBCallback", (), {"priority": 100})
-
-from open_instruct.olmo_core_callbacks import BeakerCallbackV2  # noqa: E402
-
-for _key in _MOCKED_MODULES:
-    if _original_modules[_key] is None:
-        sys.modules.pop(_key, None)
-    else:
-        sys.modules[_key] = _original_modules[_key]
+from open_instruct.olmo_core_callbacks import BeakerCallbackV2
 
 
 class TestBeakerCallbackPreTrain(unittest.TestCase):
@@ -158,7 +104,6 @@ class TestBeakerCallbackPostStep(unittest.TestCase):
         trainer_mock.metrics_collect_interval = 100
         trainer_mock.global_step = step
         callback._trainer = trainer_mock
-        callback._step = step
 
         with (
             patch("open_instruct.olmo_core_callbacks.distributed_utils.get_rank", return_value=0),
