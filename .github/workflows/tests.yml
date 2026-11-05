@@ -30,11 +30,20 @@ jobs:
       - name: Run unit tests
         run: uv run --frozen pytest
 
+  # DISABLED: both GPU-test jobs below are switched off with `if: false` and
+  # report as skipped. The Beaker job rarely got a GPU within the wait, so the
+  # check was red for reasons unrelated to the code (see PR #2182). Until they
+  # are back, run the GPU tests by hand with
+  #   ./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh
+  # and record `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)`
+  # in the PR body. To re-enable, delete the two `if: false` lines.
+  #
   # The GPU tests run on Beaker. The large runner only builds the image and
   # launches the Beaker job; waiting for Beaker happens in the small
   # `gpu-tests` job below so the large runner is not billed while idle.
   gpu-tests-launch:
     name: Build and launch GPU tests
+    if: false
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
     timeout-minutes: 30
     concurrency:
@@ -132,6 +141,7 @@ jobs:
 
   gpu-tests:
     name: Run GPU tests
+    if: false
     needs: gpu-tests-launch
     runs-on: ubuntu-latest
     timeout-minutes: 20

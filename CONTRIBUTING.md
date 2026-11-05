@@ -18,6 +18,8 @@ When you submit a pull request from a fork, some CI checks behave differently du
 
 #### GPU Tests
 
+> **Note:** The automatic GPU-test jobs in CI are currently disabled. They report as skipped on every PR and in the merge queue, and CI does not verify a `GPU_TESTS` line while they are off. Run the GPU tests by hand when a change touches GPU code paths (see [GPU_TESTS Override](#gpu_tests-override-internal-prs-only)) and include the `GPU_TESTS=[...]` line so reviewers can check the result. The rest of this section describes the behaviour when the jobs are enabled.
+
 GPU tests require access to Beaker (our internal compute platform) and are **automatically skipped** for fork PRs. You'll see a message like:
 
 ```
@@ -80,7 +82,7 @@ Four GitHub Actions workflows run on PRs:
 
 2. **Unit Tests** (`tests.yml` → `unit-tests` job): Runs `uv run pytest` on an Ubuntu runner. 20-minute timeout.
 
-3. **GPU Tests** (`tests.yml` → `gpu-tests` job): Builds a Docker image, uploads it to Beaker, and runs `open_instruct/test_*_gpu.py` on a single GPU. 45-minute timeout. Auto-skipped for fork PRs (no Beaker secrets). Can be overridden with `GPU_TESTS=[EXPERIMENT_ID]` or bypassed with `GPU_TESTS=bypass` in the PR body.
+3. **GPU Tests** (`tests.yml` → `gpu-tests-launch` and `gpu-tests` jobs): **Currently disabled; both jobs report as skipped.** When enabled, the large runner builds a Docker image, uploads it to Beaker, and launches `open_instruct/test_*_gpu.py` on a single GPU; a small runner then waits up to 20 minutes for the result and stops the Beaker job if it gives up. Auto-skipped for fork PRs (no Beaker secrets). Can be overridden with `GPU_TESTS=[EXPERIMENT_ID]` or bypassed with `GPU_TESTS=bypass` in the PR body.
 
 4. **Integration Tests** (`beaker-experiment.yml`): Runs in the merge queue (not on every PR push). Launches up to 3 Beaker experiments:
    - GRPO integration test (always runs)
