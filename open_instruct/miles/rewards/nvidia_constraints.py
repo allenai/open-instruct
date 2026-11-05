@@ -1,13 +1,17 @@
 """Portable calendar and NeMo-target adapters using maintained Open Instruct IF checkers."""
 
 import json
+import os
 import re
+import time
 from functools import lru_cache
 
-from open_instruct import ifeval_constraints
+from open_instruct import ifeval_constraints, logger_utils
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.miles.rewards import candidate_verifiers as common
 from open_instruct.miles.rewards import rewards, task_verifiers
+
+logger = logger_utils.setup_logger(__name__)
 
 # Native generators do not consistently validate types before storing arguments.
 # Validate their count/index parameters before invoking them; equality with the
@@ -34,15 +38,43 @@ _INTEGER_ARGUMENTS = {
     "small_n",
 }
 _LIST_ARGUMENTS = {"keywords", "forbidden_words"}
+# These parameters use `if not value` in their native generators. In particular,
+# copy_span_idx can randomly choose zero again, defeating the repair comparison.
+_RANDOM_ZERO_ARGUMENTS = {"N", "small_n", "n_start", "n_end", "n_sent", "n_words", "n", "m"}
+
+
+def validate_patterns(name, args):
+    """Compile the patterns exactly as the native checkers use them."""
+    patterns, flags = [], 0
+    if name == "keywords:existence":
+        patterns, flags = args["keywords"], re.IGNORECASE
+    elif name == "keywords:forbidden_words":
+        patterns, flags = [r"\b" + word + r"\b" for word in args["forbidden_words"]], re.IGNORECASE
+    elif name in {"keywords:frequency", "keywords:word_once", "keywords:word_count_different_numbers"}:
+        patterns, flags = [args["keyword"]], re.IGNORECASE
+    elif name == "count:count_increment_word":
+        patterns, flags = [args["keyword1"], args["keyword2"]], re.IGNORECASE
+    elif name == "copy:repeat_phrase":
+        words = args["phrase"].split()
+        patterns = [rf"{words[0]} .*? {words[-1]}"]
+    elif name == "detectable_format:multiple_sections":
+        patterns = [r"\s?" + args["section_spliter"] + r"\s?\d+\s?"]
+    elif name == "detectable_content:postscript" and args["postscript_marker"] not in {"P.P.S", "P.S."}:
+        patterns, flags = [r"\s*" + args["postscript_marker"].lower() + r".*$"], re.MULTILINE
+    try:
+        for pattern in patterns:
+            re.compile(pattern, flags=flags)
+    except (re.error, RecursionError) as error:
+        raise ValueError(f"Invalid native regex for {name}: {error}") from error
 
 
 def minutes(value):
     if not isinstance(value, str):
         raise ValueError("Time must be a string")
-    match = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", value.strip())
+    match = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", value.strip(), flags=re.IGNORECASE)
     if not match:
         raise ValueError("Unsupported time")
-    hour, minute, period = int(match[1]), int(match[2] or 0), match[3]
+    hour, minute, period = int(match[1]), int(match[2] or 0), (match[3] or "").lower()
     if minute >= 60 or (period and not 1 <= hour <= 12) or (not period and hour >= 24):
         raise ValueError("Time out of range")
     return ((hour % 12) + (12 if period == "pm" else 0) if period else hour) * 60 + minute
@@ -79,57 +111,74 @@ def calendar_contract(target):
     return result
 
 
-class CalendarVerifier:
+class _IsolatedAdapter:
+    kind: str
     get_config_class = staticmethod(lambda: task_verifiers.RewardConfig)
 
     def __init__(self, verifier_config=None):
         pass
 
+    def result(self, score, status="completed", **diagnostics):
+        return common.Result(score, diagnostics={"kind": self.kind, "status": status, **diagnostics})
+
     async def async_call(self, tokenized_prediction, prediction, label, **kwargs):
-        return await rewards.isolated_verifier_call(
-            {"factory": f"{type(self).__module__}.{type(self).__name__}"},
-            tokenized_prediction,
-            prediction,
-            label,
-            **kwargs,
-        )
+        policy = os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
+        if policy not in {"zero", "raise"}:
+            raise ValueError("OI_MILES_MATH_TIMEOUT_POLICY must be zero or raise")
+        start = time.monotonic()
+        try:
+            return await rewards.isolated_verifier_call(
+                {"factory": f"{type(self).__module__}.{type(self).__name__}"},
+                tokenized_prediction,
+                prediction,
+                label,
+                **kwargs,
+            )
+        except rewards.MathVerifierTimeout as error:
+            if policy == "raise":
+                raise
+            logger.warning("%s verifier timeout; assigning zero reward: %s", self.kind, error)
+            return self.result(
+                0.0,
+                status="timeout",
+                error=str(error),
+                failure_policy=policy,
+                elapsed_seconds=time.monotonic() - start,
+            )
+
+
+class CalendarVerifier(_IsolatedAdapter):
+    kind = "calendar_v1"
 
     def __call__(self, tokenized_prediction, prediction, label, **kwargs):
         contract = calendar_contract(label)
         try:
             events = common.strict_json(common.answer_text(prediction))
         except (ValueError, RecursionError) as error:
-            return common.Result(
-                0.0,
-                diagnostics={
-                    "kind": "calendar_v1",
-                    "status": "parse_error",
-                    "error_type": type(error).__name__,
-                    "error": str(error),
-                    "failure_policy": "zero",
-                },
+            return self.result(
+                0.0, status="parse_error", error_type=type(error).__name__, error=str(error), failure_policy="zero"
             )
         try:
             if not isinstance(events, list) or len(events) != len(contract):
-                return common.Result(0.0)
+                return self.result(0.0)
             intervals, seen = [], set()
             for event in events:
                 key = str(event["event_id"])
                 if key not in contract or key in seen:
-                    return common.Result(0.0)
+                    return self.result(0.0)
                 seen.add(key)
                 lower, upper, duration = contract[key]
                 if type(event["duration"]) not in (int, float) or event["duration"] != duration:
-                    return common.Result(0.0)
+                    return self.result(0.0)
                 start = minutes(event["start_time"])
                 if not lower <= start <= upper:
-                    return common.Result(0.0)
+                    return self.result(0.0)
                 intervals.append((start, start + duration))
             intervals.sort()
             valid = all(a[1] <= b[0] for a, b in zip(intervals, intervals[1:]))
-            return common.Result(float(valid))
+            return self.result(float(valid))
         except (ValueError, TypeError, KeyError):
-            return common.Result(0.0)
+            return self.result(0.0)
 
 
 @lru_cache(maxsize=4096)
@@ -144,9 +193,8 @@ def instruction_contract(serialized):
     issues = ifeval_constraints.if_training_issues({"instruction_id": ids, "kwargs": arguments})
     if issues:
         raise ValueError(f"Unsuitable IF training target: {issues}")
-    if not ids or len(ids) != len(arguments):
-        raise ValueError("Empty or unaligned IF constraints")
-    if target.get("grading_mode", "all") not in {"all", "fraction"}:
+    grading_mode = target.get("grading_mode", "all")
+    if grading_mode not in {"all", "fraction"}:
         raise ValueError("IF grading_mode must be all or fraction")
     compiled = []
     for name, args in zip(ids, arguments, strict=True):
@@ -168,10 +216,11 @@ def instruction_contract(serialized):
                 raise ValueError(f"Malformed argument {key}")
             if isinstance(value, int) and (value < 0):
                 raise ValueError(f"Negative argument {key}; qualify separately")
-        if name == "length_constraints:nth_paragraph_first_word" and args["nth_paragraph"] > args["num_paragraphs"]:
-            raise ValueError("Unsatisfiable paragraph position")
+            if key in _RANDOM_ZERO_ARGUMENTS and value == 0:
+                raise ValueError(f"Zero argument {key} for {name} triggers a native random default")
         if name == "copy:repeat_phrase" and len(args["phrase"].split()) < 3:
             raise ValueError("copy:repeat_phrase needs an interior word to replace")
+        validate_patterns(name, args)
         try:
             checker.build_description(**args)
         except (AttributeError, TypeError) as exc:
@@ -186,20 +235,21 @@ def instruction_contract(serialized):
         if (checker.get_instruction_args() or {}) != expected_args:
             raise ValueError(f"Native checker changed target arguments for {name}")
         compiled.append((name, checker, args))
-    return family, compiled
+    return grading_mode, compiled
 
 
-class InstructionVerifier(CalendarVerifier):
+class InstructionVerifier(_IsolatedAdapter):
+    kind = "nemo_if_v1"
+
     def __call__(self, tokenized_prediction, prediction, label, **kwargs):
-        family, compiled = instruction_contract(json.dumps(label, sort_keys=True, allow_nan=False))
+        grading_mode, compiled = instruction_contract(json.dumps(label, sort_keys=True, allow_nan=False))
         final = common.answer_text(prediction)
         if not final:
-            return common.Result(0.0)
+            return self.result(0.0)
         passed = []
         for name, checker, _args in compiled:
             value = checker.check_following(final)
             if type(value) is not bool:
                 raise ValueError(f"IF checker {name!r} returned {type(value).__name__}, expected bool")
             passed.append(value)
-        fraction = label.get("target", {}).get("grading_mode") == "fraction"
-        return common.Result(sum(passed) / len(passed) if fraction else float(all(passed)))
+        return self.result(sum(passed) / len(passed) if grading_mode == "fraction" else float(all(passed)))
