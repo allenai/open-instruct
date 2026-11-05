@@ -10,6 +10,7 @@ import hashlib
 import importlib
 import json
 import re
+import shutil
 from collections import Counter
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from open_instruct.miles.rewards import deterministic_verifiers as local
 from open_instruct.miles.rewards import litmus, nvidia_constraints, reasoning_gym
 
 FACTORIES = {
+    "reference_judge": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
     "deterministic": "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
     "math": "open_instruct.ground_truth_utils.MathVerifier",
     "structured": "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
@@ -96,6 +98,14 @@ def messages(raw):
 
 def adapt(raw, kind, options=None):
     options = options or {}
+    if kind == "routed_v1":
+        value = raw
+        for key in options["field"].split("."):
+            value = value[key]
+        route = options["routes"].get(value)
+        if not route or route["adapter"] == "routed_v1":
+            raise ValueError("unmapped_or_recursive_route:" + str(value))
+        return adapt(raw, route["adapter"], route.get("options"))
     ms = messages(raw)
     meta = raw.get("verifier_metadata") or {}
     if kind == "nemo_v1":
@@ -183,13 +193,22 @@ def adapt(raw, kind, options=None):
         local.validate_target(target)
         name, stratum = "deterministic", kind
     elif kind == "math_v1":
-        target = raw.get("expected_answer", raw.get("answer", raw.get("solution")))
+        target = (
+            raw[options["reference_field"]]
+            if "reference_field" in options
+            else raw.get("expected_answer", raw.get("answer"))
+        )
         if type(target) not in (str, int, float) or not str(target).strip():
             raise ValueError("missing_math_reference")
         if re.search(r"\b(prove|proof|show that)\b", ms[-1]["content"], re.I):
             raise ValueError("proof_requires_judged_contract")
         target = str(target).strip()
         name, stratum = "math", kind
+    elif kind == "reference_judge_v1":
+        target = raw[options.get("reference_field", "expected_answer")]
+        if not isinstance(target, str) or not target.strip():
+            raise ValueError("Judged reference requires nonempty text")
+        name, stratum = "reference_judge", kind
     elif kind == "deterministic_v1":
         target = copy.deepcopy(raw["target"])
         local.validate_target(target)
@@ -224,7 +243,8 @@ def prepare(plan_path, output, tokenizer):
         root = output / name
         root.mkdir()
         # A prior hygiene receipt is required; this operation does not rerun decon.
-        checked_file(spec["hygiene_receipt"], plan_path.parent)
+        hygiene = checked_file(spec["hygiene_receipt"], plan_path.parent)
+        shutil.copyfile(hygiene, root / "hygiene-receipt.json")
         counts, strata, registry, identities, prompts = Counter(), Counter(), {}, set(), Counter()
         with (root / "prompts.jsonl").open("w") as rows, (root / "dispositions.jsonl").open("w") as dispositions:
             for descriptor in spec["inputs"]:
@@ -249,6 +269,8 @@ def prepare(plan_path, output, tokenizer):
                     text = tokenizer.apply_chat_template(ms, tokenize=False, add_generation_prompt=True)
                     tokens = len(tokenizer.encode(text, add_special_tokens=False))
                     registry[verifier] = {"factory": FACTORIES[verifier]}
+                    if verifier == "reference_judge":
+                        registry[verifier]["config"] = {"name": verifier}
                     row = {
                         "input": text,
                         "label": target,
@@ -266,6 +288,8 @@ def prepare(plan_path, output, tokenizer):
                             "verifiers": [{"name": verifier, "target": target}],
                         },
                     }
+                    if verifier == "reference_judge":
+                        row["metadata"]["judge_query"] = json.dumps(ms, ensure_ascii=False)
                     rows.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
                     counts["prepared_rows"] += 1
                     counts["max_prompt_tokens"] = max(counts["max_prompt_tokens"], tokens)
@@ -278,7 +302,10 @@ def prepare(plan_path, output, tokenizer):
             "counts": dict(counts),
             "strata": dict(strata),
             "repeated_prompt_rows": sum(n - 1 for n in prompts.values()),
-            "hygiene_receipt": spec["hygiene_receipt"],
+            "hygiene_receipt": {
+                "path": str((root / "hygiene-receipt.json").relative_to(output)),
+                "sha256": file_hash(hygiene),
+            },
             "input_descriptors": spec["inputs"],
         }
         for key, path in [("prompt_data", root / "prompts.jsonl"), ("reward_config", root / "verifiers.json")]:
