@@ -88,6 +88,11 @@ step time over steps 31-100, so a stalled step counts at its full cost.
 | `8x8x8` | same, no shim and no batch hashes (H088 opt-b) | 64 | 4.23 | 1,887 | 0 |
 | `8x8x8` | opt-b + `remat_policy=save_dot_except_mlp` (H088 opt-c) | 64 | 4.18 | 1,900 | 0; a tie, keep `full` |
 
+Measurement windows: the `4x4x8` row is from 2026-10-14 and the `8x8x8` rows from 2026-10-18 (H088, the pre-split
+slice), each taking tokens/s/chip from the mean step over steps 31-100. The 2026-11-05 sweep figures quoted below
+(4.24 s, 1,934 tokens/s/chip for opt-b's config) take the median of steps 3-14 on the recreated slice, so they don't
+mix with this table.
+
 Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on either slice, paid again at every
 resume.
 
