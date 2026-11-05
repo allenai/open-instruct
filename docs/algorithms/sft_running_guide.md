@@ -9,7 +9,8 @@ uv run python scripts/train/sft.py --recipe c12r
 `c12r` is the current Olmo 3.5 small recipe: C12 SFT on base B1
 (`olmo35-small-mm-ckpt1-64k` step 20000) plus 10% long-context replay, peak LR 2e-4,
 half an epoch (18,410 steps). It runs on 2×8 B300 on `ai2/holmes` at `high` and
-takes about 9 h. It is the `b1-c12r-gpu` arm of ledger hypothesis H182.
+takes about 9 h. It is the `b1-c12r-gpu` arm of H182, an internal Ai2 post-training
+experiment (H-numbers here are its internal tracking IDs).
 
 - **Another base:** `--checkpoint <dir> --name <run>`. The checkpoint must be an
   OLMo-core DCP (the `model_and_optim` directory); HF checkpoints are not accepted.

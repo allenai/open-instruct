@@ -11,6 +11,7 @@ checkpoint in the run's output directory, which has no timestamp.
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -24,6 +25,8 @@ RECIPES = {
     # b1-c12r-gpu of ledger hypothesis H182, which serves as the control for H183-H186. 2 x 8 B300 on holmes,
     # about 9 h of training.
     "c12r": {
+        # Built from open-instruct 37a119ffd (branch line h161-gpu-hero / h182-gpu), which holds the trainer changes
+        # and scripts/train/debug/kda_hero_small_sft.json that main does not.
         "image": "01M5KX4ZAN00BJ00ARS7FNG79T",
         "checkpoint": "/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim",
         # The first step at which seed 34521's loader order has consumed half an epoch of C12 (H182's R4' gate).
@@ -110,8 +113,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--recipe", required=True, choices=sorted(RECIPES))
     parser.add_argument("--checkpoint", help="OLMo-core checkpoint (DCP) to start from. Default: the recipe's base.")
-    parser.add_argument("--name", help="Run name; also the output directory. Default: <recipe>-s<seed>.")
-    parser.add_argument("--seed", type=int, help="Data-loader seed. Default: the recipe's.")
+    parser.add_argument(
+        "--name", help="Run name; also the output directory. Default: <recipe>-s<seed>, plus -<steps>st with --steps."
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        help="Data-loader seed (data order). Default: the recipe's. The recipe's step count stays as computed for its "
+        "own seed; training's --seed is fixed because it names the cache.",
+    )
     parser.add_argument("--steps", type=int, help="Training steps. Default: the recipe's.")
     parser.add_argument("--workspace", default="ai2/olmo-instruct")
     parser.add_argument("--priority", default="high")
@@ -123,12 +133,17 @@ def main():
         parser.error("--checkpoint needs a --name, so the run does not resume into the default run's directory.")
     seed = recipe["seed"] if args.seed is None else args.seed
     steps = recipe["steps"] if args.steps is None else args.steps
-    name = args.name or f"{args.recipe}-s{seed}"
-    user = json.loads(
-        subprocess.run(
-            ["beaker", "account", "whoami", "--format", "json"], capture_output=True, text=True, check=True
-        ).stdout
-    )[0]["name"]
+    # A short run gets its own default directory, so a later full run does not resume from it.
+    name = args.name or f"{args.recipe}-s{seed}" + ("" if args.steps is None else f"-{steps}st")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        parser.error(f"--name {name!r} must be letters, digits, '.', '_' or '-'.")
+    try:
+        whoami = subprocess.run(["beaker", "account", "whoami", "--format", "json"], capture_output=True, text=True)
+        user = json.loads(whoami.stdout)[0]["name"]
+    except (OSError, ValueError, LookupError):
+        if not args.dry_run:
+            parser.error("needs a working `beaker account whoami`.")
+        user = "<user>"
     output_dir = f"/weka/oe-adapt-default/allennlp/deletable_checkpoint/{user}/sft/{name}"
 
     nodes = recipe["nodes"]
@@ -137,7 +152,8 @@ def main():
         "torchrun", f"--nnodes={nodes}", "--node_rank=$BEAKER_REPLICA_RANK",
         "--master_addr=$BEAKER_LEADER_REPLICA_HOSTNAME", "--master_port=29400", "--nproc_per_node=8",
         "open_instruct/olmo_core_finetune.py",
-        "--model_name_or_path", args.checkpoint or recipe["checkpoint"],
+        # mason joins the command for `bash -c` without quoting plain arguments.
+        "--model_name_or_path", shlex.quote(args.checkpoint or recipe["checkpoint"]),
         *recipe["train_args"],
         "--max_train_steps", str(steps),
         # A permanent checkpoint half way through, plus the final one.
