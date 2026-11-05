@@ -212,11 +212,13 @@ def _check_extra_numpy_dir(
         raise FileNotFoundError(f"{numpy_dir} has no {numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB} parts.")
     # OLMo-core trains on every file its glob matches, so a match that is not exactly one indexed part
     # (e.g. token_ids_part_backup.npy) would be trained on without the checks below.
-    for pattern, parts in (
-        (numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB, token_parts),
-        (numpy_dataset_conversion.LABELS_MASK_NPY_GLOB, mask_parts),
-    ):
-        unchecked = sorted(set(glob.glob(os.path.join(numpy_dir, pattern))) - set(parts.values()))
+    for pattern in (numpy_dataset_conversion.TOKEN_IDS_NPY_GLOB, numpy_dataset_conversion.LABELS_MASK_NPY_GLOB):
+        part_name = re.compile(re.escape(pattern).replace(r"\*", r"\d+"))
+        unchecked = sorted(
+            path
+            for path in glob.glob(os.path.join(numpy_dir, pattern))
+            if not part_name.fullmatch(os.path.basename(path))
+        )
         if unchecked:
             raise ValueError(f"{numpy_dir}: {pattern} matches files that are not one indexed part each: {unchecked}")
     if set(token_parts) != set(mask_parts):
@@ -432,8 +434,9 @@ class SFTConfig:
     """Local pretokenized numpy dirs to train on alongside the chat cache, in the converter's layout:
     `token_ids_part_XXXX.npy` (raw tokens in the dtype OLMo-core picks for the vocab, uint32 for Olmo)
     and `labels_mask_part_XXXX.npy` (one bool per token). Each part must end with EOS. Their parts
-    follow the cache's and are packed the same way, one source file at a time, so an instance never
-    mixes extra docs with chat rows; docs longer than max_seq_length are truncated. Checked at
+    are packed the same way as the cache's, one source file at a time, so an instance never mixes
+    extra docs with chat rows; the loader then shuffles all instances together. Docs longer than
+    max_seq_length are truncated. Every node needs the same dirs at the same paths. Checked at
     startup, which logs token and loss-token totals for the cache and the extras."""
 
 

@@ -5,6 +5,7 @@ import importlib
 import importlib.util
 import json
 import os
+import re
 import shlex
 import sys
 import tempfile
@@ -298,9 +299,11 @@ class ExtraNumpyDirsTest(unittest.TestCase):
             stray = os.path.join(self.extra_a, name)
             with open(stray, "wb") as f:
                 f.write(b"\0" * 4)
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "not one indexed part each"):
-                self._check([self.extra_a])
-            os.remove(stray)
+            try:
+                with self.subTest(name=name), self.assertRaisesRegex(ValueError, re.escape(f"['{stray}']")):
+                    self._check([self.extra_a])
+            finally:
+                os.remove(stray)
 
     def test_metadata_required_with_metadata_boundaries(self) -> None:
         os.remove(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"))
