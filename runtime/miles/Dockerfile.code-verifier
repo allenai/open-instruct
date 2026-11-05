@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1
+# Build on the application image produced by scripts/miles/build_image.py.
+# Supply the clean code-execution-service checkout as a named build context.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG SOURCE_REVISION
+ARG VERIFIER_REVISION
+ARG VERIFIER_SOURCE_SHA256
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
+LABEL ai2.code-verifier.revision=${VERIFIER_REVISION}
+COPY scripts/miles/prepare_code_verifier_smoke.py /opt/core-rl/scripts/miles/prepare_code_verifier_smoke.py
+COPY --from=code_execution_source /pyproject.toml /opt/code-execution-service/pyproject.toml
+COPY --from=code_execution_source /service /opt/code-execution-service/service
+COPY --from=code_execution_source /client /opt/code-execution-service/client
+RUN uv pip install --system --no-deps /opt/code-execution-service
+RUN EXPECTED_SHA=${VERIFIER_SOURCE_SHA256} python -c "import os; from code_execution_service import SOURCE_SHA256; assert SOURCE_SHA256 == os.environ['EXPECTED_SHA']; from code_execution_client.verifier import CodeVerifier"
+RUN printf '%s\n' "$SOURCE_REVISION" > /opt/core-rl/source-revision && \
+    printf '%s\n' "$VERIFIER_REVISION" > /opt/code-execution-service/source-revision
