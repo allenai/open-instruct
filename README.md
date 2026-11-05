@@ -1,4 +1,4 @@
-[![Beaker Experiment Launch](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml/badge.svg?event=merge_group)](https://github.com/allenai/open-instruct/actions/workflows/beaker-experiment.yml)
+[![Tests](https://github.com/allenai/open-instruct/actions/workflows/tests.yml/badge.svg)](https://github.com/allenai/open-instruct/actions/workflows/tests.yml)
 [![Papers with Code: Olmo 3 Think 32B on BBH](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge.svg?eval=8028&live=1)](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge-link?eval=8028)
 [![Papers with Code: Olmo 3.1 Think 32B on MATH](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge.svg?eval=8025&live=1)](https://paperswithcode.co/api/v1/papers/2512.13961/leaderboard-badge-link?eval=8025)
 
