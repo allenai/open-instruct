@@ -135,8 +135,10 @@ def main():
     steps = recipe["steps"] if args.steps is None else args.steps
     # A short run gets its own default directory, so a later full run does not resume from it.
     name = args.name or f"{args.recipe}-s{seed}" + ("" if args.steps is None else f"-{steps}st")
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
-        parser.error(f"--name {name!r} must be letters, digits, '.', '_' or '-'.")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
+        parser.error(f"--name {name!r} must start with a letter or digit, then letters, digits, '.', '_' or '-'.")
+    if steps < 1:
+        parser.error("--steps must be at least 1.")
     try:
         whoami = subprocess.run(["beaker", "account", "whoami", "--format", "json"], capture_output=True, text=True)
         user = json.loads(whoami.stdout)[0]["name"]
