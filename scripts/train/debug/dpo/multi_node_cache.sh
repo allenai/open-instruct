@@ -1,5 +1,5 @@
 #!/bin/bash
-BEAKER_IMAGE="${1:?Pass a Beaker image, or launch with ./scripts/train/build_image_and_launch.sh $0}"
+source "$(dirname "${BASH_SOURCE[0]}")/../require_beaker_image.sh"
 
 uv run python mason.py \
     --cluster ai2/jupiter \

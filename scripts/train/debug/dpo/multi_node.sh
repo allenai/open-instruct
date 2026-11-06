@@ -1,5 +1,5 @@
 #!/bin/bash
-BEAKER_IMAGE="${1:?Pass a Beaker image, or launch with ./scripts/train/build_image_and_launch.sh $0}"
+source "$(dirname "${BASH_SOURCE[0]}")/../require_beaker_image.sh"
 MODEL_NAME=allenai/OLMo-2-1124-7B
 LR=1e-6
 EXP_NAME=olmo2-7b-DPO-debug-16k-packing-bs16-tp2-${LR}-$(date +%s)
