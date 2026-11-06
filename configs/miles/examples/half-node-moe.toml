@@ -2,13 +2,13 @@
 # Background Platinum evaluation currently uses a separate GPU.
 # Replace YOUR_USERNAME and YOUR_WANDB_ENTITY; see the adjacent README before launch.
 schema_version = 1
-name = "gsm8k-4gpu"
+name = "half-node-moe"
 
 [model]
 source = "/weka/oe-training-default/jasonr/olmo35-vision-alignment/exports/olmo35-small-hero-14T-dec600-mt-lc-256k-textonly/hf-step9708-local"
 
 [output]
-root = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/runs/gsm8k-4gpu-midtrain"
+root = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/runs/half-node-moe"
 export_hf = true
 
 [launch]
@@ -121,7 +121,7 @@ sglang_mem_fraction_static = 0.7
 wandb_mode = "online"
 wandb_team = "YOUR_WANDB_ENTITY"
 wandb_project = "open-instruct-miles"
-wandb_group = "gsm8k-4gpu"
+wandb_group = "half-node-moe"
 
 [core]
 max_policy_lag = 4

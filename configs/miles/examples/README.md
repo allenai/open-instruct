@@ -4,10 +4,10 @@
 |---|---|
 | [dev.toml](dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
 | [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
-| [gsm8k-4gpu.toml](gsm8k-4gpu.toml) | Olmo 3.5 Tiny GSM8K: 1 trainer GPU, 3 inference GPUs, plus separate 1-GPU Platinum evaluation jobs |
+| [half-node-moe.toml](half-node-moe.toml) | Olmo 3.5 Tiny GSM8K: 1 trainer GPU, 3 inference GPUs, plus separate 1-GPU Platinum evaluation jobs |
 | [three-node.toml](three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
 
-`gsm8k-4gpu` uses all 7,473 GSM8K training examples, 1,000 updates,
+`half-node-moe` uses all 7,473 GSM8K training examples, 1,000 updates,
 8 prompts × 8 responses per batch, 2,048 prompt / 4,096 response tokens,
 and maximum policy lag 4. It saves every 50 updates and evaluates full
 GSM8K Platinum initially, every 100 updates, and finally. Its explicit serving
@@ -27,7 +27,7 @@ request an **additional GPU** and can overlap with training.
 
 ```bash
 mkdir -p runs
-cp configs/miles/examples/gsm8k-4gpu.toml runs/my-gsm8k.toml
+cp configs/miles/examples/half-node-moe.toml runs/my-gsm8k.toml
 # Edit the account, output, and secret fields before running these commands.
 uv run --no-project --python 3.12 python -m open_instruct.miles plan runs/my-gsm8k.toml
 uv run --no-project --python 3.12 python -m open_instruct.miles validate runs/my-gsm8k.toml
