@@ -1,5 +1,5 @@
 #!/bin/bash
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+source "$(dirname "${BASH_SOURCE[0]}")/../require_beaker_image.sh"
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 LR=1e-6
 EXP_NAME=olmo3-7b-DPO-olmo-core-8k-${LR}-$(date +%s)
