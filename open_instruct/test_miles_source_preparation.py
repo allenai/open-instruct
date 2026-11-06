@@ -302,15 +302,13 @@ def test_litmus_invalid_regex_is_a_contract_error():
         litmus.validate_target({"answer_type": "float", "expected_answer": 1, "output_regex": "("})
 
 
-def test_litmus_timeout_obeys_policy_and_reports_diagnostics(monkeypatch):
+def test_litmus_timeout_scores_zero_with_diagnostics(monkeypatch):
     class SlowPattern:
         def findall(self, text, timeout):
             raise TimeoutError("regex timed out")
 
     target = {"answer_type": "float", "expected_answer": 1, "output_regex": "Answer: (.+)"}
     monkeypatch.setattr(litmus, "validate_target", lambda label: (SlowPattern(), 1.0, "isclose", {}))
-    monkeypatch.delenv("OI_MILES_MATH_TIMEOUT_POLICY", raising=False)
-    monkeypatch.delenv("OI_MILES_FORMAT_TIMEOUT_POLICY", raising=False)
     verifier = litmus.LitmusVerifier()
     result = asyncio.run(verifier.async_call([], "Answer: 1", target))
     assert result.score == 0
@@ -321,12 +319,6 @@ def test_litmus_timeout_obeys_policy_and_reports_diagnostics(monkeypatch):
         "error": "regex timed out",
         "failure_policy": "zero",
     }
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "raise")
-    with pytest.raises(TimeoutError):
-        asyncio.run(verifier.async_call([], "Answer: 1", target))
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "ignore")
-    with pytest.raises(ValueError, match="must be zero or raise"):
-        asyncio.run(verifier.async_call([], "Answer: 1", target))
 
 
 def test_real_regex_timeout_type_is_handled():

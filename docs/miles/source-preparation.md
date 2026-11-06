@@ -75,6 +75,12 @@ new property/method strata still need reference checks and positive/near-miss
 controls before qualification. Tool-dependent chemistry remains unsupported by
 single-turn training even when its final scalar can be graded.
 
+Litmus regex matching has a 100 ms budget. As with the other local validation
+adapters, a timeout always returns zero with `status: timeout`, the error and
+elapsed time in diagnostics; there is no policy setting. Invalid targets and
+unexpected failures still raise. Qualification rejects timed-out controls, even
+though training can continue with zero reward for a timed-out response.
+
 The catalog initially says `prepared`, not `qualified`. It cannot be resolved by
 the named-source resolver until reviewed controls and the training loader path
 have passed. Integration readiness, representative policy evidence and downstream

@@ -8,7 +8,6 @@ Formatting rewards measure formatting only, not factual answer correctness.
 import ast
 import json
 import math
-import os
 import re
 import time
 from collections import Counter
@@ -313,21 +312,10 @@ class DeterministicVerifier:
         pass
 
     async def async_call(self, tokens, prediction, label, **kwargs):
-        policy = "zero"
-        if isinstance(label, dict) and label.get("kind") == "format":
-            policy = os.environ.get(
-                "OI_MILES_FORMAT_TIMEOUT_POLICY", os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
-            )
-        if policy not in ("zero", "raise"):
-            raise ValueError(
-                "OI_MILES_FORMAT_TIMEOUT_POLICY (or inherited OI_MILES_MATH_TIMEOUT_POLICY) must be zero or raise"
-            )
         start = time.monotonic()
         try:
             result = score(prediction, label)
         except FormattingVerifierTimeout as error:
-            if policy == "raise":
-                raise
             logger.warning("Formatting verifier timeout; assigning fallback zero reward: %s", error)
             return Result(
                 0.0,
@@ -335,7 +323,7 @@ class DeterministicVerifier:
                     "kind": "format",
                     "status": "timeout",
                     "error": str(error),
-                    "failure_policy": policy,
+                    "failure_policy": "zero",
                     "elapsed_seconds": time.monotonic() - start,
                 },
             )

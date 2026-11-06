@@ -55,7 +55,6 @@ def test_timeout_zero_is_diagnostic_and_pool_can_continue(monkeypatch):
         return SimpleNamespace(score=1.0, cost=0.0)
 
     monkeypatch.setattr(rewards, "isolated_verifier_call", score)
-    monkeypatch.delenv("OI_MILES_MATH_TIMEOUT_POLICY", raising=False)
 
     async def run():
         verifier = rewards._IsolatedVerifier({})
@@ -79,17 +78,4 @@ def test_other_errors_and_cancellation_are_not_zeroed(monkeypatch, error):
 
     monkeypatch.setattr(rewards, "isolated_verifier_call", fail)
     with pytest.raises(type(error)):
-        asyncio.run(rewards._IsolatedVerifier({}).async_call([], "", ""))
-
-
-def test_strict_policy_and_invalid_policy_fail(monkeypatch):
-    async def fail(*args, **kwargs):
-        raise rewards.MathVerifierTimeout("timed out")
-
-    monkeypatch.setattr(rewards, "isolated_verifier_call", fail)
-    monkeypatch.setenv("OI_MILES_MATH_TIMEOUT_POLICY", "raise")
-    with pytest.raises(rewards.MathVerifierTimeout):
-        asyncio.run(rewards._IsolatedVerifier({}).async_call([], "", ""))
-    monkeypatch.setenv("OI_MILES_MATH_TIMEOUT_POLICY", "typo")
-    with pytest.raises(ValueError, match="must be zero or raise"):
         asyncio.run(rewards._IsolatedVerifier({}).async_call([], "", ""))

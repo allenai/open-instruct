@@ -5,7 +5,6 @@ captures; it never searches a malformed capture for an incidental number.
 """
 
 import math
-import os
 import time
 from typing import Any
 
@@ -81,20 +80,11 @@ class LitmusVerifier:
 
     async def async_call(self, tokens, prediction, label, **kwargs):
         pattern, expected, rule, tolerance = validate_target(label)
-        policy = os.environ.get(
-            "OI_MILES_FORMAT_TIMEOUT_POLICY", os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
-        )
-        if policy not in ("zero", "raise"):
-            raise ValueError(
-                "OI_MILES_FORMAT_TIMEOUT_POLICY (or inherited OI_MILES_MATH_TIMEOUT_POLICY) must be zero or raise"
-            )
         start = time.monotonic()
         try:
             # Preserve the row's final-match convention with one bounded search.
             matches = pattern.findall(common.answer_text(prediction), timeout=0.1)
         except TimeoutError as error:
-            if policy == "raise":
-                raise
             logger.warning("Litmus verifier timeout; assigning fallback zero reward: %s", error)
             return common.Result(
                 0.0,
@@ -102,7 +92,7 @@ class LitmusVerifier:
                     "kind": KIND,
                     "status": "timeout",
                     "error": str(error) or "Litmus output_regex exceeded its search budget",
-                    "failure_policy": policy,
+                    "failure_policy": "zero",
                     "elapsed_seconds": time.monotonic() - start,
                 },
             )

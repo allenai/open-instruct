@@ -228,33 +228,19 @@ def test_native_regex_semantics_are_preserved():
 
 
 @pytest.mark.parametrize("cls", [nv.CalendarVerifier, nv.InstructionVerifier])
-@pytest.mark.parametrize("policy", [None, "zero", "raise", "invalid"])
-def test_worker_timeout_policy(cls, policy, monkeypatch):
-    monkeypatch.delenv("OI_MILES_MATH_TIMEOUT_POLICY", raising=False)
-    if policy is not None:
-        monkeypatch.setenv("OI_MILES_MATH_TIMEOUT_POLICY", policy)
+def test_worker_timeout_scores_zero(cls, monkeypatch):
     worker = mock.AsyncMock(side_effect=nv.rewards.MathVerifierTimeout("worker deadline"))
     warning = mock.Mock()
     monkeypatch.setattr(nv.rewards, "isolated_verifier_call", worker)
     monkeypatch.setattr(nv.logger, "warning", warning)
     verifier = cls()
-    call = verifier.async_call([], "answer", {})
-    if policy == "invalid":
-        with pytest.raises(ValueError, match="must be zero or raise"):
-            asyncio.run(call)
-        worker.assert_not_called()
-    elif policy == "raise":
-        with pytest.raises(nv.rewards.MathVerifierTimeout):
-            asyncio.run(call)
-        warning.assert_not_called()
-    else:
-        result = asyncio.run(call)
-        assert result.score == 0
-        assert result.diagnostics["kind"] == verifier.kind
-        assert result.diagnostics["status"] == "timeout"
-        assert result.diagnostics["failure_policy"] == "zero"
-        assert result.diagnostics["elapsed_seconds"] >= 0
-        warning.assert_called_once()
+    result = asyncio.run(verifier.async_call([], "answer", {}))
+    assert result.score == 0
+    assert result.diagnostics["kind"] == verifier.kind
+    assert result.diagnostics["status"] == "timeout"
+    assert result.diagnostics["failure_policy"] == "zero"
+    assert result.diagnostics["elapsed_seconds"] >= 0
+    warning.assert_called_once()
 
 
 @pytest.mark.parametrize("cls", [nv.CalendarVerifier, nv.InstructionVerifier])
@@ -264,10 +250,7 @@ def test_unexpected_worker_errors_remain_fatal(cls, monkeypatch):
         asyncio.run(cls().async_call([], "answer", {}))
 
 
-@pytest.mark.parametrize("policy", ["zero", "raise"])
-def test_real_regex_timeout_and_worker_recovery(policy, monkeypatch):
-    monkeypatch.setenv("OI_MILES_MATH_TIMEOUT_POLICY", policy)
-
+def test_real_regex_timeout_and_worker_recovery():
     async def check():
         loop = asyncio.get_running_loop()
         pool = nv.rewards._MathProcessPool(workers=1, timeout=5)
@@ -279,14 +262,10 @@ def test_real_regex_timeout_and_worker_recovery(policy, monkeypatch):
             assert (await verifier.async_call([], "a", label)).score == 1
             pool.timeout = 0.1
             call = verifier.async_call([], "a" * 80 + "!", label)
-            if policy == "raise":
-                with pytest.raises(nv.rewards.MathVerifierTimeout):
-                    await call
-            else:
-                result = await call
-                assert result.score == 0
-                assert result.diagnostics["kind"] == "nemo_if_v1"
-                assert result.diagnostics["status"] == "timeout"
+            result = await call
+            assert result.score == 0
+            assert result.diagnostics["kind"] == "nemo_if_v1"
+            assert result.diagnostics["status"] == "timeout"
             pool.timeout = 5
             assert (await verifier.async_call([], "a", label)).score == 1
         finally:

@@ -145,33 +145,23 @@ def test_yaml_aliases_rejected_before_expansion(text):
     assert "aliases" in result.diagnostics["error"]
 
 
-@pytest.mark.parametrize("policy", ["zero", "raise"])
-@pytest.mark.parametrize("setting", ["OI_MILES_FORMAT_TIMEOUT_POLICY", "OI_MILES_MATH_TIMEOUT_POLICY"])
-def test_outer_worker_timeout_policy(monkeypatch, policy, setting):
+def test_outer_worker_timeout_scores_zero(monkeypatch):
     warning = mock.Mock()
     monkeypatch.setattr(structured.logger, "warning", warning)
-    monkeypatch.delenv("OI_MILES_FORMAT_TIMEOUT_POLICY", raising=False)
-    monkeypatch.setenv(setting, policy)
     monkeypatch.setattr(
         structured.rewards,
         "isolated_verifier_call",
         mock.AsyncMock(side_effect=structured.rewards.MathVerifierTimeout("worker deadline")),
     )
     call = structured.StructuredOutputVerifier().async_call([], "{}", target())
-    if policy == "raise":
-        with pytest.raises(structured.rewards.MathVerifierTimeout):
-            asyncio.run(call)
-        warning.assert_not_called()
-    else:
-        result = asyncio.run(call)
-        assert result.score == 0 and result.diagnostics["status"] == "timeout"
-        assert result.diagnostics["failure_policy"] == "zero"
-        assert result.diagnostics["elapsed_seconds"] >= 0
-        warning.assert_called_once()
+    result = asyncio.run(call)
+    assert result.score == 0 and result.diagnostics["status"] == "timeout"
+    assert result.diagnostics["failure_policy"] == "zero"
+    assert result.diagnostics["elapsed_seconds"] >= 0
+    warning.assert_called_once()
 
 
 def test_unexpected_worker_failure_propagates(monkeypatch):
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "zero")
     monkeypatch.setattr(
         structured.rewards, "isolated_verifier_call", mock.AsyncMock(side_effect=RuntimeError("worker exited"))
     )
@@ -179,8 +169,7 @@ def test_unexpected_worker_failure_propagates(monkeypatch):
         asyncio.run(structured.StructuredOutputVerifier().async_call([], "{}", target()))
 
 
-def test_pathological_schema_regex_has_one_response_deadline(monkeypatch):
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "zero")
+def test_pathological_schema_regex_has_one_response_deadline():
     verifier = structured.StructuredOutputVerifier(structured.StructuredConfig(timeout_seconds=0.05))
     label = target(schema={"type": "string", "pattern": "^(a+)+$"})
     start = time.monotonic()
@@ -191,9 +180,7 @@ def test_pathological_schema_regex_has_one_response_deadline(monkeypatch):
     assert time.monotonic() - start < 2
 
 
-@pytest.mark.parametrize("policy", ["zero", "raise"])
-def test_alarm_during_cleanup_obeys_policy_and_restores_signal(monkeypatch, policy):
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", policy)
+def test_alarm_during_cleanup_scores_zero_and_restores_signal(monkeypatch):
     previous_handler = signal.getsignal(signal.SIGALRM)
     previous_timer = signal.getitimer(signal.ITIMER_REAL)
     real_setitimer = signal.setitimer
@@ -208,13 +195,9 @@ def test_alarm_during_cleanup_obeys_policy_and_restores_signal(monkeypatch, poli
     monkeypatch.setattr(signal, "setitimer", alarm_on_disarm)
     try:
         verifier = structured.StructuredOutputVerifier()
-        if policy == "raise":
-            with pytest.raises(TimeoutError, match="verification budget"):
-                verifier([], '{"n": 3}', target())
-        else:
-            result = verifier([], '{"n": 3}', target())
-            assert result.score == 0 and result.diagnostics["status"] == "timeout"
-            assert result.diagnostics["failure_policy"] == "zero"
+        result = verifier([], '{"n": 3}', target())
+        assert result.score == 0 and result.diagnostics["status"] == "timeout"
+        assert result.diagnostics["failure_policy"] == "zero"
         cleanup_alarm.assert_called_once()
         assert signal.getsignal(signal.SIGALRM) == previous_handler
         assert signal.getitimer(signal.ITIMER_REAL) == previous_timer
@@ -231,7 +214,6 @@ def test_real_worker_path_and_bad_target_error():
 
 
 def test_real_worker_timeout_logs_in_parent(monkeypatch):
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "zero")
     warning = mock.Mock()
     monkeypatch.setattr(structured.logger, "warning", warning)
     verifier = structured.StructuredOutputVerifier(structured.StructuredConfig(timeout_seconds=0.05))
@@ -243,7 +225,6 @@ def test_real_worker_timeout_logs_in_parent(monkeypatch):
     warning.assert_called_once()
 
 
-@pytest.mark.parametrize("timeout_policy", ["zero", "raise"])
 @pytest.mark.parametrize(
     "schema,prediction,error_type",
     [
@@ -256,8 +237,7 @@ def test_real_worker_timeout_logs_in_parent(monkeypatch):
     ],
     ids=["recursive-arrays", "huge-integer-multiple"],
 )
-def test_async_instance_validation_limits_score_zero(monkeypatch, timeout_policy, schema, prediction, error_type):
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", timeout_policy)
+def test_async_instance_validation_limits_score_zero(schema, prediction, error_type):
     label = target(schema=schema)
     # Both inputs pass parsing/serialization and target validation. The failure
     # happens only when the schema validator traverses/calculates on the instance.

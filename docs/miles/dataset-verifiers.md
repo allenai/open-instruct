@@ -26,11 +26,10 @@ schema: the policy is part of every target and therefore the artifact hash.
 Duplicate mapping keys, YAML aliases, nonfinite values, external schema references
 and XML entities are rejected. Local references and regex schema keywords are supported.
 A worker process and a configurable response deadline (`timeout_seconds`, default
-1 second) bound parsing and schema regex matching together. Timeout diagnostics
-follow `OI_MILES_FORMAT_TIMEOUT_POLICY`, falling back to the math policy (`zero`
-by default; `raise` preserves a scoring failure), including the outer worker
-timeout. The response budget includes target validation; slow targets can exhaust
-it. Invalid schema/configuration exceptions propagate, as do unexpected worker failures.
+1 second) bound parsing and schema regex matching together. Timeouts always
+return zero with `status: timeout`, the error and elapsed time in diagnostics,
+including the outer worker timeout. There is no timeout policy setting. The
+response budget includes target validation; slow targets can exhaust it. Invalid schema/configuration exceptions propagate, as do unexpected worker failures.
 The old `JSONSchemaVerifier` remains unchanged.
 
 After successful parsing and target checks, instance validation can still exceed
@@ -103,9 +102,9 @@ Times accept 24-hour notation or case-insensitive AM/PM (for example, `09:00`,
 `9am`, and `9:00 AM`). Calendar answers must be raw JSON; Markdown code fences
 are rejected. Schedule feasibility is evaluated within this response contract.
 
-Both adapters apply `OI_MILES_MATH_TIMEOUT_POLICY` to the isolated worker's
-45-second deadline: `zero` (default) returns zero with `status: timeout`,
-`failure_policy`, `error`, and `elapsed_seconds`; `raise` propagates the timeout.
+Both adapters return zero when the isolated worker exceeds its 45-second
+deadline, with `status: timeout`, `failure_policy: zero`, `error`, and
+`elapsed_seconds` in diagnostics. There is no timeout policy setting.
 Other worker/configuration errors remain fatal. Diagnostics consistently identify
 `calendar_v1` or `nemo_if_v1`, with `status: completed` for ordinary scores.
 
