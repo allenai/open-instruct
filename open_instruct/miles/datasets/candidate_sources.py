@@ -45,11 +45,13 @@ def file_hash(path):
 
 def messages(raw):
     params = raw.get("responses_create_params") or {}
+    if not isinstance(params, dict):
+        raise ValueError("requires_responses_parameters_object")
     if params.get("tools"):
         raise ValueError("requires_tool_environment")
-    if params.get("instructions"):
-        # A system-level instruction outside `input`; dropping it would change the prompt.
-        raise ValueError("requires_responses_instructions_support")
+    instructions = params.get("instructions")
+    if instructions is not None and not isinstance(instructions, str):
+        raise ValueError("requires_text_instructions")
     value = params.get("input", raw.get("input", raw.get("prompt", raw.get("question", raw.get("problem")))))
     if isinstance(value, str):
         value = [{"role": "user", "content": value}]
@@ -59,7 +61,11 @@ def messages(raw):
         raise ValueError("requires_text_conversation_ending_with_user")
     result = copy.deepcopy(value)
     for message in result:
-        if message.get("role") not in {"system", "user", "assistant"} or set(message) - {"role", "content", "type"}:
+        if message.get("role") not in {"system", "developer", "user", "assistant"} or set(message) - {
+            "role",
+            "content",
+            "type",
+        }:
             raise ValueError("unsupported_message_fields_or_role")
         content = message.get("content")
         if isinstance(content, list):
@@ -71,6 +77,20 @@ def messages(raw):
         role = message["role"]
         message.clear()
         message.update(role=role, content=content)
+    # Match NeMo Gym's Responses-to-chat conversion, using the system role our
+    # chat templates render. Preserve the order and text of the leading context.
+    leading_parts = [instructions] if instructions else []
+    leading_count = 0
+    for message in result:
+        if message["role"] not in {"system", "developer"}:
+            break
+        leading_parts.append(message["content"])
+        leading_count += 1
+    result = result[leading_count:]
+    if any(message["role"] == "developer" for message in result):
+        raise ValueError("requires_leading_developer_messages")
+    if leading_parts:
+        result.insert(0, {"role": "system", "content": "\n\n".join(leading_parts)})
     return result
 
 

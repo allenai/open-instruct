@@ -1,11 +1,16 @@
 """Source preparation must preserve populations, messages and reward contracts."""
 
 import asyncio
+import copy
 import json
 
 import pytest
 import regex
+from tokenizers import Tokenizer as FastTokenizer
+from tokenizers import models
+from transformers import PreTrainedTokenizerFast
 
+from open_instruct import dataset_transformation
 from open_instruct.miles.datasets import candidate_sources as sources
 from open_instruct.miles.rewards import litmus
 
@@ -50,7 +55,7 @@ def test_explicit_math_and_no_topic_subsetting():
 
 
 def test_full_population_no_cap_or_screen_reservation(tmp_path):
-    records = [
+    records: list[dict] = [
         {"id": "screened", "raw_record": {"prompt": "x" * 3000, "target": {"kind": "numeric", "value": "2"}}},
         {"id": "duplicate-text", "raw_record": {"prompt": "x" * 3000, "target": {"kind": "numeric", "value": "3"}}},
         {"id": "unsupported", "raw_record": {"prompt": "question", "target": {"kind": "unknown"}}},
@@ -123,7 +128,7 @@ def test_litmus_invalid_contract_is_not_zero():
         )
 
 
-def prepare_one(tmp_path, adapter, records):
+def prepare_one(tmp_path, adapter, records, tokenizer=None):
     raw = tmp_path / "input.jsonl"
     raw.write_text("".join(json.dumps(row) + "\n" for row in records))
     receipt = tmp_path / "hygiene.json"
@@ -135,7 +140,7 @@ def prepare_one(tmp_path, adapter, records):
     }
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({"schema_version": 1, "sources": {"source": source}}))
-    entry = sources.prepare(plan, tmp_path / "out", Tokenizer())["sources"]["source"]
+    entry = sources.prepare(plan, tmp_path / "out", tokenizer or Tokenizer())["sources"]["source"]
     lines = (tmp_path / "out/source/dispositions.jsonl").read_text().splitlines()
     return entry, [json.loads(line)["reason"] for line in lines]
 
@@ -184,13 +189,84 @@ def test_invalid_structured_schema_is_omitted_not_fatal(tmp_path):
     assert reasons[0].startswith("SchemaError: ")
 
 
-def test_responses_instructions_are_not_silently_dropped():
+def test_responses_instructions_are_preserved():
     params = {"instructions": "Answer in French.", "input": "question"}
-    with pytest.raises(ValueError, match="requires_responses_instructions_support"):
-        sources.messages({"responses_create_params": params})
-    assert sources.messages({"responses_create_params": {"instructions": None, "input": "question"}}) == [
+    assert sources.messages({"responses_create_params": params}) == [
+        {"role": "system", "content": "Answer in French."},
+        {"role": "user", "content": "question"},
+    ]
+
+
+@pytest.mark.parametrize("instructions", [None, ""])
+def test_empty_instructions_do_not_add_a_system_message(instructions):
+    assert sources.messages({"responses_create_params": {"instructions": instructions, "input": "question"}}) == [
         {"role": "user", "content": "question"}
     ]
+
+
+@pytest.mark.parametrize("instructions", [False, 123, ["Answer in French."], {"text": "Answer in French."}])
+def test_instructions_must_be_text(instructions):
+    with pytest.raises(ValueError, match="requires_text_instructions"):
+        sources.messages({"responses_create_params": {"instructions": instructions, "input": "question"}})
+
+
+@pytest.mark.parametrize("instructions", [None, "Answer in French."])
+def test_leading_context_survives_preparation_and_olmo_template(tmp_path, instructions):
+    raw = {
+        "responses_create_params": {
+            "instructions": instructions,
+            "input": [
+                {"role": "system", "content": "Keep units."},
+                {"role": "developer", "content": [{"type": "input_text", "text": "Use two decimals."}]},
+                {"role": "system", "content": " Preserve this whitespace.\n"},
+                {"role": "user", "content": "First question"},
+                {"role": "assistant", "content": "Previous answer"},
+                {"role": "user", "content": "Final question"},
+            ],
+        },
+        "target": {"kind": "numeric", "value": "2"},
+    }
+    original = copy.deepcopy(raw)
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=FastTokenizer(models.WordLevel({"[UNK]": 0}, unk_token="[UNK]")),
+        unk_token="[UNK]",
+        eos_token="<|im_end|>",
+        chat_template=dataset_transformation.CHAT_TEMPLATES["olmo_thinker"],
+    )
+    entry, reasons = prepare_one(tmp_path, "candidate_v1", [raw], tokenizer)
+    assert entry["counts"]["prepared_rows"] == 1 and reasons == []
+    row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
+    context = "Keep units.\n\nUse two decimals.\n\n Preserve this whitespace.\n"
+    if instructions:
+        context = instructions + "\n\n" + context
+    assert row["metadata"]["messages"] == [
+        {"role": "system", "content": context},
+        *original["responses_create_params"]["input"][3:],
+    ]
+    assert row["input"].startswith("<|im_start|>system\n" + context)
+    assert row["input"].count("<|im_start|>system\n") == 1
+    assert row["input"].endswith(
+        "<|im_start|>user\nFirst question<|im_end|>\n"
+        "<|im_start|>assistant\nPrevious answer<|im_end|>\n"
+        "<|im_start|>user\nFinal question<|im_end|>\n"
+        "<|im_start|>assistant\n<think>"
+    )
+    assert row["label"] == original["target"]
+    assert row["metadata"]["raw_record_sha256"] == sources.digest(original)
+    assert sources.messages(raw) == row["metadata"]["messages"]
+    assert raw == original
+
+
+def test_developer_message_after_user_is_not_reordered():
+    raw = {
+        "prompt": [
+            {"role": "user", "content": "First question"},
+            {"role": "developer", "content": "Later instruction"},
+            {"role": "user", "content": "Next question"},
+        ]
+    }
+    with pytest.raises(ValueError, match="requires_leading_developer_messages"):
+        sources.messages(raw)
 
 
 def test_unknown_adapter_is_a_plan_error_not_an_omission(tmp_path):

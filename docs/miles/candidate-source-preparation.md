@@ -32,13 +32,21 @@ receipt; pointing at a receipt does not independently certify a new input's
 cleanliness. The adapter does not select on policy reward, reserve screened
 prompts, cap pool size, or rewrite messages with a new answer suffix. It records
 all unsupported rows in `dispositions.jsonl`, including rows with malformed
-messages, invalid schemas or regular expressions, and Responses API
-`instructions` (a system-level instruction outside the message list, which the
-adapters do not yet carry into the prompt). An unknown adapter name is a plan
-error and stops preparation. Long prompts remain in the pool:
+messages, invalid schemas or regular expressions. An unknown adapter name is a
+plan error and stops preparation. Long prompts remain in the pool:
 set an adequate training context limit, or explicitly
 name and review a shorter-context variant. Repeated prompts are counted, not
 silently removed; resolve conflicting targets before qualification.
+
+Responses API `instructions` are placed first in a single system message,
+followed by the existing leading system/developer messages in their original
+order, separated by blank lines. This follows
+[NeMo Gym's Responses-to-chat conversion](https://github.com/NVIDIA-NeMo/Gym/blob/main/nemo_gym/models/chat_completions_converter.py)
+and lets our chat templates render developer instructions through their supported
+system role. Instruction text and subsequent conversation turns are preserved;
+the selected tokenizer's chat template supplies the role delimiters and assistant
+generation prefix. Developer messages after the leading context remain unsupported
+and are recorded as omissions rather than moved across conversation turns.
 
 | Adapter | Target and scope |
 |---|---|
