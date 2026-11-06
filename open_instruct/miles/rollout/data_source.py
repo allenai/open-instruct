@@ -127,13 +127,13 @@ class DashboardDrainingRolloutDataSource:
     def pool_exhausted(self):
         with self._cursor_lock:
             return (
-                getattr(self._delegate.args.olmo_core, "prompt_provider", "") == "pool_exposure"
+                getattr(self._delegate.args.olmo_core, "prompt_provider", "") in ("pools", "pool_exposure")
                 and not self._delegate.buffer
                 and not self._delegate.provider.available()
             )
 
     def stage_training_batch(self, rollout_id, samples):
-        if self._delegate.args.olmo_core.prompt_provider != "pool_exposure":
+        if self._delegate.args.olmo_core.prompt_provider not in ("pools", "pool_exposure"):
             return
         with self._cursor_lock:
             counts = {}

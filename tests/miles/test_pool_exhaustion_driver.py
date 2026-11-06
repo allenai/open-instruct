@@ -11,11 +11,18 @@ from miles.backends.core_utils.rollout.errors import PromptPoolExhausted
 from open_instruct.miles.execution import driver
 
 
+def test_old_exposure_only_runtime_is_rejected_before_startup(monkeypatch):
+    monkeypatch.delattr(driver.rollout_errors, "FINITE_POOL_PROVIDERS")
+    args = SimpleNamespace(olmo_core=SimpleNamespace(prompt_provider="pools"))
+    with pytest.raises(RuntimeError, match="companion MILES runtime"):
+        asyncio.run(driver.train(args))
+
+
 @pytest.mark.parametrize("saved", [True, False])
 def test_exhaustion_preserves_last_complete_checkpoint_without_duplicate_save(monkeypatch, saved):
     args = SimpleNamespace(
         olmo_core=SimpleNamespace(
-            prompt_provider="pool_exposure",
+            prompt_provider="pools",
             publication_mode="barrier",
             max_run_seconds=None,
             diagnostic_interval=0,

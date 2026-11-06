@@ -10,7 +10,7 @@ import pytest
 from open_instruct.miles.execution import driver
 
 
-@pytest.mark.parametrize("provider", ["shuffle", "pool_exposure"])
+@pytest.mark.parametrize("provider", ["shuffle", "pools", "pool_exposure"])
 @pytest.mark.parametrize("mode", ["refresh", "barrier"])
 @pytest.mark.parametrize("failure", [None, "initial", "update", "timeout", "training"])
 def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider):
@@ -110,7 +110,7 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider):
     assert learner.train.await_count == (0 if failure == "initial" else 1)
     assert manager.get.await_count == learner.train.await_count
     assert manager.core_commit_exposure.await_count == int(
-        provider == "pool_exposure" and failure not in {"initial", "training"}
+        provider in ("pools", "pool_exposure") and failure not in {"initial", "training"}
     )
     for component in (manager, learner, inference):
         component.dispose.assert_awaited_once()

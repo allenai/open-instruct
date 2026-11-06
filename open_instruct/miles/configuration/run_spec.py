@@ -779,7 +779,7 @@ class RunSpec:
             # Nothing to resume from, so a wall-clock stop is final; launch_warnings says so.
             core["max_run_final"] = True
         if "sources" in self.data:
-            put("core.prompt_provider", "pool_exposure" if "pools" in self.data else "mixture", "data.sources")
+            put("core.prompt_provider", "pools" if "pools" in self.data else "mixture", "data.sources")
             put(
                 "core.prompt_mixture",
                 prepared.get("prompt_mixture", str(root / "prepared" / "data" / "mixture.json")),
