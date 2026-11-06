@@ -123,9 +123,9 @@ def test_failed_subprocess_prints_bounded_log_and_preserves_error(receipt, monke
     stderr = capsys.readouterr().err
     assert "missing sandbox monitor.sh" in stderr
     assert "olmo-eval.log" in stderr
-    assert stderr.count("old output") < 80
+    assert stderr.count("old output") < 160
     logs = list(output.rglob("olmo-eval.log"))
-    assert len(logs) == 1
+    assert len(logs) == 2
     assert logs[0].read_text().count("old output") == 2000
     assert not list(output.rglob("complete.json"))
 
@@ -216,3 +216,41 @@ def test_lock_excludes_other_process_and_is_released_after_kill(receipt):
         child.stdout.close()
     with runner.evaluation_output(receipt) as output:
         assert (output / "provenance.json").is_file()
+
+
+def test_failed_task_does_not_block_later_tasks(receipt, runtime):
+    calls, state, _ = runtime
+    receipt["tasks"].append({"task": "c", "generation": {}, "scoring": {}})
+    output = runner.result_directory(receipt)
+    with pytest.raises(subprocess.CalledProcessError):
+        runner.run_evaluation(receipt)
+    assert calls == ["a", "b", "c"]
+    assert runner.saved_task(output, receipt["tasks"][2])[1] is not None
+    assert json.loads((output / "task-failures.json").read_text())[0]["task"] == "b"
+    state["fail"] = None
+    runner.run_evaluation(receipt)
+    assert calls == ["a", "b", "c", "b"]
+    assert json.loads((output / "task-failures.json").read_text()) == []
+
+
+@pytest.mark.parametrize("top_k", [0, -1, 20, None])
+def test_scicode_normalizes_only_hf_disabled_top_k(tmp_path, top_k):
+    checkpoint = tmp_path / "hf"
+    checkpoint.mkdir()
+    original = {"top_k": top_k, "temperature": 0.6, "top_p": 0.95, "eos_token_id": [1, 2]}
+    config = checkpoint / "generation_config.json"
+    config.write_text(json.dumps(original))
+    weights = checkpoint / "model.safetensors"
+    weights.write_bytes(b"unchanged weights")
+    output = tmp_path / "output"
+    output.mkdir()
+    view = Path(runner.scicode_checkpoint(str(checkpoint), output))
+    assert json.loads(config.read_text()) == original
+    if top_k == 0:
+        assert view != checkpoint
+        assert (view / weights.name).is_symlink()
+        assert (view / weights.name).resolve() == weights
+        assert json.loads((view / config.name).read_text()) == {**original, "top_k": -1}
+        assert Path(runner.scicode_checkpoint(str(checkpoint), output)).is_dir()
+    else:
+        assert view == checkpoint
