@@ -41,7 +41,10 @@ and documentation. Requalify when changing reward behavior. Use a matching
 MILES application image with the dependencies in
 `scripts/data/rl_readiness/requirements.txt`. The readiness Docker overlay installs
 those dependencies on an application image already built from this code. Keep
-the pinned MILES runtime; the overlay does not replace that runtime. No new GPU
+the pinned MILES runtime; the overlay does not replace that runtime. Building the
+overlay requires `--secret id=github_token,env=GH_TOKEN`, with a GitHub token that
+can read the private code-execution client repository. BuildKit mounts the token
+only for dependency installation; do not pass it as a build argument. No new GPU
 training run is claimed by this release.
 
 These are explicit **16,384-token prompt variants**, rendered with the bundled
