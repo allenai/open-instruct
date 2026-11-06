@@ -720,24 +720,42 @@ reporting unsupported rows. The [reward verifier guide](dataset-verifiers.md)
 describes their runtime contracts. CPU qualification checks the complete prepared
 pool and reviewed reward controls before a named source enters a MILES mixture;
 it does not require a separate inference study or establish downstream benefit.
-## Named pools with training-exposure control
 
-A fixed source mixture controls proposed draws; filtering and queue expiry can
-make the data actually used for training quite different. Named pools instead
-target uniform exposure in **trained prompt-groups**, and can replay low-success
-truncated prompts within the selected pool. Dataset rows supply a top-level
-`pool_id`; preparation preserves their source and verifier and maps the label to
-a configured pool name. This is opt-in and leaves existing shuffle and fixed
-mixture configurations unchanged.
+## Named pools and independent sampling policies
+
+Named pools organize labeled training data independently of how it is sampled.
+The same prepared inventory can use a finite global shuffle, uniform pool draws,
+fixed weighted pool draws, or adaptive training-exposure balancing. The default is
+one global shuffle without replacement. Pool exposure is recorded for every
+policy; only the explicit `exposure` policy uses those counts to adjust draws.
+Selective truncation replay is independently enabled and retains original verifiers.
+
+| `data.sampling.policy` | Selection |
+|---|---|
+| `shuffle` (default) | One global permutation of all fresh rows, regardless of pool sizes. Replay inserts retries without changing the relative order of fresh rows. |
+| `uniform` | Choose uniformly among currently available pools, then draw the next row from that pool. |
+| `weighted` | Choose available pools by the configured positive weights, renormalizing as pools empty. |
+| `exposure` | Adjust proposals toward uniform trained prompt-group exposure, compensating for delivery rate, accumulated deficits and outstanding work. |
+
+All policies consume each fresh row once and allow pools to empty. With replay
+turned off and a complete traversal, they consume the same fresh inventory; they
+differ in order, not membership. With a shorter budget, their coverage can differ.
+`data.shuffle=false` disables the initial row shuffle; static pool selection still
+uses its seeded RNG. Existing non-pool shuffle/source-mixture epoch behavior is
+unchanged.
 
 Exposure counts groups, not draws or tokens: a prompt with eight responses counts
 as one unit only after the optimizer update using it succeeds. If Math delivers a
 trained group on 25% of draws and IF on 50%, equal exposure needs approximately
-two Math draws per IF draw. The controller estimates that delivery rate, favors
-pools behind their accumulated target, and subtracts the expected contribution
-of outstanding work. Adjustments are bounded; token totals are reported separately.
+two Math draws per IF draw. Only `exposure` tries to compensate in this way;
+`shuffle`, `uniform` and `weighted` do not react to those outcome counts.
 
 ```toml
+[data.sampling]
+policy = "shuffle" # alternatively: uniform, weighted, exposure
+# With policy="weighted", supply every configured pool name:
+# weights = { math = 3, if = 1, code = 1, science = 1, logic = 1, general = 1 }
+
 [data.pools]
 math = { label = "math" }
 if = { label = "instruction_following" }
@@ -779,17 +797,17 @@ unchanged by the sampler; an eight-response recipe remains eight-response.
 | Contract | Behavior |
 |---|---|
 | Membership | Exactly one configured label per training row. Missing, unknown, duplicate label definitions, and conflicting runtime annotations fail preparation. |
-| Source fractions | Rejected in pool mode, rather than silently ignored. Fresh rows within a pool are uniformly shuffled across its source membership. |
+| Source fractions | Rejected in pool mode, rather than silently ignored. Use `data.sampling.weights` for fixed pool weights; every configured pool requires a finite positive weight. Weights are rejected for other policies. |
 | Finite fresh data | Each row is drawn once; there are no automatic epochs. Empty pools are skipped. |
 | Exposure credit | One group per completed optimizer update that used it. Scored, queued, filtered, or stale groups earn no credit. |
-| Reservations | Outstanding draws reserve estimated delivery, reducing over-correction during asynchronous generation. |
-| Controller | Delivery estimate `(trained + 1)/(terminal + 2)`, floored at 0.05; target deficit corrected over a 64-group horizon. Proposal weights are bounded to `[0.25, 5]`, limiting draw ratios to 20:1. |
-| Uniform target | Each trained group's unit target is divided over the pools active when it was drawn. Inactive pools accrue no new target from later draws. Exact equality is not promised after pools empty or for sources with effectively zero delivery. |
-| Replay | Pool selection precedes replay. The replay fraction is a cap on that pool's proposed draws. Replay regenerates responses and uses the original verifier. |
+| Exposure reservations only | Outstanding draws reserve estimated delivery, reducing over-correction during asynchronous generation. |
+| Exposure controller only | Delivery estimate `(trained + 1)/(terminal + 2)`, floored at 0.05; target deficit corrected over a 64-group horizon. Proposal weights are bounded to `[0.25, 5]`, limiting draw ratios to 20:1. |
+| Exposure target only | Each trained group's unit target is divided over the pools active when it was drawn. Inactive pools accrue no new target from later draws. Exact equality is not promised after pools empty or for sources with effectively zero delivery. |
+| Replay | Within the selected pool, eligible retries may replace a fresh draw. The replay fraction caps that pool's proposed draws. In global shuffle, a retry does not advance the fresh permutation; after it drains, any remaining budget-eligible replays are selected uniformly across available pools. |
 | Replay trigger | Existing PR 2187 history, with fresh-response length windows scoped to source within pool. Invalid verifier results are separate from valid zeros. |
 | Exhaustion | A pool without fresh rows or a budget-eligible replay is inactive. Once all pools and outstanding generation drain, an incomplete final collection is not trained; the last completed checkpoint is saved when configured. |
 | Stale work | Pool mode defaults to `async_unused_samples_handler="drop"`; explicit retry is rejected. Drops release reservations. |
-| Recovery | Manifest identity, cursors, RNG, targets, delivery counters, reservations, and replay histories are checkpointed with pending prompts. |
+| Recovery | Manifest and selection-policy identity, cursors, RNG, targets, delivery counters, reservations, and replay histories are checkpointed with pending prompts. |
 
 The first implementation supports fully asynchronous disaggregated serving,
 without prepared-batch overlap. The application requires the companion MILES
@@ -800,9 +818,10 @@ alone is insufficient. Full distributed GPU validation remains pending.
 
 Inference records retain `pool_id`, `sampling_pool`, `mixture_source`, and
 `pool_selection_id`. Per-update `pool-exposure-<attempt>.jsonl` receipts live in
-`records.root` and contain trained/target/proposed/pending counts, generated and
+`records.root` and contain trained/proposed/pending counts, generated and
 trained response tokens, fresh/replay training counts, and replay diagnostics.
-Unknown token counts are recorded separately. Receipts identify the resume point;
+Exposure targets are reported only for the `exposure` policy. Unknown token counts
+are recorded separately. Receipts identify the resume point;
 if an attempt fails before checkpointing, reconcile its tail against the restored
 checkpoint instead of adding counts from different attempts. Captured response
 tokens are not loss-mask tokens or GPU cost.
@@ -811,3 +830,7 @@ An empty pool does not force another epoch or a replay. When fresh data is gone,
 replay must still satisfy its budget and shortening trigger; otherwise training
 can finish before the requested update count. Different pool labels do not change
 verifiers, reward semantics, truncation policy, or the zero-variance filter.
+
+Changing the policy or weights is a new sampling experiment: checkpoint restore rejects
+a mismatched identity. Checkpoints from the earlier draft exposure-only implementation
+also require a new run. No pool-mode production runs have been qualified yet.

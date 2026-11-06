@@ -23,7 +23,7 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
         core = getattr(args, "olmo_core", None)
         if provider is not None:
             self.provider = provider
-        elif getattr(core, "prompt_provider", "shuffle") in ("mixture", "pool_exposure"):
+        elif getattr(core, "prompt_provider", "shuffle") in ("mixture", "pools", "pool_exposure"):
             self.provider, self.dataset = mixture_provider.load(args, self.dataset)
         elif getattr(core, "prompt_provider", "shuffle") == "remind":
             self.provider = remind_provider.ReMindPromptProvider(
@@ -37,7 +37,7 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             self.provider = prompt_provider.ShuffledPromptProvider(
                 lambda: self.dataset, shuffle=bool(getattr(args, "rollout_shuffle", False))
             )
-        if getattr(core, "prompt_replay_enabled", False) and core.prompt_provider != "pool_exposure":
+        if getattr(core, "prompt_replay_enabled", False) and core.prompt_provider not in ("pools", "pool_exposure"):
             if self.provider.requires_feedback:
                 raise ValueError("Prompt replay supports shuffle or mixture, not another feedback provider")
             if isinstance(self.provider, mixture_provider.MixturePromptProvider):

@@ -23,6 +23,7 @@ from open_instruct.miles.configuration import validation
 from open_instruct.miles.datasets import mixture, pools, synlogic
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import judging, task_verifiers
+from open_instruct.miles.rollout import pool_sampling
 
 # Preserve factory paths in existing prepared datasets and reward registries.
 RewardConfig = task_verifiers.RewardConfig
@@ -178,6 +179,7 @@ def validate_data(data):
         "tasks",
         "sources",
         "pools",
+        "sampling",
         "recipe",
         "rl_manifest",
         "prompt_data",
@@ -199,8 +201,11 @@ def validate_data(data):
         raise InputError("Named data recipes are not yet ported; use tasks or an immutable rl_manifest")
     if "prompt_data" in modes and not data.get("reward_config"):
         raise InputError("Prepared prompt_data requires a trusted reward_config")
+    if "sampling" in data and "pools" not in data:
+        raise InputError("data.sampling requires data.pools")
     if "pools" in data:
         pools.validate(data["pools"])
+        pool_sampling.validate(data.get("sampling", {}), data["pools"])
         if "sources" not in modes:
             raise InputError("data.pools requires data.sources")
     if "sources" in modes:
@@ -746,7 +751,14 @@ def prepare_data(
                     "seed": contract["seed"],
                     "shuffle": data.get("shuffle", True),
                     "sources": sources,
-                    **({"pools": data["pools"]} if "pools" in data else {}),
+                    **(
+                        {
+                            "pools": data["pools"],
+                            "sampling": pool_sampling.validate(data.get("sampling", {}), data["pools"]),
+                        }
+                        if "pools" in data
+                        else {}
+                    ),
                 }
             )
             (staging / "mixture.json").write_bytes(raw)

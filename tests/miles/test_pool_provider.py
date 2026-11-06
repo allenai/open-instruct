@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
 import test_mixture_provider
 import test_prompt_provider
 import test_remind_provider
@@ -17,12 +18,15 @@ from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutData
 args = test_prompt_provider.args
 
 
-def setup(args, tmp_path):
+def setup(args, tmp_path, policy="shuffle"):
     test_remind_provider.setup_remind(args, tmp_path)
     test_mixture_provider.setup(args)
     path = Path(args.olmo_core.prompt_mixture)
     manifest = json.loads(path.read_text())
     manifest["pools"] = {"math": {"label": "math"}, "if": {"label": "if"}, "empty": {"label": "empty"}}
+    manifest["sampling"] = {"policy": policy}
+    if policy == "weighted":
+        manifest["sampling"]["weights"] = {"math": 3, "if": 1, "empty": 1}
     for source, pool in zip(manifest["sources"], ["math", "if"], strict=True):
         source.pop("fraction")
         data = path.parent / source["path"]
@@ -35,14 +39,15 @@ def setup(args, tmp_path):
         source["sha256"] = hashlib.sha256(raw).hexdigest()
     path.write_text(json.dumps(manifest))
     args.olmo_core = CoreConfig(
-        prompt_provider="pool_exposure", prompt_mixture=str(path), records_root=str(tmp_path / "records")
+        prompt_provider="pools", prompt_mixture=str(path), records_root=str(tmp_path / "records")
     )
     args.rollout_batch_size = 1
     args.n_samples_per_prompt = 2
 
 
-def test_actual_filter_does_not_credit_until_optimizer_commit_and_restore(args, tmp_path):
-    setup(args, tmp_path)
+@pytest.mark.parametrize("policy", ["shuffle", "uniform", "weighted", "exposure"])
+def test_actual_filter_does_not_credit_until_optimizer_commit_and_restore(args, tmp_path, policy):
+    setup(args, tmp_path, policy)
     source = DashboardDrainingRolloutDataSource(args)
     buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, source.add_samples))
     recorder = buffer._delegate._records
@@ -80,8 +85,9 @@ def test_actual_filter_does_not_credit_until_optimizer_commit_and_restore(args, 
         source.close()
 
 
-def test_expired_queue_entry_releases_exposure_reservation(args, tmp_path):
-    setup(args, tmp_path)
+@pytest.mark.parametrize("policy", ["shuffle", "uniform", "weighted", "exposure"])
+def test_expired_queue_entry_releases_exposure_reservation(args, tmp_path, policy):
+    setup(args, tmp_path, policy)
     source = DashboardDrainingRolloutDataSource(args)
     buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, source.add_samples))
     recorder = buffer._delegate._records

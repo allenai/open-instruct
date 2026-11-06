@@ -38,12 +38,13 @@ logger = logger_utils.setup_logger(__name__)
 async def train(args, *, export_hf=None):
     if getattr(args, "cluster_backend", "ray") != "ray":
         raise ValueError("Core currently requires the Ray cluster backend")
-    pooled = getattr(args.olmo_core, "prompt_provider", "shuffle") == "pool_exposure"
+    pooled = getattr(args.olmo_core, "prompt_provider", "shuffle") in ("pools", "pool_exposure")
     exhaustion_type = None
     if pooled:
         exhaustion_type = getattr(rollout_errors, "PromptPoolExhausted", None)
-        if exhaustion_type is None:
-            raise RuntimeError("Pool exposure requires the companion MILES runtime with trained-exposure callbacks")
+        supported = getattr(rollout_errors, "FINITE_POOL_PROVIDERS", ("pool_exposure",))
+        if exhaustion_type is None or args.olmo_core.prompt_provider not in supported:
+            raise RuntimeError("Named pools require the companion MILES runtime with trained-exposure callbacks")
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
     # A time stop saves and leaves the run open, like a debug exit: no final export

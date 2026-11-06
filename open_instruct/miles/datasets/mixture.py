@@ -18,7 +18,7 @@ def validate_sources(sources, *, pooled=False):
             raise InputError("Source names must be unique safe identifiers (letters, digits, underscore, dash)")
         if pooled:
             if "fraction" in source:
-                raise InputError("Pool exposure uses uniform targets; omit source fraction")
+                raise InputError("Named pools use data.sampling; omit source fraction")
             names.append(name)
             continue
         if type(fraction) not in (int, float) or not math.isfinite(fraction) or not 0 < fraction <= 1:

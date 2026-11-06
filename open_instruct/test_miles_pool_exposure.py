@@ -30,13 +30,14 @@ def provider(size=10000, replay=None):
         for p in ["math", "if"]
         for i in range(size)
     ]
-    return pool_provider.ExposurePromptProvider(
+    return pool_provider.PoolPromptProvider(
         samples,
         pools={p: {"label": p} for p in ["math", "if", "empty"]},
         seed=17,
         shuffle=True,
         identity="fixture",
         replay=replay,
+        sampling={"policy": "exposure"},
     )
 
 
@@ -179,6 +180,7 @@ def test_prepare_labeled_sources_preserves_payload_and_emits_pool_manifest(envir
     result = test_miles_run_data.prepare(environment, data)
     manifest = json.loads(Path(result["prompt_mixture"]).read_text())
     assert manifest["pools"] == data["pools"]
+    assert manifest["sampling"] == {"policy": "shuffle"}
     assert "fraction" not in manifest["sources"][0]
     actual = json.loads(Path(result["prompt_data"]).read_text())
     assert actual["pool_id"] == row["pool_id"]

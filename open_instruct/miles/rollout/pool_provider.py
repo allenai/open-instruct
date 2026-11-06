@@ -1,11 +1,11 @@
-"""Finite named pools with trained-exposure control and pool-local fresh replay."""
+"""Finite named pools with independent selection, accounting and optional replay."""
 
 import copy
 import math
 import random
 from collections import Counter
 
-from open_instruct.miles.rollout import replay_provider
+from open_instruct.miles.rollout import pool_sampling, replay_provider
 
 SELECTION_ID = "pool_selection_id"
 POOL = "sampling_pool"
@@ -40,18 +40,35 @@ class FinitePrompts:
         self.offset = offset
 
 
-class ExposurePromptProvider:
+class PoolPromptProvider:
     requires_feedback = True
 
-    def __init__(self, samples, *, pools, seed, shuffle, identity, replay=None):
+    def __init__(self, samples, *, pools, seed, shuffle, identity, replay=None, sampling=None):
+        self.sampling = pool_sampling.validate({} if sampling is None else sampling, pools)
         self.identity = copy.deepcopy(
-            {"version": 1, "manifest": identity, "pools": pools, "seed": seed, "shuffle": shuffle, "replay": replay}
+            {
+                "version": 2,
+                "manifest": identity,
+                "pools": pools,
+                "seed": seed,
+                "shuffle": shuffle,
+                "replay": replay,
+                "sampling": self.sampling,
+            }
         )
         self.rng = random.Random(seed)
+        # A single permutation fixes fresh global order independently of outcomes.
+        # Replays can be inserted before a fresh draw without advancing this order.
+        samples = list(samples)
+        if self.sampling["policy"] == "shuffle" and shuffle:
+            random.Random(seed).shuffle(samples)
+        self.fresh_order = [s.metadata[POOL] for s in samples] if self.sampling["policy"] == "shuffle" else []
         self.providers = {}
         for name in pools:
             members = [s for s in samples if s.metadata[POOL] == name]
-            base = FinitePrompts(members, seed=f"{seed}:{name}", shuffle=shuffle)
+            base = FinitePrompts(
+                members, seed=f"{seed}:{name}", shuffle=shuffle and self.sampling["policy"] != "shuffle"
+            )
             self.providers[name] = (
                 replay_provider.ReplayPromptProvider(base, members, **replay) if replay and members else base
             )
@@ -72,6 +89,21 @@ class ExposurePromptProvider:
     def available(self):
         return bool(self.active())
 
+    def _choose_pool(self, active):
+        if self.sampling["policy"] == "shuffle":
+            offset = sum(getattr(p, "base", p).offset for p in self.providers.values())
+            if offset < len(self.fresh_order):
+                return self.fresh_order[offset]
+        weights = pool_sampling.draw_weights(
+            self.sampling,
+            active,
+            trained=self.trained,
+            targets=self.targets,
+            terminal=self.terminal,
+            pending=self.pending,
+        )
+        return self.rng.choices(active, weights=weights, k=1)[0]
+
     def next_samples(self, n):
         if type(n) is not int or n < 0:
             raise ValueError("n must be a nonnegative integer")
@@ -80,15 +112,7 @@ class ExposurePromptProvider:
             active = self.active()
             if not active:
                 raise StopIteration("All named pools exhausted")
-            outstanding = Counter(entry["pool"] for entry in self.pending.values())
-            weights = []
-            for name in active:
-                delivery = max(0.05, (self.trained[name] + 1) / (self.terminal[name] + 2))
-                deficit = self.targets[name] - self.trained[name] - outstanding[name] * delivery
-                # Bound proposal ratios (20:1) and use a 64-group correction horizon.
-                weight = math.exp(max(-3, min(3, deficit / 64))) / delivery
-                weights.append(max(0.25, min(5.0, weight)))
-            name = self.rng.choices(active, weights=weights, k=1)[0]
+            name = self._choose_pool(active)
             sample = copy.copy(self.providers[name].next_samples(1)[0])
             sample.metadata = sample.metadata | {SELECTION_ID: self.draws}
             self.pending[self.draws] = {"pool": name, "active": active, "metadata": dict(sample.metadata)}
@@ -142,14 +166,15 @@ class ExposurePromptProvider:
             self.terminal[name] += 1
             replay = entry["metadata"].get("prompt_replay_review", False)
             self.tokens[f"{name}/{'replay' if replay else 'fresh'}_groups"] += 1
-            for active in entry["active"]:
-                self.targets[active] += 1 / len(entry["active"])
+            if self.sampling["policy"] == "exposure":
+                for active in entry["active"]:
+                    self.targets[active] += 1 / len(entry["active"])
         self.committed_update = update
         self.last_commit = list(selections)
 
     def state_dict(self):
         return {
-            "kind": "pool_exposure",
+            "kind": "pools",
             "identity": copy.deepcopy(self.identity),
             "rng": self.rng.getstate(),
             "providers": {p: v.state_dict() for p, v in self.providers.items()},
@@ -165,7 +190,7 @@ class ExposurePromptProvider:
         }
 
     def load_state_dict(self, state):
-        if state.get("kind") != "pool_exposure" or state.get("identity") != self.identity:
+        if state.get("kind") != "pools" or state.get("identity") != self.identity:
             raise ValueError("Pool checkpoint identity mismatch")
         if set(state["providers"]) != set(self.providers):
             raise ValueError("Pool checkpoint membership mismatch")
@@ -229,13 +254,14 @@ class ExposurePromptProvider:
             f"rollout/pool/{p}/{metric}": counter[p]
             for metric, counter in [
                 ("trained", self.trained),
-                ("target", self.targets),
                 ("proposed", self.proposed),
                 ("terminal", self.terminal),
                 ("pending", pending),
             ]
             for p in self.providers
         }
+        if self.sampling["policy"] == "exposure":
+            result.update({f"rollout/pool/{p}/target": self.targets[p] for p in self.providers})
         result.update({f"rollout/pool/{k}": v for k, v in self.tokens.items()})
         for name, provider in self.providers.items():
             if isinstance(provider, replay_provider.ReplayPromptProvider):

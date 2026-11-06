@@ -137,7 +137,7 @@ def load(args, first_dataset):
             ):
                 raise ValueError(f"Mixture source {source['name']}: missing or excessive prepared prompt length")
         sources.append(source | {"dataset": dataset})
-    if args.olmo_core.prompt_provider == "pool_exposure":
+    if args.olmo_core.prompt_provider in ("pools", "pool_exposure"):
         if "pools" not in manifest:
             raise ValueError("Pool provider requires a prepared pools manifest")
         templates = []
@@ -158,17 +158,20 @@ def load(args, first_dataset):
             if core.prompt_replay_enabled
             else None
         )
-        provider = pool_provider.ExposurePromptProvider(
+        provider = pool_provider.PoolPromptProvider(
             templates,
             pools=manifest["pools"],
             seed=args.rollout_seed,
             shuffle=args.rollout_shuffle,
             identity=hashlib.sha256(raw).hexdigest(),
             replay=replay,
+            sampling=manifest.get(
+                "sampling", {"policy": "exposure"} if core.prompt_provider == "pool_exposure" else {}
+            ),
         )
         return provider, SourceDatasets([source["dataset"] for source in sources])
     if "pools" in manifest:
-        raise ValueError("Pool manifest requires the pool_exposure provider")
+        raise ValueError("Pool manifest requires the pools provider")
     provider = MixturePromptProvider(
         sources, seed=args.rollout_seed, shuffle=args.rollout_shuffle, identity=hashlib.sha256(raw).hexdigest()
     )
