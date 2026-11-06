@@ -42,6 +42,23 @@ def test_no_prompt_rewrite_and_native_fields():
     ]
 
 
+@pytest.mark.parametrize(
+    "instruction,args",
+    [
+        ("language:response_language", {"language": "en"}),
+        ("change_case:english_capital", {}),
+        ("change_case:english_lowercase", {}),
+    ],
+)
+def test_native_language_constraints_are_prepared(instruction, args):
+    raw = {"prompt": "Original question", "instruction_id_list": [instruction], "kwargs": [args]}
+    messages, target, name, _ = sources.adapt(raw, "instruction_v1")
+    assert messages == [{"role": "user", "content": "Original question"}]
+    assert name == "instruction"
+    assert target["target"]["instruction_id_list"] == [instruction]
+    assert target["target"]["kwargs"] == [args]
+
+
 def test_explicit_math_and_no_topic_subsetting():
     assert sources.adapt({"problem": "Compute 1+1", "answer": "2"}, "math_v1")[:3] == (
         [{"role": "user", "content": "Compute 1+1"}],

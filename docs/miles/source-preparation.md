@@ -336,9 +336,20 @@ replace it with a zero reward or omit the source row solely for that reason.
 The uppercase/lowercase English checkers retain their separate case tests;
 digits alone fail those tests before language detection runs. A successfully
 detected language that differs from the required language still fails.
-The NeMo adapter currently excludes all three language-related checkers pending
-the separate review of detector repeatability. Preserving the exception fallback
-does not by itself remove that gate or establish language-classification accuracy.
+The NeMo adapter admits all three language-related checkers using their existing
+native semantics, without a separate classifier-calibration gate.
+
+The upstream detector is randomized: identical responses can receive different
+language labels and therefore different rewards. Short or ambiguous text is
+particularly susceptible, but length alone does not guarantee stability (for
+example, a long multilingual response can remain ambiguous). See the
+[detector's documentation](https://github.com/Mimino666/langdetect#basic-usage).
+Preserve upstream behavior without introducing a fixed seed or replacing the
+classifier in this integration. TODO: evaluate a better language classifier on
+representative training responses, including short answers, mixed languages and
+case constraints; measure accuracy, repeatability and reward changes before
+adopting it. This follow-up is outside the current integration's scope and is
+not a qualification blocker. Admission does not establish classifier accuracy.
 
 ## Reference judges and routed blends
 
@@ -373,7 +384,7 @@ entire 100+ acquisition catalog has been integrated or requalified.
 | Sources | Shared integration | Remaining qualification or environment work |
 |---|---|---|
 | Litmus v0.2 (C010) | Native answer formats and scalar rules across properties | Independent scientific reference checks and controls for all new strata; tool-dependent variants need their environment |
-| Llama-Nemotron IF, Nemotron IF (C016/C021) | Maintained native checker adapters, full original messages | Language classifier calibration; malformed/unsupported arguments remain visible |
+| Llama-Nemotron IF, Nemotron IF (C016/C021) | Maintained native checker adapters including language constraints, full original messages | Rebuild and qualify expanded bundles; malformed/unsupported arguments remain visible; better language classification is a deferred investigation |
 | Citation and Free-Form Formatting (C018/C019) | Existing bounded formatting verifier | Per-format witnesses, long-context loader checks; rewards measure format only |
 | Calendar v2 (C023) | Full final-state schedule, including empty calendars | Controls across calendar strata and original-history context; no interactive dialogue-quality claim |
 | Structured Outputs v2 (C029) | Five formats and bounded schema regex evaluation | Reviewed witnesses across schemas/formats, coercion/strictness contract review |

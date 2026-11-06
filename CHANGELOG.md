@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Admit native NeMo language constraints while preserving upstream classification and detection-error behavior; defer classifier improvements (https://github.com/allenai/open-instruct/pull/2178).
 - Omit and replace ungraded MILES training prompt groups after verifier failures, and report omitted prompt records in W&B; leave the systemic-failure tolerance threshold open (https://github.com/allenai/open-instruct/pull/2178).
 - Record malformed ReasoningGym syntax and numeric references as preparation omissions instead of aborting the remaining source population (https://github.com/allenai/open-instruct/pull/2178).
 - Bind source qualification receipts to prompt-data and reward-configuration hashes so changed bundles require requalification (https://github.com/allenai/open-instruct/pull/2178).
