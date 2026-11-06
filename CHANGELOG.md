@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add opt-in anonymous Parallel MCP web search via `--tools parallel_search`, preserving existing search providers (https://github.com/allenai/open-instruct/pull/2194).
 - Add full-population, hash-pinned dataset source preparation with preserved system/developer instructions, explicit omissions for malformed rows and deterministic reward adapters, including Litmus scalar answer formats. Make local validation timeouts consistently return zero with diagnostics, removing the math/format timeout policy settings while keeping invalid targets and unexpected failures fatal (https://github.com/allenai/open-instruct/pull/2177).
 - Add shared, isolated native instruction and calendar reward adapters with deterministic argument/regex validation that accepts known native normalization, explicit grading modes, and diagnostic zero scores for calendar parse failures and worker timeouts (https://github.com/allenai/open-instruct/pull/2176).
 - Add opt-in, process-isolated structured output rewards for JSON, YAML, TOML, XML and CSV with explicit schema/coercion policies and a response deadline (https://github.com/allenai/open-instruct/pull/2175).

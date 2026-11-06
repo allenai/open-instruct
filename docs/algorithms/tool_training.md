@@ -52,6 +52,20 @@ At a high level, a tool- or environment-enabled rollout looks like this:
 
 The key implementation idea is that you configure the rollout from the script layer, while Open-Instruct handles the multi-turn dispatch loop underneath.
 
+### Optional anonymous search backend: Parallel (`parallel_search`)
+
+Select `--tools parallel_search` to send `query` calls to
+[Parallel's MCP server](https://mcp.parallel.ai/mcp) without an API key. This is
+opt-in: it does not replace Serper, You.com, S2, or any configured tools.
+Queries leave the local machine; omit this tool for offline runs. The anonymous
+service is subject to provider availability and rate limits; errors are returned
+to the caller without switching providers. No paid credentials are read or sent.
+Requests use `User-Agent: allenai-open-instruct/parallel-search` only for Parallel.
+
+Set the total timeout through `--tool_configs '{"timeout": 60}'` (seconds).
+The tool returns the server's source URLs and passages as text. Parallel controls
+the number of results; this backend has no `num_results` setting.
+
 ### Optional search backend: You.com (`you_search`)
 
 `you_search` is an optional alternative to `serper_search`. It takes the same `query` argument and formats results the same way (title, snippet text, source URL).
