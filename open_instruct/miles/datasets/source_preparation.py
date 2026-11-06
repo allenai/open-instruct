@@ -105,7 +105,7 @@ def validate_keyword_option(kind, options):
 
 
 def dolci_if_target(raw):
-    if raw.get("dataset") != ["ifeval"]:
+    if raw.get("dataset", ["ifeval"]) != ["ifeval"]:
         raise ValueError("dolci_if_v1 requires a single ifeval route")
     ground_truth = raw.get("ground_truth")
     if not isinstance(ground_truth, list) or len(ground_truth) != 1:
@@ -123,14 +123,15 @@ def corrected_dolci_target(raw, ms, policy):
             if name != "keywords:word_once":
                 continue
             keyword = args.get("keyword")
-            if not isinstance(keyword, str) or not keyword.strip():
-                raise ValueError("Keyword inclusion correction requires a nonempty literal keyword")
+            if not isinstance(keyword, str) or re.fullmatch(r"[A-Za-z]+", keyword) is None or set(args) != {"keyword"}:
+                raise ValueError("Keyword inclusion correction requires the audited alphabetic keyword shape")
             # This repair is for the audited generator wording, not arbitrary
             # instructions which might explicitly require exactly one occurrence.
             instruction = f"Include keyword {keyword.strip()} in your response."
             if instruction not in ms[-1]["content"]:
                 raise ValueError("Keyword inclusion correction requires the original inclusion instruction")
-            target["instruction_id"][index] = "keywords:at_least_once"
+            target["instruction_id"][index] = "keywords:frequency"
+            target["kwargs"][index] = {"keyword": keyword, "frequency": 1, "relation": "at least"}
     return target
 
 
@@ -138,6 +139,10 @@ def adapt(raw, kind, options=None):
     options = options or {}
     validate_keyword_option(kind, options)
     ms = messages(raw)
+    if kind == "dolci_if_v1" and any(
+        re.match(r"^\s*(?:user|assistant|system|developer):", m["content"], flags=re.IGNORECASE) for m in ms
+    ):
+        raise ValueError("dolci_if_v1 requires exported chat messages, not role-prefixed prompt strings")
     meta = raw.get("verifier_metadata") or {}
     if kind == "nemo_v1":
         agent = raw.get("agent_ref")
@@ -314,7 +319,14 @@ def prepare(plan_path, output, tokenizer):
                     if spec["adapter"] == "dolci_if_v1":
                         original = dolci_if_target(raw)
                         changes = [
-                            {"name": "dolci_keyword_inclusion_v1", "constraint_index": i, "from": before, "to": after}
+                            {
+                                "name": "dolci_keyword_inclusion_v1",
+                                "constraint_index": i,
+                                "from": before,
+                                "to": after,
+                                "from_kwargs": original["kwargs"][i],
+                                "to_kwargs": target["kwargs"][i],
+                            }
                             for i, (before, after) in enumerate(
                                 zip(original["instruction_id"], target["instruction_id"], strict=True)
                             )

@@ -1750,18 +1750,6 @@ class KeywordFrequencyOnceChecker(Instruction):
         return len(re.findall(self._keyword, value, flags=re.IGNORECASE)) == 1
 
 
-class KeywordAtLeastOnceChecker(KeywordFrequencyOnceChecker):
-    """Literal inclusion, selected explicitly by new or corrected dataset targets."""
-
-    def build_description(self, *, keyword=None):
-        super().build_description(keyword=keyword)
-        self._description_pattern = "Include keyword {keyword} at least once in your response."
-        return self._description_pattern.format(keyword=self._keyword)
-
-    def check_following(self, value):
-        return re.search(re.escape(self._keyword), value, flags=re.IGNORECASE) is not None
-
-
 class KeywordFrequencyCheckerDifferent(Instruction):
     """Check the keyword frequency."""
 
@@ -2177,7 +2165,10 @@ class BiGramWrappingChecker(Instruction):
 
     def check_following(self, value):
         """Checks if every word bigram is enclosed within double angular brackets."""
-        return re.fullmatch(r"<<[^\s<>]+\s+[^\s<>]+>>(?:\s+<<[^\s<>]+\s+[^\s<>]+>>)*", value.strip()) is not None
+        # An odd word count may end with one wrapped word; no text is ignored.
+        word = r"[^\s<>]+"
+        pair, single = rf"<<{word}\s+{word}>>", rf"<<{word}>>"
+        return re.fullmatch(rf"(?:{pair}(?:\s+{pair})*(?:\s+{single})?|{single})", value.strip()) is not None
 
 
 class CopyingSimpleChecker(Instruction):

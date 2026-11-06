@@ -356,8 +356,9 @@ def test_dolci_keyword_correction_is_explicit_and_preserves_prompt():
     assert raw == original
     assert name == "ifeval"
     assert unchanged["instruction_id"] == ["keywords:word_once", "punctuation:no_comma"]
-    assert corrected["instruction_id"] == ["keywords:at_least_once", "punctuation:no_comma"]
-    assert corrected["kwargs"] == unchanged["kwargs"]
+    assert corrected["instruction_id"] == ["keywords:frequency", "punctuation:no_comma"]
+    assert corrected["kwargs"] == [{"keyword": "apple", "frequency": 1, "relation": "at least"}, {}]
+    assert unchanged["kwargs"] == [{"keyword": "apple"}, {}]
     verifier = task_verifiers.ManifestIFVerifier()
     assert asyncio.run(verifier.async_call([], "apple apple", unchanged)).score == 0.5
     assert asyncio.run(verifier.async_call([], "apple apple", corrected)).score == 1.0
@@ -432,9 +433,56 @@ def test_dolci_prepared_correction_receipts(tmp_path):
             "name": "dolci_keyword_inclusion_v1",
             "constraint_index": 0,
             "from": "keywords:word_once",
-            "to": "keywords:at_least_once",
+            "to": "keywords:frequency",
+            "from_kwargs": {"keyword": "apple"},
+            "to_kwargs": {"keyword": "apple", "frequency": 1, "relation": "at least"},
         }
     ]
     assert rows[1]["metadata"]["target_transformations"] == []
     assert row["label"] == row["metadata"]["verifiers"][0]["target"]
     assert row["metadata"]["raw_record_sha256"] == sources.digest(raw)
+
+
+@pytest.mark.parametrize("dataset_field", [{}, {"dataset": ["ifeval"]}])
+def test_dolci_published_role_prefix_requires_export(dataset_field):
+    raw = dolci_keyword_row()
+    raw.pop("dataset")
+    raw.update(dataset_field)
+    raw["prompt"] = "user: Include keyword apple in your response."
+    with pytest.raises(ValueError, match="exported chat messages"):
+        sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    # An upstream exporter identifies the role; the preparation adapter preserves
+    # the resulting content instead of training on the serialized role prefix.
+    raw["prompt"] = [{"role": "user", "content": "Include keyword apple in your response."}]
+    ms, label, _, _ = sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    assert ms == raw["prompt"]
+    assert label["instruction_id"][0] == "keywords:frequency"
+
+
+@pytest.mark.parametrize("keyword", ["a.b", "[", " apple ", "", "(?i)apple"])
+def test_dolci_frequency_remap_rejects_unaudited_keyword_shapes(keyword):
+    raw = dolci_keyword_row()
+    raw["ground_truth"] = [repr([{"instruction_id": ["keywords:word_once"], "kwargs": [{"keyword": keyword}]}])]
+    raw["prompt"] = f"Include keyword {keyword} in your response."
+    with pytest.raises(ValueError, match="audited alphabetic"):
+        sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+
+
+def test_dolci_remap_preserves_existing_frequency_constraint():
+    raw = dolci_keyword_row()
+    raw["ground_truth"] = [
+        repr(
+            [
+                {
+                    "instruction_id": ["keywords:word_once", "keywords:frequency"],
+                    "kwargs": [{"keyword": "apple"}, {"keyword": "pear", "frequency": 2, "relation": "at least"}],
+                }
+            ]
+        )
+    ]
+    _, label, _, _ = sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    assert label["instruction_id"] == ["keywords:frequency", "keywords:frequency"]
+    assert label["kwargs"][1] == {"keyword": "pear", "frequency": 2, "relation": "at least"}
+    verifier = task_verifiers.ManifestIFVerifier()
+    assert asyncio.run(verifier.async_call([], "apple apple pear pear", label)).score == 1.0
+    assert asyncio.run(verifier.async_call([], "apple apple pear", label)).score == 0.5

@@ -46,7 +46,6 @@ _STRIPPED_ARGUMENTS = {
     "startend:end_checker": ("end_phrase",),
     "keywords:frequency": ("keyword",),
     "keywords:word_once": ("keyword",),
-    "keywords:at_least_once": ("keyword",),
     "keywords:word_count_different_numbers": ("keyword",),
     "keywords:exclude_word_harder": ("keyword",),
     "keywords:keyword_specific_position": ("keyword",),
@@ -86,7 +85,6 @@ def validate_patterns(name, args):
         patterns, flags = args["keywords"], re.IGNORECASE
     elif name == "keywords:forbidden_words":
         patterns, flags = [r"\b" + word + r"\b" for word in args["forbidden_words"]], re.IGNORECASE
-    # keywords:at_least_once escapes its keyword; legacy word_once remains a regex.
     elif name in {"keywords:frequency", "keywords:word_once", "keywords:word_count_different_numbers"}:
         patterns, flags = [args["keyword"]], re.IGNORECASE
     elif name == "count:count_increment_word":

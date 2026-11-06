@@ -457,36 +457,21 @@ def test_whitespace_is_not_normalized_for_unlisted_arguments():
     assert nv.InstructionVerifier()([], "an apple today", label).score == 1
 
 
-@pytest.mark.parametrize(
-    "keyword,gold,wrong",
-    [
-        (" (?i)apple ", "(?i)APPLE", "APPLE"),
-        ("[", "[", "apple"),
-        ("apple\\ ", "apple\\", "apple"),
-        ("a.b", "a.b a.b", "axb"),
-        ("apple", "apple apple", "pear"),
-    ],
-)
-def test_literal_keyword_inclusion_in_worker(keyword, gold, wrong):
-    async def check():
-        label = target("keywords:at_least_once", {"keyword": keyword})
-        verifier = nv.InstructionVerifier()
-        for answer, expected in [(gold, 1), (wrong, 0)]:
-            result = await verifier.async_call([], answer, label)
-            assert result.score == expected
-            assert result.diagnostics["status"] == "completed"
-
-    asyncio.run(check())
-
-
 def test_bigram_whole_answer_in_worker_and_fractional_mode():
     async def check():
         label = target("detectable_format:bigram_wrapping", {})
         verifier = nv.InstructionVerifier()
-        for answer, expected in [("<<hello world>>", 1), ("hello", 0), ("<<hello world>> stray", 0)]:
+        for answer, expected in [
+            ("<<hello world>>", 1),
+            ("hello", 0),
+            ("<<hello world>> stray", 0),
+            ("<<hello world>> <<again>>", 1),
+            ("<<hello>>", 1),
+            ("<<hello>> <<world again>>", 0),
+        ]:
             assert (await verifier.async_call([], answer, label)).score == expected
-        label["target"]["instruction_id_list"].append("keywords:at_least_once")
-        label["target"]["kwargs"].append({"keyword": "hello"})
+        label["target"]["instruction_id_list"].append("keywords:frequency")
+        label["target"]["kwargs"].append({"keyword": "hello", "frequency": 1, "relation": "at least"})
         label["target"]["grading_mode"] = "fraction"
         assert (await verifier.async_call([], "hello hello", label)).score == 0.5
         label["target"]["grading_mode"] = "all"

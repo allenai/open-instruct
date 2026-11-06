@@ -44,14 +44,11 @@ def test_single_character_copy_defaults(kwargs):
         ("computer", "computer computer", True),
         ("computer", "COMPUTER", True),
         ("computer", "desk", False),
-        ("a.b", "axb", False),
-        ("a.b", "a.b a.b", True),
-        ("[", "[", True),
     ],
 )
-def test_keyword_inclusion_is_literal_not_exact_frequency(keyword, answer, expected):
-    checker = instructions.KeywordAtLeastOnceChecker("keywords:at_least_once")
-    checker.build_description(keyword=keyword)
+def test_existing_frequency_checker_supports_at_least_once(keyword, answer, expected):
+    checker = instructions.KeywordFrequencyChecker("keywords:frequency")
+    checker.build_description(keyword=keyword, frequency=1, relation="at least")
     assert checker.check_following(answer) is expected
 
 
@@ -63,7 +60,9 @@ def test_keyword_inclusion_is_literal_not_exact_frequency(keyword, answer, expec
         ("<<hello world>> stray", False),
         ("<<hello>> <<world>>", False),
         ("<<one two three>>", False),
-        ("<<one two>> <<three>>", False),
+        ("<<one two>> <<three>>", True),
+        ("<<hello>>", True),
+        ("<<one>> <<two three>>", False),
         ("<<hello world>>", True),
         (" <<hello world>>\n<<again today>> ", True),
         ("<<hello, world!>>", True),
@@ -87,8 +86,8 @@ def test_standard_if_verifier_preserves_fractional_constraint_rewards():
     label = repr(
         [
             {
-                "instruction_id": ["keywords:at_least_once", "detectable_format:bigram_wrapping"],
-                "kwargs": [{"keyword": "computer"}, None],
+                "instruction_id": ["keywords:frequency", "detectable_format:bigram_wrapping"],
+                "kwargs": [{"keyword": "computer", "frequency": 1, "relation": "at least"}, None],
             }
         ]
     )
@@ -112,5 +111,3 @@ def test_legacy_keyword_generation_and_scores():
     assert not checker.check_following("computer computer")
     checker.build_description(keyword="(?i)apple")
     assert checker.check_following("APPLE")
-    inclusion = instructions.KeywordAtLeastOnceChecker("keywords:at_least_once")
-    assert "at least once" in inclusion.build_description(keyword="computer")

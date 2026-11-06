@@ -96,9 +96,8 @@ FUNCTION_DICT = {
     _KEYWORD + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
     _FORMAT + "square_brackets": instructions.SquareBracketChecker,
     # Historical prompts said "Include keyword X", but this ID has always graded exactly once.
-    # Preserve that contract; explicitly corrected targets use at_least_once instead.
+    # Preserve that contract; corrected targets use frequency=1 with relation="at least".
     _KEYWORD + "word_once": instructions.KeywordFrequencyOnceChecker,
-    _KEYWORD + "at_least_once": instructions.KeywordAtLeastOnceChecker,
     _KEYWORD + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
     _KEYWORD + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
     _PARAGRAPH + "paragraphs": instructions.ParagraphBasicChecker,
@@ -165,9 +164,8 @@ INSTRUCTION_DICT = {
     _KEYWORD + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
     _FORMAT + "square_brackets": instructions.SquareBracketChecker,
     # Historical prompts said "Include keyword X", but this ID has always graded exactly once.
-    # Preserve that contract; explicitly corrected targets use at_least_once instead.
+    # Preserve that contract; corrected targets use frequency=1 with relation="at least".
     _KEYWORD + "word_once": instructions.KeywordFrequencyOnceChecker,
-    _KEYWORD + "at_least_once": instructions.KeywordAtLeastOnceChecker,
     _KEYWORD + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
     _KEYWORD + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
     _PARAGRAPH + "paragraphs": instructions.ParagraphBasicChecker,
@@ -267,7 +265,6 @@ INSTRUCTION_CONFLICTS = {
     _KEYWORD + "no_adjacent_consecutive": {_KEYWORD + "no_adjacent_consecutive"},
     _FORMAT + "square_brackets": {_FORMAT + "square_brackets"},
     _KEYWORD + "word_once": {_KEYWORD + "word_once"},
-    _KEYWORD + "at_least_once": {_KEYWORD + "at_least_once"},
     _KEYWORD + "word_count_different_numbers": {_KEYWORD + "word_count_different_numbers"},
     _KEYWORD + "exclude_word_harder": {_KEYWORD + "exclude_word_harder"},
     _PARAGRAPH + "paragraphs": {_PARAGRAPH + "paragraphs", _PARAGRAPH + "paragraphs2"},

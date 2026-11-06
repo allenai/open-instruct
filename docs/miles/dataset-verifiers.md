@@ -127,11 +127,16 @@ formatting, diagnostics, and real subprocess execution. These integration checks
 do not qualify an entire raw dataset.
 
 
-The shared keyword registry distinguishes `keywords:word_once` (historical
-exactly-once regex matching) from `keywords:at_least_once` (literal case-insensitive
-inclusion). NeMo preparation preserves the supplied identifier; its legacy regex
-validation remains in place for `word_once`, while literal punctuation is valid for
-`at_least_once`. The same shared copy and bigram-wrapping fixes apply to both the
-standard IF and NeMo paths. NeMo's `all`/`fraction` aggregation modes are unchanged.
-See [the explicit Dolci preparation correction](source-preparation.md#explicit-dolci-keyword-correction)
-for opting an existing inclusion prompt into the new identifier.
+The `keywords:word_once` identifier retains its historical exactly-once regex
+matching. The optional Dolci preparation correction uses the existing
+`keywords:frequency` checker with `frequency=1` and `relation="at least"`; it
+applies only to audited alphabetic keyword shapes. NeMo preserves its supplied
+identifiers and regex-validation rules. Standard raw-dataset training paths do
+not opt into the Dolci correction automatically.
+
+Shared copy and bigram-wrapping fixes apply to both standard IF and NeMo. Wrapping
+requires complete wrapped word pairs, optionally followed by one wrapped final
+word for odd word counts (`<<hello world>> <<again>>` or just `<<hello>>`). Unwrapped
+trailing text and earlier singleton groups are rejected. NeMo's `all`/`fraction`
+aggregation modes are unchanged. See the
+[explicit Dolci preparation correction](source-preparation.md#explicit-dolci-keyword-correction).
