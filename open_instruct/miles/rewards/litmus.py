@@ -6,12 +6,17 @@ captures; it never searches a malformed capture for an incidental number.
 
 import math
 import os
+import time
+from typing import Any
 
 import regex
 
+from open_instruct import logger_utils
 from open_instruct.miles.rewards import candidate_verifiers as common
 from open_instruct.miles.rewards import task_verifiers
 
+logger = logger_utils.setup_logger(__name__)
+KIND = "litmus_scalar_v1"
 DEFAULT_RULES = {"float": "isclose", "bool": "bool_eq", "string": "string_eq"}
 RULES = {"exact", "isclose", "abs_window", "rel_window", "bool_eq", "string_eq"}
 
@@ -36,14 +41,23 @@ def validate_target(target):
     if not isinstance(target, dict) or target.get("answer_type") not in DEFAULT_RULES:
         raise ValueError("Litmus requires explicit float/bool/string answer_type")
     kind = target["answer_type"]
+    # str(None) or str([...]) must not become a reference answer.
+    if type(target.get("expected_answer")) not in (str, int, float, bool):
+        raise ValueError("Litmus requires a scalar expected_answer")
     expected = scalar(target["expected_answer"], kind)
+    if expected == "":
+        raise ValueError("Litmus requires a nonempty expected_answer")
     pattern = target.get("output_regex")
     if not isinstance(pattern, str) or len(pattern) > 4096:
         raise ValueError("Litmus requires explicit bounded output_regex")
-    pattern = regex.compile(pattern, regex.S)
+    try:
+        pattern = regex.compile(pattern, regex.S)
+    except (regex.error, RecursionError) as error:
+        raise ValueError(f"Invalid Litmus output_regex: {error}") from error
     if pattern.groups != 1:
         raise ValueError("Litmus output_regex must contain exactly one capture")
-    match = target.get("match") or {"rule": DEFAULT_RULES[kind]}
+    default: dict[str, Any] = {"rule": DEFAULT_RULES[kind]}
+    match = target.get("match") or default
     if not isinstance(match, dict) or match.get("rule") not in RULES or set(match) - {"rule", "abs_tol", "rel_tol"}:
         raise ValueError("Unsupported Litmus matching contract")
     rule = match["rule"]
@@ -67,18 +81,31 @@ class LitmusVerifier:
 
     async def async_call(self, tokens, prediction, label, **kwargs):
         pattern, expected, rule, tolerance = validate_target(label)
+        policy = os.environ.get(
+            "OI_MILES_FORMAT_TIMEOUT_POLICY", os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
+        )
+        if policy not in ("zero", "raise"):
+            raise ValueError(
+                "OI_MILES_FORMAT_TIMEOUT_POLICY (or inherited OI_MILES_MATH_TIMEOUT_POLICY) must be zero or raise"
+            )
+        start = time.monotonic()
         try:
             # Preserve the row's final-match convention with one bounded search.
             matches = pattern.findall(common.answer_text(prediction), timeout=0.1)
-        except TimeoutError:
-            policy = os.environ.get(
-                "OI_MILES_FORMAT_TIMEOUT_POLICY", os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
-            )
+        except TimeoutError as error:
             if policy == "raise":
                 raise
-            if policy != "zero":
-                raise ValueError("Timeout policy must be zero or raise") from None
-            return common.Result(0.0, diagnostics={"kind": "litmus_scalar_v1", "status": "timeout"})
+            logger.warning("Litmus verifier timeout; assigning fallback zero reward: %s", error)
+            return common.Result(
+                0.0,
+                diagnostics={
+                    "kind": KIND,
+                    "status": "timeout",
+                    "error": str(error) or "Litmus output_regex exceeded its search budget",
+                    "failure_policy": policy,
+                    "elapsed_seconds": time.monotonic() - start,
+                },
+            )
         try:
             predicted = scalar(matches[-1], label["answer_type"]) if matches else None
         except (ValueError, TypeError):
@@ -95,4 +122,4 @@ class LitmusVerifier:
             score = abs(predicted - expected) <= tolerance["abs_tol"]
         else:
             score = abs(predicted - expected) <= abs(tolerance["rel_tol"] * expected)
-        return common.Result(float(score), diagnostics={"kind": "litmus_scalar_v1", "status": "ok"})
+        return common.Result(float(score), diagnostics={"kind": KIND, "status": "ok"})

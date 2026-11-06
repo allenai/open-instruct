@@ -119,8 +119,11 @@ def validate_target(target):
         for pattern in patterns:
             if not isinstance(pattern, str) or len(pattern) > 4096:
                 raise ValueError("Invalid formatting regex")
-            re.compile(pattern)
-            regex.compile(pattern)
+            try:
+                re.compile(pattern)
+                regex.compile(pattern)
+            except (re.error, regex.error, RecursionError) as error:
+                raise ValueError(f"Invalid formatting regex: {error}") from error
     elif kind == "countdown":
         nums = target.get("nums")
         if (

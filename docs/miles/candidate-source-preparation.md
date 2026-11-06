@@ -31,7 +31,11 @@ Inputs may be raw rows or hygiene wrappers containing `id`, `raw_record` and
 receipt; pointing at a receipt does not independently certify a new input's
 cleanliness. The adapter does not select on policy reward, reserve screened
 prompts, cap pool size, or rewrite messages with a new answer suffix. It records
-all unsupported rows in `dispositions.jsonl`. Long prompts remain in the pool:
+all unsupported rows in `dispositions.jsonl`, including rows with malformed
+messages, invalid schemas or regular expressions, and Responses API
+`instructions` (a system-level instruction outside the message list, which the
+adapters do not yet carry into the prompt). An unknown adapter name is a plan
+error and stops preparation. Long prompts remain in the pool:
 set an adequate training context limit, or explicitly
 name and review a shorter-context variant. Repeated prompts are counted, not
 silently removed; resolve conflicting targets before qualification.
@@ -53,7 +57,7 @@ Litmus preserves row-specific answer formats and tolerances. The versioned
 `litmus_scalar_v1` contract deliberately requires complete finite numeric or
 explicit boolean captures; it does not recover an incidental number from malformed
 text or treat arbitrary nonzero numbers as true. A row needs an explicit
-one-capture `output_regex`. The matching rules are `isclose`, rounded-integer
+one-capture `output_regex` and a nonempty scalar `expected_answer`. The matching rules are `isclose`, rounded-integer
 `exact`, absolute/relative windows, boolean equality and normalized string
 equality. This expands *verifier wiring*, not independent scientific validation:
 new property/method strata still need reference checks and positive/near-miss
@@ -63,7 +67,8 @@ single-turn training even when its final scalar can be graded.
 The catalog initially says `prepared`, not `qualified`. It cannot be resolved by
 the named-source resolver until reviewed controls and the training loader path
 have passed. Integration readiness, representative policy evidence and downstream
-training benefit remain separate fields of evidence. Historical measurements from changed populations do not qualify these bundles.
+training benefit remain separate fields of evidence. Historical measurements
+from changed populations do not qualify these bundles.
 
 See [dataset reward verifiers](dataset-verifiers.md) for the structured-output,
 instruction and calendar contracts and their runtime dependencies.

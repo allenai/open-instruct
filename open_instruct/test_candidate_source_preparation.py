@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import pytest
+import regex
 
 from open_instruct.miles.datasets import candidate_sources as sources
 from open_instruct.miles.rewards import litmus
@@ -120,3 +121,122 @@ def test_litmus_invalid_contract_is_not_zero():
         litmus.validate_target(
             {"answer_type": "string", "expected_answer": "a", "output_regex": "(.*)", "match": {"rule": "exact"}}
         )
+
+
+def prepare_one(tmp_path, adapter, records):
+    raw = tmp_path / "input.jsonl"
+    raw.write_text("".join(json.dumps(row) + "\n" for row in records))
+    receipt = tmp_path / "hygiene.json"
+    receipt.write_text('{"completed":true}')
+    source = {
+        "adapter": adapter,
+        "inputs": [{"path": str(raw), "sha256": sources.file_hash(raw), "revision": "fixed", "split": "train"}],
+        "hygiene_receipt": {"path": str(receipt), "sha256": sources.file_hash(receipt)},
+    }
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"schema_version": 1, "sources": {"source": source}}))
+    entry = sources.prepare(plan, tmp_path / "out", Tokenizer())["sources"]["source"]
+    lines = (tmp_path / "out/source/dispositions.jsonl").read_text().splitlines()
+    return entry, [json.loads(line)["reason"] for line in lines]
+
+
+def test_malformed_rows_are_omitted_not_fatal(tmp_path):
+    question = {"prompt": "question"}
+    records = [
+        {"prompt": ["not a message object"], "verifier": {"type": "string_match", "expected_markers": ["yes"]}},
+        {"prompt": [{"role": "user", "content": ["not a content part"]}], "exp_cal_state": {}},
+        {**question, "verifier": {"type": "regex", "verify_regex": ["("]}},
+        {**question, "agent_ref": "math_with_judge"},
+        {**question, "agent_ref": {"name": "math_with_judge_agent"}},
+        {**question, "verifier": {"type": "string_match", "expected_markers": ["yes"]}},
+    ]
+    entry, reasons = prepare_one(tmp_path, "nemo_v1", records)
+    counts = entry["counts"]
+    assert (counts["input_rows"], counts["omitted_rows"], counts["prepared_rows"]) == (6, 5, 1)
+    assert [reason.split(":")[0] for reason in reasons] == ["ValueError"] * 5
+    assert "Invalid formatting regex" in reasons[2]
+    assert reasons[3] == reasons[4] == "ValueError: math_or_judge_requires_explicit_adapter"
+
+
+@pytest.mark.parametrize(
+    "adapter,record,reason",
+    [
+        ("litmus_v02_v1", {"answer_type": "float", "expected_answer": 1, "output_regex": "("}, "Invalid Litmus"),
+        ("reasoning_gym_v1", {"entry": "not an entry"}, "malformed_reasoning_gym_entry"),
+        ("reasoning_gym_v1", {"metadata": "not metadata", "answer": "1"}, "malformed_reasoning_gym_entry"),
+    ],
+)
+def test_malformed_targets_are_omitted_not_fatal(tmp_path, adapter, record, reason):
+    entry, reasons = prepare_one(tmp_path, adapter, [{"prompt": "question", **record}])
+    assert entry["counts"] == {"input_rows": 1, "omitted_rows": 1}
+    assert reasons[0].startswith("ValueError: " + reason)
+
+
+def test_invalid_structured_schema_is_omitted_not_fatal(tmp_path):
+    pytest.importorskip("xmltodict")
+    pytest.importorskip("openapi_schema_validator")
+    records = [
+        {"prompt": "question", "schema_type": "json", "schema_str": json.dumps({"type": "unknown"})},
+        {"prompt": "question", "schema_type": "json", "schema_str": json.dumps({"type": "object"})},
+    ]
+    entry, reasons = prepare_one(tmp_path, "nemo_v1", records)
+    assert entry["counts"]["prepared_rows"] == 1 and entry["counts"]["omitted_rows"] == 1
+    assert reasons[0].startswith("SchemaError: ")
+
+
+def test_responses_instructions_are_not_silently_dropped():
+    params = {"instructions": "Answer in French.", "input": "question"}
+    with pytest.raises(ValueError, match="requires_responses_instructions_support"):
+        sources.messages({"responses_create_params": params})
+    assert sources.messages({"responses_create_params": {"instructions": None, "input": "question"}}) == [
+        {"role": "user", "content": "question"}
+    ]
+
+
+def test_unknown_adapter_is_a_plan_error_not_an_omission(tmp_path):
+    with pytest.raises(sources.PlanError, match="unknown_adapter:candidte_v1"):
+        prepare_one(tmp_path, "candidte_v1", [{"prompt": "question", "target": {"kind": "numeric", "value": "2"}}])
+
+
+@pytest.mark.parametrize("expected", [None, "", "  ", ["a"], {"a": 1}])
+def test_litmus_requires_nonempty_scalar_reference(expected):
+    with pytest.raises(ValueError, match="expected_answer"):
+        litmus.validate_target({"answer_type": "string", "expected_answer": expected, "output_regex": "Answer: (.*)"})
+
+
+def test_litmus_invalid_regex_is_a_contract_error():
+    with pytest.raises(ValueError, match="Invalid Litmus output_regex"):
+        litmus.validate_target({"answer_type": "float", "expected_answer": 1, "output_regex": "("})
+
+
+def test_litmus_timeout_obeys_policy_and_reports_diagnostics(monkeypatch):
+    class SlowPattern:
+        def findall(self, text, timeout):
+            raise TimeoutError("regex timed out")
+
+    target = {"answer_type": "float", "expected_answer": 1, "output_regex": "Answer: (.+)"}
+    monkeypatch.setattr(litmus, "validate_target", lambda label: (SlowPattern(), 1.0, "isclose", {}))
+    monkeypatch.delenv("OI_MILES_MATH_TIMEOUT_POLICY", raising=False)
+    monkeypatch.delenv("OI_MILES_FORMAT_TIMEOUT_POLICY", raising=False)
+    verifier = litmus.LitmusVerifier()
+    result = asyncio.run(verifier.async_call([], "Answer: 1", target))
+    assert result.score == 0
+    assert result.diagnostics["elapsed_seconds"] >= 0
+    assert {k: v for k, v in result.diagnostics.items() if k != "elapsed_seconds"} == {
+        "kind": "litmus_scalar_v1",
+        "status": "timeout",
+        "error": "regex timed out",
+        "failure_policy": "zero",
+    }
+    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "raise")
+    with pytest.raises(TimeoutError):
+        asyncio.run(verifier.async_call([], "Answer: 1", target))
+    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "ignore")
+    with pytest.raises(ValueError, match="must be zero or raise"):
+        asyncio.run(verifier.async_call([], "Answer: 1", target))
+
+
+def test_real_regex_timeout_type_is_handled():
+    # The verifier relies on the regex package raising the builtin TimeoutError.
+    with pytest.raises(TimeoutError):
+        regex.compile(r"(?:(?:a|aa)+)+(b)").findall("a" * 5000, timeout=1e-9)

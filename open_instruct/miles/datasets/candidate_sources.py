@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from jsonschema.exceptions import SchemaError
 from transformers import AutoTokenizer
 
 from open_instruct.miles.rewards import candidate_verifiers as local
@@ -29,6 +30,10 @@ FACTORIES = {
 }
 
 
+class PlanError(Exception):
+    """The plan itself is wrong; unlike an unsupported row, this stops preparation."""
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 
@@ -42,10 +47,15 @@ def messages(raw):
     params = raw.get("responses_create_params") or {}
     if params.get("tools"):
         raise ValueError("requires_tool_environment")
+    if params.get("instructions"):
+        # A system-level instruction outside `input`; dropping it would change the prompt.
+        raise ValueError("requires_responses_instructions_support")
     value = params.get("input", raw.get("input", raw.get("prompt", raw.get("question", raw.get("problem")))))
     if isinstance(value, str):
         value = [{"role": "user", "content": value}]
-    if not isinstance(value, list) or not value or value[-1].get("role") != "user":
+    if not isinstance(value, list) or not value or not all(isinstance(message, dict) for message in value):
+        raise ValueError("requires_text_conversation_ending_with_user")
+    if value[-1].get("role") != "user":
         raise ValueError("requires_text_conversation_ending_with_user")
     result = copy.deepcopy(value)
     for message in result:
@@ -53,7 +63,7 @@ def messages(raw):
             raise ValueError("unsupported_message_fields_or_role")
         content = message.get("content")
         if isinstance(content, list):
-            if any(part.get("type") not in {"text", "input_text"} for part in content):
+            if any(not isinstance(part, dict) or part.get("type") not in {"text", "input_text"} for part in content):
                 raise ValueError("requires_nontext_environment")
             content = "\n".join(part["text"] for part in content)
         if not isinstance(content, str):
@@ -69,6 +79,8 @@ def adapt(raw, kind, options=None):
     ms = messages(raw)
     meta = raw.get("verifier_metadata") or {}
     if kind == "nemo_v1":
+        agent = raw.get("agent_ref")
+        agent = agent.get("name") if isinstance(agent, dict) else agent
         # Structural dispatch only, never a topic/success/difficulty filter.
         if "schema_str" in raw:
             kind = "structured_v1"
@@ -84,7 +96,7 @@ def adapt(raw, kind, options=None):
             kind = "instruction_v1"
         elif raw.get("options") and "expected_answer" in raw:
             kind = "mcqa_v1"
-        elif raw.get("verifier_type") == "math" or "math_with_judge" in (raw.get("agent_ref") or {}).get("name", ""):
+        elif raw.get("verifier_type") == "math" or "math_with_judge" in str(agent or ""):
             raise ValueError("math_or_judge_requires_explicit_adapter")
         else:
             raise ValueError("unsupported_reward_contract")
@@ -98,7 +110,7 @@ def adapt(raw, kind, options=None):
         }
         structured.validate_target(target)
         name = "structured"
-        stratum = kind + ":" + target["format"]
+        stratum = f"{kind}:{raw['schema_type']}"
     elif kind == "format_v1":
         target = {"kind": "format", "value": copy.deepcopy(raw["verifier"])}
         local.validate_target(target)
@@ -114,7 +126,7 @@ def adapt(raw, kind, options=None):
             },
         }
         nvidia_constraints.instruction_contract(json.dumps(target, sort_keys=True))
-        name, stratum = "instruction", kind + ":" + "+".join(sorted(target["target"]["instruction_id_list"]))
+        name, stratum = "instruction", kind + ":" + "+".join(sorted(original["instruction_id_list"]))
     elif kind == "calendar_v1":
         target = copy.deepcopy(raw["exp_cal_state"])
         nvidia_constraints.calendar_contract(target)
@@ -125,7 +137,9 @@ def adapt(raw, kind, options=None):
         name, stratum = "litmus", kind + ":" + str(raw.get("method")) + ":" + str(raw.get("property"))
     elif kind == "reasoning_gym_v1":
         target = copy.deepcopy(raw.get("entry", raw))
-        task = target.get("metadata", {}).get("source_dataset")
+        if not isinstance(target, dict) or not isinstance(target.get("metadata"), dict):
+            raise ValueError("malformed_reasoning_gym_entry")
+        task = target["metadata"].get("source_dataset")
         if task not in reasoning_gym.TASKS:
             raise ValueError("unqualified_reasoning_gym_family:" + str(task))
         if not isinstance(target.get("answer"), str) or not target["answer"].strip():
@@ -160,7 +174,8 @@ def adapt(raw, kind, options=None):
         local.validate_target(target)
         name, stratum = "candidate", kind + ":" + target["kind"]
     else:
-        raise ValueError("unknown_adapter:" + kind)
+        # A mistyped adapter would otherwise omit every row and still report "prepared".
+        raise PlanError("unknown_adapter:" + str(kind))
     return ms, target, name, stratum
 
 
@@ -181,7 +196,7 @@ def prepare(plan_path, output, tokenizer):
     if plan.get("schema_version") != 1 or not plan.get("sources"):
         raise ValueError("Expected versioned source plan")
     output.mkdir(parents=True, exist_ok=False)
-    catalog = {"schema_version": 1, "sources": {}}
+    catalog: dict = {"schema_version": 1, "sources": {}}
     for name, spec in plan["sources"].items():
         if re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", name) is None:
             raise ValueError("Invalid source name")
@@ -205,7 +220,7 @@ def prepare(plan_path, output, tokenizer):
                     counts["input_rows"] += 1
                     try:
                         ms, target, verifier, stratum = adapt(raw, spec["adapter"], spec.get("options"))
-                    except (ValueError, KeyError, TypeError) as error:
+                    except (ValueError, KeyError, TypeError, SchemaError) as error:
                         reason = f"{type(error).__name__}: {error}"
                         counts["omitted_rows"] += 1
                         dispositions.write(json.dumps({"id": identity, "status": "omitted", "reason": reason}) + "\n")
