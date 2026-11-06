@@ -1,4 +1,4 @@
-- Let qualified IF and R1 format verifiers grade extracted final answers without repeating raw thinking-boundary validation (https://github.com/allenai/open-instruct/pull/2188).
+- Preserve qualified IF answer normalization and support IF/R1 final-answer dispatch with explicit qualified-runtime requirements (https://github.com/allenai/open-instruct/pull/2188).
 - Let MILES scoring callers explicitly raise or zero reported service/judge failures; preserve zero fallback for distillation and ordinary evaluation, strict offline qualification, and training group omission (https://github.com/allenai/open-instruct/pull/2178).
 - Fix reasoning-panel GPQA/context budgets, normalize SciCode disabled top-k, and retain independent evaluation progress after task failures (https://github.com/allenai/open-instruct/pull/2136).
 # Changelog

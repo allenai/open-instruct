@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from open_instruct import ground_truth_utils
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.rewards import rewards, task_verifiers
 
@@ -33,7 +34,7 @@ def qualified_if(monkeypatch, tmp_path):
             calls.append(("raw", prediction, list(tokens)))
             if prediction.count("</think>") != 1:
                 return SimpleNamespace(score=0.0, cost=0, diagnostics={"status": "model_format_failure"})
-            return grade_answer(prediction.split("</think>", 1)[1], label)
+            return grade_answer(ground_truth_utils.remove_thinking_section(prediction), label)
 
     module = SimpleNamespace(IFVerifier=RawIFVerifier, grade_answer=grade_answer)
     monkeypatch.setitem(sys.modules, "qualified_if_test_module", module)
@@ -72,15 +73,25 @@ def score(registry, item, final_only):
 
 
 @pytest.mark.parametrize("final_only", [False, True])
-@pytest.mark.parametrize("response", ["reasoning </think> computer", "computer </think> desk"])
-def test_qualified_if_grades_selected_contents_and_preserves_raw(qualified_if, final_only, response):
+@pytest.mark.parametrize(
+    "response,expected",
+    [
+        ("reasoning </think> computer", 1),
+        ("computer </think> desk", 0),
+        ("reasoning </think><answer>computer</answer>", 1),
+        ("reasoning </think> \n<|assistant|><answer> computer </answer> \n", 1),
+        ("computer </think><answer>desk</answer>", 0),
+        ("reasoning </think><answer></answer>", 0),
+    ],
+)
+def test_qualified_if_grades_selected_contents_and_preserves_raw(qualified_if, final_only, response, expected):
     registry, calls = qualified_if
     item = sample(response)
-    assert score(registry, item, final_only) == float(response.endswith("computer"))
+    assert score(registry, item, final_only) == expected
     assert item.response == response and item.tokens == [1, 2, 3]
     raw_calls = [c for c in calls if c[0] == "raw"]
     assert raw_calls == ([] if final_only else [("raw", response, [2, 3])])
-    assert calls[-1] == ("final", response.split("</think>", 1)[1], "computer")
+    assert calls[-1] == ("final", ground_truth_utils.remove_thinking_section(response), "computer")
     assert item.metadata["verifier_diagnostics"]["ifeval"]["status"] == "scored"
 
 
@@ -112,6 +123,22 @@ def test_final_only_target_error_is_not_silently_zeroed(qualified_if):
     registry, _ = qualified_if
     with pytest.raises(ValueError, match="Invalid target"):
         score(registry, sample("reasoning </think> computer", label="bad target"), True)
+
+
+def test_qualified_if_requires_explicit_runtime_module():
+    with pytest.raises(ValueError, match="explicit module"):
+        task_verifiers.QualifiedIFVerifier()
+
+
+def test_qualified_if_does_not_bypass_source_pin_failure(qualified_if, monkeypatch):
+    registry, _ = qualified_if
+
+    def reject_pins(self, verifier_config):
+        raise ValueError("Native source changed; requalify instructions")
+
+    monkeypatch.setattr(sys.modules["qualified_if_test_module"].IFVerifier, "__init__", reject_pins)
+    with pytest.raises(ValueError, match="Native source changed; requalify instructions"):
+        score(registry, sample("reasoning </think><answer>computer</answer>"), True)
 
 
 def test_legacy_text_verifiers_still_receive_only_final_text(monkeypatch):

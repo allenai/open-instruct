@@ -146,22 +146,50 @@ correctness or content check; it retains the existing allowance for empty answer
 tags and trailing text. In final-only mode, only the last closing marker's suffix
 is checked, so answer tags in an earlier section cannot earn format reward.
 
-For the qualified Dolci IF image, use this reward-registry entry in **both** arms:
+For an ordinary image built from the current source tree, the built-in native IF
+adapter needs no experimental module. A complete reward registry is:
 
 ```json
-"ifeval": {
-  "factory": "open_instruct.miles.rewards.task_verifiers.QualifiedIFVerifier",
-  "config": {"module": "experimental_ifeval_reward_v2"}
+{
+  "ifeval": {
+    "factory": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier"
+  }
 }
 ```
 
-This wrapper keeps the qualified module and its dependency-pin checks. Raw mode
-uses its original `IFVerifier`; final-answer-only mode uses its `grade_answer`
-function, which validates the target and grades constraints without requiring a
-second closing marker. Registering the old external `IFVerifier` directly does
-not opt into this interface and remains incompatible with suffix-only input.
-Changing the registry and application image is required; changing only the flag
-or running code from an older image does not apply this repair.
+The native adapter uses the current `IFEvalVerifier`, including its existing
+`remove_thinking_section` normalization in both modes. That removes answer tags,
+`<|assistant|>` and outer whitespace before grading IF constraints. R1 format
+reward checks the tags themselves; IF reward grades the normalized answer.
+
+`QualifiedIFVerifier` is a compatibility adapter for a **separately supplied,
+source-pinned IF module**, not a replacement for current-main native IF. For the
+historical qualified H180 image only, this complete registry selects its module:
+
+```json
+{
+  "ifeval": {
+    "factory": "open_instruct.miles.rewards.task_verifiers.QualifiedIFVerifier",
+    "config": {"module": "experimental_ifeval_reward_v2"}
+  }
+}
+```
+
+The module name is required explicitly. The wrapper keeps that module's target
+validation, constraint semantics and source-pin checks. Raw mode uses the original
+`IFVerifier`; final-only mode applies the same `remove_thinking_section`
+normalization to the selected suffix before calling `grade_answer`. It does not
+fabricate another closing marker or bypass qualification failures.
+
+The historical module is **not shipped in ordinary MILES images**. Even when
+copied from H180, its pins reject the native IF sources changed by #2124/#2191.
+Building an image with this PR's complete source tree therefore does not qualify
+that historical module. A historical-runtime backport must keep all of its
+pinned sources intact; a current-source qualified module requires a separate
+qualification. Test construction and scoring in the exact image you will use,
+not just the reward files over an older source tree. Do not disable pins or
+silently substitute the native adapter into a registered qualified-verifier
+comparison: their constraint semantics and admission policies can differ.
 
 This option defaults to false and assumes the Olmo thinking format. It permits
 multiple closing markers, so it is not an exactly-one-tag format validator.
