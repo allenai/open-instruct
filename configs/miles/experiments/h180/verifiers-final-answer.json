@@ -1,0 +1,37 @@
+{
+  "code": {
+    "config": {
+      "api_url": "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program",
+      "stdio": false
+    },
+    "factory": "qualification_code_reward.CodeVerifier"
+  },
+  "code_stdio": {
+    "config": {
+      "api_url": "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program_stdio",
+      "stdio": true
+    },
+    "factory": "qualification_code_reward.CodeVerifier"
+  },
+  "general-quality": {
+    "config": {
+      "name": "general-quality"
+    },
+    "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier"
+  },
+  "general-quality_ref": {
+    "config": {
+      "name": "general-quality_ref"
+    },
+    "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier"
+  },
+  "ifeval": {
+    "factory": "open_instruct.miles.rewards.task_verifiers.QualifiedIFVerifier",
+    "config": {
+      "module": "experimental_ifeval_reward_v2"
+    }
+  },
+  "math": {
+    "factory": "open_instruct.ground_truth_utils.MathVerifier"
+  }
+}

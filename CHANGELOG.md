@@ -1,4 +1,5 @@
 # Changelog
+- H180 treatment repair: preserve the original runtime and use the qualified IF final-answer entry point (https://github.com/allenai/open-instruct/pull/2188).
 
 All notable changes to this project will be documented in this file.
 

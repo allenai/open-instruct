@@ -1,0 +1,11 @@
+# Minimal overlay on the exact qualified H180 image; all runtime pins remain unchanged.
+ARG BASE_IMAGE=h180-final-answer:qualified
+FROM ${BASE_IMAGE}
+ARG SOURCE_REVISION
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
+RUN printf '%s\n' "$SOURCE_REVISION" > /opt/core-rl/source-revision
+COPY open_instruct/miles/rewards/rewards.py /opt/core-rl/open_instruct/miles/rewards/rewards.py
+COPY open_instruct/miles/rewards/task_verifiers.py /opt/core-rl/open_instruct/miles/rewards/task_verifiers.py
+COPY open_instruct/miles/evaluation/evaluation_runner.py /opt/core-rl/open_instruct/miles/evaluation/evaluation_runner.py
+COPY configs/miles/experiments/h180 /opt/core-rl/configs/miles/experiments/h180
+RUN python -m compileall -q /opt/core-rl/open_instruct/miles/rewards /opt/core-rl/open_instruct/miles/evaluation/evaluation_runner.py
