@@ -1,10 +1,51 @@
-# Three MILES starting points
+# MILES starting points
 
 | Config | Purpose |
 |---|---|
 | [dev.toml](dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
 | [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
+| [gsm8k-4gpu.toml](gsm8k-4gpu.toml) | Olmo 3.5 Tiny GSM8K: 1 trainer GPU, 3 inference GPUs, plus separate 1-GPU Platinum evaluation jobs |
 | [three-node.toml](three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+
+`gsm8k-4gpu` uses all 7,473 GSM8K training examples, 1,000 updates,
+8 prompts × 8 responses per batch, 2,048 prompt / 4,096 response tokens,
+and maximum policy lag 4. It saves every 50 updates and evaluates full
+GSM8K Platinum initially, every 100 updates, and finally. Its explicit serving
+configuration starts from the text-only midtraining step 9,708 HF export and
+uses the Qwen math instruction for both training and Platinum chat evaluation,
+with evaluation temperature 1.0 and top-p 1 (one sample per problem). The serving
+pools and single-GPU trainer were exercised on B300 GPUs through 1,000 updates;
+other GPU models require memory qualification. This is the roughly 12.5B-total /
+0.8B-active MoE, using the existing MILES integration. The checkpoint path is an
+internal Weka export and requires access to that filesystem.
+
+To launch this example, copy it to an ignored run file and replace
+`YOUR_USERNAME`, `YOUR_WANDB_ENTITY`, the workspace, and secret references with
+your own. Confirm access to both the model and evaluator images. The four-GPU
+allocation covers training and generation; asynchronous Platinum evaluations
+request an **additional GPU** and can overlap with training.
+
+```bash
+mkdir -p runs
+cp configs/miles/examples/gsm8k-4gpu.toml runs/my-gsm8k.toml
+# Edit the account, output, and secret fields before running these commands.
+uv run --no-project --python 3.12 python -m open_instruct.miles plan runs/my-gsm8k.toml
+uv run --no-project --python 3.12 python -m open_instruct.miles validate runs/my-gsm8k.toml
+```
+
+Follow the [launch guide](../../../docs/miles/launching.md) to build the committed
+source on the cluster or select an immutable compatible training image, then run
+`python -m open_instruct.miles run runs/my-gsm8k.toml`. The image must include the
+`qwen_math` wrapper added with this example. The evaluator uses its separately
+pinned image and explicit serving options because this checkpoint's config omits
+a field required by the evaluator's named Olmo 3.5 profile.
+
+W&B defaults to online so training and background evaluations share one run.
+If you choose offline logging, sync training first and publish the saved evaluation
+receipts using the [evaluation guide](../../../docs/miles/data-and-evaluation.md).
+Native checkpoints are saved every 50 updates with only the last two retained;
+evaluation HF snapshots are saved every 100 updates. The initial evaluation is
+the prepared midtraining model, before RL updates.
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from

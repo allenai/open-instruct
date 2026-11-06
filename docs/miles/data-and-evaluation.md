@@ -58,6 +58,8 @@ service and rubric contract in [managed judges](managed-judges.md); launch does 
 automatically supply every Olmo 3 external service.
 
 `prompt_wrapper` supports the task-specific contracts in the preparation code.
+Use `qwen_math` to append “Please reason step by step, and put your final answer
+within \boxed{}.” to the user question before applying the model chat template.
 Review rendered prompts and answer format after changing it. A familiar task
 name or equal split count does not prove identical questions or reward semantics.
 

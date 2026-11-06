@@ -628,3 +628,27 @@ def test_mixture_preparation_screens_each_training_source(environment, tmp_path)
     with pytest.raises(InputError, match="source-constraints row 1:.*letter_counting_tiny_less_than"):
         prepare(environment, data)
     assert not environment[1].exists()
+
+
+def test_qwen_math_prompt_preserves_target_and_strips_solution(environment, monkeypatch):
+    monkeypatch.setattr(
+        run_data,
+        "_source_rows",
+        lambda name: [
+            {
+                "messages": [
+                    {"role": "user", "content": "What is 6 times 7?"},
+                    {"role": "assistant", "content": "SECRET SOLUTION: 42"},
+                ],
+                "ground_truth": "42",
+            }
+        ],
+    )
+    result = prepare(environment, {"tasks": [{"task": "gsm8k", "train_count": 1, "prompt_wrapper": "qwen_math"}]})
+    row = json.loads(Path(result["prompt_data"]).read_text())
+    expected = "What is 6 times 7?\n\nPlease reason step by step, and put your final answer within \\boxed{}."
+    assert environment[2].rendered == [[{"role": "user", "content": expected}]]
+    assert row["input"] == "HF template|" + expected + "|assistant:"
+    assert row["label"] == "42"
+    assert row["metadata"]["prompt_wrapper"] == "qwen_math"
+    assert "SECRET SOLUTION" not in row["input"]
