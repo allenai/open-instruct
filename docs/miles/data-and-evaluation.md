@@ -730,6 +730,13 @@ truncated prompts within the selected pool. Dataset rows supply a top-level
 a configured pool name. This is opt-in and leaves existing shuffle and fixed
 mixture configurations unchanged.
 
+Exposure counts groups, not draws or tokens: a prompt with eight responses counts
+as one unit only after the optimizer update using it succeeds. If Math delivers a
+trained group on 25% of draws and IF on 50%, equal exposure needs approximately
+two Math draws per IF draw. The controller estimates that delivery rate, favors
+pools behind their accumulated target, and subtracts the expected contribution
+of outstanding work. Adjustments are bounded; token totals are reported separately.
+
 ```toml
 [data.pools]
 math = { label = "math" }
@@ -786,9 +793,10 @@ unchanged by the sampler; an eight-response recipe remains eight-response.
 
 The first implementation supports fully asynchronous disaggregated serving,
 without prepared-batch overlap. The application requires the companion MILES
-runtime's `core_commit_exposure` callback and finite-pool termination support;
-older images fail explicitly. The runtime patch must be included in the next
-image before launching this mode. The existing pinned image alone is insufficient.
+runtime's `core_commit_exposure` callback and finite-pool termination support,
+included in this branch's runtime source pin. Older images fail explicitly.
+Build an image from this branch before launching this mode; the existing image
+alone is insufficient. Full distributed GPU validation remains pending.
 
 Inference records retain `pool_id`, `sampling_pool`, `mixture_source`, and
 `pool_selection_id`. Per-update `pool-exposure-<attempt>.jsonl` receipts live in
