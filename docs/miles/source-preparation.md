@@ -326,8 +326,10 @@ python -m open_instruct.miles.datasets.source_catalog qualified-bundle/catalog.j
 
 Qualification validates the complete pool through `run_data.prepare_data` and
 scores controls through `registered_reward`. It rejects conflicting targets for
-the same prompt. Different code test suites may share a prompt only when every
-row has a reviewed common gold solution that passes its complete original suite. Missing strata, failed controls, unresolved judge services, or
+the same prompt. Different code suites, citation-marker sets and equivalent math labels may share
+a prompt only when every row has a reviewed common gold response that passes its
+original target through the runtime bridge. ReasoningGym export UUIDs are
+provenance only; all scoring fields remain part of duplicate-target comparison. Missing strata, failed controls, unresolved judge services, or
 loader failures leave the source unqualified. Passing control rows never replace
 the full source. Quarantine genuinely malformed source rows without repairing their
 prompts or targets. Pass `--quarantine reviewed-quarantine.jsonl`, with one record
@@ -339,6 +341,20 @@ This qualifies the explicitly retained variant, not the original malformed rows.
 The report includes source/controls
 hashes, loader manifest hash, context limit, judge registry fingerprint and all
 missing strata. It does not claim that a GPU optimizer update was exercised.
+
+For a lightweight first IF pass, explicitly select
+`--instruction-family-coverage` and give each control a zero-based
+`constraint_index`. The qualifier projects that real row's selected constraint
+for the control, and requires coverage of every checker family found in the
+complete population. Training retains the original complete constraint bundles.
+The receipt calls this **family coverage**, not a solved witness for every
+combination of constraints. The default remains per-stratum coverage; projected
+controls without the flag are rejected.
+
+Large prepared files are streamed during qualification, training preparation,
+serialization and resume hashing. Code-test payloads remain complete without
+requiring several whole-file copies in memory. Identity and prompt-hash indexes
+still scale with the number of rows.
 
 Use the readiness Docker overlay on an application image built from this stack,
 so training receives the pinned optional verifier versions. Its build checks the
@@ -481,25 +497,18 @@ selected reward semantics.
 
 ## Coverage and remaining work
 
-This table covers the 21 standalone-trial sources. It is not a claim that the
-entire 100+ acquisition catalog has been integrated or requalified.
+The [first-pass data handoff](first-pass-data.md) records the released source
+variants, counts, qualification scope, artifact location and an example mixture.
+Use that snapshot for initial mixing experiments. Source support does not imply
+that every route in a heterogeneous upstream blend has its required judge or
+execution environment.
 
-| Sources | Shared integration | Remaining qualification or environment work |
-|---|---|---|
-| Litmus v0.2 (C010) | Native answer formats and scalar rules across properties | Independent scientific reference checks and controls for all new strata; tool-dependent variants need their environment |
-| Llama-Nemotron IF, Nemotron IF (C016/C021) | Maintained native checker adapters including language constraints, full original messages | Rebuild and qualify expanded bundles; malformed/unsupported arguments remain visible; better language classification is a deferred investigation |
-| Citation and Free-Form Formatting (C018/C019) | Existing bounded formatting verifier | Per-format witnesses, long-context loader checks; rewards measure format only |
-| Calendar v2 (C023) | Full final-state schedule, including empty calendars | Controls across calendar strata and original-history context; no interactive dialogue-quality claim |
-| Structured Outputs v2 (C029) | Five formats and bounded schema regex evaluation | Reviewed witnesses across schemas/formats, coercion/strictness contract review |
-| Knowledge MCQA (C031) | Displayed choice validation and final-choice reward | Native-template extraction checks, chance floor when interpreting MCQA rewards |
-| ReasoningGym (C036) | Saved entries/difficulty for all 104 exported families, including state-based tasks | Pinned native scoring with safe expression guards, partial-credit controls and bounded workers; no procedural population replacement |
-| Cascade Math, Nemotron Math v2, OpenMathReasoning, Math Stack Overflow, AceReason Math, DeepMath (C037–C040/C091/C094) | Explicit symbolic or reference-judge routing | Proof/judge parity and service calibration; canceled Nemotron Math run is not restarted |
-| Nano, Cascade-2, Lightning, Super, Ultra blends (C043–C047) | Explicit per-agent routes with full omissions report | Native judge/hybrid contracts; full code-source qualification and tool/SWE/Lean environment integration remain open |
-| AceCode (C076) | `acecode_v1` preserves context and every assertion; authenticated, source-pinned execution service | Full retained-pool qualification and aggregate service-load checks |
-| ToolRL | `toolrl_v1`, native reward scale, full history and both Olmo tool formats | First-pass offline qualification passed for 3,500 training rows; six schema-invalid rows quarantined, 80-row holdout preserved; new mixture learning remains to be measured |
+Keep these follow-ups separate from the released maintained-verifier pools:
 
-The web-search candidate remains excluded at Robert's request. SWE, Lean,
-browser/tool interaction and distillation-only records must not be presented as
-single-turn end-to-end training support. They need an actual environment or
-objective implementation. Licensing and scientific validity remain properties of
-the source and its evidence; successful parsing is not either kind of approval.
+| Area | Remaining work |
+|---|---|
+| Judged/hybrid math, proof, GenRM, rubrics, safety and abstention | Preserve each upstream judge prompt, parsing and aggregation contract; deploy and calibrate the matching service. A generic reference judge is not parity. |
+| Workplace, SWE execution, Lean, browser and other interactive tasks | Actual environment integration and recovery checks; offline next-action tool grading does not implement these environments. |
+| Alternative valid code constructions, arithmetic grammar and language detection | Preserve the documented upstream behavior for the first pass; investigate deliberate changes separately. |
+| Runtime verifier outages | Omitted-group W&B metric is implemented; the systemic-failure stopping threshold remains an explicit open decision. |
+| Semantic data quality | Qualification covers loader/reward integration and reviewed controls, not every source reference's scientific or mathematical correctness. Investigate observed training failures without retroactively selecting rows by policy success. |

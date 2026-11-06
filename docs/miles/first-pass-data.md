@@ -1,0 +1,135 @@
+# First-pass data for MILES mixing experiments
+
+This release turns the retained datasets from the early screening effort into
+named training inputs, so initial mixing experiments can start without repeating
+the preparation investigation. It provides **2,288,518 source rows across 48 named routes
+from 22 dataset families**, including ToolRL and the supported routes of all five
+Nemotron blends. Qualification checks integration and representative reward
+behavior; downstream experiments still need to establish learning benefit.
+
+## Start here
+
+The versioned release is staged at:
+
+```text
+/weka/oe-training-default/ai2-llm/data/robertb/miles-first-pass-20261106-v1
+```
+
+`catalog.json` is the entry point. `summary.json` contains per-source counts and
+coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
+qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
+records verification on shared storage. `configs/<name>.toml` provides a ready
+single-source `[data]` fragment with absolute shared paths. The release's Beaker
+archive and catalog hash are recorded in the PR handoff.
+
+Use code from PR [#2178](https://github.com/allenai/open-instruct/pull/2178) and a
+matching MILES image with the dependencies in
+`scripts/data/rl_readiness/requirements.txt`. The readiness Docker overlay installs
+those dependencies on an application image already built from this code. Keep
+the pinned MILES runtime; the overlay does not replace that runtime. No new GPU
+training run is claimed by this release.
+
+These are explicit **16,384-token prompt variants**, rendered with the bundled
+Olmo Pythonic tool template and tokenizer. Allow response tokens in addition to
+that prompt budget, for example a 32K total context with a 16K response budget.
+A different tokenizer/template needs preparation again; a smaller prompt limit
+needs an explicit smaller-context variant. `long-context/` preserves longer
+records separately, with hashes and counts, rather than truncating histories.
+These **64,478** records are not qualified for this release's prompt limit.
+
+Resolve a deliberately chosen mixture **offline**, then put the resulting
+`[data]` fragment in the run configuration:
+
+```bash
+python -m open_instruct.miles.datasets.source_catalog \
+  /weka/oe-training-default/ai2-llm/data/robertb/miles-first-pass-20261106-v1/catalog.json \
+  --source c031=0.5 --source c029=0.3 --source toolrl=0.2 \
+  --output data.toml
+```
+
+These weights illustrate the interface; they are not a recommended recipe.
+Training trusts the resulting configuration and performs ordinary preparation.
+It does not rerun qualification. Preserve the release/catalog hash with the run.
+
+## Available populations
+
+Counts are retained **source rows**, not globally unique questions. Standalone
+sources and blend routes can overlap, and some upstream blends repeat examples.
+Select sources deliberately rather than combining every row by default. Earlier
+hygiene exclusions and protected holdouts remain excluded; this release does not
+claim a new independent decontamination pass.
+
+| Dataset | Source name or prefix | Rows |
+|---|---|---:|
+| Litmus v0.2 | `c010` | 41,638 |
+| Llama-Nemotron IF | `c016` | 51,189 |
+| Nemotron Citation Formatting | `c018` | 9,540 |
+| Nemotron Free-Form Formatting | `c019` | 9,037 |
+| Nemotron IF | `c021` | 44,538 |
+| Calendar v2 | `c023` | 9,659 |
+| Structured Outputs v2 | `c029` | 57,658 |
+| Nemotron Knowledge MCQA | `c031` | 610,469 |
+| ReasoningGym | `c036` | 14,525 |
+| Nemotron Cascade Math | `c037` | 14,379 |
+| Nemotron OpenMathReasoning | `c039` | 112,647 |
+| Nemotron Math Stack Overflow | `c040` | 434,156 |
+| Nemotron Nano blend | `c043_*` | 60,255 |
+| Nemotron Cascade-2 blend | `c044_*` | 60,467 |
+| Nemotron Lightning blend | `c045_*` | 55,901 |
+| Nemotron Super blend | `c046_*` | 269,361 |
+| Nemotron Ultra blend | `c047_*` | 163,720 |
+| AceCode | `c076` | 87,149 |
+| AceReason Math | `c091` | 49,538 |
+| DeepMath-103K | `c094` | 100,985 |
+| Dolci IF | `dolci-if` | 28,207 |
+| ToolRL | `toolrl` | 3,500 |
+
+Blend names have route suffixes: `_code`, `_if`, `_mcqa`, `_structured`,
+`_calendar`, `_rg`, `_citation`, `_format`, and `_tools`, where present. For
+example, `c046_tools` selects Super's offline next-action tool examples. The
+catalog lists the exact available combinations; unsupported routes are absent.
+
+## What qualification establishes
+
+Every retained row went through the training loader. Reviewed gold, wrong,
+near-miss, empty and truncated controls went through the training reward bridge.
+The **5,195 runtime control checks** passed. Each receipt binds the checked prompt
+and verifier files to their content hashes.
+Code controls exercised the live service with complete test suites.
+
+IF uses explicit **checker-family coverage**: a selected real constraint is
+projected for each control, while training retains complete original constraint
+bundles. Every represented family is covered. This is not a solved witness for
+every combination. Other sources use their recorded reward/task strata. These
+checks do not independently prove every reference answer or code test correct,
+and no source was selected by whether a policy happened to solve it.
+
+ToolRL retains its historical reward scale: call targets range from -3 to 4;
+format-only targets from 0 to 1. NeMo tool message targets reward nonempty prose,
+not semantic answer quality. Tool-call rows preserve their history and declared
+tools, but grade the next action offline; they do not execute an environment.
+
+Code uses deployment version 9 at the pinned execution endpoint. Inject
+`CODE_EXECUTION_TOKEN` from Beaker secret
+`robertb_CODE_EXECUTION_OE_DATA_STAGING` in workspace `ai2/open-instruct-dev`;
+credentials are absent from the artifact. The service owner reports zero failures
+across 38,056 requests and 542,262 outcomes, tested through concurrency 128, with
+an AWS ceiling of 900. That is a shared service limit, not a per-run entitlement.
+
+## Deliberate exclusions and follow-ups
+
+| Area | First-pass decision | Follow-up |
+|---|---|---|
+| Malformed source rows | Quarantine exact IDs with reasons; retain the rest | Investigate repairs separately, without changing this release |
+| Long histories | Preserve outside the 16K-prompt variant | Qualify a longer-context variant when an experiment needs it |
+| Math duplicate labels | Quarantine two DeepMath rows labeled `B` versus `2` for the same numbered-choice question, and two AceReason rows whose `X` / `\text{X}` labels the existing verifier grades inconsistently | Fix the existing MathVerifier normalization issue in a separate upstream change |
+| ReasoningGym halting | Quarantine three Ultra rows: native 0.1.25 applies `bool()` to strings, awarding every nonempty response full credit | Correct and validate the upstream scorer before admitting this family |
+| Judged and hybrid routes, including Nemotron Math v2 (C038), proof, GenRM, rubrics, safety and abstention | Not included in this release | Implement each native prompt/parsing/aggregation contract and calibrate its service; do not substitute a generic judge |
+| Workplace, SWE execution, Lean, browser and other interactive routes | Not included; offline tool support does not claim their execution environments | Integrate actual environments and recovery checks |
+| Alternative valid code constructions, arithmetic grammar and language detection | Preserve the already documented upstream behavior | Investigate deliberate grading improvements separately; do not delay initial experiments for them |
+| Sustained verifier outages | Individual ungraded prompt groups are omitted and replaced; W&B reports `rollout/verification/omitted_records` | Decide the systemic-failure stopping threshold; none is introduced here |
+
+The first experiments should examine reward distributions, omitted-group counts,
+context utilization and downstream evaluations alongside learning curves. The
+purpose is to identify useful signal and concrete failure cases, while keeping
+this release and its qualification evidence reproducible.
