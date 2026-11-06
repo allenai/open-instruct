@@ -19,19 +19,19 @@ The versioned release destination is:
 coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
 qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
 records verification on shared storage; use the release after its status is `verified`. `configs/<name>.toml` provides a ready
-single-source `[data]` fragment with absolute shared paths. The immutable archives
-below reproduce this release: extract the source archive first, then apply the
-qualification refresh. Staging combines both at the shared path.
+single-source `[data]` fragment with absolute shared paths. The immutable archive
+below reproduces this release. It contains bounded transfer pieces, an archive
+manifest and `stage_release.py`; the staging script verifies reconstructed archive
+hashes, extracts the complete release and verifies the catalog's file hashes.
 
 | Release identity | Value |
 |---|---|
-| Source archive | [01M6SCPSJ5JMB9PF0220446X0A](https://beaker.org/ds/01M6SCPSJ5JMB9PF0220446X0A) |
-| Qualification refresh | [01M6SD8W46XPHATW3GV06T0YGC](https://beaker.org/ds/01M6SD8W46XPHATW3GV06T0YGC) |
+| Portable archive | [01M6SF13DDXJ2CWGWRH1TAYMKP](https://beaker.org/ds/01M6SF13DDXJ2CWGWRH1TAYMKP) |
 | Final catalog SHA256 | `3616ec5ed4861c12a572af64d1df3fe9e9d3ac326cd5d736e302b3455aaed1eb` |
 
-The refresh includes the staging script and archive manifest, and the receipts
-from requalifying all six structured-output pools after preserving native schema
-combinator behavior. It changes no training rows.
+The archive includes refreshed receipts from requalifying all six structured-output
+pools after preserving native schema combinator behavior. This changes no training
+rows.
 
 The release records runtime code baseline
 [`1e79b6210005abcea355354d30f0d83b4537f8cb`](https://github.com/allenai/open-instruct/commit/1e79b6210005abcea355354d30f0d83b4537f8cb)
