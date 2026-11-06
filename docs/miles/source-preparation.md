@@ -323,6 +323,23 @@ introduce new filtering, repairs or a qualification blocker. Such false negative
 are ordinary zero rewards, not missing grades, so they do not increment
 `rollout/verification/omitted_records`.
 
+## Native language constraints
+
+Preserve the native checkers' behavior when language detection raises
+`LangDetectException`: the language constraint passes. Both our existing IFEvalG
+checker and [NeMo's pinned upstream checker](https://github.com/abukharin-nv/verifiable-instructions/blob/f46a5ac87b1400a4f8973039844b6be9b56e3faf/verifiable_instructions/instructions.py#L137-L186)
+use this fallback. An unclassifiable answer is not necessarily a language
+violation: `42` can correctly answer an English question without containing
+detectable language. This is an intentional acceptance of ambiguity; do not
+replace it with a zero reward or omit the source row solely for that reason.
+
+The uppercase/lowercase English checkers retain their separate case tests;
+digits alone fail those tests before language detection runs. A successfully
+detected language that differs from the required language still fails.
+The NeMo adapter currently excludes all three language-related checkers pending
+the separate review of detector repeatability. Preserving the exception fallback
+does not by itself remove that gate or establish language-classification accuracy.
+
 ## Reference judges and routed blends
 
 `reference_judge_v1` preserves a nonempty reference from `expected_answer` (or
