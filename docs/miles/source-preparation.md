@@ -79,8 +79,26 @@ single-turn training even when its final scalar can be graded.
 Litmus regex matching has a 100 ms budget. As with the other local validation
 adapters, a timeout always returns zero with `status: timeout`, the error and
 elapsed time in diagnostics; there is no policy setting. Invalid targets and
-unexpected failures still raise. Qualification rejects timed-out controls, even
+unexpected failures still raise from the verifier. Qualification rejects timed-out controls, even
 though training can continue with zero reward for a timed-out response.
+
+Managed training uses `rollout_reward`: if an individual verifier raises or a
+judge reports a failed grade, its reward is missing rather than zero. The pinned
+MILES collector discards the entire prompt group (including healthy sibling
+responses) and draws replacements. `rollout/verification/omitted_records` in W&B
+counts these missing-reward prompt groups per collection interval, including groups
+that never enter the training batch. It counts sampling attempts, not distinct
+source IDs; legitimate wrong answers and local validation timeouts do not count.
+The native `rollout/dynamic_filter/drop_group_has_missing_reward` counter remains
+available too. Diagnostics retain the verifier name/error on the failed sample,
+with bounded failed-input captures under `<save>/verifier_failures`.
+
+Offline qualification and evaluation remain strict; registry construction and
+routing/configuration errors also remain fatal. **Open decision:** how many or
+what fraction of omissions should stop a run. No tolerance setting or abort
+threshold is introduced here. A sustained verifier outage can therefore keep
+collection waiting for replacements; W&B receives the count when collection
+logs, while individual failures are logged immediately.
 
 Structured tool-call rows are final-answer tasks, not tool-execution environments.
 The adapter preserves every function declaration and renders it through the Olmo
