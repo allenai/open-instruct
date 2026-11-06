@@ -14,6 +14,7 @@ from open_instruct.environments.base import BaseEnvConfig, EnvCall, StepResult
 from open_instruct.environments.examples import CounterEnvConfig, GuessNumberEnvConfig, WordleTextEnvConfig
 from open_instruct.environments.generic_sandbox import GenericSandboxEnvConfig
 from open_instruct.environments.tools.generic_mcp import GenericMCPToolConfig
+from open_instruct.environments.tools.parallel_search import ParallelSearchToolConfig
 from open_instruct.environments.tools.utils import Tool, coerce_args, log_env_call, make_api_request
 
 logger = logger_utils.setup_logger(__name__)
@@ -758,6 +759,7 @@ TOOL_REGISTRY: dict[str, type[BaseEnvConfig]] = {
     S2SearchToolConfig.tool_class.config_name: S2SearchToolConfig,
     SerperSearchToolConfig.tool_class.config_name: SerperSearchToolConfig,
     YouSearchToolConfig.tool_class.config_name: YouSearchToolConfig,
+    ParallelSearchToolConfig.tool_class.config_name: ParallelSearchToolConfig,
     Crawl4AIBrowseToolConfig.tool_class.config_name: Crawl4AIBrowseToolConfig,
     DrAgentMCPToolConfig.tool_class.config_name: DrAgentMCPToolConfig,
     GenericMCPToolConfig.tool_class.config_name: GenericMCPToolConfig,
