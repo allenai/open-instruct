@@ -92,6 +92,26 @@ def test_complete_source_qualifies_and_resolves(tmp_path, monkeypatch):
         source_catalog.resolve(tmp_path / "qualified/catalog.json", {"toy": 1.0})
 
 
+@pytest.mark.parametrize("separator", ["\u0085", "\u2028", "\u2029"])
+def test_qualification_preserves_unicode_line_separators(tmp_path, monkeypatch, separator):
+    catalog, controls, hf = setup_bundle(tmp_path, monkeypatch)
+    document = json.loads(catalog.read_text())
+    entry = document["sources"]["toy"]
+    prompts = catalog.parent / entry["prompt_data"]["path"]
+    row = json.loads(prompts.read_text())
+    row["input"] = "Question" + separator + "One plus one?"
+    prompts.write_text(json.dumps(row, ensure_ascii=False) + "\n")
+    entry["prompt_data"]["sha256"] = source_preparation.file_hash(prompts)
+    catalog.write_text(json.dumps(document))
+    control = json.loads(controls.read_text())
+    control["provenance"] = "Line one" + separator + "line two"
+    controls.write_text(json.dumps(control, ensure_ascii=False) + "\n")
+    output = tmp_path / "qualified"
+    receipt = asyncio.run(qualify_bundle.qualify(catalog, controls, hf, output, 1000))
+    assert receipt["sources"]["toy"]["status"] == "qualified"
+    assert json.loads((output / "toy/prompts.jsonl").read_text())["input"] == row["input"]
+
+
 def test_missing_stratum_never_shrinks_population(tmp_path, monkeypatch):
     catalog, controls, hf = setup_bundle(tmp_path, monkeypatch, extra=True)
     receipt = asyncio.run(qualify_bundle.qualify(catalog, controls, hf, tmp_path / "qualified", 1000))

@@ -20,6 +20,12 @@ from open_instruct.miles.datasets import source_preparation as sources
 from open_instruct.miles.rewards import complete_code, judge_registry, rewards
 
 
+def read_jsonl(path):
+    # Unicode separators inside JSON strings are prompt content, not records.
+    with Path(path).open() as stream:
+        return [json.loads(line) for line in stream if line.strip()]
+
+
 def bundled_path(root, descriptor):
     path = (root / descriptor["path"]).resolve()
     if not path.is_relative_to(root):
@@ -111,15 +117,13 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, qu
         raise ValueError("Unknown catalog version")
     quarantine = defaultdict(dict)
     if quarantine_path is not None:
-        for line in Path(quarantine_path).read_text().splitlines():
-            record = json.loads(line)
+        for record in read_jsonl(quarantine_path):
             name, identity = record["source"], record["id"]
             if name not in catalog["sources"] or identity in quarantine[name] or not record.get("reason"):
                 raise ValueError("Quarantine requires known sources, distinct IDs and explicit reasons")
             quarantine[name][identity] = record["reason"]
     controls = defaultdict(list)
-    for line in controls_path.read_text().splitlines():
-        entry = json.loads(line)
+    for entry in read_jsonl(controls_path):
         if entry["source"] not in catalog["sources"]:
             raise ValueError("Control names an unknown source")
         controls[entry["source"]].append(entry)
@@ -138,7 +142,7 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, qu
                 if "dispositions" not in entry:
                     raise ValueError("Quarantine requires a hashed dispositions report")
                 dispositions_path = bundled_path(catalog_path.parent, entry["dispositions"])
-                dispositions = [json.loads(line) for line in dispositions_path.read_text().splitlines()]
+                dispositions = read_jsonl(dispositions_path)
                 omitted_ids = {row["id"] for row in dispositions if row["status"] == "omitted"}
                 if len(omitted_ids) != omitted or omitted_ids != set(quarantine[name]):
                     raise ValueError("Every omission must match an explicitly reviewed quarantine row")
@@ -162,7 +166,7 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, qu
                     expected["config"] = dataclasses.asdict(config)
                 if spec != expected:
                     raise ValueError("Unreviewed verifier options")
-            rows = [json.loads(line) for line in paths["prompt_data"].read_text().splitlines()]
+            rows = read_jsonl(paths["prompt_data"])
             by_id = {row["metadata"]["sample_id"]: row for row in rows}
             if len(by_id) != len(rows):
                 raise ValueError("Repeated sample identity")
