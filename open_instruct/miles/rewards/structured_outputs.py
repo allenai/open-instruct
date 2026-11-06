@@ -21,7 +21,7 @@ from openapi_schema_validator import OAS31Validator
 from referencing import Registry
 
 from open_instruct import logger_utils
-from open_instruct.miles.rewards import candidate_verifiers as common
+from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import nemo_structured_types, rewards
 
 FORMATS = {"json", "yaml", "toml", "xml", "csv"}

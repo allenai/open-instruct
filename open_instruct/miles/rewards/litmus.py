@@ -12,7 +12,7 @@ from typing import Any
 import regex
 
 from open_instruct import logger_utils
-from open_instruct.miles.rewards import candidate_verifiers as common
+from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import task_verifiers
 
 logger = logger_utils.setup_logger(__name__)

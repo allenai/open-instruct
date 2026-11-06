@@ -1,4 +1,4 @@
-"""Qualify exported candidate controls through the real MILES reward and loader paths.
+"""Qualify exported dataset controls through the real MILES reward and loader paths.
 
 Run in the pinned MILES image plus requirements.txt. Exports are trusted inputs
 produced by a reviewed adapter; arbitrary dataset rows cannot choose factories.
@@ -32,6 +32,8 @@ FACTORIES = {
     "open_instruct.miles.rewards.nvidia_constraints.CalendarVerifier",
     "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
     "open_instruct.ground_truth_utils.MathVerifier",
+    "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
+    # Existing immutable registries retain their original factory path.
     "open_instruct.miles.rewards.candidate_verifiers.CandidateVerifier",
     "open_instruct.miles.rewards.reasoning_gym.ReasoningGymVerifier",
     "open_instruct.miles.rewards.json_schema.JSONSchemaVerifier",
@@ -223,6 +225,7 @@ async def main(args):
             "shuffle": False,
         }
         record = {
+            # Preserve the source identifier field in existing qualification exports.
             "candidate": values[0]["candidate"],
             "rows": len(rows),
             "status": "deferred",

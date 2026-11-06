@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 import regex
 
-from open_instruct.miles.rewards import candidate_verifiers as cv
+from open_instruct.miles.rewards import deterministic_verifiers as cv
 from open_instruct.miles.rewards import rewards
 
 QUOTED = {
@@ -162,7 +162,7 @@ def test_real_general_pattern_timeout_policy(kind, policy, monkeypatch):
         value.update(expected_markers=["a"], patterns=["^(a|aa)+$"])
     else:
         value["verify_regex"] = ["^(a|aa)+$"]
-    verifier = cv.CandidateVerifier()
+    verifier = cv.DeterministicVerifier()
     call = verifier.async_call([], "a" * 10000 + "!", {"kind": "format", "value": value})
     if policy == "raise":
         with pytest.raises(cv.FormattingVerifierTimeout, match="nested_repetition"):
@@ -182,7 +182,7 @@ def test_timeout_zero_preserves_input_and_diagnostics_in_reward_bridge(tmp_path,
 
     monkeypatch.setattr(cv.regex, "search", timeout)
     monkeypatch.setattr(rewards, "_FAILURE_CAPTURED", set())
-    monkeypatch.setattr(rewards, "_registry", lambda path: {"format": cv.CandidateVerifier()})
+    monkeypatch.setattr(rewards, "_registry", lambda path: {"format": cv.DeterministicVerifier()})
     monkeypatch.setenv("OI_MILES_MATH_TIMEOUT_POLICY", "raise")
     monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "zero")  # Explicit format policy takes precedence.
     target = {"kind": "format", "value": {"type": "regex", "verify_regex": ["x"]}}
@@ -206,7 +206,7 @@ def test_timeout_zero_preserves_input_and_diagnostics_in_reward_bridge(tmp_path,
 
 
 def test_timeout_policy_rejects_invalid_policy_and_preserves_bad_targets(monkeypatch):
-    verifier = cv.CandidateVerifier()
+    verifier = cv.DeterministicVerifier()
     monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "invalid")
     with pytest.raises(ValueError, match="must be zero or raise"):
         asyncio.run(verifier.async_call([], "", QUOTED))
@@ -223,7 +223,7 @@ def test_default_timeout_policy_is_zero(monkeypatch):
     monkeypatch.delenv("OI_MILES_MATH_TIMEOUT_POLICY", raising=False)
     monkeypatch.setattr(cv.regex, "search", timeout)
     target = {"kind": "format", "value": {"type": "regex", "verify_regex": ["x"]}}
-    result = asyncio.run(cv.CandidateVerifier().async_call([], "x", target))
+    result = asyncio.run(cv.DeterministicVerifier().async_call([], "x", target))
     assert result.score == 0.0 and result.diagnostics["status"] == "timeout"
 
 

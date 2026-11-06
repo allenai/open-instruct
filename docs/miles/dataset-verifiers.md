@@ -1,6 +1,6 @@
 # Dataset reward verifiers
 
-Candidate datasets need runtime rewards that implement their declared answer
+Datasets need runtime rewards that implement their declared answer
 contracts. The structured-output verifier lets MILES train on JSON, YAML, TOML,
 XML and CSV using its existing registered reward path. This guide explains the
 supported contracts, runtime dependencies and limits needed to prepare and
@@ -9,7 +9,7 @@ validate these training sources.
 ## Structured output sources
 
 Install `scripts/data/rl_readiness/requirements.txt` in the training
-image before using optional candidate verifiers. Registry factory
+image before using optional dataset verifiers. Registry factory
 `open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier` accepts
 a target with `format` (`json`, `yaml`, `toml`, `xml`, `csv`), `schema`, an explicit
 `schema_policy` (`as_declared` or `nemo_strict_v1`), and optional `coerce_types`.
@@ -95,7 +95,7 @@ against `exp_cal_state`: event IDs, durations, non-overlap, windows and explicit
 before/after/at/between constraints. Empty target calendars are supported. This
 version scores schedule feasibility, not event-name paraphrase or dialogue
 quality. Both adapters use the isolated verifier worker path. Their extraction
-uses the final answer after reasoning, like the other candidate verifiers.
+uses the final answer after reasoning, like the other dataset verifiers.
 Calendar JSON parsing failures, including excessive nesting, score zero with
 `parse_error`, `error_type`, and `failure_policy: zero` diagnostics. Calendar target
 errors remain fatal and are checked before response parsing.

@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import importlib
 import json
 
 import pytest
@@ -11,7 +12,7 @@ from tokenizers import models
 from transformers import PreTrainedTokenizerFast
 
 from open_instruct import dataset_transformation
-from open_instruct.miles.datasets import candidate_sources as sources
+from open_instruct.miles.datasets import source_preparation as sources
 from open_instruct.miles.rewards import litmus
 
 
@@ -35,7 +36,7 @@ def test_no_prompt_rewrite_and_native_fields():
     }
     ms, target, name, _ = sources.adapt(raw, "nemo_v1")
     assert ms == raw["responses_create_params"]["input"]
-    assert name == "candidate" and target["value"] == raw["verifier"]
+    assert name == "deterministic" and target["value"] == raw["verifier"]
     assert ms is not raw["responses_create_params"]["input"]
     assert sources.messages({"prompt": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]}) == [
         {"role": "user", "content": "hello"}
@@ -54,6 +55,16 @@ def test_explicit_math_and_no_topic_subsetting():
         sources.adapt({"responses_create_params": {"input": "hello", "tools": ["search"]}}, "nemo_v1")
 
 
+def test_legacy_preparation_module_and_adapter_use_current_contract():
+    legacy = importlib.import_module("open_instruct.miles.datasets.candidate_sources")
+    raw = {"prompt": "Compute 1+1", "target": {"kind": "numeric", "value": "2"}}
+    assert legacy.adapt(raw, "candidate_v1") == sources.adapt(raw, "deterministic_v1")
+    assert legacy.prepare is sources.prepare
+    assert sources.FACTORIES["deterministic"] == (
+        "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier"
+    )
+
+
 def test_full_population_no_cap_or_screen_reservation(tmp_path):
     records: list[dict] = [
         {"id": "screened", "raw_record": {"prompt": "x" * 3000, "target": {"kind": "numeric", "value": "2"}}},
@@ -68,7 +79,7 @@ def test_full_population_no_cap_or_screen_reservation(tmp_path):
         "schema_version": 1,
         "sources": {
             "full": {
-                "adapter": "candidate_v1",
+                "adapter": "deterministic_v1",
                 "inputs": [
                     {"path": str(raw), "sha256": sources.file_hash(raw), "revision": "fixed", "split": "train"}
                 ],
@@ -177,6 +188,23 @@ def test_malformed_targets_are_omitted_not_fatal(tmp_path, adapter, record, reas
     assert reasons[0].startswith("ValueError: " + reason)
 
 
+@pytest.mark.parametrize("adapter", ["mcqa_v1", "nemo_v1"])
+@pytest.mark.parametrize("bad_options", [["A", "B"], [{"A": "one"}, None], {"A": "one", "B": "two"}])
+def test_malformed_mcqa_options_do_not_stop_preparation(tmp_path, adapter, bad_options):
+    question = {"prompt": "Choose one.\nA. one\nB. two", "expected_answer": "B"}
+    records = [
+        {"id": "malformed", **question, "options": bad_options},
+        {"id": "valid", **question, "options": [{"A": "one"}, {"B": "two"}]},
+    ]
+    entry, reasons = prepare_one(tmp_path, adapter, records)
+    counts = entry["counts"]
+    assert (counts["input_rows"], counts["omitted_rows"], counts["prepared_rows"]) == (2, 1, 1)
+    assert reasons == ["ValueError: MCQA options must be a list of dictionaries"]
+    row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
+    assert row["metadata"]["sample_id"] == "valid"
+    assert row["label"] == {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"]}
+
+
 def test_invalid_structured_schema_is_omitted_not_fatal(tmp_path):
     pytest.importorskip("xmltodict")
     pytest.importorskip("openapi_schema_validator")
@@ -233,7 +261,7 @@ def test_leading_context_survives_preparation_and_olmo_template(tmp_path, instru
         eos_token="<|im_end|>",
         chat_template=dataset_transformation.CHAT_TEMPLATES["olmo_thinker"],
     )
-    entry, reasons = prepare_one(tmp_path, "candidate_v1", [raw], tokenizer)
+    entry, reasons = prepare_one(tmp_path, "deterministic_v1", [raw], tokenizer)
     assert entry["counts"]["prepared_rows"] == 1 and reasons == []
     row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
     context = "Keep units.\n\nUse two decimals.\n\n Preserve this whitespace.\n"
@@ -270,8 +298,8 @@ def test_developer_message_after_user_is_not_reordered():
 
 
 def test_unknown_adapter_is_a_plan_error_not_an_omission(tmp_path):
-    with pytest.raises(sources.PlanError, match="unknown_adapter:candidte_v1"):
-        prepare_one(tmp_path, "candidte_v1", [{"prompt": "question", "target": {"kind": "numeric", "value": "2"}}])
+    with pytest.raises(sources.PlanError, match="unknown_adapter:deterministc_v1"):
+        prepare_one(tmp_path, "deterministc_v1", [{"prompt": "question", "target": {"kind": "numeric", "value": "2"}}])
 
 
 @pytest.mark.parametrize("expected", [None, "", "  ", ["a"], {"a": 1}])

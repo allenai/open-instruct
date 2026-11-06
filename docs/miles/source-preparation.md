@@ -1,6 +1,6 @@
-# Preparing candidate sources
+# Preparing dataset sources
 
-Prepared source bundles connect candidate datasets to MILES training without
+Prepared source bundles connect datasets to MILES training without
 changing their original prompts or silently narrowing their populations. The
 preparation command consumes local JSONL exports from completed hygiene work;
 it does not download datasets or rerun decontamination. Each input and the prior
@@ -22,7 +22,7 @@ including Litmus v0.2 rather than both Litmus releases.
 ```
 
 ```bash
-python -m open_instruct.miles.datasets.candidate_sources plan.json \
+python -m open_instruct.miles.datasets.source_preparation plan.json \
   --tokenizer /path/to/checkpoint --output /path/to/new-bundle
 ```
 
@@ -59,7 +59,13 @@ and are recorded as omissions rather than moved across conversation turns.
 | `reasoning_gym_v1` | Saved entries for the ten qualified families, including ARC/reARC; no regeneration or difficulty reset |
 | `mcqa_v1` | Displayed options and expected answer, existing final-choice parser; no science-only filtering |
 | `math_v1` | Explicit symbolic-math source contract; proof requests are reported as requiring judged support |
-| `candidate_v1` | Existing numeric, exact-text/JSON, countdown and knights contracts in `target` |
+| `deterministic_v1` | Existing numeric, exact-text/JSON, countdown and knights contracts in `target` |
+
+New registries use
+`open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier`.
+The former `candidate_sources` command, `candidate_v1` adapter name, and
+`candidate_verifiers.CandidateVerifier` factory remain compatibility aliases for
+existing plans and immutable bundles. They do not define separate behavior.
 
 Litmus preserves row-specific answer formats and tolerances. The versioned
 `litmus_scalar_v1` contract deliberately requires complete finite numeric or

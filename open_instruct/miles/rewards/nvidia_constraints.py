@@ -8,7 +8,7 @@ from functools import lru_cache
 
 from open_instruct import ifeval_constraints, logger_utils
 from open_instruct.IFEvalG import instructions_registry
-from open_instruct.miles.rewards import candidate_verifiers as common
+from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import rewards, task_verifiers
 
 logger = logger_utils.setup_logger(__name__)

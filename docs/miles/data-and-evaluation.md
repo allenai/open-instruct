@@ -513,7 +513,7 @@ mixed/all-zero group filtering. Their input
 export must come from a reviewed adapter with immutable source provenance and
 existing hygiene receipts.
 
-The optional `candidate_verifiers` factories cover explicit MCQA answer lines,
+The optional `deterministic_verifiers` factories cover explicit MCQA answer lines,
 formatting-only checks, Countdown arithmetic, named knight/knave assignments,
 structural numeric answers, exact text, and typed JSON answers. MCQA uses a
 prepared `Answer: LETTER` contract; it must not silently replace a source's
