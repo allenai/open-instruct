@@ -353,7 +353,8 @@ for the control, and requires coverage of every checker family found in the
 complete population. Training retains the original complete constraint bundles.
 The receipt calls this **family coverage**, not a solved witness for every
 combination of constraints. The default remains per-stratum coverage; projected
-controls without the flag are rejected.
+controls without the flag are rejected. The flag applies to the invocation, so
+qualify IF and non-IF source catalogs separately before assembling a mixed catalog.
 
 Large prepared files are streamed during qualification, training preparation,
 serialization and resume hashing. Code-test payloads remain complete without

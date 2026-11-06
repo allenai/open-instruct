@@ -9,7 +9,7 @@ behavior; downstream experiments still need to establish learning benefit.
 
 ## Start here
 
-The versioned release is staged at:
+The versioned release destination is:
 
 ```text
 /weka/oe-training-default/ai2-llm/data/robertb/miles-first-pass-20261106-v1
@@ -18,9 +18,20 @@ The versioned release is staged at:
 `catalog.json` is the entry point. `summary.json` contains per-source counts and
 coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
 qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
-records verification on shared storage. `configs/<name>.toml` provides a ready
-single-source `[data]` fragment with absolute shared paths. The release's Beaker
-archive and catalog hash are recorded in the PR handoff.
+records verification on shared storage; use the release after its status is `verified`. `configs/<name>.toml` provides a ready
+single-source `[data]` fragment with absolute shared paths. The immutable archives
+below reproduce this release: extract the source archive first, then apply the
+qualification refresh. Staging combines both at the shared path.
+
+| Release identity | Value |
+|---|---|
+| Source archive | [01M6SCPSJ5JMB9PF0220446X0A](https://beaker.org/ds/01M6SCPSJ5JMB9PF0220446X0A) |
+| Qualification refresh | [01M6SD8W46XPHATW3GV06T0YGC](https://beaker.org/ds/01M6SD8W46XPHATW3GV06T0YGC) |
+| Final catalog SHA256 | `3616ec5ed4861c12a572af64d1df3fe9e9d3ac326cd5d736e302b3455aaed1eb` |
+
+The refresh includes the staging script and archive manifest, and the receipts
+from requalifying all six structured-output pools after preserving native schema
+combinator behavior. It changes no training rows.
 
 Use code from PR [#2178](https://github.com/allenai/open-instruct/pull/2178) and a
 matching MILES image with the dependencies in
@@ -51,6 +62,16 @@ These weights illustrate the interface; they are not a recommended recipe.
 ToolRL has a different reward scale from the other two sources; see below.
 Training trusts the resulting configuration and performs ordinary preparation.
 It does not rerun qualification. Preserve the release/catalog hash with the run.
+
+The qualification tokenizer came from the local
+`rl-dataset-qualification/checkpoints/rhea-preflight-v3/checkpoint/tokenizer`
+snapshot. Compare content hashes rather than inferring compatibility from a
+model name:
+
+| Bundled file | SHA256 |
+|---|---|
+| `tokenizer/tokenizer.json` | `18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300` |
+| `tokenizer/chat_template.jinja` | `43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a` |
 
 ## Available populations
 
@@ -128,6 +149,7 @@ an AWS ceiling of 900. That is a shared service limit, not a per-run entitlement
 | Judged and hybrid routes, including Nemotron Math v2 (C038), proof, GenRM, rubrics, safety and abstention | Not included in this release | Implement each native prompt/parsing/aggregation contract and calibrate its service; do not substitute a generic judge |
 | Workplace, SWE execution, Lean, browser and other interactive routes | Not included; offline tool support does not claim their execution environments | Integrate actual environments and recovery checks |
 | Alternative valid code constructions, arithmetic grammar and language detection | Preserve the already documented upstream behavior | Investigate deliberate grading improvements separately; do not delay initial experiments for them |
+| Schema combinations | Native list-traversal behavior is preserved; all six structured pools were requalified after the fix. The audit records 38 rows with object branches under `allOf` and 16 under `oneOf` | Investigate upstream schema satisfiability in the cleaning PR. For example, C029 direct-generation row 1378 requires a pet `id` through `allOf` while its parent forbids that undeclared key. Integration qualification does not prove every schema satisfiable. |
 | Sustained verifier outages | Individual ungraded prompt groups are omitted and replaced; W&B reports `rollout/verification/omitted_records` | Decide the systemic-failure stopping threshold; none is introduced here |
 
 The first experiments should examine reward distributions, omitted-group counts,
