@@ -45,7 +45,26 @@ def file_hash(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def messages(raw):
+def dolci_prompt_messages(value):
+    """Recover the unambiguous single-user form of Dolci's flattened chat.
+
+    The publisher joins messages with newlines and adds ``role: `` prefixes.
+    That serialization cannot distinguish extra turns from quoted role lines;
+    require structured messages for those cases instead of guessing boundaries.
+    """
+    if value.startswith("user: "):
+        content = value[len("user: ") :]
+        if re.search(r"\n(?:user|assistant|system|developer):", content):
+            raise ValueError("ambiguous_dolci_conversation: supply structured chat messages")
+        if not content.strip():
+            raise ValueError("empty_dolci_user_message")
+        return [{"role": "user", "content": content}]
+    if re.match(r"^\s*(?:user|assistant|system|developer):", value, flags=re.IGNORECASE):
+        raise ValueError("unsupported_dolci_role_serialization: supply structured chat messages")
+    return [{"role": "user", "content": value}]
+
+
+def messages(raw, *, dolci_prompt=False):
     params = raw.get("responses_create_params") or {}
     if not isinstance(params, dict):
         raise ValueError("requires_responses_parameters_object")
@@ -56,7 +75,7 @@ def messages(raw):
         raise ValueError("requires_text_instructions")
     value = params.get("input", raw.get("input", raw.get("prompt", raw.get("question", raw.get("problem")))))
     if isinstance(value, str):
-        value = [{"role": "user", "content": value}]
+        value = dolci_prompt_messages(value) if dolci_prompt else [{"role": "user", "content": value}]
     if not isinstance(value, list) or not value or not all(isinstance(message, dict) for message in value):
         raise ValueError("requires_text_conversation_ending_with_user")
     if value[-1].get("role") != "user":
@@ -138,11 +157,7 @@ def corrected_dolci_target(raw, ms, policy):
 def adapt(raw, kind, options=None):
     options = options or {}
     validate_keyword_option(kind, options)
-    ms = messages(raw)
-    if kind == "dolci_if_v1" and any(
-        re.match(r"^\s*(?:user|assistant|system|developer):", m["content"], flags=re.IGNORECASE) for m in ms
-    ):
-        raise ValueError("dolci_if_v1 requires exported chat messages, not role-prefixed prompt strings")
+    ms = messages(raw, dolci_prompt=kind == "dolci_if_v1")
     meta = raw.get("verifier_metadata") or {}
     if kind == "nemo_v1":
         agent = raw.get("agent_ref")

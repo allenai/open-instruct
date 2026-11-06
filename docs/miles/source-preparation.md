@@ -53,7 +53,7 @@ and are recorded as omissions rather than moved across conversation turns.
 | `nemo_v1` | Structural dispatch for formatting, structured formats, native IF, calendars and MCQA; unknown routes are reported |
 | `structured_v1` | `schema_type`/`schema_str`; explicit schema policy, all five formats |
 | `instruction_v1` | Native instruction IDs and kwargs, including bundles in verifier metadata or args |
-| `dolci_if_v1` | Normalized Dolci IF exports with one encoded `ground_truth` bundle; optional recorded keyword correction |
+| `dolci_if_v1` | Published single-user Dolci IF rows or structured chat exports, with one encoded `ground_truth` bundle; optional recorded keyword correction |
 | `calendar_v1` | Full final calendar feasibility from `exp_cal_state`, without a 20-event cutoff |
 | `format_v1` | Existing format verifier payload; formatting only |
 | `litmus_v02_v1` | Row-carried regex, answer type and matching policy; all scalar properties/methods are representable |
@@ -106,19 +106,30 @@ select the correction explicitly in the source plan:
 ```
 
 Include the usual pinned `inputs` and `hygiene_receipt` fields alongside this fragment.
-This adapter consumes normalized Dolci IF exports with one `ground_truth` entry
+This adapter consumes Dolci IF rows with one `ground_truth` entry
 (the existing JSON/Python singleton wrappers are accepted). `dataset` may be absent
 for Dolci-RLZero-IF-7B; if supplied, it must be `["ifeval"]`. The explicit adapter
 selection identifies the IF-only source; it does not infer a route for mixed data.
 
-Published Dolci rows contain a role-prefixed string such as `user: ...`. **These
-raw strings are rejected**, not silently embedded inside another user message.
-An upstream export must recover the conversation into the normal chat-message
-input fields, e.g. `input: [{"role": "user", "content": "..."}]`. Preserve actual
-roles and text; do not blindly strip apparent role prefixes from arbitrary or
-multi-turn content. Token-only exports likewise need upstream decoding. This PR
-does not introduce a universal raw-Dolci conversation parser. The prepared bundle
-uses `ManifestIFVerifier` and normal fraction-of-constraints grading.
+Published single-user `prompt` strings such as `user: Solve this problem…` are
+converted directly to `[{"role": "user", "content": "Solve this problem…"}]`.
+Only the initial, exact `user: ` serialization prefix is removed; all remaining
+whitespace and text are preserved. No separate conversation exporter is needed.
+Use the preparation command above on local JSONL rows (or hygiene wrappers),
+selecting the IF-only rows when exporting a mixed Dolci dataset to JSONL. Existing
+source hashes, revision, split, and hygiene receipt requirements still apply.
+
+Flattened strings with additional newline-delimited role labels are ambiguous:
+they could represent additional turns or quoted dialogue. These receive an
+`ambiguous_dolci_conversation` omission in `dispositions.jsonl`. Other leading
+role serializations receive `unsupported_dolci_role_serialization`. Recover these
+from an authoritative conversation representation and supply structured messages,
+e.g. `input: [{"role": "user", "content": "..."}]`; do not guess turn boundaries.
+Structured message content is never scanned for role labels or stripped, so real
+text starting with `user:` remains intact. Ordinary strings without a role prefix
+remain ordinary user content. Token-only exports still need upstream decoding.
+This conversion is specific to `dolci_if_v1`; other adapters are unchanged. The
+prepared bundle uses `ManifestIFVerifier` and normal fraction-of-constraints grading.
 
 The default policy is `preserve`. With `at_least_once_v1`, each `keywords:word_once`
 constraint becomes `keywords:frequency` with arguments

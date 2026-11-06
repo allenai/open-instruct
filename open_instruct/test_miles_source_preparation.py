@@ -390,11 +390,15 @@ def test_dolci_keyword_option_cannot_silently_change_nemo():
 
 def test_dolci_prepared_correction_receipts(tmp_path):
     raw = dolci_keyword_row()
+    raw["prompt"] = "user: " + raw["prompt"][-1]["content"]
     unmodified = copy.deepcopy(raw)
     unmodified["ground_truth"] = [repr([{"instruction_id": ["punctuation:no_comma"], "kwargs": [None]}])]
+    ambiguous = copy.deepcopy(raw)
+    ambiguous["prompt"] += "\nassistant: an ambiguous extra turn"
     input_file = tmp_path / "input.jsonl"
     input_file.write_text(
-        "\n".join(json.dumps({"id": str(i), "raw_record": r}) for i, r in enumerate([raw, unmodified])) + "\n"
+        "\n".join(json.dumps({"id": str(i), "raw_record": r}) for i, r in enumerate([raw, unmodified, ambiguous]))
+        + "\n"
     )
     hygiene = tmp_path / "hygiene.json"
     hygiene.write_text('{"completed":true}')
@@ -424,9 +428,22 @@ def test_dolci_prepared_correction_receipts(tmp_path):
     assert entry["options"] == options
     assert entry["counts"]["transformed_rows"] == entry["counts"]["transformed_constraints"] == 1
     assert entry["counts"]["prepared_rows"] == 2
+    assert entry["counts"]["input_rows"] == 3
+    assert entry["counts"]["omitted_rows"] == 1
+    dispositions = [
+        json.loads(line) for line in (out / "dolci-if-corrected/dispositions.jsonl").read_text().splitlines()
+    ]
+    assert dispositions == [
+        {
+            "id": "2",
+            "status": "omitted",
+            "reason": "ValueError: ambiguous_dolci_conversation: supply structured chat messages",
+        }
+    ]
     rows = [json.loads(line) for line in (out / "dolci-if-corrected/prompts.jsonl").read_text().splitlines()]
     row = rows[0]
-    assert row["metadata"]["messages"] == raw["prompt"]
+    assert row["metadata"]["messages"] == [{"role": "user", "content": raw["prompt"][len("user: ") :]}]
+    assert row["input"] == json.dumps(row["metadata"]["messages"])
     assert row["metadata"]["original_target_sha256"] == sources.digest(sources.dolci_if_target(raw))
     assert row["metadata"]["target_transformations"] == [
         {
@@ -444,19 +461,61 @@ def test_dolci_prepared_correction_receipts(tmp_path):
 
 
 @pytest.mark.parametrize("dataset_field", [{}, {"dataset": ["ifeval"]}])
-def test_dolci_published_role_prefix_requires_export(dataset_field):
+def test_dolci_published_role_prefix_is_converted(dataset_field):
     raw = dolci_keyword_row()
     raw.pop("dataset")
     raw.update(dataset_field)
     raw["prompt"] = "user: Include keyword apple in your response."
-    with pytest.raises(ValueError, match="exported chat messages"):
-        sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
-    # An upstream exporter identifies the role; the preparation adapter preserves
-    # the resulting content instead of training on the serialized role prefix.
-    raw["prompt"] = [{"role": "user", "content": "Include keyword apple in your response."}]
+    original = copy.deepcopy(raw)
     ms, label, _, _ = sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    assert raw == original
+    # Published and explicitly structured forms prepare to the same conversation
+    # and target, without retaining a duplicate role prefix inside the message.
+    raw["prompt"] = [{"role": "user", "content": "Include keyword apple in your response."}]
+    structured_ms, structured_label, _, _ = sources.adapt(
+        raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"}
+    )
     assert ms == raw["prompt"]
+    assert (ms, label) == (structured_ms, structured_label)
     assert label["instruction_id"][0] == "keywords:frequency"
+
+
+@pytest.mark.parametrize("role", ["user", "assistant", "system", "developer"])
+def test_dolci_structured_role_like_content_is_preserved(role):
+    raw = dolci_keyword_row()
+    raw["prompt"][-1]["content"] = f"{role}: Include keyword apple in your response.\nassistant: quoted text"
+    original = copy.deepcopy(raw)
+    ms, _, _, _ = sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    assert ms == raw["prompt"]
+    assert raw == original
+
+
+@pytest.mark.parametrize("field", ["prompt", "input", "responses_create_params"])
+def test_dolci_conversion_uses_selected_input_and_preserves_whitespace(field):
+    raw = dolci_keyword_row()
+    content = " user: literal leading label\n  Include keyword apple in your response.  \n"
+    raw[field] = {"input": "user: " + content} if field == "responses_create_params" else "user: " + content
+    ms, _, _, _ = sources.adapt(raw, "dolci_if_v1")
+    assert ms == [{"role": "user", "content": content}]
+    # Other adapters do not reinterpret role-like text.
+    assert sources.messages(raw) == [{"role": "user", "content": "user: " + content}]
+
+
+@pytest.mark.parametrize(
+    "prompt, reason",
+    [
+        ("user: Question\nassistant: Answer\nuser: Follow-up", "ambiguous_dolci_conversation"),
+        ("user: Quoted dialogue:\nuser: example", "ambiguous_dolci_conversation"),
+        ("system: Be helpful.\nuser: Question", "unsupported_dolci_role_serialization"),
+        ("User: Question", "unsupported_dolci_role_serialization"),
+        ("user: ", "empty_dolci_user_message"),
+    ],
+)
+def test_dolci_ambiguous_serialization_requires_structured_messages(prompt, reason):
+    raw = dolci_keyword_row()
+    raw["prompt"] = prompt
+    with pytest.raises(ValueError, match=reason):
+        sources.adapt(raw, "dolci_if_v1")
 
 
 @pytest.mark.parametrize("keyword", ["a.b", "[", " apple ", "", "(?i)apple"])
