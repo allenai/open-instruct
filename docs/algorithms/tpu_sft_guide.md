@@ -391,11 +391,12 @@ Each of these trained silently on wrong data or a wrong model before it was foun
     The collective-fusion flags left it at 6.47 s/step; every fourth step takes ~7.4 s.
   - libtpu on v4 rejects `--xla_tpu_enable_async_collective_fusion_fuse_all_gather=true` ("not supported" outside
     Viperlite); the rest of that flag set loads.
-  - Tiny's loss went NaN in 5 of 8 runs on this slice, across four configs, between steps 3 and 13; the unchanged
-    config went NaN in 2 of its 3 runs. H078 trained the unchanged config to the end on the `8x8x8` before its
-    2026-10-21 split. The same image and per-device config stayed finite through step 30 in 3 of 3 runs on a `4x4x8`,
-    so the slice or its host software is the suspect (its pool is the only one on GKE `v1.35.8-gke.1796000`). Don't
-    train on the recreated `8x8x8` until it is cleared.
+  - Tiny's loss went NaN in 5 of 8 runs on this slice, between steps 3 and 13. The cause is the libtpu flag
+    `--xla_tpu_enable_async_ragged_all_to_all=true`, which the overlays set until 2026-11-06: it hands one MoE router
+    gate's backward an unwritten buffer, giving ~1e33 gradient elements while the forward loss is unchanged, and
+    clipping then zeroes that step's update. Without it, the failing configs ran 10 of 10 steps finite. On a `4x4x8` it
+    did not fire: H161's hero and both H190 seeds (~99k steps) have no pre-clip `train/grad_norm` above 1e3 after
+    step 4.
 
   Speedups beyond these need code changes. Any other slice or mesh needs its own same-slice control.
 - **Comparing against a GPU result.** TPU and GPU runs of the same recipe differ in data order and numerics. Compare
