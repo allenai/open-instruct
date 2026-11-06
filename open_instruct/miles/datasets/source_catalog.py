@@ -33,8 +33,15 @@ def resolve(catalog_path, weights):
                 or hashlib.sha256(receipt_path.read_bytes()).hexdigest() != receipt["sha256"]
             ):
                 raise InputError(f"Source {name}: qualification receipt hash/path mismatch")
-            if json.loads(receipt_path.read_text())["sources"][name]["status"] != "qualified":
+            report = json.loads(receipt_path.read_text())["sources"][name]
+            if report["status"] != "qualified":
                 raise InputError(f"Source {name}: qualification receipt does not qualify this source")
+            artifacts = report.get("artifact_sha256")
+            if not isinstance(artifacts, dict):
+                raise InputError(f"Source {name}: qualification receipt lacks artifact hashes; requalify the bundle")
+            for key in ("prompt_data", "reward_config"):
+                if artifacts.get(key) != entry[key]["sha256"]:
+                    raise InputError(f"Source {name}: qualification receipt {key} hash mismatch; requalify the bundle")
         source = {"name": name, "fraction": fraction}
         for key in ("prompt_data", "reward_config"):
             descriptor = entry[key]

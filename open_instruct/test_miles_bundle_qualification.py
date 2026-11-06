@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 
 import pytest
 from scripts.data.rl_readiness import qualify_bundle
@@ -99,6 +100,67 @@ def test_missing_stratum_never_shrinks_population(tmp_path, monkeypatch):
     assert len((tmp_path / "qualified/toy/prompts.jsonl").read_text().splitlines()) == 2
     with pytest.raises(ValueError, match="not qualified"):
         source_catalog.resolve(tmp_path / "qualified/catalog.json", {"toy": 1.0})
+
+
+@pytest.mark.parametrize("artifact", ["prompt_data", "reward_config"])
+def test_receipt_rejects_changed_artifact_even_with_updated_catalog(tmp_path, monkeypatch, artifact):
+    catalog, controls, hf = setup_bundle(tmp_path, monkeypatch)
+    output = tmp_path / "qualified"
+    asyncio.run(qualify_bundle.qualify(catalog, controls, hf, output, 1000))
+    published = output / "catalog.json"
+    document = json.loads(published.read_text())
+    descriptor = document["sources"]["toy"][artifact]
+    path = output / descriptor["path"]
+    value = json.loads(path.read_text())
+    if artifact == "prompt_data":
+        value["input"] = "A different question"
+    else:
+        value["deterministic"]["factory"] = source_preparation.FACTORIES["math"]
+    path.write_text(json.dumps(value) + "\n")
+    descriptor["sha256"] = source_preparation.file_hash(path)
+    published.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match=f"qualification receipt {artifact} hash mismatch"):
+        source_catalog.resolve(published, {"toy": 1.0})
+
+
+@pytest.mark.parametrize("missing", ["artifact_sha256", "prompt_data", "reward_config"])
+def test_receipt_requires_both_artifact_bindings(tmp_path, monkeypatch, missing):
+    catalog, controls, hf = setup_bundle(tmp_path, monkeypatch)
+    output = tmp_path / "qualified"
+    receipt = asyncio.run(qualify_bundle.qualify(catalog, controls, hf, output, 1000))
+    report = receipt["sources"]["toy"]
+    (report if missing == "artifact_sha256" else report["artifact_sha256"]).pop(missing)
+    receipt_path = output / "qualification.json"
+    receipt_path.write_text(json.dumps(receipt))
+    published = output / "catalog.json"
+    document = json.loads(published.read_text())
+    document["sources"]["toy"]["qualification"]["sha256"] = source_preparation.file_hash(receipt_path)
+    published.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="requalify the bundle"):
+        source_catalog.resolve(published, {"toy": 1.0})
+
+
+def test_qualification_survives_relocation_and_can_be_renewed(tmp_path, monkeypatch):
+    catalog, controls, hf = setup_bundle(tmp_path, monkeypatch)
+    output = tmp_path / "qualified"
+    asyncio.run(qualify_bundle.qualify(catalog, controls, hf, output, 1000))
+    relocated = tmp_path / "relocated"
+    shutil.copytree(output, relocated)
+    published = relocated / "catalog.json"
+    resolved = source_catalog.resolve(published, {"toy": 1.0})
+    assert resolved["sources"][0]["prompt_data"] == str(relocated / "toy/prompts.jsonl")
+    document = json.loads(published.read_text())
+    descriptor = document["sources"]["toy"]["prompt_data"]
+    path = relocated / descriptor["path"]
+    row = json.loads(path.read_text())
+    row["input"] = "What is 1 + 1?"
+    path.write_text(json.dumps(row) + "\n")
+    descriptor["sha256"] = source_preparation.file_hash(path)
+    published.write_text(json.dumps(document))
+    renewed = tmp_path / "requalified"
+    receipt = asyncio.run(qualify_bundle.qualify(published, controls, hf, renewed, 1000))
+    assert receipt["sources"]["toy"]["artifact_sha256"]["prompt_data"] == descriptor["sha256"]
+    assert source_catalog.resolve(renewed / "catalog.json", {"toy": 1.0})["sources"][0]["name"] == "toy"
 
 
 def test_whole_pool_length_validation(tmp_path, monkeypatch):

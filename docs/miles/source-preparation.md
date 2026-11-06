@@ -175,6 +175,30 @@ future generated examples. This does not rewrite existing dataset prompts.
 
 ## Qualification and publication
 
+Source preparation and qualification run before training. Keep the qualified
+bundle together: `catalog.json`, `qualification.json`, and each source's
+`prompts.jsonl`, `verifiers.json`, hygiene receipt, and dispositions. The prompt
+JSONL contains rendered input text, verifier targets, and source metadata; the
+verifier registry selects trusted reward implementations and their configuration.
+
+Qualification receipts bind each source to the SHA-256 hashes of its prompt data
+and reward configuration. Catalog resolution verifies both those bindings and the
+files themselves. Updating a catalog's file hashes cannot reuse an old receipt:
+changed artifacts must be requalified. Receipts without these bindings also need
+requalification. Moving an unchanged bundle preserves qualification because the
+bindings use content hashes rather than absolute paths. These checks apply to
+machine-readable qualification receipts; trusted catalogs with manual qualification
+annotations remain a separate, manually reviewed path.
+
+The catalog command emits source paths and mixture weights for the training
+config. It does not embed the receipt into that config. At run preparation, MILES
+writes its own source JSONL files, verifier registry, `mixture.json`, and
+`manifest.json` containing input/output hashes and preparation settings. Resume
+checks those hashes. Retain the qualified bundle alongside the run evidence:
+the run manifest establishes what data was used, while the qualification receipt
+records which controls passed for those source artifacts. Direct-path training
+configs do not automatically enforce catalog qualification.
+
 Provide reviewed controls keyed to actual prepared sample IDs. Each stratum needs
 at least one case set containing `gold` (expected 1), `wrong` and `near_miss`
 (expected 0 for binary graders; an explicit score below 1 for native partial-credit graders). A near miss should exercise the likely shortcut: a wrong number containing

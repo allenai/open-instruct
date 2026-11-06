@@ -144,6 +144,9 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, qu
                     raise ValueError("Every omission must match an explicitly reviewed quarantine row")
                 report["quarantined_rows"] = omitted
             paths = {key: bundled_path(catalog_path.parent, entry[key]) for key in ("prompt_data", "reward_config")}
+            # Bind the evidence to the inputs checked here, before running controls
+            # or copying artifacts into the published bundle. Paths may relocate.
+            report["artifact_sha256"] = {key: entry[key]["sha256"] for key in paths}
             registry = json.loads(paths["reward_config"].read_text())
             for key, spec in registry.items():
                 if spec.get("factory") not in set(sources.FACTORIES.values()):
@@ -203,7 +206,10 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, qu
             target = output / name / path.name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, target)
-            entry[key] = {"path": str(target.relative_to(output)), "sha256": sources.file_hash(target)}
+            copied_hash = sources.file_hash(target)
+            if copied_hash != entry[key]["sha256"]:
+                raise ValueError("Catalog artifact changed while copying: " + key)
+            entry[key] = {"path": str(target.relative_to(output)), "sha256": copied_hash}
     receipt = {
         "schema_version": 1,
         "catalog_sha256": sources.file_hash(catalog_path),
