@@ -21,7 +21,7 @@ from open_instruct.miles.configuration import (
     validation,
 )
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
-from open_instruct.miles.datasets import mixture, run_data
+from open_instruct.miles.datasets import mixture, pools, run_data
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.infrastructure import gpu_hardware
@@ -327,6 +327,7 @@ class RunSpec:
             data["sources"] = [
                 {
                     "name": source["name"],
+                    **({"pool": source["pool"]} if "pool" in source else {}),
                     **({"fraction": source["fraction"]} if "fraction" in source else {}),
                     **{
                         key: value
@@ -761,7 +762,7 @@ class RunSpec:
             miles.setdefault("async_data_buffer_capacity_factor", 1.0)
             # Finite pools retire stale draws; retry would resubmit a selection
             # whose exposure reservation was already released.
-            miles.setdefault("async_unused_samples_handler", "drop" if "pools" in self.data else "retry")
+            miles.setdefault("async_unused_samples_handler", "drop" if pools.resolve(self.data) else "retry")
             # MILES upstream also defaults its fully-async producer to sample backfill:
             # a finished sibling frees its slot instead of idling until its slowest
             # sibling and rewards finish. Training still consumes whole groups.
@@ -779,7 +780,7 @@ class RunSpec:
             # Nothing to resume from, so a wall-clock stop is final; launch_warnings says so.
             core["max_run_final"] = True
         if "sources" in self.data:
-            put("core.prompt_provider", "pools" if "pools" in self.data else "mixture", "data.sources")
+            put("core.prompt_provider", "pools" if pools.resolve(self.data) else "mixture", "data.sources")
             put(
                 "core.prompt_mixture",
                 prepared.get("prompt_mixture", str(root / "prepared" / "data" / "mixture.json")),

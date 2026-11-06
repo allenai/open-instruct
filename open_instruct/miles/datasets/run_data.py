@@ -201,15 +201,15 @@ def validate_data(data):
         raise InputError("Named data recipes are not yet ported; use tasks or an immutable rl_manifest")
     if "prompt_data" in modes and not data.get("reward_config"):
         raise InputError("Prepared prompt_data requires a trusted reward_config")
-    if "sampling" in data and "pools" not in data:
-        raise InputError("data.sampling requires data.pools")
-    if "pools" in data:
-        pools.validate(data["pools"])
-        pool_sampling.validate(data.get("sampling", {}), data["pools"])
+    resolved_pools = pools.resolve(data)
+    if "sampling" in data and not resolved_pools:
+        raise InputError("data.sampling requires data.pools or source pool assignments")
+    if resolved_pools:
+        pool_sampling.validate(data.get("sampling", {}), resolved_pools)
         if "sources" not in modes:
             raise InputError("data.pools requires data.sources")
     if "sources" in modes:
-        mixture.validate_sources(data["sources"], pooled="pools" in data)
+        mixture.validate_sources(data["sources"], pooled=bool(resolved_pools))
         for source in data["sources"]:
             if set(source) & {"sources", "seed", "shuffle"}:
                 raise InputError("Mixture sources cannot nest sources or override data.seed/shuffle")
@@ -615,6 +615,7 @@ def prepare_data(
     source and output digest before returning the same paths.
     """
     validate_data(data)
+    resolved_pools = pools.resolve(data)
     if type(max_prompt_length) is not int or max_prompt_length < 1:
         raise InputError("max_prompt_length must be positive")
     output, hf_checkpoint = Path(output).resolve(), Path(hf_checkpoint).resolve()
@@ -677,6 +678,7 @@ def prepare_data(
     if_verifiers = _if_verifier_names(known)
     if not all(partitions.get(split) for split in training):
         raise InputError("Preparation requires nonempty training data")
+    source_pools = {f"source-{source['name']}": source.get("pool") for source in data.get("sources", [])}
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
     for split, rows in partitions.items():
@@ -689,8 +691,8 @@ def prepare_data(
                         for verifier in verifiers:
                             if isinstance(verifier, dict) and isinstance(name := verifier.get("name"), str):
                                 judging.require_binding(name, registry_overrides, known.get(name))
-                if "pools" in data and split in training:
-                    pools.annotate(row, data["pools"])
+                if resolved_pools and split in training:
+                    pools.annotate(row, resolved_pools, source_pool=source_pools.get(split))
                 _verify_row(row, tokenizer, max_prompt_length, known)
                 if split in training:
                     _verify_if_training_row(row, if_verifiers)
@@ -738,6 +740,7 @@ def prepare_data(
             sources = [
                 {
                     "name": source["name"],
+                    **({"pool": source["pool"]} if "pool" in source else {}),
                     **({"fraction": source["fraction"]} if "fraction" in source else {}),
                     "path": f"{split}.jsonl",
                     "sha256": outputs[f"{split}.jsonl"],
@@ -753,10 +756,10 @@ def prepare_data(
                     "sources": sources,
                     **(
                         {
-                            "pools": data["pools"],
-                            "sampling": pool_sampling.validate(data.get("sampling", {}), data["pools"]),
+                            "pools": resolved_pools,
+                            "sampling": pool_sampling.validate(data.get("sampling", {}), resolved_pools),
                         }
-                        if "pools" in data
+                        if resolved_pools
                         else {}
                     ),
                 }

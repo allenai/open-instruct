@@ -730,6 +730,39 @@ one global shuffle without replacement. Pool exposure is recorded for every
 policy; only the explicit `exposure` policy uses those counts to adjust draws.
 Selective truncation replay is independently enabled and retains original verifiers.
 
+To treat entire datasets as pools, add `pool` to each source entry. The pool is
+created automatically; neither `[data.pools]` nor row-level `pool_id` is needed:
+
+```toml
+[data.sampling]
+policy = "uniform"
+
+[[data.sources]]
+name = "deepmath"
+pool = "deepmath"
+prompt_data = "/data/deepmath.jsonl.gz"
+reward_config = "/data/verifiers.json"
+
+[[data.sources]]
+name = "polaris"
+pool = "polaris"
+prompt_data = "/data/polaris.jsonl.gz"
+reward_config = "/data/verifiers.json"
+```
+
+Use distinct pool names for dataset-uniform draws, or the same `pool = "math"`
+on multiple sources to group them. Source identity remains separate in records.
+The same assignment works with every sampling policy and optional replay.
+An explicit source `pool` takes precedence over any existing row `pool_id` in the
+prepared training copy; input files, prompts, answers and verifiers are preserved.
+If the named pool already has a configured label, that label becomes the prepared
+row's canonical `pool_id`. Held-out evaluation rows are not reassigned.
+
+Sources without `pool` can still use their row labels when `[data.pools]` is
+provided. Without that label mapping, every source must specify `pool`; there is
+no implicit fallback for unassigned sources. Source fractions remain prohibited
+in pool mode; fixed pool weights belong in `data.sampling.weights`.
+
 | `data.sampling.policy` | Selection |
 |---|---|
 | `shuffle` (default) | One global permutation of all fresh rows, regardless of pool sizes. Replay inserts retries without changing the relative order of fresh rows. |
@@ -796,7 +829,7 @@ unchanged by the sampler; an eight-response recipe remains eight-response.
 
 | Contract | Behavior |
 |---|---|
-| Membership | Exactly one configured label per training row. Missing, unknown, duplicate label definitions, and conflicting runtime annotations fail preparation. |
+| Membership | A source-level `pool` assigns the whole source; otherwise rows need a configured top-level `pool_id`. Missing/unknown labels, duplicate label definitions and conflicting runtime annotations fail preparation. |
 | Source fractions | Rejected in pool mode, rather than silently ignored. Use `data.sampling.weights` for fixed pool weights; every configured pool requires a finite positive weight. Weights are rejected for other policies. |
 | Finite fresh data | Each row is drawn once; there are no automatic epochs. Empty pools are skipped. |
 | Exposure credit | One group per completed optimizer update that used it. Scored, queued, filtered, or stale groups earn no credit. |
