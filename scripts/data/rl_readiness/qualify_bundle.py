@@ -7,7 +7,9 @@ prepared unless every observed stratum has reviewed gold/wrong/near-miss control
 import argparse
 import asyncio
 import copy
+import dataclasses
 import json
+import math
 import shutil
 from collections import defaultdict
 from pathlib import Path
@@ -15,7 +17,7 @@ from types import SimpleNamespace
 
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.datasets import source_preparation as sources
-from open_instruct.miles.rewards import judge_registry, rewards
+from open_instruct.miles.rewards import complete_code, judge_registry, rewards
 
 
 def bundled_path(root, descriptor):
@@ -29,8 +31,11 @@ async def check_control(row, cases, reward_path):
     by_kind = {case["kind"]: case for case in cases}
     if len(by_kind) != len(cases) or not {"gold", "wrong", "near_miss"} <= by_kind.keys():
         raise ValueError("Require distinct gold, wrong and near_miss controls")
-    if by_kind["gold"]["expected"] != 1 or any(by_kind[k]["expected"] != 0 for k in ("wrong", "near_miss")):
-        raise ValueError("Gold must expect one; wrong and near_miss must expect zero")
+    if by_kind["gold"]["expected"] != 1 or any(
+        not isinstance(by_kind[k]["expected"], (int, float)) or not 0 <= by_kind[k]["expected"] < 1
+        for k in ("wrong", "near_miss")
+    ):
+        raise ValueError("Gold must expect one; wrong and near_miss must expect a score below one")
     expanded = [
         *cases,
         {"kind": "empty", "response": "", "expected": 0},
@@ -53,25 +58,65 @@ async def check_control(row, cases, reward_path):
             status="truncated" if case["kind"] == "truncated" else "completed",
         )
         actual = await rewards.registered_reward(args, sample)
+        diagnostics = sample.metadata.get("verifier_diagnostics", {})
+        if any(value.get("status") == "timeout" for value in diagnostics.values()):
+            raise ValueError(f"{case['kind']} control timed out")
         results.append(
             {
                 "kind": case["kind"],
                 "expected": case["expected"],
                 "actual": actual,
+                "diagnostics": diagnostics,
                 "response_sha256": sources.digest(case["response"]),
             }
         )
-        if actual != case["expected"]:
+        if not math.isclose(actual, float(case["expected"]), rel_tol=1e-9, abs_tol=1e-12):
             raise ValueError(f"{case['kind']} expected {case['expected']}, got {actual}")
     return results
 
 
-async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, accept_omissions=False):
+def validate_prompt_targets(rows, controls, registry):
+    """Different hidden code tests may share a prompt if a common witness passes all.
+
+    Every witness is subsequently executed by check_control. Other differing
+    targets remain ambiguous and require source review before qualification.
+    """
+    groups = defaultdict(list)
+    golds = defaultdict(set)
+    for control in controls:
+        for case in control["cases"]:
+            if case["kind"] == "gold" and case["expected"] == 1:
+                golds[control["sample_id"]].add(case["response"])
+    for row in rows:
+        groups[sources.digest(row["input"])].append(row)
+    for group in groups.values():
+        if len({sources.digest(row["metadata"]["verifiers"]) for row in group}) <= 1:
+            continue
+        witnesses = None
+        for row in group:
+            verifiers = row["metadata"]["verifiers"]
+            if len(verifiers) != 1 or registry[verifiers[0]["name"]]["factory"] != sources.FACTORIES["complete_code"]:
+                raise ValueError("Conflicting targets for the same prompt")
+            candidates = golds[row["metadata"]["sample_id"]]
+            witnesses = candidates if witnesses is None else witnesses & candidates
+        if not witnesses:
+            raise ValueError("Different code tests for one prompt require a shared gold control for every row")
+
+
+async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, quarantine_path=None):
     catalog_path, controls_path = Path(catalog_path).resolve(), Path(controls_path).resolve()
     output = Path(output).resolve()
     catalog = json.loads(catalog_path.read_text())
     if catalog.get("schema_version") != 1:
         raise ValueError("Unknown catalog version")
+    quarantine = defaultdict(dict)
+    if quarantine_path is not None:
+        for line in Path(quarantine_path).read_text().splitlines():
+            record = json.loads(line)
+            name, identity = record["source"], record["id"]
+            if name not in catalog["sources"] or identity in quarantine[name] or not record.get("reason"):
+                raise ValueError("Quarantine requires known sources, distinct IDs and explicit reasons")
+            quarantine[name][identity] = record["reason"]
     controls = defaultdict(list)
     for line in controls_path.read_text().splitlines():
         entry = json.loads(line)
@@ -88,10 +133,16 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, ac
         reports[name] = report
         try:
             bundled_path(catalog_path.parent, entry["hygiene_receipt"])
-            if entry.get("counts", {}).get("omitted_rows", 0) and not accept_omissions:
-                raise ValueError(
-                    "Review omissions; use --accept-omissions only for an explicitly accepted source variant"
-                )
+            omitted = entry.get("counts", {}).get("omitted_rows", 0)
+            if omitted or quarantine[name]:
+                if "dispositions" not in entry:
+                    raise ValueError("Quarantine requires a hashed dispositions report")
+                dispositions_path = bundled_path(catalog_path.parent, entry["dispositions"])
+                dispositions = [json.loads(line) for line in dispositions_path.read_text().splitlines()]
+                omitted_ids = {row["id"] for row in dispositions if row["status"] == "omitted"}
+                if len(omitted_ids) != omitted or omitted_ids != set(quarantine[name]):
+                    raise ValueError("Every omission must match an explicitly reviewed quarantine row")
+                report["quarantined_rows"] = omitted
             paths = {key: bundled_path(catalog_path.parent, entry[key]) for key in ("prompt_data", "reward_config")}
             registry = json.loads(paths["reward_config"].read_text())
             for key, spec in registry.items():
@@ -102,18 +153,17 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, ac
                     expected["config"] = {"name": key}
                     if not judge_registry.bound(key):
                         raise ValueError("Missing resolved named judge binding: " + key)
+                if spec["factory"] == sources.FACTORIES["complete_code"]:
+                    config = complete_code.Config(**spec.get("config", {}))
+                    complete_code.validate_config(config)
+                    expected["config"] = dataclasses.asdict(config)
                 if spec != expected:
                     raise ValueError("Unreviewed verifier options")
             rows = [json.loads(line) for line in paths["prompt_data"].read_text().splitlines()]
             by_id = {row["metadata"]["sample_id"]: row for row in rows}
             if len(by_id) != len(rows):
                 raise ValueError("Repeated sample identity")
-            prompt_targets = {}
-            for row in rows:
-                key, target = sources.digest(row["input"]), sources.digest(row["metadata"]["verifiers"])
-                if key in prompt_targets and prompt_targets[key] != target:
-                    raise ValueError("Conflicting targets for the same prompt")
-                prompt_targets[key] = target
+            validate_prompt_targets(rows, controls[name], registry)
             prepared = run_data.prepare_data(
                 {"sources": [{"name": name, "fraction": 1.0, **{k: str(v) for k, v in paths.items()}}]},
                 Path(hf),
@@ -146,7 +196,9 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, ac
         except Exception as error:
             report["reason"] = f"{type(error).__name__}: {error}"
         # Preserve all inputs and hashes even for deferred sources. Never shrink a source to passing controls.
-        for key in ("prompt_data", "reward_config", "hygiene_receipt"):
+        for key in ("prompt_data", "reward_config", "hygiene_receipt", "dispositions"):
+            if key not in entry:
+                continue
             path = bundled_path(catalog_path.parent, entry[key])
             target = output / name / path.name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -157,11 +209,13 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, ac
         "catalog_sha256": sources.file_hash(catalog_path),
         "controls_sha256": sources.file_hash(controls_path),
         "max_prompt_length": max_prompt_length,
-        "accept_omissions": accept_omissions,
+        "quarantine_sha256": sources.file_hash(quarantine_path) if quarantine_path else None,
         "judges_sha256": sources.digest(judge_registry.registry()),
         "scope": "Whole-pool loader validation; stratum controls via runtime bridge. No GPU training or policy screen.",
         "sources": reports,
     }
+    if quarantine_path is not None:
+        shutil.copyfile(quarantine_path, output / "quarantine.jsonl")
     sources.write(output / "qualification.json", receipt)
     for entry in qualified["sources"].values():
         entry["qualification"] = {
@@ -179,12 +233,12 @@ def main():
     parser.add_argument("--tokenizer", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-prompt-length", type=int, required=True)
-    parser.add_argument("--accept-omissions", action="store_true")
+    parser.add_argument(
+        "--quarantine", type=Path, help="Reviewed JSONL records with source, id and reason for every omitted row"
+    )
     args = parser.parse_args()
     receipt = asyncio.run(
-        qualify(
-            args.catalog, args.controls, args.tokenizer, args.output, args.max_prompt_length, args.accept_omissions
-        )
+        qualify(args.catalog, args.controls, args.tokenizer, args.output, args.max_prompt_length, args.quarantine)
     )
     print(json.dumps({name: result["status"] for name, result in receipt["sources"].items()}, indent=2))
     if any(result["status"] != "qualified" for result in receipt["sources"].values()):

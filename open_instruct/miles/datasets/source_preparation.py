@@ -6,6 +6,7 @@ Factories are selected by reviewed adapter code, not dataset-supplied imports.
 
 import argparse
 import copy
+import dataclasses
 import hashlib
 import importlib
 import json
@@ -18,10 +19,11 @@ from jsonschema.exceptions import SchemaError
 from transformers import AutoTokenizer
 
 from open_instruct import ifeval_constraints
+from open_instruct.miles.rewards import complete_code, litmus, nvidia_constraints, reasoning_gym, structured_tool_calls
 from open_instruct.miles.rewards import deterministic_verifiers as local
-from open_instruct.miles.rewards import litmus, nvidia_constraints, reasoning_gym
 
 FACTORIES = {
+    "complete_code": "open_instruct.miles.rewards.complete_code.CompleteCodeVerifier",
     "reference_judge": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
     "deterministic": "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
     "math": "open_instruct.ground_truth_utils.MathVerifier",
@@ -66,15 +68,18 @@ def dolci_prompt_messages(value):
     return [{"role": "user", "content": value}]
 
 
-def messages(raw, *, dolci_prompt=False):
+def messages(raw, *, dolci_prompt=False, structured_tool_answer=False):
     params = raw.get("responses_create_params") or {}
     if not isinstance(params, dict):
         raise ValueError("requires_responses_parameters_object")
-    if params.get("tools"):
+    if params.get("tools") and not structured_tool_answer:
         raise ValueError("requires_tool_environment")
     instructions = params.get("instructions")
     if instructions is not None and not isinstance(instructions, str):
         raise ValueError("requires_text_instructions")
+    system_prompt = raw.get("system_prompt")
+    if system_prompt is not None and not isinstance(system_prompt, str):
+        raise ValueError("requires_text_system_prompt")
     value = params.get("input", raw.get("input", raw.get("prompt", raw.get("question", raw.get("problem")))))
     if isinstance(value, str):
         value = dolci_prompt_messages(value) if dolci_prompt else [{"role": "user", "content": value}]
@@ -102,7 +107,7 @@ def messages(raw, *, dolci_prompt=False):
         message.update(role=role, content=content)
     # Match NeMo Gym's Responses-to-chat conversion, using the system role our
     # chat templates render. Preserve the order and text of the leading context.
-    leading_parts = [instructions] if instructions else []
+    leading_parts = [text for text in (system_prompt, instructions) if text]
     leading_count = 0
     for message in result:
         if message["role"] not in {"system", "developer"}:
@@ -167,7 +172,17 @@ def adapt(raw, kind, options=None):
         if not route or route["adapter"] == "routed_v1":
             raise ValueError("unmapped_or_recursive_route:" + str(value))
         return adapt(raw, route["adapter"], route.get("options"))
-    ms = messages(raw, dolci_prompt=kind == "dolci_if_v1")
+    if kind == "acecode_v1" and raw.get("context_messages"):
+        # AceCode's context is part of the original task, not generated solutions.
+        raw = copy.deepcopy(raw)
+        context = raw["context_messages"]
+        if not isinstance(context, list) or not isinstance(raw.get("question"), str):
+            raise ValueError("AceCode requires context messages and a text question")
+        raw["input"] = context
+    tool_answer = (kind == "structured_v1" or (kind == "nemo_v1" and "schema_str" in raw)) and raw.get(
+        "response_mode"
+    ) == "tool_call"
+    ms = messages(raw, dolci_prompt=kind == "dolci_if_v1", structured_tool_answer=tool_answer)
     meta = raw.get("verifier_metadata") or {}
     if kind == "nemo_v1":
         agent = raw.get("agent_ref")
@@ -191,7 +206,14 @@ def adapt(raw, kind, options=None):
             raise ValueError("math_or_judge_requires_explicit_adapter")
         else:
             raise ValueError("unsupported_reward_contract")
-    if kind == "structured_v1":
+    if kind in {"acecode_v1", "livecodebench_v1"}:
+        if kind == "acecode_v1":
+            target = {"mode": "assert", "tests": copy.deepcopy(raw["test_cases"])}
+        else:
+            target = complete_code.livecodebench_target(meta["unit_tests"])
+        complete_code.validate_target(target)
+        name, stratum = "complete_code", kind + ":" + target["mode"]
+    elif kind == "structured_v1":
         structured = importlib.import_module("open_instruct.miles.rewards.structured_outputs")
         target = {
             "format": raw["schema_type"],
@@ -199,13 +221,31 @@ def adapt(raw, kind, options=None):
             "schema_policy": options.get("schema_policy", "nemo_strict_v1"),
             "coerce_types": True,
         }
+        if tool_answer:
+            structured_tool_calls.tools_for_template(raw)
+            target.update(
+                response_mode="tool_call",
+                tool_name=raw.get("tool_name"),
+                tool_payload_key=raw.get("tool_payload_key"),
+                tool_call_format="olmo3_pythonic_v1",
+            )
         structured.validate_target(target)
+        # These native parsers have fixed root shapes. A schema demanding the
+        # opposite shape cannot be satisfied by any response in that format.
+        root_type = target["schema"].get("type")
+        allowed_types = {root_type} if isinstance(root_type, str) else set(root_type or [])
+        parsed_type = {"csv": "array", "toml": "object"}.get(target["format"])
+        if parsed_type and allowed_types and parsed_type not in allowed_types:
+            raise ValueError(f"unrepresentable_{target['format']}_root:{root_type}")
         name = "structured"
-        stratum = f"{kind}:{raw['schema_type']}"
+        stratum = f"{kind}:tool_call" if tool_answer else f"{kind}:{raw['schema_type']}"
     elif kind == "format_v1":
         target = {"kind": "format", "value": copy.deepcopy(raw["verifier"])}
         local.validate_target(target)
-        name, stratum = "deterministic", kind
+        name = "deterministic"
+        stratum = kind + ":" + str(raw["verifier"]["type"])
+        if raw["verifier"].get("pattern_id"):
+            stratum += ":" + raw["verifier"]["pattern_id"]
     elif kind == "instruction_v1":
         original = raw.get("args") or (meta if "instruction_id_list" in meta else raw)
         target = {
@@ -231,13 +271,7 @@ def adapt(raw, kind, options=None):
         name, stratum = "litmus", kind + ":" + str(raw.get("method")) + ":" + str(raw.get("property"))
     elif kind == "reasoning_gym_v1":
         target = copy.deepcopy(raw.get("entry", raw))
-        if not isinstance(target, dict) or not isinstance(target.get("metadata"), dict):
-            raise ValueError("malformed_reasoning_gym_entry")
-        task = target["metadata"].get("source_dataset")
-        if task not in reasoning_gym.TASKS:
-            raise ValueError("unqualified_reasoning_gym_family:" + str(task))
-        if not isinstance(target.get("answer"), str) or not target["answer"].strip():
-            raise ValueError("missing_reasoning_gym_answer")
+        task = reasoning_gym.validate_target(target)
         name, stratum = "reasoning_gym", kind + ":" + task
     elif kind == "mcqa_v1":
         choices_data = raw.get("options", [])
@@ -331,9 +365,23 @@ def prepare(plan_path, output, tokenizer):
                         counts["omitted_rows"] += 1
                         dispositions.write(json.dumps({"id": identity, "status": "omitted", "reason": reason}) + "\n")
                         continue
-                    text = tokenizer.apply_chat_template(ms, tokenize=False, add_generation_prompt=True)
+                    template_options = {}
+                    if verifier == "structured" and target.get("response_mode") == "tool_call":
+                        if "<function_calls>" not in tokenizer.chat_template:
+                            raise PlanError("Structured tool answers require the Olmo Pythonic tool-call template")
+                        template_options["tools"] = structured_tool_calls.tools_for_template(raw)
+                    text = tokenizer.apply_chat_template(
+                        ms, tokenize=False, add_generation_prompt=True, **template_options
+                    )
                     tokens = len(tokenizer.encode(text, add_special_tokens=False))
                     registry[verifier] = {"factory": FACTORIES[verifier]}
+                    if verifier == "complete_code":
+                        try:
+                            config = complete_code.Config(**spec.get("code_service", {}))
+                            complete_code.validate_config(config)
+                        except (TypeError, ValueError) as error:
+                            raise PlanError(f"Invalid code_service plan configuration: {error}") from error
+                        registry[verifier]["config"] = dataclasses.asdict(config)
                     if verifier == "reference_judge":
                         registry[verifier]["config"] = {"name": verifier}
                     row = {
@@ -373,6 +421,8 @@ def prepare(plan_path, output, tokenizer):
                         row["metadata"]["target_transformations"] = changes
                         counts["transformed_rows"] += bool(changes)
                         counts["transformed_constraints"] += len(changes)
+                    if template_options:
+                        row["metadata"]["tools"] = template_options["tools"]
                     if verifier == "reference_judge":
                         row["metadata"]["judge_query"] = json.dumps(ms, ensure_ascii=False)
                     rows.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
@@ -394,7 +444,11 @@ def prepare(plan_path, output, tokenizer):
             },
             "input_descriptors": spec["inputs"],
         }
-        for key, path in [("prompt_data", root / "prompts.jsonl"), ("reward_config", root / "verifiers.json")]:
+        for key, path in [
+            ("prompt_data", root / "prompts.jsonl"),
+            ("reward_config", root / "verifiers.json"),
+            ("dispositions", root / "dispositions.jsonl"),
+        ]:
             entry[key] = {"path": str(path.relative_to(output)), "sha256": file_hash(path)}
         catalog["sources"][name] = entry
     write(output / "plan.json", plan)

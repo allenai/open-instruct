@@ -545,3 +545,64 @@ def test_dolci_remap_preserves_existing_frequency_constraint():
     verifier = task_verifiers.ManifestIFVerifier()
     assert asyncio.run(verifier.async_call([], "apple apple pear pear", label)).score == 1.0
     assert asyncio.run(verifier.async_call([], "apple apple pear", label)).score == 0.5
+
+
+def test_structured_tool_declarations_preserved_and_target_declared():
+    raw = {
+        "responses_create_params": {
+            "input": [
+                {"role": "system", "content": "Return the result through the tool."},
+                {"role": "user", "content": "Extract the count."},
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "submit",
+                    "description": "Submit result",
+                    "parameters": '{"type":"object","properties":{"result":{"type":"object"}}}',
+                }
+            ],
+        },
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "tool_payload_key": "result",
+        "schema_type": "json",
+        "schema_str": '{"type":"object","properties":{"n":{"type":"integer"}}}',
+    }
+    original = copy.deepcopy(raw)
+    messages, label, name, stratum = sources.adapt(raw, "nemo_v1")
+    assert messages == raw["responses_create_params"]["input"]
+    assert label["tool_name"] == "submit" and label["tool_payload_key"] == "result"
+    assert label["tool_call_format"] == "olmo3_pythonic_v1"
+    assert name == "structured" and stratum == "structured_v1:tool_call"
+    tools = sources.structured_tool_calls.tools_for_template(raw)
+    assert tools[0]["function"]["parameters"]["type"] == "object"
+    assert raw == original
+
+
+def test_tool_response_marker_does_not_enable_unrelated_tool_tasks():
+    raw = {
+        "response_mode": "tool_call",
+        "responses_create_params": {"input": "Question", "tools": [{"type": "function", "name": "search"}]},
+    }
+    with pytest.raises(ValueError, match="requires_tool_environment"):
+        sources.adapt(raw, "nemo_v1")
+
+
+@pytest.mark.parametrize("kind,root_type", [("csv", "object"), ("toml", "array")])
+def test_incompatible_format_schema_is_an_omission(kind, root_type):
+    raw = {
+        "prompt": "Return the structured result",
+        "schema_type": kind,
+        "schema_str": json.dumps({"type": root_type}),
+    }
+    with pytest.raises(ValueError, match="unrepresentable_"):
+        sources.adapt(raw, "structured_v1")
+
+
+def test_legacy_source_system_prompt_is_preserved():
+    raw = {"system_prompt": "detailed thinking off", "input": [{"role": "user", "content": "Question"}]}
+    assert sources.messages(raw) == [
+        {"role": "system", "content": "detailed thinking off"},
+        {"role": "user", "content": "Question"},
+    ]

@@ -5,3 +5,6 @@ reasoning-gym==0.1.25
 rdkit==2025.9.3
 openapi-schema-validator==0.6.3
 xmltodict==0.14.2
+
+# Complete-test client: authenticated v2 API, LiveCodeBench labels and source pinning.
+code-execution-service[client] @ git+https://github.com/robertb/verifier-paired-replay.git@c8ab35c375fafb68b2dbbe49c4efb33e51c50bbe

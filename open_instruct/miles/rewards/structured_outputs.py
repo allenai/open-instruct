@@ -21,7 +21,7 @@ from referencing import Registry
 
 from open_instruct import logger_utils
 from open_instruct.miles.rewards import deterministic_verifiers as common
-from open_instruct.miles.rewards import nemo_structured_types, rewards
+from open_instruct.miles.rewards import nemo_structured_types, rewards, structured_tool_calls
 
 FORMATS = {"json", "yaml", "toml", "xml", "csv"}
 logger = logger_utils.setup_logger(__name__)
@@ -30,52 +30,34 @@ logger = logger_utils.setup_logger(__name__)
 def validate_target(target):
     if not isinstance(target, dict) or target.get("format") not in FORMATS:
         raise ValueError("Structured target requires format=json/yaml/toml/xml/csv")
-    if set(target) - {"format", "schema", "schema_policy", "coerce_types"}:
+    if set(target) - {
+        "format",
+        "schema",
+        "schema_policy",
+        "coerce_types",
+        "response_mode",
+        "tool_name",
+        "tool_payload_key",
+        "tool_call_format",
+    }:
         raise ValueError("Unknown structured target fields")
     if target.get("schema_policy") not in {"as_declared", "nemo_strict_v1"}:
         raise ValueError("Specify schema_policy explicitly: as_declared or nemo_strict_v1")
     if type(target.get("coerce_types", False)) is not bool:
         raise ValueError("coerce_types must be boolean")
+    structured_tool_calls.validate_contract(target)
     schema = copy.deepcopy(target["schema"])
     if not isinstance(schema, dict):
         raise ValueError("Expected schema object")
     if target["schema_policy"] == "nemo_strict_v1":
         nemo_structured_types.NativeStructuredTypes().strictify_schema(schema)
     # Only schema positions are inspected: a field literally called '$ref' is fine.
-    pending = [schema]
-    maps = {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"}
-    singles = {
-        "items",
-        "additionalProperties",
-        "unevaluatedProperties",
-        "contains",
-        "propertyNames",
-        "not",
-        "if",
-        "then",
-        "else",
-        "additionalItems",
-        "unevaluatedItems",
-    }
-    lists = {"allOf", "anyOf", "oneOf", "prefixItems"}
-    while pending:
-        node = pending.pop()
-        if not isinstance(node, dict):
-            continue
+    for node in nemo_structured_types.schema_nodes(schema):
         for key in ("$ref", "$dynamicRef"):
             if key in node and (not isinstance(node[key], str) or not node[key].startswith("#")):
                 raise ValueError("Only local schema references are supported")
-        if "$id" in node and node is not schema:
-            raise ValueError("Nested resource identifiers require a separately qualified contract")
-        for key, value in node.items():
-            if key in maps and isinstance(value, dict):
-                pending.extend(value.values())
-            elif key in singles:
-                pending.extend(value if isinstance(value, list) else [value])
-            elif key in lists and isinstance(value, list):
-                pending.extend(value)
-            elif key == "dependencies" and isinstance(value, dict):
-                pending.extend(v for v in value.values() if isinstance(v, dict))
+        # Nested $id declarations establish local resource scopes. They do not
+        # authorize retrieval; the instance validator uses a non-retrieving registry.
     OAS31Validator.check_schema(schema)
     return schema
 
@@ -188,7 +170,10 @@ class StructuredOutputVerifier:
                 schema = validate_target(label)  # Configuration errors must not become wrong answers.
                 text = common.answer_text(prediction)
                 try:
-                    value = parse(text, label["format"], schema, label.get("coerce_types", False))
+                    if label.get("response_mode") == "tool_call":
+                        value = structured_tool_calls.parse_payload(text, label)
+                    else:
+                        value = parse(text, label["format"], schema, label.get("coerce_types", False))
                 except (
                     ValueError,
                     TypeError,
