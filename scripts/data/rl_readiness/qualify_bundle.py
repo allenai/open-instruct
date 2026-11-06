@@ -37,14 +37,24 @@ async def check_control(row, cases, reward_path):
     by_kind = {case["kind"]: case for case in cases}
     if len(by_kind) != len(cases) or not {"gold", "wrong", "near_miss"} <= by_kind.keys():
         raise ValueError("Require distinct gold, wrong and near_miss controls")
-    if by_kind["gold"]["expected"] != 1 or any(
-        not isinstance(by_kind[k]["expected"], (int, float)) or not 0 <= by_kind[k]["expected"] < 1
+    # ToolRL preserves its published reward scale instead of silently rescaling
+    # training to fit the qualification tool's usual [0, 1] contract.
+    low, high = 0, 1
+    registry = json.loads(Path(reward_path).read_text())
+    specs = row["metadata"]["verifiers"]
+    if len(specs) == 1 and registry[specs[0]["name"]]["factory"] == sources.FACTORIES["toolrl"]:
+        if specs[0].get("weight", 1) != 1:
+            raise ValueError("ToolRL controls require the unweighted source reward")
+        if specs[0]["target"]["calls"]:
+            low, high = -3, 4
+    if by_kind["gold"]["expected"] != high or any(
+        not isinstance(by_kind[k]["expected"], (int, float)) or not low <= by_kind[k]["expected"] < high
         for k in ("wrong", "near_miss")
     ):
-        raise ValueError("Gold must expect one; wrong and near_miss must expect a score below one")
+        raise ValueError(f"Gold must expect {high}; wrong and near_miss must be in [{low}, {high})")
     expanded = [
         *cases,
-        {"kind": "empty", "response": "", "expected": 0},
+        {"kind": "empty", "response": "", "expected": low},
         {"kind": "truncated", "response": by_kind["gold"]["response"], "expected": 0},
     ]
     args = SimpleNamespace(

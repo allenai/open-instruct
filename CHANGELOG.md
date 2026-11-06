@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Support offline ToolRL and native NeMo next-action tool datasets in source preparation, preserving histories and source-specific rewards; add literal tool-call parsing and ToolRL qualification at its original reward scale (https://github.com/allenai/open-instruct/pull/2178).
 - Preserve Unicode line separators inside prompts when reading offline source qualification JSONL artifacts (https://github.com/allenai/open-instruct/pull/2178).
 - Admit native NeMo language constraints while preserving upstream classification and detection-error behavior; defer classifier improvements (https://github.com/allenai/open-instruct/pull/2178).
 - Omit and replace ungraded MILES training prompt groups after verifier failures, and report omitted prompt records in W&B; leave the systemic-failure tolerance threshold open (https://github.com/allenai/open-instruct/pull/2178).

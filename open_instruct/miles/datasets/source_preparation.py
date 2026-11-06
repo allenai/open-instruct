@@ -19,10 +19,20 @@ from jsonschema.exceptions import SchemaError
 from transformers import AutoTokenizer
 
 from open_instruct import ifeval_constraints
-from open_instruct.miles.rewards import complete_code, litmus, nvidia_constraints, reasoning_gym, structured_tool_calls
+from open_instruct.miles.datasets import tool_conversations, toolrl
+from open_instruct.miles.rewards import (
+    complete_code,
+    litmus,
+    nemo_tool_calls,
+    nvidia_constraints,
+    reasoning_gym,
+    structured_tool_calls,
+)
 from open_instruct.miles.rewards import deterministic_verifiers as local
 
 FACTORIES = {
+    "toolrl": "open_instruct.miles.rewards.toolrl.ToolRLVerifier",
+    "single_step_tool": "open_instruct.miles.rewards.nemo_tool_calls.SingleStepToolVerifier",
     "complete_code": "open_instruct.miles.rewards.complete_code.CompleteCodeVerifier",
     "reference_judge": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
     "deterministic": "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
@@ -164,6 +174,17 @@ def corrected_dolci_target(raw, ms, policy):
 def adapt(raw, kind, options=None):
     options = options or {}
     validate_keyword_option(kind, options)
+    if kind in {"toolrl_v1", "single_step_tool_v1"}:
+        if options.get("tool_format", "olmo_pythonic_v1") not in {"olmo_pythonic_v1", "olmo_xml_v1"}:
+            raise PlanError("Unknown tool rendering format")
+        if (
+            kind == "single_step_tool_v1"
+            and "profile" in options
+            and options["profile"] not in nemo_tool_calls.THRESHOLDS
+        ):
+            raise PlanError("Unknown native tool comparison profile")
+    if kind == "toolrl_v1":
+        return toolrl.adapt(raw, options)
     if kind == "routed_v1":
         value = raw
         for key in options["field"].split("."):
@@ -182,7 +203,11 @@ def adapt(raw, kind, options=None):
     tool_answer = (kind == "structured_v1" or (kind == "nemo_v1" and "schema_str" in raw)) and raw.get(
         "response_mode"
     ) == "tool_call"
-    ms = messages(raw, dolci_prompt=kind == "dolci_if_v1", structured_tool_answer=tool_answer)
+    ms = (
+        tool_conversations.messages(raw)
+        if kind == "single_step_tool_v1"
+        else messages(raw, dolci_prompt=kind == "dolci_if_v1", structured_tool_answer=tool_answer)
+    )
     meta = raw.get("verifier_metadata") or {}
     if kind == "nemo_v1":
         agent = raw.get("agent_ref")
@@ -206,7 +231,11 @@ def adapt(raw, kind, options=None):
             raise ValueError("math_or_judge_requires_explicit_adapter")
         else:
             raise ValueError("unsupported_reward_contract")
-    if kind in {"acecode_v1", "livecodebench_v1"}:
+    if kind == "single_step_tool_v1":
+        target = nemo_tool_calls.target_for_row(raw, options)
+        name = "single_step_tool"
+        stratum = kind + ":" + target["profile"] + ":" + target["expected_action"]["type"]
+    elif kind in {"acecode_v1", "livecodebench_v1"}:
         # TODO: investigate upstream tests rejecting alternative valid outputs
         # (unordered results, tied optima, constructions). Preserve their grading
         # for now; see docs/miles/source-preparation.md#alternative-valid-code-outputs.
@@ -369,13 +398,27 @@ def prepare(plan_path, output, tokenizer):
                         dispositions.write(json.dumps({"id": identity, "status": "omitted", "reason": reason}) + "\n")
                         continue
                     template_options = {}
+                    if verifier in {"single_step_tool", "toolrl"}:
+                        marker = "<function_calls>" if target["tool_format"] == "olmo_pythonic_v1" else "<tool_call>"
+                        if marker not in tokenizer.chat_template:
+                            raise PlanError("Tool target format does not match the selected chat template")
+                        template_options["tools"] = target["tools"]
                     if verifier == "structured" and target.get("response_mode") == "tool_call":
                         if "<function_calls>" not in tokenizer.chat_template:
                             raise PlanError("Structured tool answers require the Olmo Pythonic tool-call template")
                         template_options["tools"] = structured_tool_calls.tools_for_template(raw)
-                    text = tokenizer.apply_chat_template(
-                        ms, tokenize=False, add_generation_prompt=True, **template_options
+                    render_messages = (
+                        tool_conversations.for_template(ms, tokenizer.chat_template)
+                        if verifier in {"single_step_tool", "toolrl"}
+                        else ms
                     )
+                    text = tokenizer.apply_chat_template(
+                        render_messages, tokenize=False, add_generation_prompt=True, **template_options
+                    )
+                    if verifier == "toolrl":
+                        if text.rstrip().endswith("<think>") and not text.endswith("<think>"):
+                            raise PlanError("ToolRL requires an exact reasoning prefix, without trailing whitespace")
+                        target["think_prefix_in_prompt"] = text.endswith("<think>")
                     tokens = len(tokenizer.encode(text, add_special_tokens=False))
                     registry[verifier] = {"factory": FACTORIES[verifier]}
                     if verifier == "complete_code":

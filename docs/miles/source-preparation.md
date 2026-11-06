@@ -61,9 +61,97 @@ and are recorded as omissions rather than moved across conversation turns.
 | `mcqa_v1` | Displayed options and expected answer, existing final-choice parser; no science-only filtering |
 | `math_v1` | Explicit symbolic-math source contract; proof requests are reported as requiring judged support |
 | `deterministic_v1` | Existing numeric, exact-text/JSON, countdown and knights contracts in `target` |
+| `toolrl_v1` | Canonical ToolRL messages, tools and reference calls; original partial-credit reward and format-only answer rows |
+| `single_step_tool_v1` | NeMo offline next-action routes with native conversational, function-calling or SWE-pivot comparison rules |
 
 New registries use
 `open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier`.
+
+## Offline tool-call datasets
+
+ToolRL and NeMo's single-step tool datasets teach the next action from an existing
+conversation. Their prompts include tool definitions, previous calls, observations
+and reasoning. Training generates one next response and grades it against the
+source target; it does not execute the tools or require a live environment.
+These are separate reward contracts, even though they share native-format parsing.
+
+### ToolRL
+
+The source converter reuses the prior ToolRL integration's pinned 4,000-row source,
+schema translation, reference-argument conversion and dialogue-group train/holdout
+split. Its immutable source is
+[ToolRL revision 8cee13ec0ca7](https://github.com/qiancheng0/ToolRL/tree/8cee13ec0ca72f0461da372a93a6fd8140dbb840).
+To reproduce canonical rows offline:
+
+```bash
+python -m scripts.data.rlvr.toolrl --input /path/to/rlla_rl.json \
+  --output-dir /path/to/toolrl-canonical
+```
+
+The converter checks the source SHA256 and writes `train.jsonl`, `eval.jsonl`
+and `source-manifest.json`, including every rejected source coordinate. These
+are intermediate records. Use `toolrl_v1` in the source plan above, with the
+hashed `train.jsonl` input and the existing hygiene receipt, then run
+`source_preparation`. Keep `eval.jsonl` out of training. The adapter validates
+reference and historical calls against their schemas and reports malformed rows
+as omissions; it does not silently truncate long histories or choose rows by reward.
+
+`options.tool_format` is `olmo_pythonic_v1` by default; use `olmo_xml_v1` for
+the XML template from the earlier ToolRL experiments. Preparation checks the
+template and records whether its generation prefix already supplies `<think>`.
+Historical reasoning is embedded in assistant content for templates that do not
+consume `reasoning_content`. Literal tool/parameter names may contain spaces,
+digits or parentheses: they remain unchanged and are parsed without executing
+Python. Keep `core.reward_final_answer_only: false`, since ToolRL grades the
+reasoning/answer boundary as well as the calls.
+
+| Target | Preserved reward |
+|---|---|
+| One or more reference calls | Format credit 0 or 1, plus native multiset-name overlap and greedy argument matching from −3 to 3; total −3 to 4 |
+| No reference calls | Plain response format only, from 0 to 1; no factual correctness check |
+
+The reward factory is `open_instruct.miles.rewards.toolrl.ToolRLVerifier`.
+Qualification recognizes this native scale; it does not rescale training rewards
+to fit a generic binary control. Training's configured truncated-response gate
+still returns zero. Account for the reward scale when designing mixtures.
+
+The 2026-11-06 local first-pass check reproduced the prior 3,506 training rows
+and 80 held-out rows exactly; the converter reports 414 malformed or unsupported
+raw records separately. Six previously identified schema-invalid training
+rows were quarantined. All remaining **3,500** rows passed prompt preparation,
+reference-action rendering/reward checks and the whole-pool training loader:
+3,056 call targets and 444 format-only targets. Maximum prompt length was 3,570
+tokens; the nine rows previously deferred at 2,048 tokens are retained. Gold,
+wrong, near-miss, empty and truncated controls passed for both reward categories.
+This validates the integration, not an independent semantic relabeling or a new
+learning run. The existing BFCL overlap report contains only short embedded
+matches (one to four words); the receipt preserves those review flags and does
+not assert independent benchmark cleanliness.
+
+### NeMo single-step tool routes
+
+`single_step_tool_v1` selects the source's `agent_ref.name`: ordinary
+`single_step_tool_use_with_argument_comparison_agent`,
+`toolcall_schema_single_step_tool_use_with_argument_comparison_agent`, or
+`swe_pivot_single_step_tool_use_with_argument_comparison_agent`. It uses the same
+explicit `tool_format` options as ToolRL. Unknown routes require an explicit
+reviewed profile, rather than guessing from the prompt.
+
+Comparison code and profile settings are pinned to
+[NeMo Gym 966145fc02ae](https://github.com/NVIDIA-NeMo/Gym/tree/966145fc02ae58b887fd49379675604cc38fdd43/resources_servers/single_step_tool_use_with_argument_comparison).
+The native string word-count thresholds are 0.1 for conversational/function-calling
+and 0 for SWE-pivot; numeric tolerance is 1e-6. Zero word-count tolerance still
+ignores word order. Calls take precedence over accompanying prose; with native
+parallel-call rewarding disabled, surplus calls are not penalized when the expected
+calls match. A message target rewards any nonempty assistant prose, not semantic
+equivalence to the reference message. Preserve these upstream limitations for
+initial mixing; investigate stricter behavior separately rather than silently
+changing reward semantics. Response parsing/resource failures score zero with
+diagnostics, while malformed targets remain fatal verifier errors.
+
+These routes do not implement SWE patch execution, Workplace Assistant state
+changes, browser interaction or Lean compilation. Those environment-dependent
+routes remain separate integration work.
 
 Litmus preserves row-specific answer formats and tolerances. The versioned
 `litmus_scalar_v1` contract deliberately requires complete finite numeric or
@@ -408,6 +496,7 @@ entire 100+ acquisition catalog has been integrated or requalified.
 | Cascade Math, Nemotron Math v2, OpenMathReasoning, Math Stack Overflow, AceReason Math, DeepMath (C037–C040/C091/C094) | Explicit symbolic or reference-judge routing | Proof/judge parity and service calibration; canceled Nemotron Math run is not restarted |
 | Nano, Cascade-2, Lightning, Super, Ultra blends (C043–C047) | Explicit per-agent routes with full omissions report | Native judge/hybrid contracts; full code-source qualification and tool/SWE/Lean environment integration remain open |
 | AceCode (C076) | `acecode_v1` preserves context and every assertion; authenticated, source-pinned execution service | Full retained-pool qualification and aggregate service-load checks |
+| ToolRL | `toolrl_v1`, native reward scale, full history and both Olmo tool formats | First-pass offline qualification passed for 3,500 training rows; six schema-invalid rows quarantined, 80-row holdout preserved; new mixture learning remains to be measured |
 
 The web-search candidate remains excluded at Robert's request. SWE, Lean,
 browser/tool interaction and distillation-only records must not be presented as

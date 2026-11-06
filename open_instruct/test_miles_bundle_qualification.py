@@ -300,3 +300,29 @@ def test_different_code_test_suites_require_a_shared_passing_witness():
     registry["code"]["factory"] = source_preparation.FACTORIES["math"]
     with pytest.raises(ValueError, match="Conflicting targets"):
         qualify_bundle.validate_prompt_targets(rows, controls, registry)
+
+
+@pytest.mark.parametrize("has_calls", [True, False])
+def test_toolrl_qualification_preserves_native_reward_scale(tmp_path, has_calls):
+    target = {
+        "format": "olmo-toolrl-v1",
+        "tool_format": "olmo_pythonic_v1",
+        "think_prefix_in_prompt": True,
+        "tools": [{"function": {"name": "lookup", "parameters": {"properties": {"item": {"type": "string"}}}}}],
+        "calls": [{"name": "lookup", "parameters": {"item": "apple"}}] if has_calls else [],
+    }
+    row = {"input": "<think>", "metadata": {"verifiers": [{"name": "toolrl", "target": target}]}}
+    reward_path = tmp_path / "rewards.json"
+    reward_path.write_text(json.dumps({"toolrl": {"factory": source_preparation.FACTORIES["toolrl"]}}))
+    gold = 'plan</think><function_calls>lookup(item="apple")</function_calls>' if has_calls else "plan</think>answer"
+    near = gold.replace("apple", "pear") if has_calls else "plan</think>"
+    cases = [
+        {"kind": "gold", "response": gold, "expected": 4 if has_calls else 1},
+        {"kind": "wrong", "response": "invalid", "expected": -3 if has_calls else 0},
+        {"kind": "near_miss", "response": near, "expected": 2 if has_calls else 0},
+    ]
+    results = asyncio.run(qualify_bundle.check_control(row, cases, reward_path))
+    assert [r["actual"] for r in results] == ([4, -3, 2, -3, 0] if has_calls else [1, 0, 0, 0, 0])
+    cases[0]["expected"] = 1 if has_calls else 4
+    with pytest.raises(ValueError, match="Gold must"):
+        asyncio.run(qualify_bundle.check_control(row, cases, reward_path))
