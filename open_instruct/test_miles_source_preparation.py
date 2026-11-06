@@ -595,6 +595,8 @@ def test_dolci_remap_preserves_existing_frequency_constraint():
 
 
 def test_structured_tool_declarations_preserved_and_target_declared():
+    pytest.importorskip("xmltodict")
+    pytest.importorskip("openapi_schema_validator")
     raw = {
         "responses_create_params": {
             "input": [
@@ -638,6 +640,8 @@ def test_tool_response_marker_does_not_enable_unrelated_tool_tasks():
 
 @pytest.mark.parametrize("kind,root_type", [("csv", "object"), ("toml", "array")])
 def test_incompatible_format_schema_is_an_omission(kind, root_type):
+    pytest.importorskip("xmltodict")
+    pytest.importorskip("openapi_schema_validator")
     raw = {
         "prompt": "Return the structured result",
         "schema_type": kind,

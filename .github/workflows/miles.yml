@@ -46,4 +46,4 @@ jobs:
       - name: Check optional structured-output verifiers
         run: >-
           uv run --frozen --with openapi-schema-validator==0.6.3 --with xmltodict==0.14.2
-          pytest open_instruct/test_structured_outputs.py
+          pytest open_instruct/test_structured_outputs.py open_instruct/test_miles_source_preparation.py
