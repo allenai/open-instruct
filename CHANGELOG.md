@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Add explicit offline instruction-family qualification, streaming complete-pool checks, and runtime-tested shared witnesses for compatible duplicate math/citation targets; publish the first-pass dataset handoff (https://github.com/allenai/open-instruct/pull/2178).
 - Stream prepared MILES source JSONL, output serialization and resume hashes so complete code-test bundles do not require multiple whole-file copies in memory; retain validation metadata and immutable resume checks (https://github.com/allenai/open-instruct/pull/2178).
 - Support offline ToolRL and native NeMo next-action tool datasets in source preparation, preserving histories and source-specific rewards; add literal tool-call parsing and ToolRL qualification at its original reward scale (https://github.com/allenai/open-instruct/pull/2178).
 - Preserve Unicode line separators inside prompts when reading offline source qualification JSONL artifacts (https://github.com/allenai/open-instruct/pull/2178).

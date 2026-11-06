@@ -297,7 +297,7 @@ def test_different_code_test_suites_require_a_shared_passing_witness():
     qualify_bundle.validate_prompt_targets(rows, controls, registry)
     with pytest.raises(ValueError, match="shared gold"):
         qualify_bundle.validate_prompt_targets(rows, controls[:1], registry)
-    registry["code"]["factory"] = source_preparation.FACTORIES["math"]
+    registry["code"]["factory"] = source_preparation.FACTORIES["calendar"]
     with pytest.raises(ValueError, match="Conflicting targets"):
         qualify_bundle.validate_prompt_targets(rows, controls, registry)
 
@@ -326,3 +326,155 @@ def test_toolrl_qualification_preserves_native_reward_scale(tmp_path, has_calls)
     cases[0]["expected"] = 1 if has_calls else 4
     with pytest.raises(ValueError, match="Gold must"):
         asyncio.run(qualify_bundle.check_control(row, cases, reward_path))
+
+
+def test_instruction_family_projection_keeps_complete_target_unchanged():
+    target = {
+        "family": "nemo",
+        "target": {
+            "instruction_id_list": ["first", "second"],
+            "kwargs": [{"x": 1}, {"y": 2}],
+            "grading_mode": "fraction",
+        },
+    }
+    row = {"input": "original prompt", "label": target, "metadata": {"verifiers": [{"name": "if", "target": target}]}}
+    registry = {"if": {"factory": source_preparation.FACTORIES["instruction"]}}
+    projected, family = qualify_bundle.family_control_row(row, 1, registry)
+    assert family == "second"
+    assert projected["label"]["target"] == {
+        "instruction_id_list": ["second"],
+        "kwargs": [{"y": 2}],
+        "grading_mode": "fraction",
+    }
+    assert row["label"]["target"]["instruction_id_list"] == ["first", "second"]
+    with pytest.raises(ValueError, match="constraint_index"):
+        qualify_bundle.family_control_row(row, -1, registry)
+    with pytest.raises(ValueError, match="only supported"):
+        qualify_bundle.instruction_families(row, {"if": {"factory": source_preparation.FACTORIES["math"]}})
+
+
+def test_first_pass_family_coverage_requires_every_family_and_keeps_bundles(tmp_path, monkeypatch):
+    catalog_path, controls_path, hf = setup_bundle(tmp_path, monkeypatch)
+    catalog = json.loads(catalog_path.read_text())
+    entry = catalog["sources"]["toy"]
+    prompt_path = catalog_path.parent / entry["prompt_data"]["path"]
+    registry_path = catalog_path.parent / entry["reward_config"]["path"]
+    row = json.loads(prompt_path.read_text())
+    target = {"instruction_id": ["detectable_format:title", "startend:quotation"], "kwargs": [{}, {}]}
+    row["label"] = target
+    row["metadata"]["verifiers"] = [{"name": "ifeval", "target": target}]
+    prompt_path.write_text(json.dumps(row) + "\n")
+    registry_path.write_text(json.dumps({"ifeval": {"factory": source_preparation.FACTORIES["ifeval"]}}))
+    for key, path in [("prompt_data", prompt_path), ("reward_config", registry_path)]:
+        entry[key]["sha256"] = source_preparation.file_hash(path)
+    catalog_path.write_text(json.dumps(catalog))
+    controls = [
+        {
+            "source": "toy",
+            "sample_id": "one",
+            "constraint_index": i,
+            "cases": [
+                {"kind": "gold", "response": gold, "expected": 1},
+                {"kind": "wrong", "response": "unformatted", "expected": 0},
+                {"kind": "near_miss", "response": near, "expected": 0},
+            ],
+        }
+        for i, (gold, near) in enumerate([("<<Title>>", "<<Title>"), ('"answer"', '"answer')])
+    ]
+    controls_path.write_text(json.dumps(controls[0]) + "\n")
+    missing = asyncio.run(
+        qualify_bundle.qualify(
+            catalog_path, controls_path, hf, tmp_path / "missing-family", 1000, family_coverage=True
+        )
+    )
+    assert missing["sources"]["toy"]["status"] == "deferred"
+    assert missing["sources"]["toy"]["missing_strata"] == ["startend:quotation"]
+    controls_path.write_text("".join(json.dumps(c) + "\n" for c in controls))
+    passed = asyncio.run(
+        qualify_bundle.qualify(catalog_path, controls_path, hf, tmp_path / "all-families", 1000, family_coverage=True)
+    )
+    assert passed["sources"]["toy"]["status"] == "qualified"
+    assert passed["sources"]["toy"]["coverage"] == "instruction_families"
+    assert json.loads((tmp_path / "all-families/toy/prompts.jsonl").read_text())["label"] == target
+
+
+def test_shared_citation_witness_requires_every_target():
+    rows = [
+        {
+            "input": "same prompt",
+            "metadata": {
+                "sample_id": str(i),
+                "verifiers": [
+                    {
+                        "name": "format",
+                        "target": {"kind": "format", "value": {"type": "string_match", "expected_markers": markers}},
+                    }
+                ],
+            },
+        }
+        for i, markers in enumerate([["[ref:1]"], ["[ref:1]", "[ref:2]"]])
+    ]
+    registry = {"format": {"factory": source_preparation.FACTORIES["deterministic"]}}
+    controls = [
+        {"sample_id": str(i), "cases": [{"kind": "gold", "response": "[ref:1] [ref:2]", "expected": 1}]}
+        for i in range(2)
+    ]
+    qualify_bundle.validate_prompt_targets(rows, controls, registry)
+    with pytest.raises(ValueError, match="shared gold"):
+        qualify_bundle.validate_prompt_targets(rows, controls[:1], registry)
+
+
+def test_equivalent_math_targets_require_shared_runtime_witness(tmp_path):
+    rows = [
+        {
+            "input": "What is 52 divided by 3?",
+            "metadata": {"sample_id": str(i), "verifiers": [{"name": "math", "target": target}]},
+        }
+        for i, target in enumerate(["52 / 3", "52/3"])
+    ]
+    registry = {"math": {"factory": source_preparation.FACTORIES["math"]}}
+    controls = [
+        {
+            "sample_id": str(i),
+            "cases": [
+                {"kind": "gold", "response": r"\boxed{52/3}", "expected": 1},
+                {"kind": "wrong", "response": r"\boxed{17}", "expected": 0},
+                {"kind": "near_miss", "response": r"\boxed{53/3}", "expected": 0},
+            ],
+        }
+        for i in range(2)
+    ]
+    qualify_bundle.validate_prompt_targets(rows, controls, registry)
+    with pytest.raises(ValueError, match="shared gold"):
+        qualify_bundle.validate_prompt_targets(rows, controls[:1], registry)
+    path = tmp_path / "rewards.json"
+    path.write_text(json.dumps(registry))
+    for row, control in zip(rows, controls):
+        asyncio.run(qualify_bundle.check_control(row, control["cases"], path))
+    rows[1]["metadata"]["verifiers"][0]["target"] = "19"
+    with pytest.raises(ValueError, match="gold expected 1"):
+        asyncio.run(qualify_bundle.check_control(rows[1], controls[1]["cases"], path))
+
+
+def test_reasoning_gym_duplicate_uuid_is_provenance_only():
+    rows = [
+        {
+            "input": "same puzzle",
+            "metadata": {
+                "sample_id": str(i),
+                "verifiers": [
+                    {
+                        "name": "rg",
+                        "target": {"uuid": str(i), "answer": "bob", "metadata": {"source_dataset": "zebra_puzzles"}},
+                    }
+                ],
+            },
+        }
+        for i in range(2)
+    ]
+    registry = {"rg": {"factory": source_preparation.FACTORIES["reasoning_gym"]}}
+    qualify_bundle.validate_prompt_targets(rows, [], registry)
+    assert rows[0]["metadata"]["verifiers"][0]["target"]["uuid"] == "0"
+    rows[1]["metadata"]["verifiers"][0]["target"]["answer"] = "alice"
+    with pytest.raises(ValueError, match="Conflicting targets"):
+        qualify_bundle.validate_prompt_targets(rows, [], registry)

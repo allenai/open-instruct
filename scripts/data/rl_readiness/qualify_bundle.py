@@ -92,7 +92,7 @@ async def check_control(row, cases, reward_path):
 
 
 def validate_prompt_targets(rows, controls, registry):
-    """Different hidden code tests may share a prompt if a common witness passes all.
+    """Compatible code, citation and math targets need a shared runtime-tested witness.
 
     Every witness is subsequently executed by check_control. Other differing
     targets remain ambiguous and require source review before qualification.
@@ -104,22 +104,67 @@ def validate_prompt_targets(rows, controls, registry):
             if case["kind"] == "gold" and case["expected"] == 1:
                 golds[control["sample_id"]].add(case["response"])
     for row in rows:
-        groups[sources.digest(row["input"])].append(row)
+        verifiers = row["metadata"]["verifiers"]
+        compatible = len(verifiers) == 1 and registry[verifiers[0]["name"]]["factory"] in {
+            sources.FACTORIES["complete_code"],
+            sources.FACTORIES["math"],
+        }
+        if len(verifiers) == 1 and registry[verifiers[0]["name"]]["factory"] == sources.FACTORIES["deterministic"]:
+            target = verifiers[0]["target"]
+            compatible = target.get("kind") == "format" and target.get("value", {}).get("type") == "string_match"
+        # NeMo exports can assign different UUIDs to the identical saved puzzle.
+        # The pinned ReasoningGym scorers never read this provenance field.
+        grading_specs = verifiers
+        if len(verifiers) == 1 and registry[verifiers[0]["name"]]["factory"] == sources.FACTORIES["reasoning_gym"]:
+            grading_specs = copy.deepcopy(verifiers)
+            grading_specs[0]["target"].pop("uuid", None)
+        groups[sources.digest(row["input"])].append(
+            (sources.digest(grading_specs), compatible, row["metadata"]["sample_id"])
+        )
     for group in groups.values():
-        if len({sources.digest(row["metadata"]["verifiers"]) for row in group}) <= 1:
+        if len({digest for digest, _, _ in group}) <= 1:
             continue
         witnesses = None
-        for row in group:
-            verifiers = row["metadata"]["verifiers"]
-            if len(verifiers) != 1 or registry[verifiers[0]["name"]]["factory"] != sources.FACTORIES["complete_code"]:
+        for _, compatible, identity in group:
+            if not compatible:
                 raise ValueError("Conflicting targets for the same prompt")
-            candidates = golds[row["metadata"]["sample_id"]]
+            candidates = golds[identity]
             witnesses = candidates if witnesses is None else witnesses & candidates
         if not witnesses:
-            raise ValueError("Different code tests for one prompt require a shared gold control for every row")
+            raise ValueError("Different compatible targets require a shared gold control for every row")
 
 
-async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, quarantine_path=None):
+def instruction_families(row, registry):
+    specs = row["metadata"]["verifiers"]
+    if len(specs) != 1:
+        raise ValueError("Family coverage requires exactly one instruction verifier")
+    factory = registry[specs[0]["name"]]["factory"]
+    target = specs[0]["target"]
+    if factory == sources.FACTORIES["instruction"]:
+        return target["target"]["instruction_id_list"]
+    if factory == sources.FACTORIES["ifeval"]:
+        return target["instruction_id"]
+    raise ValueError("Family coverage is only supported for instruction-following sources")
+
+
+def family_control_row(row, index, registry):
+    """Project a real source constraint for component tests; keep training rows intact."""
+    families = instruction_families(row, registry)
+    if type(index) is not int or not 0 <= index < len(families):
+        raise ValueError("Family controls require a valid constraint_index")
+    result = copy.deepcopy(row)
+    target = result["metadata"]["verifiers"][0]["target"]
+    bundle = target["target"] if "family" in target else target
+    key = "instruction_id_list" if "family" in target else "instruction_id"
+    bundle[key] = [bundle[key][index]]
+    bundle["kwargs"] = [bundle["kwargs"][index]]
+    result["label"] = target
+    return result, families[index]
+
+
+async def qualify(
+    catalog_path, controls_path, hf, output, max_prompt_length, quarantine_path=None, *, family_coverage=False
+):
     catalog_path, controls_path = Path(catalog_path).resolve(), Path(controls_path).resolve()
     output = Path(output).resolve()
     catalog = json.loads(catalog_path.read_text())
@@ -176,10 +221,16 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, qu
                     expected["config"] = dataclasses.asdict(config)
                 if spec != expected:
                     raise ValueError("Unreviewed verifier options")
-            rows = read_jsonl(paths["prompt_data"])
-            by_id = {row["metadata"]["sample_id"]: row for row in rows}
-            if len(by_id) != len(rows):
-                raise ValueError("Repeated sample identity")
+            rows = run_data._JsonlRows(paths["prompt_data"], {})
+            wanted = {control["sample_id"] for control in controls[name]}
+            by_id, identities = {}, set()
+            for row in rows:
+                identity = row["metadata"]["sample_id"]
+                if identity in identities:
+                    raise ValueError("Repeated sample identity")
+                identities.add(identity)
+                if identity in wanted:
+                    by_id[identity] = row
             validate_prompt_targets(rows, controls[name], registry)
             prepared = run_data.prepare_data(
                 {"sources": [{"name": name, "fraction": 1.0, **{k: str(v) for k, v in paths.items()}}]},
@@ -193,16 +244,28 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, qu
             covered = set()
             for control in controls[name]:
                 row = by_id[control["sample_id"]]
+                coverage_key = row["metadata"]["subtask"]
+                if family_coverage:
+                    row, coverage_key = family_control_row(row, control.get("constraint_index"), registry)
+                elif "constraint_index" in control:
+                    raise ValueError("Projected controls require explicit family coverage")
                 result = await check_control(row, control["cases"], paths["reward_config"])
-                covered.add(row["metadata"]["subtask"])
-                report["controls"].append({"sample_id": control["sample_id"], "cases": result})
-            required = {row["metadata"]["subtask"] for row in rows}
+                covered.add(coverage_key)
+                report["controls"].append(
+                    {"sample_id": control["sample_id"], "coverage_key": coverage_key, "cases": result}
+                )
+            required = (
+                {family for row in rows for family in instruction_families(row, registry)}
+                if family_coverage
+                else {row["metadata"]["subtask"] for row in rows}
+            )
             missing = sorted(required - covered)
             report.update(
                 required_strata=len(required),
                 covered_strata=len(covered),
                 missing_strata=missing,
                 rows=len(rows),
+                coverage="instruction_families" if family_coverage else "strata",
                 loader_manifest_sha256=sources.file_hash(prepared["manifest"]),
             )
             if missing:
@@ -231,7 +294,11 @@ async def qualify(catalog_path, controls_path, hf, output, max_prompt_length, qu
         "max_prompt_length": max_prompt_length,
         "quarantine_sha256": sources.file_hash(quarantine_path) if quarantine_path else None,
         "judges_sha256": sources.digest(judge_registry.registry()),
-        "scope": "Whole-pool loader validation; stratum controls via runtime bridge. No GPU training or policy screen.",
+        "scope": (
+            "Whole-pool loader validation; instruction-family controls via runtime bridge, not solved witnesses for every combination. No GPU training or policy screen."
+            if family_coverage
+            else "Whole-pool loader validation; stratum controls via runtime bridge. No GPU training or policy screen."
+        ),
         "sources": reports,
     }
     if quarantine_path is not None:
@@ -254,11 +321,24 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-prompt-length", type=int, required=True)
     parser.add_argument(
+        "--instruction-family-coverage",
+        action="store_true",
+        help="First-pass IF coverage by native checker family, using constraint_index controls",
+    )
+    parser.add_argument(
         "--quarantine", type=Path, help="Reviewed JSONL records with source, id and reason for every omitted row"
     )
     args = parser.parse_args()
     receipt = asyncio.run(
-        qualify(args.catalog, args.controls, args.tokenizer, args.output, args.max_prompt_length, args.quarantine)
+        qualify(
+            args.catalog,
+            args.controls,
+            args.tokenizer,
+            args.output,
+            args.max_prompt_length,
+            args.quarantine,
+            family_coverage=args.instruction_family_coverage,
+        )
     )
     print(json.dumps({name: result["status"] for name, result in receipt["sources"].items()}, indent=2))
     if any(result["status"] != "qualified" for result in receipt["sources"].values()):
