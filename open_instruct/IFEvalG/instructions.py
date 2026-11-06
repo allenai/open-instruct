@@ -1604,12 +1604,13 @@ class CopySpanIdxChecker(Instruction):
             raise ValueError("prompt_to_repeat must be set.")
         else:
             self._prompt_to_repeat = prompt_to_repeat
-        if not n_start:
-            self._n_start = random.randint(0, len(self._prompt_to_repeat) - 2)
+        if n_start is None:
+            last_start = len(self._prompt_to_repeat) - 1 if n_end is None else n_end
+            self._n_start = random.randint(0, last_start)
         else:
             self._n_start = n_start
-        if not n_end:
-            self._n_end = random.randint(self._n_start + 1, len(self._prompt_to_repeat) - 1)
+        if n_end is None:
+            self._n_end = random.randint(self._n_start, len(self._prompt_to_repeat) - 1)
         else:
             self._n_end = n_end
         self._description_pattern = "Copy the span of words that lies between (and including) index {n_start} and {n_end}, the indices are character indices!"
@@ -1626,8 +1627,8 @@ class CopySpanIdxChecker(Instruction):
         return ["n_start", "n_end", "prompt_to_repeat"]
 
     def check_following(self, value):
-        """Checks if the response contains the expected number of phrases with the correct modifications."""
-        return value.strip().lower() == self._prompt_to_repeat[self._n_start : self._n_end].strip().lower()
+        """Check the inclusive character span, preserving case-insensitive matching."""
+        return value.strip().lower() == self._prompt_to_repeat[self._n_start : self._n_end + 1].strip().lower()
 
 
 class SentenceHyphenChecker(Instruction):
@@ -1745,10 +1746,8 @@ class KeywordFrequencyOnceChecker(Instruction):
         return ["keyword"]
 
     def check_following(self, value):
-        """Checks if the response contain the keyword with required frequency."""
-        actual_occurrences = len(re.findall(self._keyword, value, flags=re.IGNORECASE))
-
-        return actual_occurrences == 1
+        """The instruction asks for inclusion, without an exact occurrence count."""
+        return re.search(re.escape(self._keyword), value, flags=re.IGNORECASE) is not None
 
 
 class KeywordFrequencyCheckerDifferent(Instruction):
@@ -2166,11 +2165,7 @@ class BiGramWrappingChecker(Instruction):
 
     def check_following(self, value):
         """Checks if every word bigram is enclosed within double angular brackets."""
-        words = value.split()
-        for i in range(0, len(words) - 1, 2):
-            if i + 1 < len(words) and not (words[i].startswith("<<") and words[i + 1].endswith(">>")):
-                return False
-        return True
+        return re.fullmatch(r"<<[^\s<>]+\s+[^\s<>]+>>(?:\s+<<[^\s<>]+\s+[^\s<>]+>>)*", value.strip()) is not None
 
 
 class CopyingSimpleChecker(Instruction):
