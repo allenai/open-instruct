@@ -48,7 +48,9 @@ def resolve(catalog_path, weights):
             filename = (path.parent / descriptor["path"]).resolve()
             if not filename.is_relative_to(path.parent):
                 raise InputError(f"Source {name}: bundle path must stay within the catalog directory")
-            if hashlib.sha256(filename.read_bytes()).hexdigest() != descriptor["sha256"]:
+            with filename.open("rb") as stream:
+                actual = hashlib.file_digest(stream, "sha256").hexdigest()
+            if actual != descriptor["sha256"]:
                 raise InputError(f"Source {name}: {key} hash mismatch")
             source[key] = str(filename)
         sources.append(source)
