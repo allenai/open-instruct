@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Preserve native NeMo code comparison semantics automatically for Nemotron input/output labels, retain AceCode assertions, and pin the compatible service client (https://github.com/allenai/open-instruct/pull/2178).
 - Validate complete source bundles with whole-pool loader checks and per-stratum runtime reward controls; preserve explicit quarantine receipts and reference-judge routing, support final structured tool answers, 104 ReasoningGym families with bounded safe grading, and complete-test code rewards through an authenticated source-pinned service (https://github.com/allenai/open-instruct/pull/2178).
 - Add full-population, hash-pinned dataset source preparation with preserved system/developer instructions, explicit omissions for malformed rows and deterministic reward adapters, including Litmus scalar answer formats. Make local validation timeouts consistently return zero with diagnostics, removing the math/format timeout policy settings while keeping invalid targets and unexpected failures fatal (https://github.com/allenai/open-instruct/pull/2177).
 - Add shared, isolated native instruction and calendar reward adapters with deterministic argument/regex validation that accepts known native normalization, explicit grading modes, and diagnostic zero scores for calendar parse failures and worker timeouts (https://github.com/allenai/open-instruct/pull/2176).

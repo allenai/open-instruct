@@ -158,14 +158,14 @@ validate reward behavior; training continues to use the complete qualified pool.
 `verifier_metadata.unit_tests` (`inputs`, `outputs`, optional `fn_name`). It retains
 all aligned pairs and distinguishes stdio from module/Solution function calls.
 The readiness requirements pin the maintained execution client to commit
-`c8ab35c375fafb68b2dbbe49c4efb33e51c50bbe`.
+`4cab7e85e8748db501163e6cbbc5ab7c041692af`.
 
 Each source plan must supply trusted service configuration, outside raw rows:
 
 ```json
 "code_service": {
   "api_url": "https://1n7avfskve.execute-api.us-west-2.amazonaws.com",
-  "expected_source_sha256": "6bd42a0cb609169ccb8036a0e1128b289644da402a53a725bc66a9887b13ec00",
+  "expected_source_sha256": "f8ee353acb3e49580439ae1dbdb1cbb66550e9f4fbc5f2dcb64feb5c64cc5905",
   "max_execution_time": 1.0,
   "total_timeout": 600.0
 }
@@ -182,13 +182,19 @@ Start qualification sequentially; training must bound aggregate in-flight servic
 requests to eight across all callers, not eight per trainer rank. The live control
 panel is not a sustained-load certification.
 
-The current LiveCodeBench helper uses exact JSON-normalized Python equality for
-function results and exact decimal equality for numeric stdio lines. This is
-stricter than the NeMo checker’s float tolerances and case-insensitive `yes`/`no`
-handling. Native checker parity remains a qualification gate for Nemotron code
-routes; successful wire-format controls alone do not close it. See the pinned
-[service contract](https://github.com/robertb/verifier-paired-replay/blob/c8ab35c375fafb68b2dbbe49c4efb33e51c50bbe/docs/training-integration-contract.md)
-for request limits and comparison details.
+The Nemotron-backed `livecodebench_v1` adapter automatically selects the pinned
+`nemo_v1` output comparison through `prepare_nemotron_tests`; there is no training
+comparison option. Whole-line yes/no verdicts ignore case, floating stdio tokens
+use NeMo's 1e-6 tolerance while integer tokens stay exact, and function results
+use the native scalar/list comparison rules. AceCode retains its original assertions.
+The client rejects a service that does not advertise the required comparison;
+unknown outcomes never become zero rewards. Existing prepared Nemotron bundles
+must be rebuilt and qualified so they contain the new comparison metadata and
+function assertions. Update their trusted service source pin as well.
+See the pinned [NeMo comparison contract](https://github.com/allenai/code-execution-service/blob/4cab7e85e8748db501163e6cbbc5ab7c041692af/docs/nemotron-comparison-contract.md)
+for exact rules and the 10,053-case native-checker differential validation.
+This closes the comparison implementation gap; whole-source dataset qualification
+and training-load validation remain separate gates.
 
 ## Reference judges and routed blends
 
@@ -230,7 +236,7 @@ entire 100+ acquisition catalog has been integrated or requalified.
 | Knowledge MCQA (C031) | Displayed choice validation and final-choice reward | Native-template extraction checks, chance floor when interpreting MCQA rewards |
 | ReasoningGym (C036) | Saved entries/difficulty for all 104 exported families, including state-based tasks | Pinned native scoring with safe expression guards, partial-credit controls and bounded workers; no procedural population replacement |
 | Cascade Math, Nemotron Math v2, OpenMathReasoning, Math Stack Overflow, AceReason Math, DeepMath (C037–C040/C091/C094) | Explicit symbolic or reference-judge routing | Proof/judge parity and service calibration; canceled Nemotron Math run is not restarted |
-| Nano, Cascade-2, Lightning, Super, Ultra blends (C043–C047) | Explicit per-agent routes with full omissions report | Native judge/hybrid contracts; code comparison parity and tool/SWE/Lean environment integration remain open |
+| Nano, Cascade-2, Lightning, Super, Ultra blends (C043–C047) | Explicit per-agent routes with full omissions report | Native judge/hybrid contracts; full code-source qualification and tool/SWE/Lean environment integration remain open |
 | AceCode (C076) | `acecode_v1` preserves context and every assertion; authenticated, source-pinned execution service | Full retained-pool qualification and aggregate service-load checks |
 
 The web-search candidate remains excluded at Robert's request. SWE, Lean,

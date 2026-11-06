@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from open_instruct.miles.rewards import deterministic_verifiers as common
 
-CLIENT_REVISION = "c8ab35c375fafb68b2dbbe49c4efb33e51c50bbe"
+CLIENT_REVISION = "4cab7e85e8748db501163e6cbbc5ab7c041692af"
 _SUITE_LIMIT = 2000
 
 
@@ -57,7 +57,8 @@ def validate_target(target):
         else:
             valid = (
                 isinstance(test, dict)
-                and set(test) == {"input", "output"}
+                and {"input", "output"} <= set(test) <= {"input", "output", "comparison"}
+                and test.get("comparison", "exact") in ("exact", "nemo_v1")
                 and isinstance(test["output"], str)
                 and (
                     isinstance(test["input"], str)
@@ -80,7 +81,7 @@ def livecodebench_target(unit_tests):
     helper = importlib.import_module("code_execution_client.livecodebench")
     all_tests = []
     for start in range(0, len(inputs), _SUITE_LIMIT):
-        mode, tests = helper.prepare_tests(
+        mode, tests = helper.prepare_nemotron_tests(
             inputs[start : start + _SUITE_LIMIT], outputs[start : start + _SUITE_LIMIT], unit_tests.get("fn_name")
         )
         all_tests.extend(tests)
