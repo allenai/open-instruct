@@ -70,8 +70,10 @@ optional `grading_mode` is `all` (default) or `fraction`. Unknown modes, invalid
 argument types, and native argument repairs are errors. Numeric counts/indices
 must be integers, text arguments must be strings, and keyword collections must
 be lists of strings. Target validation runs even when the response is empty. The
-adapter rejects zero parameters that trigger native random defaults, including
-`new:copy_span_idx.n_start=0`; admission must not depend on a worker's RNG seed.
+adapter rejects zero parameters that still trigger native random defaults. Copy
+indices now preserve explicit zero and include the end index; admission checks
+that `0 <= n_start <= n_end < len(prompt_to_repeat)`. Grading must not depend on a
+worker's RNG seed.
 Known constructor normalization is accepted: lowercasing the paragraph's required
 first word or a frequency checker's letter, and trimming the specific text
 arguments that the native checker itself trims. For example, `first_word: "The"`
@@ -123,3 +125,13 @@ Run `uv run pytest open_instruct/test_miles_nvidia_constraints.py -q`. They cove
 native scoring, deterministic admission, regex errors, timeout policies, calendar
 formatting, diagnostics, and real subprocess execution. These integration checks
 do not qualify an entire raw dataset.
+
+
+The shared keyword registry distinguishes `keywords:word_once` (historical
+exactly-once regex matching) from `keywords:at_least_once` (literal case-insensitive
+inclusion). NeMo preparation preserves the supplied identifier; its legacy regex
+validation remains in place for `word_once`, while literal punctuation is valid for
+`at_least_once`. The same shared copy and bigram-wrapping fixes apply to both the
+standard IF and NeMo paths. NeMo's `all`/`fraction` aggregation modes are unchanged.
+See [the explicit Dolci preparation correction](source-preparation.md#explicit-dolci-keyword-correction)
+for opting an existing inclusion prompt into the new identifier.

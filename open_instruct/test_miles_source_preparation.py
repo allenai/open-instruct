@@ -12,7 +12,7 @@ from transformers import PreTrainedTokenizerFast
 
 from open_instruct import dataset_transformation
 from open_instruct.miles.datasets import source_preparation as sources
-from open_instruct.miles.rewards import litmus
+from open_instruct.miles.rewards import litmus, task_verifiers
 
 
 class Tokenizer:
@@ -325,3 +325,116 @@ def test_real_regex_timeout_type_is_handled():
     # The verifier relies on the regex package raising the builtin TimeoutError.
     with pytest.raises(TimeoutError):
         regex.compile(r"(?:(?:a|aa)+)+(b)").findall("a" * 5000, timeout=1e-9)
+
+
+def dolci_keyword_row():
+    return {
+        "dataset": ["ifeval"],
+        "ground_truth": [
+            repr(
+                [
+                    {
+                        "instruction_id": ["keywords:word_once", "punctuation:no_comma"],
+                        "kwargs": [{"keyword": "apple"}, None],
+                    }
+                ]
+            )
+        ],
+        "prompt": [
+            {"role": "system", "content": "Be helpful."},
+            {"role": "user", "content": "Include keyword apple in your response. Do not use commas."},
+        ],
+    }
+
+
+def test_dolci_keyword_correction_is_explicit_and_preserves_prompt():
+    raw = dolci_keyword_row()
+    original = copy.deepcopy(raw)
+    ms, unchanged, name, _ = sources.adapt(raw, "dolci_if_v1")
+    corrected_ms, corrected, _, _ = sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    assert ms == corrected_ms == raw["prompt"]
+    assert raw == original
+    assert name == "ifeval"
+    assert unchanged["instruction_id"] == ["keywords:word_once", "punctuation:no_comma"]
+    assert corrected["instruction_id"] == ["keywords:at_least_once", "punctuation:no_comma"]
+    assert corrected["kwargs"] == unchanged["kwargs"]
+    verifier = task_verifiers.ManifestIFVerifier()
+    assert asyncio.run(verifier.async_call([], "apple apple", unchanged)).score == 0.5
+    assert asyncio.run(verifier.async_call([], "apple apple", corrected)).score == 1.0
+    assert asyncio.run(verifier.async_call([], "pear", corrected)).score == 0.5
+
+
+@pytest.mark.parametrize("prompt", ["Include keyword apple exactly once in your response.", "Answer a question."])
+def test_dolci_correction_rejects_unrecognized_wording(prompt):
+    raw = dolci_keyword_row()
+    raw["prompt"][-1]["content"] = prompt
+    with pytest.raises(ValueError, match="original inclusion instruction"):
+        sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+
+
+def test_dolci_keyword_option_cannot_silently_change_nemo():
+    raw = {
+        "prompt": "Include keyword apple in your response.",
+        "instruction_id_list": ["keywords:word_once"],
+        "kwargs": [{"keyword": "apple"}],
+    }
+    _, target, _, _ = sources.adapt(raw, "instruction_v1")
+    assert target["target"]["instruction_id_list"] == ["keywords:word_once"]
+    for kind in ["instruction_v1", "nemo_v1"]:
+        with pytest.raises(sources.PlanError, match="requires the dolci_if_v1"):
+            sources.adapt(raw, kind, {"keyword_inclusion": "at_least_once_v1"})
+    with pytest.raises(sources.PlanError, match="Unknown keyword_inclusion"):
+        sources.adapt(dolci_keyword_row(), "dolci_if_v1", {"keyword_inclusion": "typo"})
+
+
+def test_dolci_prepared_correction_receipts(tmp_path):
+    raw = dolci_keyword_row()
+    unmodified = copy.deepcopy(raw)
+    unmodified["ground_truth"] = [repr([{"instruction_id": ["punctuation:no_comma"], "kwargs": [None]}])]
+    input_file = tmp_path / "input.jsonl"
+    input_file.write_text(
+        "\n".join(json.dumps({"id": str(i), "raw_record": r}) for i, r in enumerate([raw, unmodified])) + "\n"
+    )
+    hygiene = tmp_path / "hygiene.json"
+    hygiene.write_text('{"completed":true}')
+    options = {"keyword_inclusion": "at_least_once_v1"}
+    plan = {
+        "schema_version": 1,
+        "sources": {
+            "dolci-if-corrected": {
+                "adapter": "dolci_if_v1",
+                "options": options,
+                "inputs": [
+                    {
+                        "path": str(input_file),
+                        "sha256": sources.file_hash(input_file),
+                        "revision": "pinned",
+                        "split": "train",
+                    }
+                ],
+                "hygiene_receipt": {"path": str(hygiene), "sha256": sources.file_hash(hygiene)},
+            }
+        },
+    }
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(plan))
+    out = tmp_path / "bundle"
+    entry = sources.prepare(plan_path, out, Tokenizer())["sources"]["dolci-if-corrected"]
+    assert entry["options"] == options
+    assert entry["counts"]["transformed_rows"] == entry["counts"]["transformed_constraints"] == 1
+    assert entry["counts"]["prepared_rows"] == 2
+    rows = [json.loads(line) for line in (out / "dolci-if-corrected/prompts.jsonl").read_text().splitlines()]
+    row = rows[0]
+    assert row["metadata"]["messages"] == raw["prompt"]
+    assert row["metadata"]["original_target_sha256"] == sources.digest(sources.dolci_if_target(raw))
+    assert row["metadata"]["target_transformations"] == [
+        {
+            "name": "dolci_keyword_inclusion_v1",
+            "constraint_index": 0,
+            "from": "keywords:word_once",
+            "to": "keywords:at_least_once",
+        }
+    ]
+    assert rows[1]["metadata"]["target_transformations"] == []
+    assert row["label"] == row["metadata"]["verifiers"][0]["target"]
+    assert row["metadata"]["raw_record_sha256"] == sources.digest(raw)

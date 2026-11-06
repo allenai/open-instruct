@@ -53,6 +53,7 @@ and are recorded as omissions rather than moved across conversation turns.
 | `nemo_v1` | Structural dispatch for formatting, structured formats, native IF, calendars and MCQA; unknown routes are reported |
 | `structured_v1` | `schema_type`/`schema_str`; explicit schema policy, all five formats |
 | `instruction_v1` | Native instruction IDs and kwargs, including bundles in verifier metadata or args |
+| `dolci_if_v1` | A single `ifeval` route in `dataset`, with one encoded constraint bundle in `ground_truth`; optional recorded keyword correction |
 | `calendar_v1` | Full final calendar feasibility from `exp_cal_state`, without a 20-event cutoff |
 | `format_v1` | Existing format verifier payload; formatting only |
 | `litmus_v02_v1` | Row-carried regex, answer type and matching policy; all scalar properties/methods are representable |
@@ -89,3 +90,43 @@ from changed populations do not qualify these bundles.
 
 See [dataset reward verifiers](dataset-verifiers.md) for the structured-output,
 instruction and calendar contracts and their runtime dependencies.
+
+## Explicit Dolci keyword correction
+
+Historical Dolci IF prompts say “Include keyword X” but use `keywords:word_once`,
+whose historical grader requires exactly one regex match. Preserve that identifier
+for compatibility. To keep those prompts unchanged while grading literal inclusion,
+select the correction explicitly in the source plan:
+
+```json
+{
+  "adapter": "dolci_if_v1",
+  "options": {"keyword_inclusion": "at_least_once_v1"}
+}
+```
+
+Include the usual pinned `inputs` and `hygiene_receipt` fields alongside this fragment.
+This adapter consumes Dolci IF exports with `dataset: ["ifeval"]`, one `ground_truth`
+entry (the existing JSON/Python singleton wrappers are accepted), and text or chat
+messages in the normal preparation input fields. Token-only exports must first be
+decoded upstream; this adapter does not infer chat boundaries from rendered text.
+It keeps the normal IF fraction-of-constraints grading through `ManifestIFVerifier`.
+
+The default policy is `preserve`. With `at_least_once_v1`, each `keywords:word_once`
+constraint is changed to `keywords:at_least_once` only when the final user message
+contains the audited sentence `Include keyword X in your response.` with the matching
+keyword. A mismatch is recorded as an omitted row, not guessed or silently repaired.
+Other constraints and prompt text are preserved. Existing admission screens still apply.
+The new checker uses literal, case-insensitive substring matching and permits repetition;
+it does not reinterpret other frequency rules or uniqueness constraints.
+
+Each prepared row records `original_target_sha256` and `target_transformations`,
+including the versioned correction name, constraint index, and old/new identifiers.
+The catalog records the selected options and transformed row/constraint counts;
+the original input hash and saved plan remain available. Write a new bundle rather
+than replacing historical artifacts. The option is rejected for other adapters:
+NeMo sources retain their original keyword identifiers and grading. There is no
+runtime switch based on dataset origin.
+
+The shared `word_once` prompt generator now explicitly says “exactly once” for
+future generated examples. This does not rewrite existing dataset prompts.

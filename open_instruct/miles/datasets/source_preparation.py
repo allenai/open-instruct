@@ -16,6 +16,7 @@ from pathlib import Path
 from jsonschema.exceptions import SchemaError
 from transformers import AutoTokenizer
 
+from open_instruct import ifeval_constraints
 from open_instruct.miles.rewards import deterministic_verifiers as local
 from open_instruct.miles.rewards import litmus, nvidia_constraints, reasoning_gym
 
@@ -24,6 +25,7 @@ FACTORIES = {
     "math": "open_instruct.ground_truth_utils.MathVerifier",
     "structured": "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
     "instruction": "open_instruct.miles.rewards.nvidia_constraints.InstructionVerifier",
+    "ifeval": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
     "calendar": "open_instruct.miles.rewards.nvidia_constraints.CalendarVerifier",
     "reasoning_gym": "open_instruct.miles.rewards.reasoning_gym.ReasoningGymVerifier",
     "litmus": "open_instruct.miles.rewards.litmus.LitmusVerifier",
@@ -94,8 +96,47 @@ def messages(raw):
     return result
 
 
+def validate_keyword_option(kind, options):
+    policy = options.get("keyword_inclusion", "preserve")
+    if policy not in {"preserve", "at_least_once_v1"}:
+        raise PlanError("Unknown keyword_inclusion policy: " + str(policy))
+    if policy != "preserve" and kind != "dolci_if_v1":
+        raise PlanError("keyword_inclusion correction requires the dolci_if_v1 adapter")
+
+
+def dolci_if_target(raw):
+    if raw.get("dataset") != ["ifeval"]:
+        raise ValueError("dolci_if_v1 requires a single ifeval route")
+    ground_truth = raw.get("ground_truth")
+    if not isinstance(ground_truth, list) or len(ground_truth) != 1:
+        raise ValueError("dolci_if_v1 requires one ground_truth entry")
+    return ifeval_constraints.parse_constraint_bundle(ground_truth[0])
+
+
+def corrected_dolci_target(raw, ms, policy):
+    target = dolci_if_target(raw)
+    issues = ifeval_constraints.if_training_issues(target)
+    if issues:
+        raise ValueError(f"Unsuitable IF training target: {issues}")
+    if policy == "at_least_once_v1":
+        for index, (name, args) in enumerate(zip(target["instruction_id"], target["kwargs"], strict=True)):
+            if name != "keywords:word_once":
+                continue
+            keyword = args.get("keyword")
+            if not isinstance(keyword, str) or not keyword.strip():
+                raise ValueError("Keyword inclusion correction requires a nonempty literal keyword")
+            # This repair is for the audited generator wording, not arbitrary
+            # instructions which might explicitly require exactly one occurrence.
+            instruction = f"Include keyword {keyword.strip()} in your response."
+            if instruction not in ms[-1]["content"]:
+                raise ValueError("Keyword inclusion correction requires the original inclusion instruction")
+            target["instruction_id"][index] = "keywords:at_least_once"
+    return target
+
+
 def adapt(raw, kind, options=None):
     options = options or {}
+    validate_keyword_option(kind, options)
     ms = messages(raw)
     meta = raw.get("verifier_metadata") or {}
     if kind == "nemo_v1":
@@ -147,6 +188,9 @@ def adapt(raw, kind, options=None):
         }
         nvidia_constraints.instruction_contract(json.dumps(target, sort_keys=True))
         name, stratum = "instruction", kind + ":" + "+".join(sorted(original["instruction_id_list"]))
+    elif kind == "dolci_if_v1":
+        target = corrected_dolci_target(raw, ms, options.get("keyword_inclusion", "preserve"))
+        name, stratum = "ifeval", kind + ":" + "+".join(sorted(target["instruction_id"]))
     elif kind == "calendar_v1":
         target = copy.deepcopy(raw["exp_cal_state"])
         nvidia_constraints.calendar_contract(target)
@@ -221,6 +265,7 @@ def prepare(plan_path, output, tokenizer):
     for name, spec in plan["sources"].items():
         if re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", name) is None:
             raise ValueError("Invalid source name")
+        validate_keyword_option(spec["adapter"], spec.get("options") or {})
         root = output / name
         root.mkdir()
         # A prior hygiene receipt is required; this operation does not rerun decon.
@@ -266,6 +311,19 @@ def prepare(plan_path, output, tokenizer):
                             "verifiers": [{"name": verifier, "target": target}],
                         },
                     }
+                    if spec["adapter"] == "dolci_if_v1":
+                        original = dolci_if_target(raw)
+                        changes = [
+                            {"name": "dolci_keyword_inclusion_v1", "constraint_index": i, "from": before, "to": after}
+                            for i, (before, after) in enumerate(
+                                zip(original["instruction_id"], target["instruction_id"], strict=True)
+                            )
+                            if before != after
+                        ]
+                        row["metadata"]["original_target_sha256"] = digest(original)
+                        row["metadata"]["target_transformations"] = changes
+                        counts["transformed_rows"] += bool(changes)
+                        counts["transformed_constraints"] += len(changes)
                     rows.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
                     counts["prepared_rows"] += 1
                     counts["max_prompt_tokens"] = max(counts["max_prompt_tokens"], tokens)
@@ -275,6 +333,7 @@ def prepare(plan_path, output, tokenizer):
         entry = {
             "status": "prepared",
             "adapter": spec["adapter"],
+            "options": spec.get("options") or {},
             "counts": dict(counts),
             "strata": dict(strata),
             "repeated_prompt_rows": sum(n - 1 for n in prompts.values()),

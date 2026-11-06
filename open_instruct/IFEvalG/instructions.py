@@ -1708,7 +1708,7 @@ class SquareBracketChecker(Instruction):
 
 
 class KeywordFrequencyOnceChecker(Instruction):
-    """Check at-least-once inclusion; retain the legacy name for existing dataset identifiers."""
+    """Preserve historical exactly-once regex grading for existing dataset identifiers."""
 
     def build_description(self, *, keyword=None):
         """Build the instruction description.
@@ -1733,7 +1733,7 @@ class KeywordFrequencyOnceChecker(Instruction):
 
         self._frequency = 1
 
-        self._description_pattern = "Include keyword {keyword} in your response."
+        self._description_pattern = "Include keyword {keyword} exactly once in your response."
 
         return self._description_pattern.format(keyword=self._keyword, frequency=self._frequency)
 
@@ -1746,7 +1746,19 @@ class KeywordFrequencyOnceChecker(Instruction):
         return ["keyword"]
 
     def check_following(self, value):
-        """The instruction asks for inclusion, without an exact occurrence count."""
+        """Preserve the existing regex and case-insensitive occurrence-count contract."""
+        return len(re.findall(self._keyword, value, flags=re.IGNORECASE)) == 1
+
+
+class KeywordAtLeastOnceChecker(KeywordFrequencyOnceChecker):
+    """Literal inclusion, selected explicitly by new or corrected dataset targets."""
+
+    def build_description(self, *, keyword=None):
+        super().build_description(keyword=keyword)
+        self._description_pattern = "Include keyword {keyword} at least once in your response."
+        return self._description_pattern.format(keyword=self._keyword)
+
+    def check_following(self, value):
         return re.search(re.escape(self._keyword), value, flags=re.IGNORECASE) is not None
 
 

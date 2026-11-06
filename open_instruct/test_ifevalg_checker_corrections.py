@@ -50,7 +50,7 @@ def test_single_character_copy_defaults(kwargs):
     ],
 )
 def test_keyword_inclusion_is_literal_not_exact_frequency(keyword, answer, expected):
-    checker = instructions.KeywordFrequencyOnceChecker("keywords:word_once")
+    checker = instructions.KeywordAtLeastOnceChecker("keywords:at_least_once")
     checker.build_description(keyword=keyword)
     assert checker.check_following(answer) is expected
 
@@ -87,7 +87,7 @@ def test_standard_if_verifier_preserves_fractional_constraint_rewards():
     label = repr(
         [
             {
-                "instruction_id": ["keywords:word_once", "detectable_format:bigram_wrapping"],
+                "instruction_id": ["keywords:at_least_once", "detectable_format:bigram_wrapping"],
                 "kwargs": [{"keyword": "computer"}, None],
             }
         ]
@@ -103,3 +103,14 @@ def test_explicit_keyword_frequency_rule_is_unchanged():
     checker.build_description(keyword="computer", frequency=2, relation="less than")
     assert checker.check_following("computer")
     assert not checker.check_following("computer computer")
+
+
+def test_legacy_keyword_generation_and_scores():
+    checker = instructions.KeywordFrequencyOnceChecker("keywords:word_once")
+    assert checker.build_description(keyword="computer") == "Include keyword computer exactly once in your response."
+    assert checker.check_following("COMPUTER")
+    assert not checker.check_following("computer computer")
+    checker.build_description(keyword="(?i)apple")
+    assert checker.check_following("APPLE")
+    inclusion = instructions.KeywordAtLeastOnceChecker("keywords:at_least_once")
+    assert "at least once" in inclusion.build_description(keyword="computer")

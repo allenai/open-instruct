@@ -37,15 +37,16 @@ _INTEGER_ARGUMENTS = {
     "small_n",
 }
 _LIST_ARGUMENTS = {"keywords", "forbidden_words"}
-# These parameters use `if not value` in their native generators. In particular,
-# copy_span_idx can randomly choose zero again, defeating the repair comparison.
-_RANDOM_ZERO_ARGUMENTS = {"N", "small_n", "n_start", "n_end", "n_sent", "n_words", "n", "m"}
+# These parameters still use `if not value` in their native generators.
+# Copy indices use explicit None defaults, so zero is now a valid fixed index.
+_RANDOM_ZERO_ARGUMENTS = {"N", "small_n", "n_sent", "n_words", "n", "m"}
 _STRIPPED_ARGUMENTS = {
     "detectable_format:multiple_sections": ("section_spliter",),
     "detectable_content:postscript": ("postscript_marker",),
     "startend:end_checker": ("end_phrase",),
     "keywords:frequency": ("keyword",),
     "keywords:word_once": ("keyword",),
+    "keywords:at_least_once": ("keyword",),
     "keywords:word_count_different_numbers": ("keyword",),
     "keywords:exclude_word_harder": ("keyword",),
     "keywords:keyword_specific_position": ("keyword",),
@@ -85,6 +86,7 @@ def validate_patterns(name, args):
         patterns, flags = args["keywords"], re.IGNORECASE
     elif name == "keywords:forbidden_words":
         patterns, flags = [r"\b" + word + r"\b" for word in args["forbidden_words"]], re.IGNORECASE
+    # keywords:at_least_once escapes its keyword; legacy word_once remains a regex.
     elif name in {"keywords:frequency", "keywords:word_once", "keywords:word_count_different_numbers"}:
         patterns, flags = [args["keyword"]], re.IGNORECASE
     elif name == "count:count_increment_word":
@@ -248,6 +250,8 @@ def instruction_contract(serialized):
                 raise ValueError(f"Negative argument {key}; qualify separately")
             if key in _RANDOM_ZERO_ARGUMENTS and value == 0:
                 raise ValueError(f"Zero argument {key} for {name} triggers a native random default")
+        if name == "new:copy_span_idx" and not 0 <= args["n_start"] <= args["n_end"] < len(args["prompt_to_repeat"]):
+            raise ValueError("Copy span must have ordered inclusive indices within the source text")
         if name == "copy:repeat_phrase" and len(args["phrase"].split()) < 3:
             raise ValueError("copy:repeat_phrase needs an interior word to replace")
         expected_args = expected_native_args(name, args)
