@@ -1708,7 +1708,7 @@ class SquareBracketChecker(Instruction):
 
 
 class KeywordFrequencyOnceChecker(Instruction):
-    """Check the keyword frequency."""
+    """Check at-least-once inclusion; retain the legacy name for existing dataset identifiers."""
 
     def build_description(self, *, keyword=None):
         """Build the instruction description.

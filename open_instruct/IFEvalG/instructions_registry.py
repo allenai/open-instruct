@@ -95,6 +95,8 @@ FUNCTION_DICT = {
     _FORMAT + "sentence_hyphens": instructions.SentenceHyphenChecker,
     _KEYWORD + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
     _FORMAT + "square_brackets": instructions.SquareBracketChecker,
+    # Legacy name: related Dolci IF prompts say "Include keyword X", meaning at least once;
+    # the old exactly-once check disagreed with that wording. Keep the ID for existing datasets.
     _KEYWORD + "word_once": instructions.KeywordFrequencyOnceChecker,
     _KEYWORD + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
     _KEYWORD + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
@@ -161,6 +163,8 @@ INSTRUCTION_DICT = {
     _FORMAT + "sentence_hyphens": instructions.SentenceHyphenChecker,
     _KEYWORD + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
     _FORMAT + "square_brackets": instructions.SquareBracketChecker,
+    # Legacy name: related Dolci IF prompts say "Include keyword X", meaning at least once;
+    # the old exactly-once check disagreed with that wording. Keep the ID for existing datasets.
     _KEYWORD + "word_once": instructions.KeywordFrequencyOnceChecker,
     _KEYWORD + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
     _KEYWORD + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
