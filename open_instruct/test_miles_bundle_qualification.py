@@ -118,3 +118,81 @@ def test_named_judge_preserves_reference_and_requires_explicit_route():
     assert messages == [{"role": "user", "content": "Prove the claim"}]
     with pytest.raises(ValueError, match="unmapped"):
         source_preparation.adapt(raw, "routed_v1", {**route, "routes": {}})
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+def test_quarantine_requires_exact_omission_identities(tmp_path, monkeypatch, accepted):
+    catalog, controls, hf = setup_bundle(tmp_path, monkeypatch)
+    document = json.loads(catalog.read_text())
+    entry = document["sources"]["toy"]
+    entry["counts"]["omitted_rows"] = 1
+    dispositions = catalog.parent / entry["dispositions"]["path"]
+    dispositions.write_text(
+        json.dumps({"id": "bad-row", "status": "omitted", "reason": "Invalid source schema"}) + "\n"
+    )
+    entry["dispositions"]["sha256"] = source_preparation.file_hash(dispositions)
+    catalog.write_text(json.dumps(document))
+    quarantine = tmp_path / "reviewed.jsonl"
+    quarantine.write_text(
+        json.dumps(
+            {
+                "source": "toy",
+                "id": "bad-row" if accepted else "another-row",
+                "reason": "Malformed source; quarantined without repair",
+            }
+        )
+        + "\n"
+    )
+    report = asyncio.run(qualify_bundle.qualify(catalog, controls, hf, tmp_path / "qualified", 1000, quarantine))
+    assert report["sources"]["toy"]["status"] == ("qualified" if accepted else "deferred")
+    assert (tmp_path / "qualified/quarantine.jsonl").read_text() == quarantine.read_text()
+    assert (tmp_path / "qualified/toy/dispositions.jsonl").read_text() == dispositions.read_text()
+
+
+def test_timeout_cannot_pass_a_zero_reward_control(tmp_path, monkeypatch):
+    catalog, controls, hf = setup_bundle(tmp_path, monkeypatch)
+
+    async def reward(args, sample):
+        if sample.response == "2":
+            return 1.0
+        sample.metadata["verifier_diagnostics"] = {"test": {"status": "timeout"}}
+        return 0.0
+
+    monkeypatch.setattr(qualify_bundle.rewards, "registered_reward", reward)
+    report = asyncio.run(qualify_bundle.qualify(catalog, controls, hf, tmp_path / "qualified", 1000))
+    assert report["sources"]["toy"]["status"] == "deferred"
+    assert "wrong control timed out" in report["sources"]["toy"]["reason"]
+
+
+def test_native_partial_credit_is_an_explicit_control_expectation(tmp_path, monkeypatch):
+    catalog, controls, hf = setup_bundle(tmp_path, monkeypatch)
+    value = json.loads(controls.read_text())
+    value["cases"][2]["expected"] = 0.5
+    controls.write_text(json.dumps(value) + "\n")
+
+    async def reward(args, sample):
+        if sample.status == "truncated":
+            return 0.0
+        return {"2": 1.0, "3": 0.0, "12": 0.5, "": 0.0}[sample.response]
+
+    monkeypatch.setattr(qualify_bundle.rewards, "registered_reward", reward)
+    report = asyncio.run(qualify_bundle.qualify(catalog, controls, hf, tmp_path / "qualified", 1000))
+    assert report["sources"]["toy"]["status"] == "qualified"
+
+
+def test_different_code_test_suites_require_a_shared_passing_witness():
+    rows = [
+        {"input": "Implement f", "metadata": {"sample_id": str(i), "verifiers": [{"name": "code", "target": [test]}]}}
+        for i, test in enumerate(["assert f(1)==1", "assert f(2)==2"])
+    ]
+    registry = {"code": {"factory": source_preparation.FACTORIES["complete_code"]}}
+    controls = [
+        {"sample_id": str(i), "cases": [{"kind": "gold", "response": "def f(x): return x", "expected": 1}]}
+        for i in range(2)
+    ]
+    qualify_bundle.validate_prompt_targets(rows, controls, registry)
+    with pytest.raises(ValueError, match="shared gold"):
+        qualify_bundle.validate_prompt_targets(rows, controls[:1], registry)
+    registry["code"]["factory"] = source_preparation.FACTORIES["math"]
+    with pytest.raises(ValueError, match="Conflicting targets"):
+        qualify_bundle.validate_prompt_targets(rows, controls, registry)

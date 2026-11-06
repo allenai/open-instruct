@@ -19,6 +19,9 @@ original messages; no JSON-only suffix is needed for non-JSON sources.
 `nemo_strict_v1` and XML/CSV type coercion use the pure helpers extracted from
 NVIDIA NeMo Gym's Apache-2.0 `resources_servers/structured_outputs/app.py`
 (SHA256 `5e9d85edaa6743abcdf0fd80859321bb9ce386e461846399069e80bb25cbbc70`).
+Schema strengthening walks schema positions (including combinators), leaving
+property maps and literal defaults intact. Nested `$id` resources may resolve
+fragment-local references; the registry never retrieves remote resources.
 CSV boolean subschemas are left unchanged for schema validation rather than type
 coercion. YAML mapping keys must be strings to match the JSON Schema data model.
 Unlike the legacy JSON-only slice, the contract does not silently strengthen a
@@ -37,7 +40,7 @@ Python's recursion or numeric limits (for example, deeply nested recursive array
 or a huge integer with a fractional `multipleOf`). `RecursionError` and
 `OverflowError` from instance validation receive zero with `status: validation_error`,
 `error_type`, `error`, `failure_policy: zero`, and `elapsed_seconds` diagnostics.
-This fixed policy is independent of the timeout policy and records a validator
+This fixed policy records a validator
 limit, not a completed schema mismatch. Target validation, validator construction,
 and unresolved-reference errors remain fatal.
 
@@ -57,7 +60,7 @@ use the same representation expected in training responses.
 
 With `as_declared`, use `required` and `minItems` where the task demands nonempty
 objects or arrays: an empty TOML document or header-only CSV can otherwise satisfy
-the schema. `nemo_strict_v1` retains the native helper's traversal and does not
+the schema. `nemo_strict_v1` requires all declared object properties and does not
 add array length requirements; qualification controls must validate each target's
 intended behavior. The qualification script uses the default one-second budget.
 

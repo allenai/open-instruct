@@ -3,22 +3,54 @@
 """Pure helpers from NVIDIA NeMo Gym structured_outputs/app.py.
 
 Source SHA256: 5e9d85edaa6743abcdf0fd80859321bb9ce386e461846399069e80bb25cbbc70.
-Adapted to leave boolean CSV subschemas to validation; other helper behavior is
-unchanged. See docs/miles/dataset-verifiers.md.
+Adapted to leave boolean CSV subschemas to validation and to strengthen only
+schema positions, including combinators. See docs/miles/dataset-verifiers.md.
 """
 
 from typing import Any
 
 
+def schema_nodes(schema):
+    """Walk schema objects without treating property maps or instance defaults as schemas."""
+    pending = [schema]
+    maps = {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"}
+    singles = {
+        "items",
+        "additionalProperties",
+        "unevaluatedProperties",
+        "contains",
+        "propertyNames",
+        "not",
+        "if",
+        "then",
+        "else",
+        "additionalItems",
+        "unevaluatedItems",
+    }
+    lists = {"allOf", "anyOf", "oneOf", "prefixItems"}
+    while pending:
+        node = pending.pop()
+        if not isinstance(node, dict):
+            continue
+        yield node
+        for key, value in node.items():
+            if key in maps and isinstance(value, dict):
+                pending.extend(value.values())
+            elif key in singles:
+                pending.extend(value if isinstance(value, list) else [value])
+            elif key in lists and isinstance(value, list):
+                pending.extend(value)
+            elif key == "dependencies" and isinstance(value, dict):
+                pending.extend(v for v in value.values() if isinstance(v, dict))
+
+
 class NativeStructuredTypes:
     def strictify_schema(self, schema: dict[str, Any]):
         """Make a schema strict as per OpenAPI guidelines"""
-        if isinstance(schema, dict):
-            if "properties" in schema:
-                schema["required"] = list(schema["properties"])
-                schema["additionalProperties"] = False
-            for _k, v in schema.items():
-                self.strictify_schema(v)
+        for node in schema_nodes(schema):
+            if isinstance(node.get("properties"), dict):
+                node["required"] = list(node["properties"])
+                node["additionalProperties"] = False
 
     def coerce_xml_types(self, data: Any, schema: dict[str, Any]) -> Any:
         """Recursively coerce xmltodict string values to match the JSON schema types.

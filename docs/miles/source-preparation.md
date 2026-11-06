@@ -51,12 +51,12 @@ and are recorded as omissions rather than moved across conversation turns.
 | Adapter | Target and scope |
 |---|---|
 | `nemo_v1` | Structural dispatch for formatting, structured formats, native IF, calendars and MCQA; unknown routes are reported |
-| `structured_v1` | `schema_type`/`schema_str`; explicit schema policy, all five formats |
+| `structured_v1` | `schema_type`/`schema_str`; explicit schema policy, all five formats and non-executing final tool calls |
 | `instruction_v1` | Native instruction IDs and kwargs, including bundles in verifier metadata or args |
 | `calendar_v1` | Full final calendar feasibility from `exp_cal_state`, without a 20-event cutoff |
 | `format_v1` | Existing format verifier payload; formatting only |
 | `litmus_v02_v1` | Row-carried regex, answer type and matching policy; all scalar properties/methods are representable |
-| `reasoning_gym_v1` | Saved entries for the ten qualified families, including ARC/reARC; no regeneration or difficulty reset |
+| `reasoning_gym_v1` | Saved entries for 104 pinned task families, including state-based graders; no regeneration or difficulty reset |
 | `mcqa_v1` | Displayed options and expected answer, existing final-choice parser; no science-only filtering |
 | `math_v1` | Explicit symbolic-math source contract; proof requests are reported as requiring judged support |
 | `deterministic_v1` | Existing numeric, exact-text/JSON, countdown and knights contracts in `target` |
@@ -81,6 +81,24 @@ elapsed time in diagnostics; there is no policy setting. Invalid targets and
 unexpected failures still raise. Qualification rejects timed-out controls, even
 though training can continue with zero reward for a timed-out response.
 
+Structured tool-call rows are final-answer tasks, not tool-execution environments.
+The adapter preserves every function declaration and renders it through the Olmo
+Pythonic tool template. The verifier requires exactly one `<function_calls>` call,
+the declared function name and payload key, and a schema-valid payload. It never
+executes the call. CSV/object and TOML/array root requirements are recorded as
+unrepresentable: the native parsers cannot produce those shapes.
+
+ReasoningGym uses `reasoning-gym==0.1.25`. The 33 families inheriting its substring
+scorer use exact answers; custom scorers retain native partial credit. Empty and
+ambiguous answers score zero. Legitimate empty AB/equation solutions can use the
+explicit `""` answer. State-based tasks need their puzzle metadata, not a fabricated
+reference. Literal and symbolic answers are checked against a non-executable
+grammar before native parsing. Malformed factorization, grid, action-plan and
+nonfinite probability answers score zero with diagnostics. Puzzle24 additionally
+requires the actual puzzle numbers and an exact total of 24. A five-second response
+budget and outer worker deadline return zero on timeout; qualification rejects
+such controls. Invalid targets and unexpected worker errors remain fatal.
+
 The catalog initially says `prepared`, not `qualified`. It cannot be resolved by
 the named-source resolver until reviewed controls and the training loader path
 have passed. Integration readiness, representative policy evidence and downstream
@@ -93,8 +111,8 @@ instruction and calendar contracts and their runtime dependencies.
 ## Qualification and publication
 
 Provide reviewed controls keyed to actual prepared sample IDs. Each stratum needs
-at least one case set containing `gold` (expected 1), `wrong` (0) and `near_miss`
-(0). A near miss should exercise the likely shortcut: a wrong number containing
+at least one case set containing `gold` (expected 1), `wrong` and `near_miss`
+(expected 0 for binary graders; an explicit score below 1 for native partial-credit graders). A near miss should exercise the likely shortcut: a wrong number containing
 the gold digits, a calendar constraint violation, a malformed schema field, or a
 wrong MCQA option. The command additionally checks empty and truncated responses.
 Do not manufacture a positive witness by assuming the model's response is right.
@@ -113,11 +131,17 @@ python -m open_instruct.miles.datasets.source_catalog qualified-bundle/catalog.j
 
 Qualification validates the complete pool through `run_data.prepare_data` and
 scores controls through `registered_reward`. It rejects conflicting targets for
-the same prompt. Missing strata, failed controls, unresolved judge services, or
+the same prompt. Different code test suites may share a prompt only when every
+row has a reviewed common gold solution that passes its complete original suite. Missing strata, failed controls, unresolved judge services, or
 loader failures leave the source unqualified. Passing control rows never replace
-the full source. Review all dispositions before using `--accept-omissions` to
-qualify an explicitly accepted subset. This switch accepts the stated omissions;
-it does not certify full dataset coverage. The report includes source/controls
+the full source. Quarantine genuinely malformed source rows without repairing their
+prompts or targets. Pass `--quarantine reviewed-quarantine.jsonl`, with one record
+`{"source":"my-source","id":"original-stable-id","reason":"Invalid original schema"}`
+per reviewed omission. The identities must match **every** omitted row exactly;
+unsupported valid rows cannot silently disappear. The qualifier preserves the
+hashed dispositions and quarantine report, and records the retained population.
+This qualifies the explicitly retained variant, not the original malformed rows.
+The report includes source/controls
 hashes, loader manifest hash, context limit, judge registry fingerprint and all
 missing strata. It does not claim that a GPU optimizer update was exercised.
 
@@ -126,6 +150,45 @@ so training receives the pinned optional verifier versions. Its build checks the
 qualification and source-preparation entry points. After CPU checks, use the
 existing local toy-model coverage workflow for a GPU mechanics exercise. Controls
 validate reward behavior; training continues to use the complete qualified pool.
+
+## Complete-test code sources
+
+`acecode_v1` uses the original `context_messages` when present and preserves every
+`test_cases` assertion. `livecodebench_v1` reads
+`verifier_metadata.unit_tests` (`inputs`, `outputs`, optional `fn_name`). It retains
+all aligned pairs and distinguishes stdio from module/Solution function calls.
+The readiness requirements pin the maintained execution client to commit
+`c8ab35c375fafb68b2dbbe49c4efb33e51c50bbe`.
+
+Each source plan must supply trusted service configuration, outside raw rows:
+
+```json
+"code_service": {
+  "api_url": "https://1n7avfskve.execute-api.us-west-2.amazonaws.com",
+  "expected_source_sha256": "6bd42a0cb609169ccb8036a0e1128b289644da402a53a725bc66a9887b13ec00",
+  "max_execution_time": 1.0,
+  "total_timeout": 600.0
+}
+```
+
+Inject `CODE_EXECUTION_TOKEN` at runtime from the authorized Beaker secret;
+credentials never belong in plans, rows or qualification reports. Reward is one
+only when **every** test passes. All tests execute, including after a failure;
+suites above 2,000 tests are partitioned without truncation. Each partition uses
+the configured total client deadline, and each test uses a fresh interpreter.
+Syntax/runtime errors and execution timeouts are zero; infrastructure, incomplete
+result and service-source mismatches raise. Reports retain request identifiers.
+Start qualification sequentially; training must bound aggregate in-flight service
+requests to eight across all callers, not eight per trainer rank. The live control
+panel is not a sustained-load certification.
+
+The current LiveCodeBench helper uses exact JSON-normalized Python equality for
+function results and exact decimal equality for numeric stdio lines. This is
+stricter than the NeMo checker’s float tolerances and case-insensitive `yes`/`no`
+handling. Native checker parity remains a qualification gate for Nemotron code
+routes; successful wire-format controls alone do not close it. See the pinned
+[service contract](https://github.com/robertb/verifier-paired-replay/blob/c8ab35c375fafb68b2dbbe49c4efb33e51c50bbe/docs/training-integration-contract.md)
+for request limits and comparison details.
 
 ## Reference judges and routed blends
 
@@ -165,10 +228,10 @@ entire 100+ acquisition catalog has been integrated or requalified.
 | Calendar v2 (C023) | Full final-state schedule, including empty calendars | Controls across calendar strata and original-history context; no interactive dialogue-quality claim |
 | Structured Outputs v2 (C029) | Five formats and bounded schema regex evaluation | Reviewed witnesses across schemas/formats, coercion/strictness contract review |
 | Knowledge MCQA (C031) | Displayed choice validation and final-choice reward | Native-template extraction checks, chance floor when interpreting MCQA rewards |
-| ReasoningGym (C036) | Saved entries/difficulty for ten qualified families, including ARC | Additional families require scorer audits and adversarial controls; no procedural population replacement |
+| ReasoningGym (C036) | Saved entries/difficulty for all 104 exported families, including state-based tasks | Pinned native scoring with safe expression guards, partial-credit controls and bounded workers; no procedural population replacement |
 | Cascade Math, Nemotron Math v2, OpenMathReasoning, Math Stack Overflow, AceReason Math, DeepMath (C037–C040/C091/C094) | Explicit symbolic or reference-judge routing | Proof/judge parity and service calibration; canceled Nemotron Math run is not restarted |
-| Nano, Cascade-2, Lightning, Super, Ultra blends (C043–C047) | Explicit per-agent routes with full omissions report | Native judge/hybrid contracts; unsupported code/tool/SWE/Lean routes remain deferred |
-| AceCode (C076) | Existing source support remains unchanged | Code-verifier debugging stays paused pending its replacement |
+| Nano, Cascade-2, Lightning, Super, Ultra blends (C043–C047) | Explicit per-agent routes with full omissions report | Native judge/hybrid contracts; code comparison parity and tool/SWE/Lean environment integration remain open |
+| AceCode (C076) | `acecode_v1` preserves context and every assertion; authenticated, source-pinned execution service | Full retained-pool qualification and aggregate service-load checks |
 
 The web-search candidate remains excluded at Robert's request. SWE, Lean,
 browser/tool interaction and distillation-only records must not be presented as
