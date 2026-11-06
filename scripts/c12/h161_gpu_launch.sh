@@ -11,6 +11,8 @@
 #   ctrl   H149's c12-b2 length S = 16,303 steps (phi = 0.5803 of one pass), --num_epochs 1.
 #   b1r    ledger H182 (b1-c12r-gpu): base B1 (step20000), peak LR 2e-4, plus the 10% LC replay dir as
 #          --extra_numpy_dirs; S_R=<steps> is required (H182 R4', per seed, from the offline loader replay).
+#   sct    ledger H196 (s-c): b1r on B2 tmax (step22320), two passes over the union (--num_epochs 2), seed 34521;
+#   scn    the same on B2 noag (step21159). S_R=<steps> from H196 R4'; permanent checkpoint at the end of epoch 1.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -73,6 +75,18 @@ case "$ARM" in
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h182-gpu; DESC="ledger H182 b1-c12r-gpu"
          STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14 ;;
+    sct|scn) B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
+         if [[ "$ARM" == sct ]]; then
+             MODEL=$B/olmo35-small-mm-ckpt2-256k-tmax/step22320-lm-olmocore/model_and_optim
+             HF_REF=$H/olmo35-small-mm-ckpt2-256k-tmax-step22320-base-h149-c12seed
+         else
+             MODEL=$B/olmo35-small-mm-ckpt2-256k-noagentic/step21159-lm-olmocore/model_and_optim
+             HF_REF=$H/olmo35-small-mm-ckpt2-256k-noagentic-step21159-base-h149-c12seed
+         fi
+         [[ "$SEED" == 34521 ]] || { echo "s-c runs seed 34521 only" >&2; exit 1; }
+         LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/s-c-gpu; DESC="ledger H196 s-c"
+         STEPS="${S_R:?S_R=<steps from H196 R4 prime>}"; EPOCHS=2; CKPT=$((STEPS / 2)); HOURS=96 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
@@ -80,6 +94,8 @@ esac
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == b1r ]] && RUN_NAME="h182gpu-s${SEED}"
+[[ "$ARM" == sct ]] && RUN_NAME="s-c-tmax-s${SEED}"
+[[ "$ARM" == scn ]] && RUN_NAME="s-c-noag-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
