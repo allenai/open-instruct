@@ -18,8 +18,9 @@ The versioned release destination is:
 `catalog.json` is the entry point. `summary.json` contains per-source counts and
 coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
 qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
-records verification on shared storage; use the release after its status is `verified`. `configs/<name>.toml` provides a ready
-single-source `[data]` fragment with absolute shared paths. The versioned S3 archive
+records verification on shared storage; use the release after its status is
+`verified`. `configs/<name>.toml` provides a ready single-source `[data]` fragment
+with absolute shared paths. The versioned S3 archive
 below reproduces this release. It contains compressed source archives, an archive
 manifest and `stage_release.py`; the staging script verifies archive hashes,
 extracts the complete release and verifies the catalog's file hashes. Use `s5cmd`
@@ -30,15 +31,35 @@ for bulk transfer; Beaker is used only for the small staging helper and CPU job.
 | S3 archive | `s3://robertb-beaker/rl-dataset-qualification/miles-first-pass-20261106-v1/` |
 | Final catalog SHA256 | `3616ec5ed4861c12a572af64d1df3fe9e9d3ac326cd5d736e302b3455aaed1eb` |
 
+To restore elsewhere, use credentials with read access to this prefix (the local
+transfer uses Robert's `halo` AWS profile). Download into a local archive directory,
+then choose a **new** shared-storage destination:
+
+```bash
+mkdir -p /tmp/miles-first-pass-archives
+s5cmd cp 's3://robertb-beaker/rl-dataset-qualification/miles-first-pass-20261106-v1/*' \
+  /tmp/miles-first-pass-archives/
+python /tmp/miles-first-pass-archives/stage_release.py \
+  /tmp/miles-first-pass-archives /weka/oe-training-default/your-new-release-directory
+```
+
+The script writes `STAGED.json` only after verifying the release and regenerates
+the config fragments with the chosen destination's absolute paths. The Beaker
+helper is a small copy of the same script and transfer utility for the original
+staging job; it is not needed for this restore command. `v1` names the release
+prefix, not S3 object versions. On November 6, 2026, the bucket had neither S3
+versioning enabled nor a lifecycle expiration rule. Preserve the catalog and
+archive hashes; the prefix is not protected against later overwrites or deletion.
+
 The archive includes refreshed receipts from requalifying all six structured-output
 pools after preserving native schema combinator behavior. This changes no training
 rows.
 
 The release records runtime code baseline
 [`1e79b6210005abcea355354d30f0d83b4537f8cb`](https://github.com/allenai/open-instruct/commit/1e79b6210005abcea355354d30f0d83b4537f8cb)
-in `CODE_REVISION` and `VALIDATION.json`. Subsequent PR commits update tests, CI
-and documentation. Requalify when changing reward behavior. Use a matching
-MILES application image with the dependencies in
+in `CODE_REVISION` and `VALIDATION.json`. Subsequent PR commits update tests, CI,
+image packaging and documentation. Requalify when changing reward behavior. Use a
+matching MILES application image with the dependencies in
 `scripts/data/rl_readiness/requirements.txt`. The readiness Docker overlay installs
 those dependencies on an application image already built from this code. Keep
 the pinned MILES runtime; the overlay does not replace that runtime. Building the
