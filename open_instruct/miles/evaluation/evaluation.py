@@ -128,9 +128,20 @@ def parse(value, launch):
     server_args = value["external_server_args"]
     if not isinstance(server_args, list) or any(not isinstance(arg, str) for arg in server_args):
         raise InputError("evaluation.external_server_args must be a list of SGLang arguments for SciCode")
-    server_reserved = {"--model", "--model-path", "--tokenizer-path", "--port", "--host", "--tp", "--tp-size"}
+    server_reserved = {
+        "--model",
+        "--model-path",
+        "--tokenizer-path",
+        "--port",
+        "--host",
+        "--tp",
+        "--tp-size",
+        "--served-model-name",
+    }
     if any(arg.split("=")[0] in server_reserved for arg in server_args):
-        raise InputError("evaluation.external_server_args cannot override snapshot, tokenizer, port or GPU allocation")
+        raise InputError(
+            "evaluation.external_server_args cannot override snapshot, served model name, tokenizer, port or GPU allocation"
+        )
     tasks = value.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise InputError("evaluation.tasks must be a nonempty list of olmo-eval tasks")

@@ -30,6 +30,7 @@ class CoreConfig:
     reward_zero_truncated: bool = True
     reward_final_answer_only: bool = False
     max_run_seconds: float | None = None
+    max_run_final: bool = False
     filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
@@ -115,6 +116,7 @@ class CoreConfig:
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
             validation.number(self.max_run_seconds, "core.max_run_seconds", exclusive_min=True)
+        validation.boolean(self.max_run_final, "core.max_run_final")
         validation.boolean(self.prepared_batch_overlap, "core.prepared_batch_overlap")
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
@@ -382,6 +384,8 @@ class RunConfig:
             if key in self.miles:
                 raise constraints.error(f"miles.{key} is managed by the Core backend")
         cli_options.encode_options(self.miles)
+        if self.core.max_run_final and self.core.max_run_seconds is None:
+            raise constraints.error("core.max_run_final requires core.max_run_seconds")
         if (self.core.selection_table is None) != (self.core.selection_sha256 is None):
             raise constraints.error("core.selection_table and core.selection_sha256 must be set together")
         if (self.core.records_responses == "sample") != (self.core.records_response_sample_rate is not None):
@@ -404,6 +408,16 @@ class RunConfig:
         if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path"):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
+        if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
+            raise constraints.error("Core weight publication supports retract or in_place pause mode")
+        # This preflight checks top-level settings. Refresh/engine_drain reject
+        # sglang_config below; barrier-mode server-group overrides are resolved
+        # and cache-validated by Core at actor startup.
+        if options.get("pause_generation_mode") == "in_place":
+            if options.get("colocate"):
+                raise constraints.error("Core in_place publication requires non-colocated serving")
+            if not options.get("sglang_disable_radix_cache"):
+                raise constraints.error("Core in_place publication requires sglang_disable_radix_cache=true")
         if self.core.records_root is not None and not options.get("fully_async", False):
             # The completed buffer that records groups exists only in fully async runs.
             raise constraints.error(

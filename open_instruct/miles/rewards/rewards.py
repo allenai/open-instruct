@@ -224,15 +224,10 @@ class _IsolatedVerifier:
         self.spec = spec
 
     async def async_call(self, *args, **kwargs):
-        policy = os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
-        if policy not in ("zero", "raise"):
-            raise ValueError("OI_MILES_MATH_TIMEOUT_POLICY must be zero or raise")
         start = time.monotonic()
         try:
             result = await isolated_verifier_call(self.spec, *args, **kwargs)
         except MathVerifierTimeout as error:
-            if policy == "raise":
-                raise
             logger.warning("Math verifier timeout; assigning zero reward: %s", error)
             return SimpleNamespace(
                 score=0.0,
@@ -241,7 +236,7 @@ class _IsolatedVerifier:
                     "kind": "math",
                     "status": "timeout",
                     "error": str(error),
-                    "failure_policy": policy,
+                    "failure_policy": "zero",
                     "elapsed_seconds": time.monotonic() - start,
                 },
             )
@@ -376,10 +371,8 @@ async def _score(args, sample):
             # reasoning's tokens alongside an extracted final-answer string.
             tokens = []
         if judge_registry.bound(name):
-            if args.olmo_core.reward_final_answer_only:
-                raise ValueError("Final-answer-only grading currently supports text verifiers, not managed judges")
             score = await general_judge.general_judge_score(
-                args, sample, name=name, target=copy.deepcopy(spec["target"])
+                args, sample, name=name, target=copy.deepcopy(spec["target"]), prediction=response
             )
             total += weight * score
             components.append({"name": name, "score": score, "weight": weight, "cost": 0.0})

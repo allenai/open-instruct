@@ -83,6 +83,8 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
     pending = spec.compile()
     assert pending.inference_profile["model_metadata_available"] is False
+    assert pending.miles["pause_generation_mode"] == "in_place"
+    assert pending.miles["sglang_disable_radix_cache"] is True
     assert pending.miles["sglang_max_running_requests"] == 512
     assert pending.miles["async_max_concurrent_samples"] == producer_budget
     (tmp_path / "config.json").write_text(json.dumps(inference_profiles.MODEL_SHAPE | {"dtype": "bfloat16"}))

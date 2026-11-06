@@ -27,6 +27,10 @@ jobs:
         with:
           version: '0.8.6'
       - run: uv sync --frozen
+      - name: Install native instruction tokenizer data
+        run: |
+          echo "NLTK_DATA=$RUNNER_TEMP/nltk_data" >> "$GITHUB_ENV"
+          uv run --frozen python -m nltk.downloader --exit-on-error --dir "$RUNNER_TEMP/nltk_data" punkt_tab
       - name: Check integration, scripts and runtime test style
         run: |
           uv run --frozen ruff check open_instruct/miles scripts/miles tests/miles tests/miles_eval
@@ -39,3 +43,7 @@ jobs:
           uv run --frozen python -m scripts.miles.generate_docs --check
       - name: Check application integration types
         run: uv run --frozen ty check open_instruct/miles --config 'src.exclude = []'
+      - name: Check optional structured-output verifiers
+        run: >-
+          uv run --frozen --with openapi-schema-validator==0.6.3 --with xmltodict==0.14.2
+          pytest open_instruct/test_structured_outputs.py

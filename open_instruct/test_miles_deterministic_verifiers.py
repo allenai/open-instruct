@@ -8,8 +8,19 @@ import pytest
 
 from open_instruct.miles.datasets import source_catalog
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import candidate_verifiers as cv
-from open_instruct.miles.rewards import json_schema
+from open_instruct.miles.rewards import deterministic_verifiers as cv
+from open_instruct.miles.rewards import json_schema, rewards
+
+
+def test_deterministic_registry_factory(tmp_path):
+    factory = "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier"
+    path = tmp_path / "verifiers.json"
+    path.write_text(json.dumps({"numeric": {"factory": factory}}))
+    verifier = rewards._registry(str(path))["numeric"]
+    assert isinstance(verifier, cv.DeterministicVerifier)
+    target = {"kind": "numeric", "value": "2"}
+    assert asyncio.run(verifier.async_call([], "2", target)).score == 1
+    assert asyncio.run(verifier.async_call([], "3", target)).score == 0
 
 
 @pytest.mark.parametrize(

@@ -9,8 +9,12 @@ import pytest
 
 from open_instruct.miles.execution import driver
 
+TIME_STOPS = {"time", "time_final", "time_nosave"}
 
-@pytest.mark.parametrize("stop", [None, "training", "publication", "time", "evaluation", "debug"])
+
+@pytest.mark.parametrize(
+    "stop", [None, "training", "publication", "time", "time_final", "time_nosave", "evaluation", "debug"]
+)
 def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch, stop):
     events = []
     pending = None
@@ -18,7 +22,8 @@ def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch
     args = SimpleNamespace(
         olmo_core=SimpleNamespace(
             publication_mode="refresh",
-            max_run_seconds=0 if stop == "time" else None,
+            max_run_seconds=0 if stop in TIME_STOPS else None,
+            max_run_final=stop == "time_final",
             diagnostic_interval=0,
             engine_update_timeout=1,
             engine_drain_timeout=1,
@@ -31,7 +36,7 @@ def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch
         eval_interval=1 if stop == "evaluation" else None,
         skip_eval_before_train=True,
         save_interval=1,
-        save="checkpoint",
+        save=None if stop == "time_nosave" else "checkpoint",
         save_trigger_sentinel=None,
         update_weights_interval=1,
         debug_exit_after_rollout=1 if stop == "debug" else None,
@@ -92,6 +97,7 @@ def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch
         dispose=AsyncMock(),
         save_model=AsyncMock(),
         finalize_checkpoint=AsyncMock(),
+        export_hf=AsyncMock(),
     )
     inference = SimpleNamespace(prepare_rollout=AsyncMock(), dispose=AsyncMock())
     monkeypatch.setattr(driver.prepared_batch, "enabled", lambda _: True)
@@ -116,14 +122,16 @@ def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch
     monkeypatch.setattr(driver, "EvalDispatcher", lambda *_: SimpleNamespace(drain=AsyncMock(), dispatch=AsyncMock()))
     monkeypatch.setattr(driver, "should_run_periodic_action", lambda _i, interval, *_: interval is not None)
 
+    export_hf = "hf" if stop in TIME_STOPS else None
+
     async def scenario():
         if stop in {"training", "publication"}:
             with pytest.raises(RuntimeError, match=f"{stop} failed"):
-                await driver.train(args)
+                await driver.train(args, export_hf=export_hf)
         else:
-            await driver.train(args)
+            return await driver.train(args, export_hf=export_hf)
 
-    asyncio.run(asyncio.wait_for(scenario(), 3))
+    result = asyncio.run(asyncio.wait_for(scenario(), 3))
     if stop is None:
         assert [(e[0], e[1]) for e in events if e[0] in {"prepare", "train", "consume"}] == [
             ("prepare", 1),
@@ -139,3 +147,9 @@ def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch
         assert not any(e[0] == "prepare" for e in events)
     assert any(e[0] == "cancel" for e in events)
     assert events.index(next(e for e in events if e[0] == "cancel")) < events.index(("boundary",))
+    if stop in TIME_STOPS:
+        assert result["stopped_for_time"] and result["time_stop_resumable"] == (stop == "time")
+        assert ("save", 0, 1) in events
+        # A resumable stop leaves the end-of-run export path free for the resumed process;
+        # max_run_final, or no save path to resume from, makes the stop final.
+        assert learner.export_hf.await_count == (stop != "time")

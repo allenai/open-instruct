@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation, evaluation_runner, evaluation_submit
@@ -514,7 +514,10 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
     learner.train.side_effect = train_step
     args = SimpleNamespace(
         olmo_core=SimpleNamespace(
-            publication_mode="barrier", diagnostic_interval=0, max_run_seconds=1 if deadline_stop else None
+            publication_mode="barrier",
+            diagnostic_interval=0,
+            max_run_seconds=1 if deadline_stop else None,
+            max_run_final=deadline_stop,
         ),
         background_evaluation=evaluation.runtime(run, run.compile().miles),
         fully_async=False,
@@ -599,6 +602,12 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
 def test_wall_clock_budget_must_be_finite_and_positive(value):
     with pytest.raises(InputError):
         CoreConfig(max_run_seconds=value)
+
+
+def test_final_time_stop_needs_a_wall_clock_budget():
+    with pytest.raises(InputError, match="requires core.max_run_seconds"):
+        RunConfig(CoreConfig(max_run_final=True), {}).validate()
+    assert not CoreConfig(max_run_seconds=60).max_run_final
 
 
 def test_incomplete_snapshot_never_submitted(run, monkeypatch):

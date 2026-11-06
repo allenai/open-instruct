@@ -149,6 +149,15 @@ infrastructure errors even when upstream reports success with numeric zero score
 SciCode's sandbox installs its pinned scientific dependencies from the upstream
 lock; account for startup time and registry/package access when qualifying jobs.
 
+SciCode's SGLang serving boundary translates an exported HF `top_k=0` to
+SGLang's equivalent `top_k=-1` using a temporary local checkpoint view. Positive
+values and every other generation setting are preserved; the frozen checkpoint
+is never edited. `scicode-sampling-normalization.json` records the source config hash
+and the exact translation. Infrastructure errors in SciCode predictions remain
+fatal and include the original error in the runner diagnostic.
+The view lives outside the results directory to avoid copying model weights into
+Beaker artifacts.
+
 Safety tasks configure olmo-eval managed WildGuard and StrongREJECT providers.
 WildGuard serves `allenai/wildguard`; StrongREJECT serves `google/gemma-2b` with
 the `qylu4156/strongreject-15k-v1` adapter and its tokenizer. The sandbox evaluator
@@ -156,6 +165,25 @@ image includes the pinned vLLM extra in an isolated environment selected through
 `VLLM_PYTHON`, preserving the policy serving environment. Model access credentials
 (including gated Gemma access) belong in `evaluation.secrets`. Record resolved
 judge revisions and serving settings with qualification results.
+
+The maintained managed WildGuard and Gemma StrongREJECT configurations default
+`auxiliary_providers.<name>.kwargs.startup_timeout` to 1200 seconds. Explicit
+values win; external endpoints and other model configurations are unchanged.
+The runner resolves the value when building each evaluator command and records it
+in the attempt's `command.json`. It reaches the evaluator's server lifecycle, not
+the vLLM CLI. Implicit defaults leave saved run specs and evaluation claims
+unchanged. Readiness still detects exited processes early and retains startup
+logs. This allowance does not change the overall Beaker job
+timeout or any sampling/scoring settings. Slow startup alone does not establish
+whether loading, compilation, or another cause was responsible.
+
+The maintained three-node evaluator also emits live `[vllm-startup]` messages
+with elapsed time, deadline, full log path, and the last phase observed in judge
+logs. It checks process exit independently of HTTP probes and preserves INFO-level
+child logs. Unknown phases remain explicit; timeout errors are distinct from
+process exits. Older evaluator images receive the profile timeout but need the
+startup image below for phase diagnostics. Submitted jobs embed their runner, so
+regenerate their specifications from the fixed checkout to receive the live relay.
 
 Planning rejects the maintained managed `vllm_server` judges that download
 `allenai/wildguard` (five tasks) or `google/gemma-2b` (StrongREJECT) unless
@@ -170,7 +198,7 @@ overrides, not arbitrary upstream presets. Local model paths, existing server
 endpoints and tasks with all evaluation milestones disabled are exempt.
 
 The image and CLI/config checks do not establish full-panel correctness, GPU
-memory fit or completion within the starter three-hour timeout. Run small samples
+memory fit or completion within the configured timeout. Run small samples
 of every task, inspect predictions and judge/code failures, then measure a full
 panel before setting production resource bounds. For qualification, verify all
 25 entries completed at both expected checkpoints and were published; training
@@ -335,13 +363,15 @@ background evaluations select `provider.kind=sglang` and
 explicit HTTP exception described above. The runner checks the installed
 olmo-eval revision against the receipt before evaluating.
 
-Both examples pin olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`,
-which includes the [native SGLang provider](https://github.com/allenai/olmo-eval/pull/506).
-The node image is `01M5ZGD5K01GNW3ASDPNXXPEJ3`. Three-node uses sandbox-enabled
-image `01M632ZP67Y4WMV060J74FSC3R` with isolated vLLM judges. Both recipes build evaluator dependencies
-at image construction; benchmark sandboxes may have their own upstream setup steps.
-The revision change can also change task defaults; do not compare scores across
-revisions as though the benchmark protocol were unchanged.
+The node example pins olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`
+and image `01M5ZGD5K01GNW3ASDPNXXPEJ3`. The three-node example pins
+`ba0ff700e8f9b301cfd8ed5fd462df9d83dddfe1` and image
+`01M6J0KMAD3CXVGT07V1BHR1VH`, retaining H169's qualified sandbox and isolated vLLM
+runtime. Its only evaluator code change from H169's `ede61eb9` image is the shared
+startup lifecycle fix ([olmo-eval PR 541](https://github.com/allenai/olmo-eval/pull/541));
+the earlier `3536fe75` to `ede61eb9` change fixes explicit CLI `null` overrides.
+Neither change alters benchmark prompts, sampling defaults, or scoring. The
+startup image recipe is `runtime/miles/Dockerfile.evaluator-startup`.
 
 Replace the old `evaluation.server_args` with typed `evaluation.provider_kwargs`
 using Python option names, for example `context_length = 34816`. Let the selected
@@ -433,3 +463,22 @@ Include this module in the custom worker's content manifest and import its
 `score_one(row, item)` for development tasks. Check the actual panel's label
 schema, not just synthetic scalar-label canaries. Version corrected bundles;
 never modify a running experiment's immutable dataset in place.
+
+## Reasoning-panel response budgets
+
+The three-node panel uses `gpqa_diamond:cot` and `gpqa_main:cot`. The plain
+`gpqa_diamond` task is a short-answer protocol with a 1,024-token default; it can
+truncate almost every response from a reasoning policy. These are different
+protocols: do not compare their scores as interchangeable.
+
+OMEGA sets `generation = { max_tokens = "null" }`: the CLI parses this as no
+fixed response cap, so SGLang generates within the remaining model context.
+This follows the existing GPQA CoT and IF protocols and retains the qualified
+34,816-token serving profile. A fixed 32,768-token response request would instead
+be rejected whenever the prompt exceeds 2,048 tokens. Requests and predictions
+retain prompt/completion lengths and finish reasons. The full panel allows
+12 hours per job, with completed-task reuse after preemption.
+
+A failed task is recorded in `task-failures.json`; subsequent independent tasks
+still execute. The collection remains failed until every task validates. Retrying
+reuses successful task attempts and reruns the failures.
