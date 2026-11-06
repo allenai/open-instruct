@@ -309,7 +309,9 @@ Provide reviewed controls keyed to actual prepared sample IDs. Each stratum need
 at least one case set containing `gold` (expected 1), `wrong` and `near_miss`
 (expected 0 for binary graders; an explicit score below 1 for native partial-credit graders). A near miss should exercise the likely shortcut: a wrong number containing
 the gold digits, a calendar constraint violation, a malformed schema field, or a
-wrong MCQA option. The command additionally checks empty and truncated responses.
+wrong MCQA option. The command additionally checks empty and truncated responses. Timeout,
+`judge_error` and `service_error` diagnostics fail qualification even when a
+negative control otherwise receives the expected zero.
 Do not manufacture a positive witness by assuming the model's response is right.
 
 ```json
@@ -328,7 +330,9 @@ Qualification validates the complete pool through `run_data.prepare_data` and
 scores controls through `registered_reward`. It rejects conflicting targets for
 the same prompt. Different code suites, citation-marker sets and equivalent math labels may share
 a prompt only when every row has a reviewed common gold response that passes its
-original target through the runtime bridge. ReasoningGym export UUIDs are
+original target through the runtime bridge. A shared witness establishes joint
+satisfiability, not identical rewards for every response; compatible duplicate
+code/citation targets can still contribute label noise. ReasoningGym export UUIDs are
 provenance only; all scoring fields remain part of duplicate-target comparison. Missing strata, failed controls, unresolved judge services, or
 loader failures leave the source unqualified. Passing control rows never replace
 the full source. Quarantine genuinely malformed source rows without repairing their

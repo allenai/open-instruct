@@ -19,8 +19,11 @@ original messages; no JSON-only suffix is needed for non-JSON sources.
 `nemo_strict_v1` and XML/CSV type coercion use the pure helpers extracted from
 NVIDIA NeMo Gym's Apache-2.0 `resources_servers/structured_outputs/app.py`
 (SHA256 `5e9d85edaa6743abcdf0fd80859321bb9ce386e461846399069e80bb25cbbc70`).
-Schema strengthening walks schema positions (including combinators), leaving
-property maps and literal defaults intact. Nested `$id` resources may resolve
+Schema strengthening walks dictionary-valued schema positions, leaving property
+maps and literal defaults intact. It preserves native NeMo list boundaries:
+combinator and tuple-item list branches are not independently strictified.
+Closing separate `allOf` branches can make a satisfiable schema impossible.
+Validation and regex/resource checks still inspect all schema branches. Nested `$id` resources may resolve
 fragment-local references; the registry never retrieves remote resources.
 CSV boolean subschemas are left unchanged for schema validation rather than type
 coercion. YAML mapping keys must be strings to match the JSON Schema data model.

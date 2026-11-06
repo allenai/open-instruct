@@ -75,8 +75,12 @@ async def check_control(row, cases, reward_path):
         )
         actual = await rewards.registered_reward(args, sample)
         diagnostics = sample.metadata.get("verifier_diagnostics", {})
-        if any(value.get("status") == "timeout" for value in diagnostics.values()):
-            raise ValueError(f"{case['kind']} control timed out")
+        for value in diagnostics.values():
+            status = value.get("status")
+            if status == "timeout":
+                raise ValueError(f"{case['kind']} control timed out")
+            if status in {"judge_error", "service_error"}:
+                raise ValueError(f"{case['kind']} control was not graded: {status}")
         results.append(
             {
                 "kind": case["kind"],

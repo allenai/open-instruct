@@ -286,10 +286,10 @@ def test_strictification_visits_schemas_not_property_maps_or_defaults():
     validated = structured.validate_target(label)
     assert set(validated["properties"]) == {"properties", "default", "variants"}
     assert validated["properties"]["default"]["default"] == {"properties": {"literal": 1}}
-    assert validated["properties"]["variants"]["anyOf"][0]["required"] == ["x"]
+    assert "required" not in validated["properties"]["variants"]["anyOf"][0]
     verifier = structured.StructuredOutputVerifier()
     assert verifier([], '{"properties":"literal","default":{},"variants":{"x":1}}', label).score == 1
-    assert verifier([], '{"properties":"literal","default":{},"variants":{}}', label).score == 0
+    assert verifier([], '{"properties":"literal","default":{},"variants":{}}', label).score == 1
     assert "required" not in schema
 
 
@@ -381,3 +381,19 @@ def test_tool_answer_can_represent_a_reserved_field_name():
         )
     )
     assert result.score == 1
+
+
+def test_native_strictification_does_not_close_allof_branches():
+    schema = {
+        "type": "object",
+        "allOf": [
+            {"properties": {"a": {"type": "integer"}}, "required": ["a"]},
+            {"properties": {"b": {"type": "integer"}}, "required": ["b"]},
+        ],
+    }
+    label = target(schema=schema, schema_policy="nemo_strict_v1")
+    assert structured.validate_target(label) == schema
+    verifier = structured.StructuredOutputVerifier()
+    assert asyncio.run(verifier.async_call([], '{"a":1,"b":2}', label)).score == 1
+    assert asyncio.run(verifier.async_call([], '{"a":1}', label)).score == 0
+    assert asyncio.run(verifier.async_call([], '{"a":1,"b":"wrong"}', label)).score == 0

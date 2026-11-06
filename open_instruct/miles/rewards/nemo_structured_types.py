@@ -4,13 +4,14 @@
 
 Source SHA256: 5e9d85edaa6743abcdf0fd80859321bb9ce386e461846399069e80bb25cbbc70.
 Adapted to leave boolean CSV subschemas to validation and to strengthen only
-schema positions, including combinators. See docs/miles/dataset-verifiers.md.
+schema positions, preserving native list boundaries during strictification.
+See docs/miles/dataset-verifiers.md.
 """
 
 from typing import Any
 
 
-def schema_nodes(schema):
+def schema_nodes(schema, *, descend_lists=True):
     """Walk schema objects without treating property maps or instance defaults as schemas."""
     pending = [schema]
     maps = {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"}
@@ -37,8 +38,11 @@ def schema_nodes(schema):
             if key in maps and isinstance(value, dict):
                 pending.extend(value.values())
             elif key in singles:
-                pending.extend(value if isinstance(value, list) else [value])
-            elif key in lists and isinstance(value, list):
+                if not isinstance(value, list):
+                    pending.append(value)
+                elif descend_lists:
+                    pending.extend(value)
+            elif descend_lists and key in lists and isinstance(value, list):
                 pending.extend(value)
             elif key == "dependencies" and isinstance(value, dict):
                 pending.extend(v for v in value.values() if isinstance(v, dict))
@@ -47,7 +51,9 @@ def schema_nodes(schema):
 class NativeStructuredTypes:
     def strictify_schema(self, schema: dict[str, Any]):
         """Make a schema strict as per OpenAPI guidelines"""
-        for node in schema_nodes(schema):
+        # Native NeMo does not descend into lists. Closing separate allOf
+        # branches independently can make otherwise valid schemas unsatisfiable.
+        for node in schema_nodes(schema, descend_lists=False):
             if isinstance(node.get("properties"), dict):
                 node["required"] = list(node["properties"])
                 node["additionalProperties"] = False

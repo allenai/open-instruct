@@ -48,6 +48,7 @@ python -m open_instruct.miles.datasets.source_catalog \
 ```
 
 These weights illustrate the interface; they are not a recommended recipe.
+ToolRL has a different reward scale from the other two sources; see below.
 Training trusts the resulting configuration and performs ordinary preparation.
 It does not rerun qualification. Preserve the release/catalog hash with the run.
 

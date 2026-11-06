@@ -478,3 +478,26 @@ def test_reasoning_gym_duplicate_uuid_is_provenance_only():
     rows[1]["metadata"]["verifiers"][0]["target"]["answer"] = "alice"
     with pytest.raises(ValueError, match="Conflicting targets"):
         qualify_bundle.validate_prompt_targets(rows, [], registry)
+
+
+@pytest.mark.parametrize("status", ["judge_error", "service_error"])
+@pytest.mark.parametrize("failed_case", ["wrong", "near_miss"])
+def test_failed_negative_grades_cannot_qualify_after_successful_gold(tmp_path, monkeypatch, status, failed_case):
+    reward_path = tmp_path / "rewards.json"
+    reward_path.write_text(json.dumps({"judge": {"factory": source_preparation.FACTORIES["reference_judge"]}}))
+    row = {"input": "question", "metadata": {"verifiers": [{"name": "judge", "target": "answer"}]}}
+    cases = [
+        {"kind": kind, "response": kind, "expected": int(kind == "gold")} for kind in ["gold", "wrong", "near_miss"]
+    ]
+    seen = []
+
+    async def grade(args, sample):
+        seen.append(sample.response)
+        if sample.response == failed_case:
+            sample.metadata["verifier_diagnostics"] = {"judge": {"status": status, "error": "backend unavailable"}}
+        return float(sample.response == "gold")
+
+    monkeypatch.setattr(qualify_bundle.rewards, "registered_reward", grade)
+    with pytest.raises(ValueError, match=f"{failed_case} control was not graded: {status}"):
+        asyncio.run(qualify_bundle.check_control(row, cases, reward_path))
+    assert seen == (["gold", "wrong"] if failed_case == "wrong" else ["gold", "wrong", "near_miss"])
