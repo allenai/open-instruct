@@ -174,20 +174,36 @@ def test_calendar_recursion_failure_through_worker():
 
 
 @pytest.mark.parametrize("seed", [0, 2, 7, 17])
-def test_zero_copy_span_is_rejected_independently_of_rng(seed, monkeypatch):
-    monkeypatch.setattr(random, "randint", random.Random(seed).randint)
+def test_zero_copy_span_is_supported_independently_of_rng(seed, monkeypatch):
+    draw = mock.Mock(wraps=random.Random(seed).randint)
+    monkeypatch.setattr(random, "randint", draw)
     nv.instruction_contract.cache_clear()
     args = {"prompt_to_repeat": "abcdef", "n_start": 0, "n_end": 4}
-    with pytest.raises(ValueError, match="n_start.*random default"):
-        nv.instruction_contract(json.dumps(target("new:copy_span_idx", args)))
+    verifier = nv.InstructionVerifier()
+    assert verifier([], "abcde", target("new:copy_span_idx", args)).score == 1
+    assert verifier([], "abcd", target("new:copy_span_idx", args)).score == 0
     args["n_start"] = 1
-    assert nv.InstructionVerifier()([], "bcd", target("new:copy_span_idx", args)).score == 1
+    assert verifier([], "bcde", target("new:copy_span_idx", args)).score == 1
+    assert verifier([], "bcd", target("new:copy_span_idx", args)).score == 0
+    draw.assert_not_called()
 
 
-def test_zero_copy_span_is_fatal_in_worker():
-    label = target("new:copy_span_idx", {"prompt_to_repeat": "abcdef", "n_start": 0, "n_end": 4})
-    with pytest.raises(RuntimeError, match="n_start.*random default"):
-        asyncio.run(nv.InstructionVerifier().async_call([], "abcd", label))
+def test_zero_copy_span_in_worker():
+    async def check():
+        verifier = nv.InstructionVerifier()
+        for start, end, gold, wrong in [(0, 4, "abcde", "abcd"), (0, 0, "a", "b")]:
+            label = target("new:copy_span_idx", {"prompt_to_repeat": "abcdef", "n_start": start, "n_end": end})
+            assert (await verifier.async_call([], gold, label)).score == 1
+            assert (await verifier.async_call([], wrong, label)).score == 0
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("start,end", [(2, 1), (0, 6), (6, 6)])
+def test_copy_span_invalid_bounds_are_fatal(start, end):
+    label = target("new:copy_span_idx", {"prompt_to_repeat": "abcdef", "n_start": start, "n_end": end})
+    with pytest.raises(ValueError, match="ordered inclusive indices"):
+        nv.instruction_contract(json.dumps(label))
 
 
 def test_explicit_zero_without_native_random_default_is_supported():
@@ -199,9 +215,9 @@ def test_explicit_zero_without_native_random_default_is_supported():
     "name,args",
     [
         ("keywords:existence", {"keywords": ["["]}),
+        ("keywords:word_once", {"keyword": "["}),
         ("keywords:forbidden_words", {"forbidden_words": ["["]}),
         ("keywords:frequency", {"keyword": "[", "frequency": 1, "relation": "at least"}),
-        ("keywords:word_once", {"keyword": "["}),
         ("keywords:word_count_different_numbers", {"keyword": "[", "frequency": 1, "relation": "at least"}),
         ("count:count_increment_word", {"keyword1": "apple", "keyword2": "["}),
         ("copy:repeat_phrase", {"phrase": "[ two three", "small_n": 2}),
@@ -439,3 +455,36 @@ def test_whitespace_is_not_normalized_for_unlisted_arguments():
     label = target("keywords:existence", {"keywords": [" apple "]})
     assert nv.InstructionVerifier()([], "apple", label).score == 0
     assert nv.InstructionVerifier()([], "an apple today", label).score == 1
+
+
+def test_bigram_whole_answer_in_worker_and_fractional_mode():
+    async def check():
+        label = target("detectable_format:bigram_wrapping", {})
+        verifier = nv.InstructionVerifier()
+        for answer, expected in [
+            ("<<hello world>>", 1),
+            ("hello", 0),
+            ("<<hello world>> stray", 0),
+            ("<<hello world>> <<again>>", 1),
+            ("<<hello>>", 1),
+            ("<<hello>> <<world again>>", 0),
+        ]:
+            assert (await verifier.async_call([], answer, label)).score == expected
+        label["target"]["instruction_id_list"].append("keywords:frequency")
+        label["target"]["kwargs"].append({"keyword": "hello", "frequency": 1, "relation": "at least"})
+        label["target"]["grading_mode"] = "fraction"
+        assert (await verifier.async_call([], "hello hello", label)).score == 0.5
+        label["target"]["grading_mode"] = "all"
+        assert (await verifier.async_call([], "hello hello", label)).score == 0.0
+
+    asyncio.run(check())
+
+
+def test_legacy_nemo_keyword_stays_exactly_once_in_worker():
+    async def check():
+        label = target("keywords:word_once", {"keyword": "apple"})
+        verifier = nv.InstructionVerifier()
+        assert (await verifier.async_call([], "apple", label)).score == 1
+        assert (await verifier.async_call([], "apple apple", label)).score == 0
+
+    asyncio.run(check())

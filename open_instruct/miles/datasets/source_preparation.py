@@ -16,6 +16,7 @@ from pathlib import Path
 from jsonschema.exceptions import SchemaError
 from transformers import AutoTokenizer
 
+from open_instruct import ifeval_constraints
 from open_instruct.miles.rewards import deterministic_verifiers as local
 from open_instruct.miles.rewards import litmus, nvidia_constraints, reasoning_gym
 
@@ -24,6 +25,7 @@ FACTORIES = {
     "math": "open_instruct.ground_truth_utils.MathVerifier",
     "structured": "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
     "instruction": "open_instruct.miles.rewards.nvidia_constraints.InstructionVerifier",
+    "ifeval": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
     "calendar": "open_instruct.miles.rewards.nvidia_constraints.CalendarVerifier",
     "reasoning_gym": "open_instruct.miles.rewards.reasoning_gym.ReasoningGymVerifier",
     "litmus": "open_instruct.miles.rewards.litmus.LitmusVerifier",
@@ -43,7 +45,26 @@ def file_hash(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def messages(raw):
+def dolci_prompt_messages(value):
+    """Recover the unambiguous single-user form of Dolci's flattened chat.
+
+    The publisher joins messages with newlines and adds ``role: `` prefixes.
+    That serialization cannot distinguish extra turns from quoted role lines;
+    require structured messages for those cases instead of guessing boundaries.
+    """
+    if value.startswith("user: "):
+        content = value[len("user: ") :]
+        if re.search(r"\n(?:user|assistant|system|developer):", content):
+            raise ValueError("ambiguous_dolci_conversation: supply structured chat messages")
+        if not content.strip():
+            raise ValueError("empty_dolci_user_message")
+        return [{"role": "user", "content": content}]
+    if re.match(r"^\s*(?:user|assistant|system|developer):", value, flags=re.IGNORECASE):
+        raise ValueError("unsupported_dolci_role_serialization: supply structured chat messages")
+    return [{"role": "user", "content": value}]
+
+
+def messages(raw, *, dolci_prompt=False):
     params = raw.get("responses_create_params") or {}
     if not isinstance(params, dict):
         raise ValueError("requires_responses_parameters_object")
@@ -54,7 +75,7 @@ def messages(raw):
         raise ValueError("requires_text_instructions")
     value = params.get("input", raw.get("input", raw.get("prompt", raw.get("question", raw.get("problem")))))
     if isinstance(value, str):
-        value = [{"role": "user", "content": value}]
+        value = dolci_prompt_messages(value) if dolci_prompt else [{"role": "user", "content": value}]
     if not isinstance(value, list) or not value or not all(isinstance(message, dict) for message in value):
         raise ValueError("requires_text_conversation_ending_with_user")
     if value[-1].get("role") != "user":
@@ -94,9 +115,49 @@ def messages(raw):
     return result
 
 
+def validate_keyword_option(kind, options):
+    policy = options.get("keyword_inclusion", "preserve")
+    if policy not in {"preserve", "at_least_once_v1"}:
+        raise PlanError("Unknown keyword_inclusion policy: " + str(policy))
+    if policy != "preserve" and kind != "dolci_if_v1":
+        raise PlanError("keyword_inclusion correction requires the dolci_if_v1 adapter")
+
+
+def dolci_if_target(raw):
+    if raw.get("dataset", ["ifeval"]) != ["ifeval"]:
+        raise ValueError("dolci_if_v1 requires a single ifeval route")
+    ground_truth = raw.get("ground_truth")
+    if not isinstance(ground_truth, list) or len(ground_truth) != 1:
+        raise ValueError("dolci_if_v1 requires one ground_truth entry")
+    return ifeval_constraints.parse_constraint_bundle(ground_truth[0])
+
+
+def corrected_dolci_target(raw, ms, policy):
+    target = dolci_if_target(raw)
+    issues = ifeval_constraints.if_training_issues(target)
+    if issues:
+        raise ValueError(f"Unsuitable IF training target: {issues}")
+    if policy == "at_least_once_v1":
+        for index, (name, args) in enumerate(zip(target["instruction_id"], target["kwargs"], strict=True)):
+            if name != "keywords:word_once":
+                continue
+            keyword = args.get("keyword")
+            if not isinstance(keyword, str) or re.fullmatch(r"[A-Za-z]+", keyword) is None or set(args) != {"keyword"}:
+                raise ValueError("Keyword inclusion correction requires the audited alphabetic keyword shape")
+            # This repair is for the audited generator wording, not arbitrary
+            # instructions which might explicitly require exactly one occurrence.
+            instruction = f"Include keyword {keyword.strip()} in your response."
+            if instruction not in ms[-1]["content"]:
+                raise ValueError("Keyword inclusion correction requires the original inclusion instruction")
+            target["instruction_id"][index] = "keywords:frequency"
+            target["kwargs"][index] = {"keyword": keyword, "frequency": 1, "relation": "at least"}
+    return target
+
+
 def adapt(raw, kind, options=None):
     options = options or {}
-    ms = messages(raw)
+    validate_keyword_option(kind, options)
+    ms = messages(raw, dolci_prompt=kind == "dolci_if_v1")
     meta = raw.get("verifier_metadata") or {}
     if kind == "nemo_v1":
         agent = raw.get("agent_ref")
@@ -147,6 +208,9 @@ def adapt(raw, kind, options=None):
         }
         nvidia_constraints.instruction_contract(json.dumps(target, sort_keys=True))
         name, stratum = "instruction", kind + ":" + "+".join(sorted(original["instruction_id_list"]))
+    elif kind == "dolci_if_v1":
+        target = corrected_dolci_target(raw, ms, options.get("keyword_inclusion", "preserve"))
+        name, stratum = "ifeval", kind + ":" + "+".join(sorted(target["instruction_id"]))
     elif kind == "calendar_v1":
         target = copy.deepcopy(raw["exp_cal_state"])
         nvidia_constraints.calendar_contract(target)
@@ -221,6 +285,7 @@ def prepare(plan_path, output, tokenizer):
     for name, spec in plan["sources"].items():
         if re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", name) is None:
             raise ValueError("Invalid source name")
+        validate_keyword_option(spec["adapter"], spec.get("options") or {})
         root = output / name
         root.mkdir()
         # A prior hygiene receipt is required; this operation does not rerun decon.
@@ -266,6 +331,26 @@ def prepare(plan_path, output, tokenizer):
                             "verifiers": [{"name": verifier, "target": target}],
                         },
                     }
+                    if spec["adapter"] == "dolci_if_v1":
+                        original = dolci_if_target(raw)
+                        changes = [
+                            {
+                                "name": "dolci_keyword_inclusion_v1",
+                                "constraint_index": i,
+                                "from": before,
+                                "to": after,
+                                "from_kwargs": original["kwargs"][i],
+                                "to_kwargs": target["kwargs"][i],
+                            }
+                            for i, (before, after) in enumerate(
+                                zip(original["instruction_id"], target["instruction_id"], strict=True)
+                            )
+                            if before != after
+                        ]
+                        row["metadata"]["original_target_sha256"] = digest(original)
+                        row["metadata"]["target_transformations"] = changes
+                        counts["transformed_rows"] += bool(changes)
+                        counts["transformed_constraints"] += len(changes)
                     rows.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
                     counts["prepared_rows"] += 1
                     counts["max_prompt_tokens"] = max(counts["max_prompt_tokens"], tokens)
@@ -275,6 +360,7 @@ def prepare(plan_path, output, tokenizer):
         entry = {
             "status": "prepared",
             "adapter": spec["adapter"],
+            "options": spec.get("options") or {},
             "counts": dict(counts),
             "strata": dict(strata),
             "repeated_prompt_rows": sum(n - 1 for n in prompts.values()),

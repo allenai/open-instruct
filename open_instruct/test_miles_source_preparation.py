@@ -12,7 +12,7 @@ from transformers import PreTrainedTokenizerFast
 
 from open_instruct import dataset_transformation
 from open_instruct.miles.datasets import source_preparation as sources
-from open_instruct.miles.rewards import litmus
+from open_instruct.miles.rewards import litmus, task_verifiers
 
 
 class Tokenizer:
@@ -325,3 +325,223 @@ def test_real_regex_timeout_type_is_handled():
     # The verifier relies on the regex package raising the builtin TimeoutError.
     with pytest.raises(TimeoutError):
         regex.compile(r"(?:(?:a|aa)+)+(b)").findall("a" * 5000, timeout=1e-9)
+
+
+def dolci_keyword_row():
+    return {
+        "dataset": ["ifeval"],
+        "ground_truth": [
+            repr(
+                [
+                    {
+                        "instruction_id": ["keywords:word_once", "punctuation:no_comma"],
+                        "kwargs": [{"keyword": "apple"}, None],
+                    }
+                ]
+            )
+        ],
+        "prompt": [
+            {"role": "system", "content": "Be helpful."},
+            {"role": "user", "content": "Include keyword apple in your response. Do not use commas."},
+        ],
+    }
+
+
+def test_dolci_keyword_correction_is_explicit_and_preserves_prompt():
+    raw = dolci_keyword_row()
+    original = copy.deepcopy(raw)
+    ms, unchanged, name, _ = sources.adapt(raw, "dolci_if_v1")
+    corrected_ms, corrected, _, _ = sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    assert ms == corrected_ms == raw["prompt"]
+    assert raw == original
+    assert name == "ifeval"
+    assert unchanged["instruction_id"] == ["keywords:word_once", "punctuation:no_comma"]
+    assert corrected["instruction_id"] == ["keywords:frequency", "punctuation:no_comma"]
+    assert corrected["kwargs"] == [{"keyword": "apple", "frequency": 1, "relation": "at least"}, {}]
+    assert unchanged["kwargs"] == [{"keyword": "apple"}, {}]
+    verifier = task_verifiers.ManifestIFVerifier()
+    assert asyncio.run(verifier.async_call([], "apple apple", unchanged)).score == 0.5
+    assert asyncio.run(verifier.async_call([], "apple apple", corrected)).score == 1.0
+    assert asyncio.run(verifier.async_call([], "pear", corrected)).score == 0.5
+
+
+@pytest.mark.parametrize("prompt", ["Include keyword apple exactly once in your response.", "Answer a question."])
+def test_dolci_correction_rejects_unrecognized_wording(prompt):
+    raw = dolci_keyword_row()
+    raw["prompt"][-1]["content"] = prompt
+    with pytest.raises(ValueError, match="original inclusion instruction"):
+        sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+
+
+def test_dolci_keyword_option_cannot_silently_change_nemo():
+    raw = {
+        "prompt": "Include keyword apple in your response.",
+        "instruction_id_list": ["keywords:word_once"],
+        "kwargs": [{"keyword": "apple"}],
+    }
+    _, target, _, _ = sources.adapt(raw, "instruction_v1")
+    assert target["target"]["instruction_id_list"] == ["keywords:word_once"]
+    for kind in ["instruction_v1", "nemo_v1"]:
+        with pytest.raises(sources.PlanError, match="requires the dolci_if_v1"):
+            sources.adapt(raw, kind, {"keyword_inclusion": "at_least_once_v1"})
+    with pytest.raises(sources.PlanError, match="Unknown keyword_inclusion"):
+        sources.adapt(dolci_keyword_row(), "dolci_if_v1", {"keyword_inclusion": "typo"})
+
+
+def test_dolci_prepared_correction_receipts(tmp_path):
+    raw = dolci_keyword_row()
+    raw["prompt"] = "user: " + raw["prompt"][-1]["content"]
+    unmodified = copy.deepcopy(raw)
+    unmodified["ground_truth"] = [repr([{"instruction_id": ["punctuation:no_comma"], "kwargs": [None]}])]
+    ambiguous = copy.deepcopy(raw)
+    ambiguous["prompt"] += "\nassistant: an ambiguous extra turn"
+    input_file = tmp_path / "input.jsonl"
+    input_file.write_text(
+        "\n".join(json.dumps({"id": str(i), "raw_record": r}) for i, r in enumerate([raw, unmodified, ambiguous]))
+        + "\n"
+    )
+    hygiene = tmp_path / "hygiene.json"
+    hygiene.write_text('{"completed":true}')
+    options = {"keyword_inclusion": "at_least_once_v1"}
+    plan = {
+        "schema_version": 1,
+        "sources": {
+            "dolci-if-corrected": {
+                "adapter": "dolci_if_v1",
+                "options": options,
+                "inputs": [
+                    {
+                        "path": str(input_file),
+                        "sha256": sources.file_hash(input_file),
+                        "revision": "pinned",
+                        "split": "train",
+                    }
+                ],
+                "hygiene_receipt": {"path": str(hygiene), "sha256": sources.file_hash(hygiene)},
+            }
+        },
+    }
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(plan))
+    out = tmp_path / "bundle"
+    entry = sources.prepare(plan_path, out, Tokenizer())["sources"]["dolci-if-corrected"]
+    assert entry["options"] == options
+    assert entry["counts"]["transformed_rows"] == entry["counts"]["transformed_constraints"] == 1
+    assert entry["counts"]["prepared_rows"] == 2
+    assert entry["counts"]["input_rows"] == 3
+    assert entry["counts"]["omitted_rows"] == 1
+    dispositions = [
+        json.loads(line) for line in (out / "dolci-if-corrected/dispositions.jsonl").read_text().splitlines()
+    ]
+    assert dispositions == [
+        {
+            "id": "2",
+            "status": "omitted",
+            "reason": "ValueError: ambiguous_dolci_conversation: supply structured chat messages",
+        }
+    ]
+    rows = [json.loads(line) for line in (out / "dolci-if-corrected/prompts.jsonl").read_text().splitlines()]
+    row = rows[0]
+    assert row["metadata"]["messages"] == [{"role": "user", "content": raw["prompt"][len("user: ") :]}]
+    assert row["input"] == json.dumps(row["metadata"]["messages"])
+    assert row["metadata"]["original_target_sha256"] == sources.digest(sources.dolci_if_target(raw))
+    assert row["metadata"]["target_transformations"] == [
+        {
+            "name": "dolci_keyword_inclusion_v1",
+            "constraint_index": 0,
+            "from": "keywords:word_once",
+            "to": "keywords:frequency",
+            "from_kwargs": {"keyword": "apple"},
+            "to_kwargs": {"keyword": "apple", "frequency": 1, "relation": "at least"},
+        }
+    ]
+    assert rows[1]["metadata"]["target_transformations"] == []
+    assert row["label"] == row["metadata"]["verifiers"][0]["target"]
+    assert row["metadata"]["raw_record_sha256"] == sources.digest(raw)
+
+
+@pytest.mark.parametrize("dataset_field", [{}, {"dataset": ["ifeval"]}])
+def test_dolci_published_role_prefix_is_converted(dataset_field):
+    raw = dolci_keyword_row()
+    raw.pop("dataset")
+    raw.update(dataset_field)
+    raw["prompt"] = "user: Include keyword apple in your response."
+    original = copy.deepcopy(raw)
+    ms, label, _, _ = sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    assert raw == original
+    # Published and explicitly structured forms prepare to the same conversation
+    # and target, without retaining a duplicate role prefix inside the message.
+    raw["prompt"] = [{"role": "user", "content": "Include keyword apple in your response."}]
+    structured_ms, structured_label, _, _ = sources.adapt(
+        raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"}
+    )
+    assert ms == raw["prompt"]
+    assert (ms, label) == (structured_ms, structured_label)
+    assert label["instruction_id"][0] == "keywords:frequency"
+
+
+@pytest.mark.parametrize("role", ["user", "assistant", "system", "developer"])
+def test_dolci_structured_role_like_content_is_preserved(role):
+    raw = dolci_keyword_row()
+    raw["prompt"][-1]["content"] = f"{role}: Include keyword apple in your response.\nassistant: quoted text"
+    original = copy.deepcopy(raw)
+    ms, _, _, _ = sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    assert ms == raw["prompt"]
+    assert raw == original
+
+
+@pytest.mark.parametrize("field", ["prompt", "input", "responses_create_params"])
+def test_dolci_conversion_uses_selected_input_and_preserves_whitespace(field):
+    raw = dolci_keyword_row()
+    content = " user: literal leading label\n  Include keyword apple in your response.  \n"
+    raw[field] = {"input": "user: " + content} if field == "responses_create_params" else "user: " + content
+    ms, _, _, _ = sources.adapt(raw, "dolci_if_v1")
+    assert ms == [{"role": "user", "content": content}]
+    # Other adapters do not reinterpret role-like text.
+    assert sources.messages(raw) == [{"role": "user", "content": "user: " + content}]
+
+
+@pytest.mark.parametrize(
+    "prompt, reason",
+    [
+        ("user: Question\nassistant: Answer\nuser: Follow-up", "ambiguous_dolci_conversation"),
+        ("user: Quoted dialogue:\nuser: example", "ambiguous_dolci_conversation"),
+        ("system: Be helpful.\nuser: Question", "unsupported_dolci_role_serialization"),
+        ("User: Question", "unsupported_dolci_role_serialization"),
+        ("user: ", "empty_dolci_user_message"),
+    ],
+)
+def test_dolci_ambiguous_serialization_requires_structured_messages(prompt, reason):
+    raw = dolci_keyword_row()
+    raw["prompt"] = prompt
+    with pytest.raises(ValueError, match=reason):
+        sources.adapt(raw, "dolci_if_v1")
+
+
+@pytest.mark.parametrize("keyword", ["a.b", "[", " apple ", "", "(?i)apple"])
+def test_dolci_frequency_remap_rejects_unaudited_keyword_shapes(keyword):
+    raw = dolci_keyword_row()
+    raw["ground_truth"] = [repr([{"instruction_id": ["keywords:word_once"], "kwargs": [{"keyword": keyword}]}])]
+    raw["prompt"] = f"Include keyword {keyword} in your response."
+    with pytest.raises(ValueError, match="audited alphabetic"):
+        sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+
+
+def test_dolci_remap_preserves_existing_frequency_constraint():
+    raw = dolci_keyword_row()
+    raw["ground_truth"] = [
+        repr(
+            [
+                {
+                    "instruction_id": ["keywords:word_once", "keywords:frequency"],
+                    "kwargs": [{"keyword": "apple"}, {"keyword": "pear", "frequency": 2, "relation": "at least"}],
+                }
+            ]
+        )
+    ]
+    _, label, _, _ = sources.adapt(raw, "dolci_if_v1", {"keyword_inclusion": "at_least_once_v1"})
+    assert label["instruction_id"] == ["keywords:frequency", "keywords:frequency"]
+    assert label["kwargs"][1] == {"keyword": "pear", "frequency": 2, "relation": "at least"}
+    verifier = task_verifiers.ManifestIFVerifier()
+    assert asyncio.run(verifier.async_call([], "apple apple pear pear", label)).score == 1.0
+    assert asyncio.run(verifier.async_call([], "apple apple pear", label)).score == 0.5
