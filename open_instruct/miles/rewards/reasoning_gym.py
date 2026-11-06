@@ -183,6 +183,10 @@ def expression_syntax(text, *, symbolic=False, bitwise=False):
     This also protects dataset expressions, not just model responses.
     """
     tree = ast.parse(text.strip(), mode="eval")
+    # TODO: investigate four-operation-only guards for Countdown/Puzzle24.
+    # Native parsing also accepts **, % and //; review the reward differences
+    # against pinned upstream before tightening this allowlist. Symbolic tasks
+    # must retain powers. Keep the current behavior pending that investigation.
     operators = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod, ast.FloorDiv, ast.UAdd, ast.USub)
     if bitwise:
         operators += (ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor, ast.Invert)
