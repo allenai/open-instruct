@@ -31,5 +31,5 @@ def validate_sources(sources, *, pooled=False):
 
 def source_data(source, data):
     return {"seed": data.get("seed", 17), "shuffle": data.get("shuffle", True)} | {
-        key: value for key, value in source.items() if key not in ("name", "fraction")
+        key: value for key, value in source.items() if key not in ("name", "fraction", "pool")
     }
