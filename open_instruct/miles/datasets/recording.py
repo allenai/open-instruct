@@ -67,6 +67,14 @@ class FeedbackRecorder(inference_records.Recorder):
         if self._requires_feedback and self.counts["failed"] != failures:
             raise RuntimeError("Could not construct prompt feedback record")
 
+    def record_disposition(self, samples, *, accepted, staleness):
+        source = self._source()
+        if source is not None and hasattr(source.provider, "commit") and not accepted:
+            source.feedback(
+                [{"kind": "disposition", "disposition": "discarded", "group_index": samples[0].group_index}]
+            )
+        super().record_disposition(samples, accepted=accepted, staleness=staleness)
+
     def _enqueue(self, row):
         if row.get("kind") == "group":
             try:

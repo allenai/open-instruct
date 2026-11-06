@@ -302,6 +302,7 @@ STRUCTURED_FIELDS = {
         "shuffle",
         "tasks",
         "sources",
+        "pools",
     },
     "launch": {
         "auto_resume",

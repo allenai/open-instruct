@@ -7,6 +7,7 @@ same data instead of silently resampling or accepting changed files.
 """
 
 import copy
+import gzip
 import hashlib
 import importlib
 import json
@@ -19,7 +20,7 @@ from pathlib import Path
 
 from open_instruct import ifeval_constraints
 from open_instruct.miles.configuration import validation
-from open_instruct.miles.datasets import mixture, synlogic
+from open_instruct.miles.datasets import mixture, pools, synlogic
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import judging, task_verifiers
 
@@ -146,6 +147,8 @@ def _required_mapping(value, name, fields):
 
 
 def _rows(raw, source="Data JSONL"):
+    if str(source).endswith(".gz"):
+        raw = gzip.decompress(raw)
     try:
         # Unicode paragraph/line separators are valid inside JSON strings.
         # JSONL record boundaries are LF, optionally preceded by CR.
@@ -174,6 +177,7 @@ def validate_data(data):
         "shuffle",
         "tasks",
         "sources",
+        "pools",
         "recipe",
         "rl_manifest",
         "prompt_data",
@@ -195,8 +199,12 @@ def validate_data(data):
         raise InputError("Named data recipes are not yet ported; use tasks or an immutable rl_manifest")
     if "prompt_data" in modes and not data.get("reward_config"):
         raise InputError("Prepared prompt_data requires a trusted reward_config")
+    if "pools" in data:
+        pools.validate(data["pools"])
+        if "sources" not in modes:
+            raise InputError("data.pools requires data.sources")
     if "sources" in modes:
-        mixture.validate_sources(data["sources"])
+        mixture.validate_sources(data["sources"], pooled="pools" in data)
         for source in data["sources"]:
             if set(source) & {"sources", "seed", "shuffle"}:
                 raise InputError("Mixture sources cannot nest sources or override data.seed/shuffle")
@@ -676,6 +684,8 @@ def prepare_data(
                         for verifier in verifiers:
                             if isinstance(verifier, dict) and isinstance(name := verifier.get("name"), str):
                                 judging.require_binding(name, registry_overrides, known.get(name))
+                if "pools" in data and split in training:
+                    pools.annotate(row, data["pools"])
                 _verify_row(row, tokenizer, max_prompt_length, known)
                 if split in training:
                     _verify_if_training_row(row, if_verifiers)
@@ -723,7 +733,7 @@ def prepare_data(
             sources = [
                 {
                     "name": source["name"],
-                    "fraction": source["fraction"],
+                    **({"fraction": source["fraction"]} if "fraction" in source else {}),
                     "path": f"{split}.jsonl",
                     "sha256": outputs[f"{split}.jsonl"],
                     "rows": len(partitions[split]),
@@ -736,6 +746,7 @@ def prepare_data(
                     "seed": contract["seed"],
                     "shuffle": data.get("shuffle", True),
                     "sources": sources,
+                    **({"pools": data["pools"]} if "pools" in data else {}),
                 }
             )
             (staging / "mixture.json").write_bytes(raw)

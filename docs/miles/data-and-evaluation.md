@@ -720,3 +720,86 @@ reporting unsupported rows. The [reward verifier guide](dataset-verifiers.md)
 describes their runtime contracts. CPU qualification checks the complete prepared
 pool and reviewed reward controls before a named source enters a MILES mixture;
 it does not require a separate inference study or establish downstream benefit.
+## Named pools with training-exposure control
+
+A fixed source mixture controls proposed draws; filtering and queue expiry can
+make the data actually used for training quite different. Named pools instead
+target uniform exposure in **trained prompt-groups**, and can replay low-success
+truncated prompts within the selected pool. Dataset rows supply a top-level
+`pool_id`; preparation preserves their source and verifier and maps the label to
+a configured pool name. This is opt-in and leaves existing shuffle and fixed
+mixture configurations unchanged.
+
+```toml
+[data.pools]
+math = { label = "math" }
+if = { label = "instruction_following" }
+code = { label = "code" }
+science = { label = "science_knowledge" }
+logic = { label = "logic_reasoning" }
+general = { label = "general" }
+
+[[data.sources]]
+name = "labeled_data"
+prompt_data = "/data/labeled-trainer-rows.jsonl.gz"
+reward_config = "/data/verifiers.json"
+# Add additional labeled sources in the same way. Omit fraction in pool mode.
+
+[async]
+fully_async = true
+
+[records]
+enabled = true
+root = "/run/inference-records"
+
+[core]
+prepared_batch_overlap = false
+prompt_replay_enabled = true
+prompt_replay_max_successes = 0
+prompt_replay_truncation = "any"
+prompt_replay_fraction = 0.1
+prompt_replay_length_drop = 0.1
+prompt_replay_window = 256
+```
+
+This is a fragment to apply to an otherwise valid MILES run, not a complete
+launch configuration. Prepared inputs must already have the standard rendered
+`input`, `label`, and verifier `metadata` fields. Dolci's prompt-inventory records
+still require target resolution and rendering. Compressed JSONL is supported.
+There must be exactly one optimizer update per collection. Sample count is
+unchanged by the sampler; an eight-response recipe remains eight-response.
+
+| Contract | Behavior |
+|---|---|
+| Membership | Exactly one configured label per training row. Missing, unknown, duplicate label definitions, and conflicting runtime annotations fail preparation. |
+| Source fractions | Rejected in pool mode, rather than silently ignored. Fresh rows within a pool are uniformly shuffled across its source membership. |
+| Finite fresh data | Each row is drawn once; there are no automatic epochs. Empty pools are skipped. |
+| Exposure credit | One group per completed optimizer update that used it. Scored, queued, filtered, or stale groups earn no credit. |
+| Reservations | Outstanding draws reserve estimated delivery, reducing over-correction during asynchronous generation. |
+| Controller | Delivery estimate `(trained + 1)/(terminal + 2)`, floored at 0.05; target deficit corrected over a 64-group horizon. Proposal weights are bounded to `[0.25, 5]`, limiting draw ratios to 20:1. |
+| Uniform target | Each trained group's unit target is divided over the pools active when it was drawn. Inactive pools accrue no new target from later draws. Exact equality is not promised after pools empty or for sources with effectively zero delivery. |
+| Replay | Pool selection precedes replay. The replay fraction is a cap on that pool's proposed draws. Replay regenerates responses and uses the original verifier. |
+| Replay trigger | Existing PR 2187 history, with fresh-response length windows scoped to source within pool. Invalid verifier results are separate from valid zeros. |
+| Exhaustion | A pool without fresh rows or a budget-eligible replay is inactive. Once all pools and outstanding generation drain, an incomplete final collection is not trained; the last completed checkpoint is saved when configured. |
+| Stale work | Pool mode defaults to `async_unused_samples_handler="drop"`; explicit retry is rejected. Drops release reservations. |
+| Recovery | Manifest identity, cursors, RNG, targets, delivery counters, reservations, and replay histories are checkpointed with pending prompts. |
+
+The first implementation supports fully asynchronous disaggregated serving,
+without prepared-batch overlap. The application requires the companion MILES
+runtime's `core_commit_exposure` callback and finite-pool termination support;
+older images fail explicitly. The runtime patch must be included in the next
+image before launching this mode. The existing pinned image alone is insufficient.
+
+Inference records retain `pool_id`, `sampling_pool`, `mixture_source`, and
+`pool_selection_id`. Per-update `pool-exposure-<attempt>.jsonl` receipts live in
+`records.root` and contain trained/target/proposed/pending counts, generated and
+trained response tokens, fresh/replay training counts, and replay diagnostics.
+Unknown token counts are recorded separately. Receipts identify the resume point;
+if an attempt fails before checkpointing, reconcile its tail against the restored
+checkpoint instead of adding counts from different attempts. Captured response
+tokens are not loss-mask tokens or GPU cost.
+
+An empty pool does not force another epoch or a replay. When fresh data is gone,
+replay must still satisfy its budget and shortening trigger; otherwise training
+can finish before the requested update count. Different pool labels do not change
+verifiers, reward semantics, truncation policy, or the zero-variance filter.
