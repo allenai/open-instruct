@@ -363,6 +363,15 @@ async def _score(args, sample):
         diagnostics = getattr(result, "diagnostics", None)
         if not isinstance(diagnostics, dict):
             diagnostics = {"kind": "adapter", "status": "completed"}
+        elif diagnostics.get("kind") == "experimental_ifeval_v1" and diagnostics.get("status") in {
+            "scored",
+            "model_format_failure",
+            "empty_answer",
+        }:
+            # The pinned IF package describes the model outcome in `status`.
+            # MILES uses status for grading completion: these are known rewards,
+            # including legitimate zeroes, not unavailable verifier evidence.
+            diagnostics = {**diagnostics, "status": "completed", "outcome": diagnostics["status"]}
         metadata.setdefault("verifier_diagnostics", {})[name] = diagnostics
     total = _finite(total, "combined reward")
     metadata["reward_components"] = components
