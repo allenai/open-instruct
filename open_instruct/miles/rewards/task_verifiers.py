@@ -61,6 +61,11 @@ class R1FormatVerifier(MultiplicationVerifier):
     async def async_call(self, tokens, prediction, label, **kwargs):
         return RewardResult(float(re.match(r".*?</think>\s*<answer>.*?</answer>", prediction, re.DOTALL) is not None))
 
+    async def async_call_final_answer(self, tokens, prediction, label, **kwargs):
+        # The reward adapter already validated and removed the closing-think
+        # marker. Keep the existing answer-tag format check on the selected suffix.
+        return RewardResult(float(re.match(r"\s*<answer>.*?</answer>", prediction, re.DOTALL) is not None))
+
 
 class ManifestIFVerifier(MultiplicationVerifier):
     """Translate canonical baseline constraint targets to OI's legacy list wrapper."""

@@ -138,6 +138,14 @@ is the extracted suffix and `tokens` is empty. Without this method, text verifie
 continue to receive the suffix through `async_call`. Raw-response mode always
 uses `async_call`.
 
+The built-in `R1FormatVerifier` implements this interface: after the outer gate
+selects the final section, it checks for optional leading whitespace followed by
+`<answer>...</answer>`, without requiring another closing-think marker. Its
+raw-response check is unchanged. This remains a format reward, not an answer
+correctness or content check; it retains the existing allowance for empty answer
+tags and trailing text. In final-only mode, only the last closing marker's suffix
+is checked, so answer tags in an earlier section cannot earn format reward.
+
 For the qualified Dolci IF image, use this reward-registry entry in **both** arms:
 
 ```json
