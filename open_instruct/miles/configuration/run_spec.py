@@ -327,7 +327,7 @@ class RunSpec:
             data["sources"] = [
                 {
                     "name": source["name"],
-                    "fraction": source["fraction"],
+                    **({"fraction": source["fraction"]} if "fraction" in source else {}),
                     **{
                         key: value
                         for key, value in RunSpec._data(mixture.source_data(source, data), base).items()
@@ -759,7 +759,9 @@ class RunSpec:
                 raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
             miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
             miles.setdefault("async_data_buffer_capacity_factor", 1.0)
-            miles.setdefault("async_unused_samples_handler", "retry")
+            # Finite pools retire stale draws; retry would resubmit a selection
+            # whose exposure reservation was already released.
+            miles.setdefault("async_unused_samples_handler", "drop" if "pools" in self.data else "retry")
             # MILES upstream also defaults its fully-async producer to sample backfill:
             # a finished sibling frees its slot instead of idling until its slowest
             # sibling and rewards finish. Training still consumes whole groups.
@@ -777,7 +779,7 @@ class RunSpec:
             # Nothing to resume from, so a wall-clock stop is final; launch_warnings says so.
             core["max_run_final"] = True
         if "sources" in self.data:
-            put("core.prompt_provider", "mixture", "data.sources")
+            put("core.prompt_provider", "pool_exposure" if "pools" in self.data else "mixture", "data.sources")
             put(
                 "core.prompt_mixture",
                 prepared.get("prompt_mixture", str(root / "prepared" / "data" / "mixture.json")),

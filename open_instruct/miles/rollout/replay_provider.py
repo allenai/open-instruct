@@ -104,6 +104,13 @@ class ReplayPromptProvider:
                 result.append(key)
         return result
 
+    def available(self):
+        if getattr(self.base, "available", lambda: True)():
+            return True
+        numerator, denominator = self.fraction.numerator, self.fraction.denominator
+        slot = (self.draws + 1) * numerator // denominator > self.draws * numerator // denominator
+        return bool(slot and self._eligible())
+
     def next_samples(self, n):
         self._check_dataset()
         if type(n) is not int or n < 0:

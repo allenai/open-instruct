@@ -1,5 +1,7 @@
 # Changelog
 
+- Add opt-in named prompt pools, trained-exposure control, and pool-scoped truncation replay (stacked follow-up to PR #2187; PR link pending).
+
 All notable changes to this project will be documented in this file.
 
 
