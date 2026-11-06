@@ -541,14 +541,19 @@ python -m scripts.data.rl_readiness.audit --catalog /path/to/new-catalog --run /
 ```
 
 Direct file-path invocation is not the supported entry point. To package these
-tools, build the readiness image with the **repository root** as its context:
+tools, build the readiness image with the **repository root** as its context.
+Set `GH_TOKEN` to a GitHub token with read access to the private code-execution
+client repository; BuildKit mounts it only during dependency installation:
 
 ```bash
-docker build -f scripts/data/rl_readiness/Dockerfile --build-arg BASE_IMAGE=YOUR_MATCHING_MILES_IMAGE -t rl-readiness .
+docker build -f scripts/data/rl_readiness/Dockerfile \
+  --build-arg BASE_IMAGE=YOUR_MATCHING_MILES_IMAGE \
+  --secret id=github_token,env=GH_TOKEN -t rl-readiness .
 ```
 
-The image copies the readiness package under `/opt/core-rl/scripts/data/` and
-checks all three module entry points with `--help` during the build.
+The image copies the readiness and RLVR preparation packages under
+`/opt/core-rl/scripts/data/` and checks the readiness and source-preparation
+entry points with `--help` during the build.
 
 Formatting matching shares a one-second monotonic deadline across the response,
 with each regex call additionally capped at 100 ms or the remaining time,
