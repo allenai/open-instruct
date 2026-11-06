@@ -33,8 +33,11 @@ The refresh includes the staging script and archive manifest, and the receipts
 from requalifying all six structured-output pools after preserving native schema
 combinator behavior. It changes no training rows.
 
-Use code from PR [#2178](https://github.com/allenai/open-instruct/pull/2178) and a
-matching MILES image with the dependencies in
+The release records runtime code baseline
+[`1e79b6210005abcea355354d30f0d83b4537f8cb`](https://github.com/allenai/open-instruct/commit/1e79b6210005abcea355354d30f0d83b4537f8cb)
+in `CODE_REVISION` and `VALIDATION.json`. Subsequent PR commits update tests, CI
+and documentation. Requalify when changing reward behavior. Use a matching
+MILES application image with the dependencies in
 `scripts/data/rl_readiness/requirements.txt`. The readiness Docker overlay installs
 those dependencies on an application image already built from this code. Keep
 the pinned MILES runtime; the overlay does not replace that runtime. No new GPU
