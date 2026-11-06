@@ -14,7 +14,7 @@ Once you have modified `pyproject.toml` to point to the specific commit, run `uv
 
 ### CI and GPU validation
 
-The checks that run on a pull request need no Beaker credentials or cluster capacity, so they behave the same for fork and internal PRs. The GPU pytest suite is manual for both. When a change needs GPU validation, an Ai2 maintainer can run it on Beaker, or a contributor can run the relevant tests on an available GPU. Training smoke runs on Beaker start only once a PR enters the merge queue (see [CI Workflows](#ci-workflows)).
+Automated CI runs on GitHub-hosted runners and does not require Beaker credentials or cluster capacity. GPU tests and training integration runs are manual for both fork and internal PRs. When a change needs GPU validation, an Ai2 maintainer can run it on Beaker, or a contributor can run the relevant tests on an available GPU.
 
 ## Internal Contributors
 
@@ -46,7 +46,7 @@ Track new large or binary test data files with `git lfs track "path/to/file"` an
 
 **Unit tests**: `uv run pytest` discovers CPU tests in `open_instruct/`, `tests/`, and the repository root. CUDA-only files under `open_instruct/` are excluded when CUDA is unavailable.
 
-Data-loader sampling/resume/accounting (`test_hf_data_loader.py`), Beaker callbacks (`test_olmo_core_callbacks.py`), and DPO collation/forward/gradient checks (`test_dpo_forward.py`) run in ordinary unit-test CI on every PR push, without depending on Beaker. The DPO tests initialize tiny HF and OLMo-core models locally and use a local tokenizer, without model downloads. To run this coverage on CPU:
+Data-loader sampling/resume/accounting (`test_hf_data_loader.py`), Beaker callbacks (`test_olmo_core_callbacks.py`), and DPO collation/forward/gradient checks (`test_dpo_forward.py`) run in ordinary unit-test CI without depending on Beaker. The DPO tests initialize tiny HF and OLMo-core models locally and use a local tokenizer, without model downloads. To run this coverage on CPU:
 
 ```bash
 CUDA_VISIBLE_DEVICES="" HF_HUB_OFFLINE=1 uv run pytest \
@@ -63,7 +63,7 @@ These checks do not replace CUDA/BF16 kernels, FlashAttention packing, optimizer
 
 ## CI Workflows
 
-Checks that run on PR pushes, without Beaker:
+Automated checks run on GitHub-hosted runners:
 
 | Workflow | Checks |
 |---|---|
@@ -73,21 +73,9 @@ Checks that run on PR pushes, without Beaker:
 | `docs.yml` | Documentation validation and deployment. |
 | `codex-review.yml`, `claude-review.yml` | Automated code reviews. |
 
-`tests.yml` and `pr_checks.yml` also run in the merge queue, where `Run unit tests` and `Code Quality` are the two required checks.
+No workflow launches, waits for, or verifies Beaker experiments. GPU pytest and the training smoke scripts remain available for manual validation; they are not merge-queue jobs.
 
-**Integration tests** (`beaker-experiment.yml`) are the only CI jobs that use Beaker. They run in the merge queue, not on PR pushes, and can be started by hand from the Actions tab:
-
-1. A large runner builds the image and launches up to four Beaker experiments, each a short single-GPU training run:
-   - OLMo-core SFT integration test (always runs)
-   - GRPO integration test (runs when GRPO-related code or runtime files change)
-   - DPO integration test (runs if DPO-related files changed)
-   - SFT integration test (runs if `finetune.py` changed)
-2. A small `ubuntu-latest` job waits up to 20 minutes for the experiments and stops any that have not finished, so an abandoned job does not hold a place in the Beaker queue.
-3. If every experiment passed, follow-up jobs publish the exact image they ran on as `open_instruct_auto` and `open_instruct_auto_cuda12`, and build and publish `open_instruct_auto_cuda13`.
-
-None of these jobs is a required check: a failed or timed-out integration run does not stop the merge. A failure with a real exit code, or a failed build, launch or publish, sends a Slack notification; a queue timeout or preemption does not. Either way the published images stay at the last commit whose experiments passed.
-
-The GPU pytest suite is not run by any workflow. Launch it manually (see [Recording manual GPU tests](#recording-manual-gpu-tests)).
+CI also no longer publishes `open_instruct_auto`, `open_instruct_auto_cuda12`, or `open_instruct_auto_cuda13`. Existing images are not refreshed automatically. Build an image from the intended code revision with `scripts/train/build_image_and_launch.sh` when launching training or GPU tests.
 
 ## Launching Experiments on Beaker
 
