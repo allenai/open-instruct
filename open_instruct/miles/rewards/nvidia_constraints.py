@@ -1,14 +1,13 @@
 """Portable calendar and NeMo-target adapters using maintained Open Instruct IF checkers."""
 
 import json
-import os
 import re
 import time
 from functools import lru_cache
 
 from open_instruct import ifeval_constraints, logger_utils
 from open_instruct.IFEvalG import instructions_registry
-from open_instruct.miles.rewards import candidate_verifiers as common
+from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import rewards, task_verifiers
 
 logger = logger_utils.setup_logger(__name__)
@@ -158,9 +157,6 @@ class _IsolatedAdapter:
         return common.Result(score, diagnostics={"kind": self.kind, "status": status, **diagnostics})
 
     async def async_call(self, tokenized_prediction, prediction, label, **kwargs):
-        policy = os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
-        if policy not in {"zero", "raise"}:
-            raise ValueError("OI_MILES_MATH_TIMEOUT_POLICY must be zero or raise")
         start = time.monotonic()
         try:
             return await rewards.isolated_verifier_call(
@@ -171,14 +167,12 @@ class _IsolatedAdapter:
                 **kwargs,
             )
         except rewards.MathVerifierTimeout as error:
-            if policy == "raise":
-                raise
             logger.warning("%s verifier timeout; assigning zero reward: %s", self.kind, error)
             return self.result(
                 0.0,
                 status="timeout",
                 error=str(error),
-                failure_policy=policy,
+                failure_policy="zero",
                 elapsed_seconds=time.monotonic() - start,
             )
 

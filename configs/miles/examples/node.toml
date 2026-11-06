@@ -29,7 +29,6 @@ mount_path = "/weka/oe-training-default"
 
 [launch.env]
 OI_MILES_RAY_CPUS = "64"
-OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 OI_MILES_CODE_FAILURE_POLICY = "zero"
 SGLANG_TIMEOUT_KEEP_ALIVE = "60"
 NCCL_SOCKET_IFNAME = "ib"

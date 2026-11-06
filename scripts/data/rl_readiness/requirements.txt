@@ -1,4 +1,4 @@
-# Optional dependencies for the local candidate qualification image.
+# Optional dependencies for the local dataset qualification image.
 # regex is supplied by the main transformers dependency; the schema verifier
 # explicitly requires openapi-schema-validator rather than its transitive presence.
 reasoning-gym==0.1.25

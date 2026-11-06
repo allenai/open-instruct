@@ -9,7 +9,6 @@ import copy
 import csv
 import io
 import json
-import os
 import signal
 import time
 from dataclasses import dataclass
@@ -21,7 +20,7 @@ from openapi_schema_validator import OAS31Validator
 from referencing import Registry
 
 from open_instruct import logger_utils
-from open_instruct.miles.rewards import candidate_verifiers as common
+from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import nemo_structured_types, rewards
 
 FORMATS = {"json", "yaml", "toml", "xml", "csv"}
@@ -134,14 +133,7 @@ class StructuredConfig:
     timeout_seconds: float = 1.0
 
 
-def timeout_policy():
-    policy = os.environ.get("OI_MILES_FORMAT_TIMEOUT_POLICY", os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero"))
-    if policy not in {"zero", "raise"}:
-        raise ValueError("Structured timeout policy must be zero or raise")
-    return policy
-
-
-def timeout_result(error, start, policy):
+def timeout_result(error, start):
     logger.warning("Structured verifier timeout; assigning zero reward: %s", error)
     return common.Result(
         0.0,
@@ -149,7 +141,7 @@ def timeout_result(error, start, policy):
             "kind": "structured_v1",
             "status": "timeout",
             "error": str(error),
-            "failure_policy": policy,
+            "failure_policy": "zero",
             "elapsed_seconds": time.monotonic() - start,
         },
     )
@@ -164,7 +156,6 @@ class StructuredOutputVerifier:
             raise ValueError("Structured verifier timeout must be in (0, 30] seconds")
 
     async def async_call(self, tokenized_prediction, prediction, label, **kwargs):
-        policy = timeout_policy()
         start = time.monotonic()
         try:
             result = await rewards.isolated_verifier_call(
@@ -178,9 +169,7 @@ class StructuredOutputVerifier:
                 **kwargs,
             )
         except rewards.MathVerifierTimeout as error:
-            if policy == "raise":
-                raise
-            return timeout_result(error, start, policy)
+            return timeout_result(error, start)
         if result.diagnostics.get("status") == "timeout":
             # Worker stderr is suppressed by the pool; surface its timeout here.
             logger.warning("Structured verifier timeout; assigning zero reward: %s", result.diagnostics["error"])
@@ -191,7 +180,6 @@ class StructuredOutputVerifier:
         def expired(signum, frame):
             raise TimeoutError("Structured response exceeded its verification budget")
 
-        policy = timeout_policy()
         start = time.monotonic()
         previous = signal.signal(signal.SIGALRM, expired)
         timer = signal.setitimer(signal.ITIMER_REAL, self.config.timeout_seconds)
@@ -235,13 +223,11 @@ class StructuredOutputVerifier:
                 return common.Result(float(valid), diagnostics={"kind": "structured_v1", "status": "completed"})
             finally:
                 # Disarming can itself receive the pending alarm. Always restore
-                # the handler/timer, then apply the timeout policy outside cleanup.
+                # the handler/timer, then handle the timeout outside cleanup.
                 try:
                     signal.setitimer(signal.ITIMER_REAL, 0)
                 finally:
                     signal.signal(signal.SIGALRM, previous)
                     signal.setitimer(signal.ITIMER_REAL, *timer)
         except TimeoutError as error:
-            if policy == "raise":
-                raise
-            return timeout_result(error, start, policy)
+            return timeout_result(error, start)
