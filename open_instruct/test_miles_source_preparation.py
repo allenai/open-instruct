@@ -206,6 +206,36 @@ def test_invalid_structured_schema_is_omitted_not_fatal(tmp_path):
     assert reasons[0].startswith("SchemaError: ")
 
 
+@pytest.mark.parametrize(
+    "task,answer,metadata,error",
+    [
+        ("number_sorting", "[1,", {}, "SyntaxError"),
+        ("bitwise_arithmetic", "1", {"problem": "1 <<"}, "SyntaxError"),
+        ("polynomial_multiplication", "x +", {}, "SyntaxError"),
+        ("simple_integration", "x + C", {"integrand": "x +"}, "SyntaxError"),
+        ("intermediate_integration", "x + C", {"integrand": "("}, "SyntaxError"),
+        ("coin_flip", "1/0", {}, "ZeroDivisionError"),
+        ("coin_flip", "1" + "0" * 310, {}, "OverflowError"),
+    ],
+)
+def test_malformed_reasoning_gym_references_do_not_drop_later_rows(tmp_path, task, answer, metadata, error):
+    bad = {"question": "Malformed source", "answer": answer, "metadata": {"source_dataset": task, **metadata}}
+    valid = {"question": "Convert 10 to binary", "answer": "1010", "metadata": {"source_dataset": "base_conversion"}}
+    original = copy.deepcopy(bad)
+    records = [{"id": "bad", "raw_record": bad}, {"id": "valid", "raw_record": valid}]
+    entry, reasons = prepare_one(tmp_path, "reasoning_gym_v1", records)
+    assert bad == original
+    assert entry["counts"]["input_rows"] == 2
+    assert entry["counts"]["omitted_rows"] == entry["counts"]["prepared_rows"] == 1
+    assert len(reasons) == 1 and reasons[0].startswith(
+        f"ValueError: Invalid ReasoningGym reference for {task}: {error}:"
+    )
+    disposition = json.loads((tmp_path / "out/source/dispositions.jsonl").read_text())
+    assert disposition["id"] == "bad" and disposition["status"] == "omitted"
+    row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
+    assert row["metadata"]["sample_id"] == "valid" and row["label"] == valid
+
+
 def test_responses_instructions_are_preserved():
     params = {"instructions": "Answer in French.", "input": "question"}
     assert sources.messages({"responses_create_params": params}) == [

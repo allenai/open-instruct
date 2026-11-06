@@ -151,3 +151,23 @@ def test_invalid_configuration_stays_fatal():
     entry = {"answer": "__import__('os').getpid()", "metadata": {"source_dataset": "polynomial_multiplication"}}
     with pytest.raises(ValueError, match="Unsupported expression syntax"):
         asyncio.run(rg.ReasoningGymVerifier().async_call([], "1", entry))
+
+
+@pytest.mark.parametrize(
+    "task,answer,error_type",
+    [
+        ("number_sorting", "[1,", SyntaxError),
+        ("coin_flip", "1/0", ZeroDivisionError),
+        ("coin_flip", "1e310", OverflowError),
+    ],
+)
+def test_invalid_references_remain_explicit_errors_through_async_call(task, answer, error_type, monkeypatch):
+    entry = {"answer": answer, "metadata": {"source_dataset": task}}
+
+    async def unexpected_scoring(*args, **kwargs):
+        pytest.fail("A malformed target must not reach response scoring")
+
+    monkeypatch.setattr(rg.rewards, "isolated_verifier_call", unexpected_scoring)
+    with pytest.raises(ValueError, match=f"Invalid ReasoningGym reference for {task}") as error:
+        asyncio.run(rg.ReasoningGymVerifier().async_call([], "1", entry))
+    assert isinstance(error.value.__cause__, error_type)

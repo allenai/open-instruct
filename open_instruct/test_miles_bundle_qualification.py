@@ -170,6 +170,28 @@ def test_whole_pool_length_validation(tmp_path, monkeypatch):
     assert "Prompt has" in receipt["sources"]["toy"]["reason"]
 
 
+def test_quarantining_every_row_cannot_qualify_an_empty_source(tmp_path, monkeypatch):
+    catalog, controls, hf = setup_bundle(tmp_path, monkeypatch)
+    document = json.loads(catalog.read_text())
+    entry = document["sources"]["toy"]
+    prompts = catalog.parent / entry["prompt_data"]["path"]
+    prompts.write_text("")
+    entry["prompt_data"]["sha256"] = source_preparation.file_hash(prompts)
+    entry["counts"].update(prepared_rows=0, omitted_rows=1)
+    dispositions = catalog.parent / entry["dispositions"]["path"]
+    dispositions.write_text(json.dumps({"id": "one", "status": "omitted", "reason": "Malformed reference"}) + "\n")
+    entry["dispositions"]["sha256"] = source_preparation.file_hash(dispositions)
+    catalog.write_text(json.dumps(document))
+    controls.write_text("")
+    quarantine = tmp_path / "quarantine.jsonl"
+    quarantine.write_text(json.dumps({"source": "toy", "id": "one", "reason": "Malformed reference"}) + "\n")
+    output = tmp_path / "qualified"
+    receipt = asyncio.run(qualify_bundle.qualify(catalog, controls, hf, output, 1000, quarantine))
+    assert receipt["sources"]["toy"]["status"] == "deferred"
+    with pytest.raises(ValueError, match="not qualified"):
+        source_catalog.resolve(output / "catalog.json", {"toy": 1.0})
+
+
 def test_named_judge_preserves_reference_and_requires_explicit_route():
     raw = {"prompt": "Prove the claim", "expected_answer": "Reference proof", "agent_ref": {"name": "math_with_judge"}}
     with pytest.raises(ValueError, match="explicit_adapter"):

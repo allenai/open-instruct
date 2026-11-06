@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Record malformed ReasoningGym syntax and numeric references as preparation omissions instead of aborting the remaining source population (https://github.com/allenai/open-instruct/pull/2178).
 - Bind source qualification receipts to prompt-data and reward-configuration hashes so changed bundles require requalification (https://github.com/allenai/open-instruct/pull/2178).
 - Preserve native NeMo code comparison semantics automatically for Nemotron input/output labels, retain AceCode assertions, and pin the compatible service client (https://github.com/allenai/open-instruct/pull/2178).
 - Validate complete source bundles with whole-pool loader checks and per-stratum runtime reward controls; preserve explicit quarantine receipts and reference-judge routing, support final structured tool answers, 104 ReasoningGym families with bounded safe grading, and complete-test code rewards through an authenticated source-pinned service (https://github.com/allenai/open-instruct/pull/2178).

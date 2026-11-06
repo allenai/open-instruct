@@ -269,18 +269,23 @@ def validate_target(entry):
         ):
             raise ValueError("Invalid ReasoningGym grid target")
     # Native eval/parse_expr must never see executable source metadata either.
-    if task == "number_sorting":
-        ast.literal_eval(entry["answer"])
-    if task == "bitwise_arithmetic":
-        expression_syntax(entry["metadata"]["problem"], bitwise=True)
-    if task in SYMBOLIC_TASKS:
-        expression_syntax(entry["answer"], symbolic=True)
-        if task.endswith("integration"):
-            expression_syntax(entry["metadata"]["integrand"], symbolic=True)
-    if task == "prime_factorization":
-        [int(factor.strip()) for factor in entry["answer"].split("×") if factor.strip()]
-    if task == "coin_flip" and not math.isfinite(float(Fraction(entry["answer"].replace(",", "")))):
-        raise ValueError("Invalid coin-flip reference")
+    try:
+        if task == "number_sorting":
+            ast.literal_eval(entry["answer"])
+        if task == "bitwise_arithmetic":
+            expression_syntax(entry["metadata"]["problem"], bitwise=True)
+        if task in SYMBOLIC_TASKS:
+            expression_syntax(entry["answer"], symbolic=True)
+            if task.endswith("integration"):
+                expression_syntax(entry["metadata"]["integrand"], symbolic=True)
+        if task == "prime_factorization":
+            [int(factor.strip()) for factor in entry["answer"].split("×") if factor.strip()]
+        if task == "coin_flip" and not math.isfinite(float(Fraction(entry["answer"].replace(",", "")))):
+            raise ValueError("Invalid coin-flip reference")
+    except (SyntaxError, ZeroDivisionError, OverflowError) as error:
+        # Preparation records ValueError as an omitted row. Keep this an error
+        # at scoring time, rather than mistaking a broken reference for reward 0.
+        raise ValueError(f"Invalid ReasoningGym reference for {task}: {type(error).__name__}: {error}") from error
     return task
 
 
