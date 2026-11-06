@@ -61,3 +61,66 @@ objects or arrays: an empty TOML document or header-only CSV can otherwise satis
 the schema. `nemo_strict_v1` retains the native helper's traversal and does not
 add array length requirements; qualification controls must validate each target's
 intended behavior. The qualification script uses the default one-second budget.
+
+## Native instruction and calendar sources
+
+`open_instruct.miles.rewards.nvidia_constraints.InstructionVerifier` uses the
+maintained `IFEvalG` instruction registry. Targets have `family="nemo"` and a
+`target` object with parallel `instruction_id_list` and `kwargs` arrays. The
+optional `grading_mode` is `all` (default) or `fraction`. Unknown modes, invalid
+argument types, and native argument repairs are errors. Numeric counts/indices
+must be integers, text arguments must be strings, and keyword collections must
+be lists of strings. Target validation runs even when the response is empty. The
+adapter rejects zero parameters that trigger native random defaults, including
+`new:copy_span_idx.n_start=0`; admission must not depend on a worker's RNG seed.
+Known constructor normalization is accepted: lowercasing the paragraph's required
+first word or a frequency checker's letter, and trimming the specific text
+arguments that the native checker itself trims. For example, `first_word: "The"`
+and `letter: "A"` retain their native rewards. This is not blanket normalization:
+keyword-list entries retain their whitespace, and a padded letter such as `" A "`
+is rejected because the native checker randomly replaces it before trimming.
+Other argument changes, including numeric repairs, remain fatal. Regex validation
+uses the normalized pattern that the native checker will actually evaluate.
+Native regex arguments are compiled during admission and invalid patterns are
+fatal target errors. Regex matching semantics are retained, rather than treating
+keywords as literal text. The adapter applies the existing IF training admission
+policy, including rejection
+of impossible paragraph positions and tiny total-letter limits. It admits the
+corrected lowercase-repetition and Unicode letter-counting checkers. Language
+classification and English case-plus-language families remain deferred pending
+calibration; this is not a claim that every native family has passed controls.
+
+`CalendarVerifier` in the same module validates the full final JSON calendar
+against `exp_cal_state`: event IDs, durations, non-overlap, windows and explicit
+before/after/at/between constraints. Empty target calendars are supported. This
+version scores schedule feasibility, not event-name paraphrase or dialogue
+quality. Both adapters use the isolated verifier worker path. Their extraction
+uses the final answer after reasoning, like the other candidate verifiers.
+Calendar JSON parsing failures, including excessive nesting, score zero with
+`parse_error`, `error_type`, and `failure_policy: zero` diagnostics. Calendar target
+errors remain fatal and are checked before response parsing.
+Times accept 24-hour notation or case-insensitive AM/PM (for example, `09:00`,
+`9am`, and `9:00 AM`). Calendar answers must be raw JSON; Markdown code fences
+are rejected. Schedule feasibility is evaluated within this response contract.
+
+Both adapters apply `OI_MILES_MATH_TIMEOUT_POLICY` to the isolated worker's
+45-second deadline: `zero` (default) returns zero with `status: timeout`,
+`failure_policy`, `error`, and `elapsed_seconds`; `raise` propagates the timeout.
+Other worker/configuration errors remain fatal. Diagnostics consistently identify
+`calendar_v1` or `nemo_if_v1`, with `status: completed` for ordinary scores.
+
+Before training, qualify every prepared row through
+[`scripts/data/rl_readiness/qualify.py`](https://github.com/allenai/open-instruct/blob/main/scripts/data/rl_readiness/qualify.py).
+It invokes the actual registered reward on each row's positive, negative, empty,
+and truncated controls. Target errors defer the row, and timeout fallbacks cannot
+pass qualification. Use only the resulting qualified catalog; this guarantee
+applies to those rows, not to the entire raw dataset. The generic run-data IF
+screen uses another target schema and does not validate these native adapters;
+manually supplied rows that bypass qualification may fail when first scored.
+
+Reproducible integration controls live in
+[`open_instruct/test_miles_nvidia_constraints.py`](https://github.com/allenai/open-instruct/blob/main/open_instruct/test_miles_nvidia_constraints.py).
+Run `uv run pytest open_instruct/test_miles_nvidia_constraints.py -q`. They cover
+native scoring, deterministic admission, regex errors, timeout policies, calendar
+formatting, diagnostics, and real subprocess execution. These integration checks
+do not qualify an entire raw dataset.
