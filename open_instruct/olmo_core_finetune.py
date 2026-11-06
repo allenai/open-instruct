@@ -95,7 +95,8 @@ def _seed_cache_suffix(seed: int, max_seq_length: int) -> str:
 
 
 # Appended to the numpy cache directory name for caches written with row-aligned parts, so they
-# never share a directory with the 1 GiB mid-row-cut caches the default writes under the same hash.
+# never share a directory with the legacy 1 GiB mid-row-cut caches (`--no_row_aligned_parts`)
+# written under the same hash.
 _ROW_ALIGNED_CACHE_SUFFIX = "-rowaligned"
 
 
@@ -523,7 +524,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # Part of the cache directory name.
         if not args.sft.row_aligned_parts:
             cache_args.append("--no_row_aligned_parts")
-        # Checked before tokenizing: without it, the legacy layout's cache job would fail at startup.
+        # `_document_boundary_kwargs` runs before tokenizing, so the cache job needs this opt-out too:
+        # with `--no_row_aligned_parts` alone it would fail at startup. With the EOS-scan opt-out alone
+        # it has no effect on the cache.
         if not args.sft.document_boundaries_from_metadata:
             cache_args.append("--no_document_boundaries_from_metadata")
         cache_args += [f"--local_cache_dir {args.dataset.local_cache_dir}", "--cache_dataset_only"]
