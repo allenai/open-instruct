@@ -1186,10 +1186,30 @@ def accumulate_inference_batches(
     )
 
 
-def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch: Batch, enabled: bool) -> Batch:
-    """If enabled, drop rollouts that didn't finish with 'stop' from result (in place) and batch."""
+def compute_group_advantages(scores: np.ndarray, num_samples_per_prompt: int, normalization_type: str) -> np.ndarray:
+    """Normalize each score against the other samples for the same prompt.
+
+    `scores` must hold complete groups: `num_samples_per_prompt` consecutive samples per prompt.
+    """
+    scores_per_prompt = scores.reshape(-1, num_samples_per_prompt)
+    mean_grouped_rewards = np.repeat(scores_per_prompt.mean(axis=-1), num_samples_per_prompt, axis=0)
+    std_grouped_rewards = np.repeat(scores_per_prompt.std(axis=-1), num_samples_per_prompt, axis=0)
+    if normalization_type == "standard":
+        return (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+    if normalization_type == "centered":
+        return scores - mean_grouped_rewards
+    raise ValueError(f"Invalid advantage normalization type: {normalization_type}")
+
+
+def maybe_mask_truncated_completions(
+    result: data_types.GenerationResult, batch: Batch, advantages: np.ndarray, enabled: bool
+) -> tuple[Batch, np.ndarray]:
+    """If enabled, drop rollouts that didn't finish with 'stop' from result (in place), batch, and advantages.
+
+    Call this after `compute_group_advantages`: dropping single rollouts leaves groups of uneven size.
+    """
     if not enabled:
-        return batch
+        return batch, advantages
     stop_idxes = [i for i, fr in enumerate(result.finish_reasons) if fr == "stop"]
     num_truncated = len(result.finish_reasons) - len(stop_idxes)
     if num_truncated > 0:
@@ -1201,7 +1221,7 @@ def maybe_mask_truncated_completions(result: data_types.GenerationResult, batch:
     result.masks = [result.masks[i] for i in stop_idxes]
     result.finish_reasons = [result.finish_reasons[i] for i in stop_idxes]
     result.logprobs = [result.logprobs[i] for i in stop_idxes]
-    return batch[stop_idxes]
+    return batch[stop_idxes], advantages[stop_idxes]
 
 
 def prepare_collated_data_for_workers(
@@ -1452,7 +1472,30 @@ class DataPreparationActor:
             assert batch is not None
             assert batch_stats is not None
 
-            batch = maybe_mask_truncated_completions(result, batch, self.config.mask_truncated_completions)
+            # Advantages are normalized per prompt group, so compute them (and save traces, which index
+            # samples by group) before the truncation filter drops individual samples.
+            advantages = compute_group_advantages(
+                np.array(batch.scores),
+                self.config.num_samples_per_prompt_rollout,
+                self.config.advantage_normalization_type,
+            )
+
+            if self.config.save_traces and self.config.rollouts_save_path:
+                save_rollouts_to_disk(
+                    self.config.rollouts_save_path,
+                    self.run_name,
+                    self.training_step,
+                    batch,
+                    result,
+                    advantages,
+                    self.config.num_samples_per_prompt_rollout,
+                    self.total_samples_written,
+                )
+                self.total_samples_written += len(batch.queries)
+
+            batch, advantages = maybe_mask_truncated_completions(
+                result, batch, advantages, self.config.mask_truncated_completions
+            )
 
             if len(result.responses) == 0:
                 logger.warning(
@@ -1472,31 +1515,6 @@ class DataPreparationActor:
                 self.ground_truth_overrides.update(new_overrides)
 
             scores = np.array(batch.scores)
-            scores_per_prompt = scores.reshape(-1, self.config.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, self.config.num_samples_per_prompt_rollout, axis=0)
-
-            if self.config.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif self.config.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {self.config.advantage_normalization_type}")
-
-            if self.config.save_traces and self.config.rollouts_save_path:
-                save_rollouts_to_disk(
-                    self.config.rollouts_save_path,
-                    self.run_name,
-                    self.training_step,
-                    batch,
-                    result,
-                    advantages,
-                    self.config.num_samples_per_prompt_rollout,
-                    self.total_samples_written,
-                )
-                self.total_samples_written += len(batch.queries)
 
             packed_sequences = pack_sequences(
                 queries=batch.queries,
