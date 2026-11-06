@@ -303,6 +303,26 @@ for exact rules and the 10,053-case native-checker differential validation.
 This closes the comparison implementation gap; whole-source dataset qualification
 and training-load validation remain separate gates.
 
+### Alternative valid code outputs
+
+Some questions permit arbitrary output order, any tied optimum or any valid
+construction, while their supplied tests accept only one reference output. For
+example, an AceCode TwoSum question allows either index order but its assertion
+accepts `[0, 1]` and rejects `[1, 0]`; a Nemotron string-construction task similarly
+rejects a different valid string. These are limitations of the supplied grading
+contracts: [NeMo compares reference outputs](https://github.com/NVIDIA-NeMo/Gym/blob/bd6f5f0d8f3a56cbf3f7e1d2d4a1d2220b7ff6fe/resources_servers/code_gen/lcb_integration/testing_util.py),
+and [AceCode executes the supplied assertions](https://github.com/TIGER-AI-Lab/AceCoder/blob/e37ef2aea2e3710be6b06e9a91dd92c98321df96/src/acecoder/evalplus_eval.py#L160-L168).
+
+**Deferred investigation:** consider recovering original special judges or adding
+task-specific property checkers, with valid-alternative and invalid-output
+controls. Unordered comparison must preserve multiplicity where required;
+construction and optimality tasks need their own checks. This would intentionally
+diverge from upstream grading and requires a separate review of reward changes.
+For now, preserve the upstream tests and comparisons; this concern does not
+introduce new filtering, repairs or a qualification blocker. Such false negatives
+are ordinary zero rewards, not missing grades, so they do not increment
+`rollout/verification/omitted_records`.
+
 ## Reference judges and routed blends
 
 `reference_judge_v1` preserves a nonempty reference from `expected_answer` (or

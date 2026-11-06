@@ -207,6 +207,9 @@ def adapt(raw, kind, options=None):
         else:
             raise ValueError("unsupported_reward_contract")
     if kind in {"acecode_v1", "livecodebench_v1"}:
+        # TODO: investigate upstream tests rejecting alternative valid outputs
+        # (unordered results, tied optima, constructions). Preserve their grading
+        # for now; see docs/miles/source-preparation.md#alternative-valid-code-outputs.
         if kind == "acecode_v1":
             target = {"mode": "assert", "tests": copy.deepcopy(raw["test_cases"])}
         else:
