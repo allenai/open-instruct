@@ -1,5 +1,5 @@
 #!/bin/bash
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+BEAKER_IMAGE="${1:?Pass a Beaker image, or launch with ./scripts/train/build_image_and_launch.sh $0}"
 
 uv run python mason.py \
     --cluster ai2/saturn ai2/jupiter \

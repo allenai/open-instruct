@@ -2,7 +2,7 @@
 # Two-node SFT integration test with Ulysses sequence parallelism.
 # Tests multi-node training + SP loss aggregation.
 
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+BEAKER_IMAGE="${1:?Pass a Beaker image, or launch with ./scripts/train/build_image_and_launch.sh $0}"
 SP_SIZE="${2:-4}"
 
 echo "Using Beaker image: $BEAKER_IMAGE"

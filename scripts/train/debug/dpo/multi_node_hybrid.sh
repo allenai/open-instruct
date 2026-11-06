@@ -1,5 +1,5 @@
 #!/bin/bash
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+BEAKER_IMAGE="${1:?Pass a Beaker image, or launch with ./scripts/train/build_image_and_launch.sh $0}"
 MODEL_NAME=allenai/Olmo-Hybrid-Instruct-DPO-7B
 LR=1e-6
 EXP_NAME=hybrid-7b-DPO-test-${LR}-$(date +%s)
