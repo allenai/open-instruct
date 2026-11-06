@@ -285,9 +285,23 @@ suites above 2,000 tests are partitioned without truncation. Each partition uses
 the configured total client deadline, and each test uses a fresh interpreter.
 Syntax/runtime errors and execution timeouts are zero; infrastructure, incomplete
 result and service-source mismatches raise. Reports retain request identifiers.
-Start qualification sequentially; training must bound aggregate in-flight service
-requests to eight across all callers, not eight per trainer rank. The live control
-panel is not a sustained-load certification.
+
+The service owner's 2026-11-06 scaling panel supersedes the original eight-request
+guidance. Reserved Lambda concurrency is now 900, with no provisioned warm
+baseline. The panel tested 12, 16, 32, 64 and 128 concurrent HTTP requests:
+38,056 requests and 542,262 test outcomes completed with no retries,
+infrastructure failures, throttles or scoring differences from the sequential
+baseline. Timeout recovery passed, and CloudWatch confirmed scaling with zero
+throttles. At 128 concurrent requests, the selected workload sustained 266.6
+requests/second (about 60 complete solutions/second).
+
+The configured ceiling of 900 is not a tested operating point: load qualification
+reached 128 concurrent HTTP requests, with roughly one minute of submissions per
+phase followed by draining. Capacity is shared across runs; keep pending work
+bounded and account for overload. End-to-end multi-run admission/backpressure
+remains to be validated. Service version 9 and the client/source pins above are
+unchanged. Evidence: `docs/scaling-load-validation-20261106.md` and its companion
+JSON in the `allenai/code-execution-service` repository (service-owner report).
 
 The Nemotron-backed `livecodebench_v1` adapter automatically selects the pinned
 `nemo_v1` output comparison through `prepare_nemotron_tests`; there is no training
@@ -301,7 +315,8 @@ function assertions. Update their trusted service source pin as well.
 See the pinned [NeMo comparison contract](https://github.com/allenai/code-execution-service/blob/4cab7e85e8748db501163e6cbbc5ab7c041692af/docs/nemotron-comparison-contract.md)
 for exact rules and the 10,053-case native-checker differential validation.
 This closes the comparison implementation gap; whole-source dataset qualification
-and training-load validation remain separate gates.
+and end-to-end training-load validation remain separate gates; the bounded
+service-load panel above is complete.
 
 ### Alternative valid code outputs
 
