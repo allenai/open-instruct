@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from scripts.data.rl_readiness import local_coverage
 
-from open_instruct.miles.rewards import candidate_verifiers as cv
+from open_instruct.miles.rewards import deterministic_verifiers as cv
 from open_instruct.miles.rewards import rewards
 
 
@@ -92,7 +92,9 @@ def test_qualification_rejects_timeout_fallback(qualification_module, monkeypatc
         "row": {"input": "question", "label": {}, "metadata": {"verifiers": [{"name": "format", "target": {}}]}},
         "gold": "gold",
         "negative": "wrong",
-        "registry": {"format": {"factory": "open_instruct.miles.rewards.candidate_verifiers.CandidateVerifier"}},
+        "registry": {
+            "format": {"factory": "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier"}
+        },
     }
     args = SimpleNamespace(
         reward_key=None,

@@ -1,3 +1,5 @@
+"""CPU coverage for sampling, checkpoint cursors, and batch accounting."""
+
 import tempfile
 import unittest
 
@@ -5,8 +7,7 @@ import datasets
 import parameterized
 import torch
 
-import open_instruct.data_loader
-from open_instruct import tensor_utils
+from open_instruct import data_loader, tensor_utils
 
 
 def single_example_collator(examples: list[dict]) -> dict:
@@ -33,7 +34,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_smoke(self):
         dataset = make_test_dataset(20)
 
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -62,7 +63,7 @@ class TestHFDataLoader(unittest.TestCase):
         dataset = make_test_dataset(num_examples)
 
         loaders = [
-            open_instruct.data_loader.HFDataLoader(
+            data_loader.HFDataLoader(
                 dataset=dataset,
                 batch_size=batch_size,
                 seed=42,
@@ -100,7 +101,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_reshuffle(self):
         dataset = make_test_dataset(20)
 
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -121,7 +122,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_state_dict_load_state_dict(self):
         dataset = make_test_dataset(20)
 
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -140,7 +141,7 @@ class TestHFDataLoader(unittest.TestCase):
 
         state = loader.state_dict()
 
-        new_loader = open_instruct.data_loader.HFDataLoader(
+        new_loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -157,7 +158,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_reproducibility_across_runs(self):
         dataset = make_test_dataset(50)
 
-        loader1 = open_instruct.data_loader.HFDataLoader(
+        loader1 = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -166,7 +167,7 @@ class TestHFDataLoader(unittest.TestCase):
             work_dir=tempfile.gettempdir(),
             collator=single_example_collator,
         )
-        loader2 = open_instruct.data_loader.HFDataLoader(
+        loader2 = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -191,7 +192,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_checkpoint_resumption_exact_position(self):
         dataset = make_test_dataset(50)
 
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -213,7 +214,7 @@ class TestHFDataLoader(unittest.TestCase):
         for _ in range(40):
             remaining_original.append(next(loader_iter)["index"])
 
-        new_loader = open_instruct.data_loader.HFDataLoader(
+        new_loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -234,7 +235,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_batches_processed_increments_during_iteration(self):
         dataset = make_test_dataset(20)
 
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -257,7 +258,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_checkpoint_mid_epoch_restores_position(self):
         dataset = make_test_dataset(20)
 
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -275,7 +276,7 @@ class TestHFDataLoader(unittest.TestCase):
         state = loader.state_dict()
         self.assertEqual(state["batches_processed"], 10)
 
-        new_loader = open_instruct.data_loader.HFDataLoader(
+        new_loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -292,7 +293,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_infinite_loop_all_excluded(self):
         dataset = make_test_dataset(10)
 
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -314,7 +315,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_unique_prompt_ids_across_iterations(self):
         dataset = make_test_dataset(10)
 
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=1,
             seed=42,
@@ -341,7 +342,7 @@ class TestHFDataLoader(unittest.TestCase):
     def test_global_num_tokens_in_batch(self):
         dataset = make_test_dataset(10)
 
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset, batch_size=2, seed=42, dp_rank=0, dp_world_size=2, work_dir=tempfile.gettempdir()
         )
 
@@ -350,7 +351,7 @@ class TestHFDataLoader(unittest.TestCase):
 
     def test_global_num_tokens_in_batch_excludes_padding(self, batch_size: int = 2, real_tokens: int = 5):
         """Verify that padding tokens are excluded from the count."""
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=make_test_dataset(batch_size * real_tokens),
             batch_size=2,
             seed=42,
@@ -375,7 +376,7 @@ class TestHFDataLoader(unittest.TestCase):
             )
 
     def test_global_num_tokens_prefixed_attention_mask(self):
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=make_test_dataset(10),
             batch_size=2,
             seed=42,
@@ -387,7 +388,7 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(loader.global_num_tokens_in_batch(batch), (64 + 48) * 2)
 
     def test_global_num_tokens_cu_seq_lens(self):
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=make_test_dataset(10),
             batch_size=2,
             seed=42,
@@ -402,7 +403,7 @@ class TestHFDataLoader(unittest.TestCase):
         self.assertEqual(loader.global_num_tokens_in_batch(batch), (64 + 48) * 2)
 
     def test_global_num_tokens_fallback_input_ids(self):
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=make_test_dataset(10),
             batch_size=2,
             seed=42,
@@ -423,7 +424,7 @@ class TestHFDataLoader(unittest.TestCase):
     )
     def test_drop_last_true_drops_remainder(self, name, num_examples, batch_size):
         dataset = make_test_dataset(num_examples)
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=batch_size,
             seed=42,
@@ -447,7 +448,7 @@ class TestHFDataLoader(unittest.TestCase):
     )
     def test_drop_last_false_covers_all_indices(self, name, num_examples, batch_size):
         dataset = make_test_dataset(num_examples)
-        loader = open_instruct.data_loader.HFDataLoader(
+        loader = data_loader.HFDataLoader(
             dataset=dataset,
             batch_size=batch_size,
             seed=42,
@@ -467,7 +468,7 @@ class TestHFDataLoader(unittest.TestCase):
         dataset = make_test_dataset(num_examples)
         all_indices = []
         for dp_rank in range(dp_world_size):
-            loader = open_instruct.data_loader.HFDataLoader(
+            loader = data_loader.HFDataLoader(
                 dataset=dataset,
                 batch_size=batch_size,
                 seed=42,
@@ -485,15 +486,13 @@ class TestStreamingDataLoaderConfigSaveTraces(unittest.TestCase):
     def test_save_traces_requires_rollouts_save_path(self):
         """Test that save_traces=True with empty rollouts_save_path raises ValueError."""
         with self.assertRaises(ValueError) as context:
-            open_instruct.data_loader.StreamingDataLoaderConfig(save_traces=True, rollouts_save_path="")
+            data_loader.StreamingDataLoaderConfig(save_traces=True, rollouts_save_path="")
         self.assertIn("rollouts_save_path", str(context.exception))
         self.assertIn("save_traces", str(context.exception))
 
     def test_save_traces_with_valid_path_succeeds(self):
         """Test that save_traces=True with valid path succeeds."""
-        config = open_instruct.data_loader.StreamingDataLoaderConfig(
-            save_traces=True, rollouts_save_path="/tmp/rollouts"
-        )
+        config = data_loader.StreamingDataLoaderConfig(save_traces=True, rollouts_save_path="/tmp/rollouts")
         self.assertTrue(config.save_traces)
         self.assertEqual(config.rollouts_save_path, "/tmp/rollouts")
 

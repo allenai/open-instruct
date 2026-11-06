@@ -1,4 +1,4 @@
-"""Local contracts for explicitly prepared candidate slices.
+"""Deterministic reward contracts for prepared dataset sources.
 
 These factories accept data, never Python supplied by a dataset. Preparation must
 validate targets and positive/negative controls before publishing a source.
@@ -8,7 +8,6 @@ Formatting rewards measure formatting only, not factual answer correctness.
 import ast
 import json
 import math
-import os
 import re
 import time
 from collections import Counter
@@ -35,7 +34,7 @@ class FormattingVerifierTimeout(TimeoutError):
 class Result:
     score: float
     cost: float = 0.0
-    diagnostics: dict = field(default_factory=lambda: {"kind": "candidate_local_v1", "status": "ok"})
+    diagnostics: dict = field(default_factory=lambda: {"kind": "deterministic_local_v1", "status": "ok"})
 
 
 def answer_text(text):
@@ -88,7 +87,7 @@ def validate_target(target):
         "exact_text",
         "json_exact",
     }:
-        raise ValueError("Unsupported candidate target")
+        raise ValueError("Unsupported deterministic target")
     kind = target["kind"]
     value = target.get("value")
     if kind in {"mcqa", "mcqa_final_choice"}:
@@ -119,8 +118,11 @@ def validate_target(target):
         for pattern in patterns:
             if not isinstance(pattern, str) or len(pattern) > 4096:
                 raise ValueError("Invalid formatting regex")
-            re.compile(pattern)
-            regex.compile(pattern)
+            try:
+                re.compile(pattern)
+                regex.compile(pattern)
+            except (re.error, regex.error, RecursionError) as error:
+                raise ValueError(f"Invalid formatting regex: {error}") from error
     elif kind == "countdown":
         nums = target.get("nums")
         if (
@@ -303,28 +305,17 @@ def score(text, target):
         return 0.0
 
 
-class CandidateVerifier:
+class DeterministicVerifier:
     get_config_class = staticmethod(lambda: task_verifiers.RewardConfig)
 
     def __init__(self, verifier_config=None):
         pass
 
     async def async_call(self, tokens, prediction, label, **kwargs):
-        policy = "zero"
-        if isinstance(label, dict) and label.get("kind") == "format":
-            policy = os.environ.get(
-                "OI_MILES_FORMAT_TIMEOUT_POLICY", os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
-            )
-        if policy not in ("zero", "raise"):
-            raise ValueError(
-                "OI_MILES_FORMAT_TIMEOUT_POLICY (or inherited OI_MILES_MATH_TIMEOUT_POLICY) must be zero or raise"
-            )
         start = time.monotonic()
         try:
             result = score(prediction, label)
         except FormattingVerifierTimeout as error:
-            if policy == "raise":
-                raise
             logger.warning("Formatting verifier timeout; assigning fallback zero reward: %s", error)
             return Result(
                 0.0,
@@ -332,10 +323,10 @@ class CandidateVerifier:
                     "kind": "format",
                     "status": "timeout",
                     "error": str(error),
-                    "failure_policy": policy,
+                    "failure_policy": "zero",
                     "elapsed_seconds": time.monotonic() - start,
                 },
             )
         if not math.isfinite(result):
-            raise ValueError("Nonfinite candidate reward")
+            raise ValueError("Nonfinite deterministic reward")
         return Result(result)
