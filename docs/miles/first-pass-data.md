@@ -19,14 +19,15 @@ The versioned release destination is:
 coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
 qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
 records verification on shared storage; use the release after its status is `verified`. `configs/<name>.toml` provides a ready
-single-source `[data]` fragment with absolute shared paths. The immutable archive
-below reproduces this release. It contains bounded transfer pieces, an archive
-manifest and `stage_release.py`; the staging script verifies reconstructed archive
-hashes, extracts the complete release and verifies the catalog's file hashes.
+single-source `[data]` fragment with absolute shared paths. The versioned S3 archive
+below reproduces this release. It contains compressed source archives, an archive
+manifest and `stage_release.py`; the staging script verifies archive hashes,
+extracts the complete release and verifies the catalog's file hashes. Use `s5cmd`
+for bulk transfer; Beaker is used only for the small staging helper and CPU job.
 
 | Release identity | Value |
 |---|---|
-| Portable archive | [01M6SF13DDXJ2CWGWRH1TAYMKP](https://beaker.org/ds/01M6SF13DDXJ2CWGWRH1TAYMKP) |
+| S3 archive | `s3://robertb-beaker/rl-dataset-qualification/miles-first-pass-20261106-v1/` |
 | Final catalog SHA256 | `3616ec5ed4861c12a572af64d1df3fe9e9d3ac326cd5d736e302b3455aaed1eb` |
 
 The archive includes refreshed receipts from requalifying all six structured-output
