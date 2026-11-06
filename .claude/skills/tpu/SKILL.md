@@ -28,9 +28,9 @@ Rules an agent follows:
   does nothing while it is admitted.
 - **Pick the mesh from the guide's measured table** (Changing the recipe). On the `8x8x8`, a short sweep of the
   parallelism split, batch, vocab tiling and XLA collective flags found only data 8 x fsdp 8 faster for tiny (+8%), and
-  small fits only its one config. Tiny's loss went NaN in 5 of 8 short runs on the `8x8x8` recreated on 2026-11-03 and in
-  0 of 3 on a `4x4x8` with the same image: don't train on that slice until it is cleared, and run any new slice
-  well past step 20 before trusting it. A new slice or mesh needs an xprof of one TPU step first (in-loop
+  small fits only its one config. Don't set `--xla_tpu_enable_async_ragged_all_to_all`: it corrupts an MoE router
+  gate's gradient (~1e33) while the forward loss stays normal, every few steps on the `8x8x8` (guide: Changing the recipe). Run any
+  new slice well past step 20 before trusting it. A new slice or mesh needs an xprof of one TPU step first (in-loop
   all-gathers cost 140x once), and its own same-slice control.
 - **Stream `REQUIRED_RBF` from JAX process 0 from step 1** (`kubectl logs -f` on that pod) when a rule needs every step.
   Polling `kubectl logs` loses steps at kubelet's log rotation, and the agent account cannot read Cloud Logging.
