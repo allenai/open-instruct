@@ -12,14 +12,8 @@ from open_instruct.miles.rewards import deterministic_verifiers as cv
 from open_instruct.miles.rewards import json_schema, rewards
 
 
-@pytest.mark.parametrize(
-    "factory",
-    [
-        "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
-        "open_instruct.miles.rewards.candidate_verifiers.CandidateVerifier",
-    ],
-)
-def test_saved_registry_factory_names_remain_loadable(tmp_path, factory):
+def test_deterministic_registry_factory(tmp_path):
+    factory = "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier"
     path = tmp_path / "verifiers.json"
     path.write_text(json.dumps({"numeric": {"factory": factory}}))
     verifier = rewards._registry(str(path))["numeric"]

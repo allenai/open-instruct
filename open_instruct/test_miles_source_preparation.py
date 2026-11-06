@@ -2,7 +2,6 @@
 
 import asyncio
 import copy
-import importlib
 import json
 
 import pytest
@@ -53,16 +52,6 @@ def test_explicit_math_and_no_topic_subsetting():
         sources.adapt({"question": "Prove the theorem", "answer": "a proof"}, "math_v1")
     with pytest.raises(ValueError, match="requires_tool"):
         sources.adapt({"responses_create_params": {"input": "hello", "tools": ["search"]}}, "nemo_v1")
-
-
-def test_legacy_preparation_module_and_adapter_use_current_contract():
-    legacy = importlib.import_module("open_instruct.miles.datasets.candidate_sources")
-    raw = {"prompt": "Compute 1+1", "target": {"kind": "numeric", "value": "2"}}
-    assert legacy.adapt(raw, "candidate_v1") == sources.adapt(raw, "deterministic_v1")
-    assert legacy.prepare is sources.prepare
-    assert sources.FACTORIES["deterministic"] == (
-        "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier"
-    )
 
 
 def test_full_population_no_cap_or_screen_reservation(tmp_path):

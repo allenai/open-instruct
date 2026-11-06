@@ -96,9 +96,6 @@ def messages(raw):
 
 def adapt(raw, kind, options=None):
     options = options or {}
-    # Accept source plans written before the dataset terminology cleanup.
-    if kind == "candidate_v1":
-        kind = "deterministic_v1"
     ms = messages(raw)
     meta = raw.get("verifier_metadata") or {}
     if kind == "nemo_v1":

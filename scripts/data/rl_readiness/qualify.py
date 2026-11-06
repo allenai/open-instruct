@@ -33,8 +33,6 @@ FACTORIES = {
     "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
     "open_instruct.ground_truth_utils.MathVerifier",
     "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
-    # Existing immutable registries retain their original factory path.
-    "open_instruct.miles.rewards.candidate_verifiers.CandidateVerifier",
     "open_instruct.miles.rewards.reasoning_gym.ReasoningGymVerifier",
     "open_instruct.miles.rewards.json_schema.JSONSchemaVerifier",
 }
@@ -225,8 +223,7 @@ async def main(args):
             "shuffle": False,
         }
         record = {
-            # Preserve the source identifier field in existing qualification exports.
-            "candidate": values[0]["candidate"],
+            "source": name,
             "rows": len(rows),
             "status": "deferred",
             "strata": sorted({v["stratum"] for v in values}),

@@ -35,8 +35,7 @@ class FormattingVerifierTimeout(TimeoutError):
 class Result:
     score: float
     cost: float = 0.0
-    # Keep the versioned diagnostic identifier used by existing qualification receipts.
-    diagnostics: dict = field(default_factory=lambda: {"kind": "candidate_local_v1", "status": "ok"})
+    diagnostics: dict = field(default_factory=lambda: {"kind": "deterministic_local_v1", "status": "ok"})
 
 
 def answer_text(text):

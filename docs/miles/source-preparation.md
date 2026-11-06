@@ -63,9 +63,6 @@ and are recorded as omissions rather than moved across conversation turns.
 
 New registries use
 `open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier`.
-The former `candidate_sources` command, `candidate_v1` adapter name, and
-`candidate_verifiers.CandidateVerifier` factory remain compatibility aliases for
-existing plans and immutable bundles. They do not define separate behavior.
 
 Litmus preserves row-specific answer formats and tolerances. The versioned
 `litmus_scalar_v1` contract deliberately requires complete finite numeric or
