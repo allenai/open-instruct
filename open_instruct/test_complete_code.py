@@ -2,9 +2,11 @@
 
 import asyncio
 import dataclasses
+import importlib
 from types import SimpleNamespace
 
 import pytest
+import requests
 
 from open_instruct.miles.datasets import source_preparation as sources
 from open_instruct.miles.rewards import complete_code
@@ -100,10 +102,62 @@ def test_livecodebench_adaptation_preserves_test_order():
     pytest.importorskip("code_execution_client.livecodebench")
     raw = {"question": "Add", "verifier_metadata": {"unit_tests": {"inputs": ["2 3", "4 5"], "outputs": ["5", "9"]}}}
     _, label, name, stratum = sources.adapt(raw, "livecodebench_v1")
-    assert label == {"mode": "stdio", "tests": [{"input": "2 3", "output": "5"}, {"input": "4 5", "output": "9"}]}
+    assert label == {
+        "mode": "stdio",
+        "tests": [
+            {"input": "2 3", "output": "5", "comparison": "nemo_v1"},
+            {"input": "4 5", "output": "9", "comparison": "nemo_v1"},
+        ],
+    }
     assert name == "complete_code" and stratum == "livecodebench_v1:stdio"
 
 
 def test_invalid_source_assertion_is_a_target_error():
     with pytest.raises(ValueError, match="source test"):
         complete_code.validate_target({"mode": "assert", "tests": ["assert f( == 1"]})
+
+
+@pytest.mark.parametrize(
+    ("prediction", "unit_tests", "expected_score"),
+    [
+        ("print('yes')", {"inputs": [""], "outputs": ["YES"]}, 1),
+        ("print('1.0000005')", {"inputs": [""], "outputs": ["1.0"]}, 1),
+        ("print('alice')", {"inputs": [""], "outputs": ["Alice"]}, 0),
+        ("print('1.01')", {"inputs": [""], "outputs": ["1.0"]}, 0),
+        ("def f(x): return 1.0000005", {"inputs": ["0"], "outputs": ["1.0"], "fn_name": "f"}, 1),
+        ("def f(x): return 1.01", {"inputs": ["0"], "outputs": ["1.0"], "fn_name": "f"}, 0),
+        ("broken syntax!", {"inputs": [""], "outputs": ["YES"]}, 0),
+    ],
+)
+def test_nemotron_adapter_selects_native_comparison_over_http(monkeypatch, prediction, unit_tests, expected_score):
+    service = pytest.importorskip("code_execution_service")
+    handler = importlib.import_module("code_execution_service.handler")
+    local_server = importlib.import_module("code_execution_service.local_server")
+    monkeypatch.setattr(handler, "_TOKEN", "test")
+    monkeypatch.setenv("CODE_EXECUTION_TOKEN", "test")
+    server, url = local_server.serve_in_thread()
+    session_type = requests.Session
+
+    class LocalSession(session_type):
+        def request(self, method, target_url, **kwargs):
+            return super().request(method, target_url.replace("https://service.example", url), **kwargs)
+
+    monkeypatch.setattr(requests, "Session", LocalSession)
+    try:
+        raw = {"question": "Solve", "verifier_metadata": {"unit_tests": unit_tests}}
+        _, target, _, _ = sources.adapt(raw, "livecodebench_v1")
+        config = dataclasses.replace(CONFIG, expected_source_sha256=service.SOURCE_SHA256)
+        result = asyncio.run(complete_code.CompleteCodeVerifier(config).async_call([], prediction, target))
+        assert result.score == expected_score
+        assert result.diagnostics["status"] == "ok"
+        assert result.diagnostics["tests"] == len(unit_tests["inputs"])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_nemotron_target_rejects_unknown_comparison():
+    with pytest.raises(ValueError):
+        complete_code.validate_target(
+            {"mode": "stdio", "tests": [{"input": "", "output": "YES", "comparison": "typo"}]}
+        )
