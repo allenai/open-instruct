@@ -19,7 +19,7 @@ import json
 from collections import Counter
 from enum import StrEnum
 from json import JSONDecodeError
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias, cast
 
 from jsonschema import validators
 from jsonschema.exceptions import SchemaError as JSONSchemaError
@@ -519,7 +519,7 @@ class ActionComparator(BaseModel):
         if score == 1.0:
             return ActionComparisonResult(reward=1.0, category=StepRewardCategory.EXPECTED_TOOL_CALL)
 
-        return ActionComparisonResult(reward=score, category=category)
+        return ActionComparisonResult(reward=score, category=cast(StepRewardCategory, category))
 
     def compare_tool_call_arguments(
         self,

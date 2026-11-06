@@ -5,6 +5,7 @@ ToolRL preparation integration (5732f2ef5); no tools are executed during trainin
 """
 
 import copy
+from typing import Any, cast
 
 from open_instruct.miles.rewards import nemo_tool_calls
 
@@ -78,12 +79,13 @@ def messages(raw):
             role = item.get("role")
             if role not in {"user", "assistant", "system", "developer", "tool"}:
                 raise ValueError("Unsupported tool-history role")
-            message = {"role": role, "content": text_content(item.get("content") or "")}
+            message: dict[str, Any] = {"role": role, "content": text_content(item.get("content") or "")}
             if item.get("tool_calls"):
                 if role != "assistant":
                     raise ValueError("Only assistant history may contain calls")
-                message["tool_calls"] = copy.deepcopy(item["tool_calls"])
-                for call in message["tool_calls"]:
+                history_calls = cast(list[dict[str, Any]], copy.deepcopy(item["tool_calls"]))
+                message["tool_calls"] = history_calls
+                for call in history_calls:
                     function = call["function"]
                     function["arguments"] = nemo_tool_calls.json_object(function["arguments"])
                     if call.get("id"):

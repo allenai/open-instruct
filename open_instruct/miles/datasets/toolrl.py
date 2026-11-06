@@ -5,13 +5,9 @@ import json
 
 from jsonschema import validators
 from referencing import Registry
-from referencing.exceptions import NoSuchResource, Unresolvable
+from referencing.exceptions import Unresolvable
 
 from open_instruct import toolrl_utils
-
-
-def deny_external(uri):
-    raise NoSuchResource(ref=uri)
 
 
 def adapt(raw, options):
@@ -29,7 +25,8 @@ def adapt(raw, options):
         schema = function["parameters"]
         cls = validators.validator_for(schema)
         cls.check_schema(schema)
-        checkers[function["name"]] = cls(schema, registry=Registry(retrieve=deny_external))
+        # The default registry refuses retrieval with NoSuchResource; no network access.
+        checkers[function["name"]] = cls(schema, registry=Registry())
     calls = list(target["calls"])
     for message in messages:
         if (

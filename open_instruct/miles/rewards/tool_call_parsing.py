@@ -8,6 +8,8 @@ Only parsing is shared; source-specific reward semantics belong to each verifier
 import ast
 import json
 import re
+from collections.abc import Sequence
+from typing import Any
 
 from open_instruct.miles.rewards import structured_tool_calls
 
@@ -105,7 +107,7 @@ def _boundary(text, delimiter):
     return len(text)
 
 
-def parse_pythonic_calls(body, tools=()):
+def parse_pythonic_calls(body: str, tools: Sequence[dict[str, Any]] = ()):
     """Read the template's literal call notation, including non-Python tool names.
 
     Names are matched against declarations before looking for parentheses: some
@@ -115,7 +117,8 @@ def parse_pythonic_calls(body, tools=()):
     match = re.fullmatch(r"\s*<function_calls>(.*?)</function_calls>\s*", body, re.S)
     if match is None:
         raise ValueError("Expected a complete Pythonic function-call block")
-    names = sorted((t["function"]["name"] for t in tools), key=len, reverse=True)
+    names: list[str] = [t["function"]["name"] for t in tools]
+    names.sort(key=len, reverse=True)
     remaining, calls = match[1].strip(), []
     while remaining:
         name = next((n for n in names if remaining.startswith(n + "(")), None)
