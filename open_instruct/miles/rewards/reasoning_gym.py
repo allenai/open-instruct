@@ -6,7 +6,7 @@ import math
 import re
 from importlib import metadata
 
-from open_instruct.miles.rewards import candidate_verifiers, task_verifiers
+from open_instruct.miles.rewards import deterministic_verifiers, task_verifiers
 
 TASKS = frozenset(
     {
@@ -41,7 +41,7 @@ class ReasoningGymVerifier:
         task = entry["metadata"]["source_dataset"]
         if task not in TASKS or not isinstance(entry.get("answer"), str) or not entry["answer"].strip():
             raise ValueError("Unqualified ReasoningGym task or missing reference")
-        final = candidate_verifiers.answer_text(prediction)
+        final = deterministic_verifiers.answer_text(prediction)
         tagged = re.findall(r"<answer>(.*?)</answer>", final, re.S)
         boxes = re.findall(r"\\boxed\{([^{}]+)\}", final)
         # Multiple explicit answers cannot be resolved by picking the last one.
@@ -84,7 +84,7 @@ class ReasoningGymVerifier:
             result = 0.0
         if not math.isfinite(result) or not 0 <= result <= 1:
             raise ValueError("Invalid ReasoningGym reward")
-        return candidate_verifiers.Result(
+        return deterministic_verifiers.Result(
             result,
             diagnostics={"kind": "reasoning_gym_0.1.25", "status": "ok", "scoring_protocol": "exact_default_v2"},
         )

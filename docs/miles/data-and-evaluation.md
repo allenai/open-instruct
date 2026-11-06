@@ -468,12 +468,12 @@ training; the fallback applies to grading requests.
 ### Symbolic math timeouts
 
 Symbolic math runs in a bounded subprocess pool. An individual request exceeding
-45 seconds kills and replaces that worker and defaults to reward zero. The sample
+45 seconds kills and replaces that worker and returns reward zero. The sample
 retains `verifier_diagnostics` with `kind=math`, `status=timeout` and elapsed time;
 `rollout/math_verifier/timeouts` and `timeout_fraction` count these separately from
-ordinary incorrect answers. Set `OI_MILES_MATH_TIMEOUT_POLICY=raise` for strict
-handling. Configuration errors, unexpected worker failures and cancellation
-still propagate. A timeout-zero is an ungraded sample, not proof of a wrong
+ordinary incorrect answers. Validation timeouts always return zero with diagnostics;
+there is no timeout policy setting. Configuration errors, unexpected worker
+failures and cancellation still propagate. A timeout-zero is an ungraded sample, not proof of a wrong
 mathematical answer; include the timeout rate when interpreting benchmark scores.
 
 ## Independent background evaluation
@@ -513,7 +513,7 @@ mixed/all-zero group filtering. Their input
 export must come from a reviewed adapter with immutable source provenance and
 existing hygiene receipts.
 
-The optional `candidate_verifiers` factories cover explicit MCQA answer lines,
+The optional `deterministic_verifiers` factories cover explicit MCQA answer lines,
 formatting-only checks, Countdown arithmetic, named knight/knave assignments,
 structural numeric answers, exact text, and typed JSON answers. MCQA uses a
 prepared `Answer: LETTER` contract; it must not silently replace a source's
@@ -555,12 +555,11 @@ with each regex call additionally capped at 100 ms or the remaining time,
 whichever is shorter. The deadline is checked between lines, markers, matches and
 patterns, including the quoted-pair fast path. These are in-process checks, not
 process isolation: linear string operations and target validation are not
-forcibly interrupted. A timeout defaults
-to fallback zero with `verifier_diagnostics.status="timeout"`, the original error,
+forcibly interrupted. A timeout returns
+fallback zero with `verifier_diagnostics.status="timeout"`, the original error,
 and elapsed time. It is an ungraded response, not evidence of an incorrect answer.
-`OI_MILES_FORMAT_TIMEOUT_POLICY=raise` stops on the error; `zero` continues. When
-unset, this inherits `OI_MILES_MATH_TIMEOUT_POLICY` (default `zero`). Invalid
-targets still raise in either mode. Failure capture reserves two slots per
+There is no timeout policy setting. Invalid targets and unexpected failures
+still raise. Failure capture reserves two slots per
 worker/save directory: one for a raised registered-call exception and one for a
 returned `status="timeout"` diagnostic from any verifier, including math and
 formatting. Each records the full prompt, response, scored response and target
@@ -568,7 +567,7 @@ under `<save>/verifier_failures/`. A fallback timeout cannot consume the excepti
 slot, and absent error text is recorded with a descriptive placeholder.
 Minimum-line rules return success as soon as enough lines match; irrelevant
 trailing lines cannot invalidate that predicate. Qualification rejects timeouts
-even when the runtime policy permits fallback zero.
+even though runtime validation timeouts return zero.
 
 ReasoningGym families inheriting its default substring scorer use stripped exact
 matching instead. At the pinned version these are `base_conversion`, `leg_counting`

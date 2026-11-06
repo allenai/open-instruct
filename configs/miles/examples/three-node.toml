@@ -38,7 +38,6 @@ mount_path = "/weka/oe-adapt-default"
 [launch.env]
 # Ray logical capacity per node; the actor reservations below are not thread counts.
 OI_MILES_RAY_CPUS = "64"
-OI_MILES_MATH_TIMEOUT_POLICY = "zero"
 OI_MILES_CODE_FAILURE_POLICY = "zero"
 OI_MILES_JUDGE_FAILURE_POLICY = "zero"
 SGLANG_TIMEOUT_KEEP_ALIVE = "60"
