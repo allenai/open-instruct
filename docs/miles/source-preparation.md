@@ -391,7 +391,7 @@ validate reward behavior; training continues to use the complete qualified pool.
 `verifier_metadata.unit_tests` (`inputs`, `outputs`, optional `fn_name`). It retains
 all aligned pairs and distinguishes stdio from module/Solution function calls.
 The readiness requirements pin the maintained execution client to commit
-`4cab7e85e8748db501163e6cbbc5ab7c041692af`.
+`103ca279b35e8e81d118947f82b72c22676c6540`.
 
 Each source plan must supply trusted service configuration, outside raw rows:
 
