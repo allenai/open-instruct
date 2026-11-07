@@ -112,9 +112,14 @@ def test_actual_filter_does_not_credit_until_optimizer_commit_and_restore(args, 
         source.acknowledge_groups([kept])
         assert sum(source.provider.trained.values()) == 0
         source.stage_training_batch(0, kept)
-        source.commit_training_batch(0)
+        metrics = source.commit_training_batch(0)
         source.commit_training_batch(0)  # RPC retry must not double-credit or append another receipt.
         assert sum(source.provider.trained.values()) == 1
+        assert metrics == source.provider.metrics()
+        for key in ("proposed", "attempted", "filtered", "filtered_all_zero", "trained"):
+            expected = 2 if key in ("proposed", "attempted") else 1
+            assert sum(metrics[f"rollout/pool/{p}/{key}"] for p in source.provider.providers) == expected
+        assert all(recorder.metrics()[k] == v for k, v in metrics.items())
         receipts = list((tmp_path / "records").glob("pool-exposure-*.jsonl"))
         assert len(receipts) == 1
         receipt = json.loads(receipts[0].read_text())
@@ -150,6 +155,9 @@ def test_expired_queue_entry_releases_exposure_reservation(args, tmp_path, polic
         assert not source.provider.pending
         assert sum(source.provider.trained.values()) == 0
         assert sum(source.provider.terminal.values()) == 1
+        pool = kept[0].metadata["sampling_pool"]
+        assert recorder.metrics()[f"rollout/pool/{pool}/discarded"] == 1
+        assert recorder.metrics()[f"rollout/pool/{pool}/discarded_unobserved"] == 0
     finally:
         recorder.close()
         source.close()

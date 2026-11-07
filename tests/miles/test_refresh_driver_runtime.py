@@ -62,6 +62,7 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider):
     async def commit(i):
         assert ("train",) in events and failure != "training"
         events.append(("exposure", i))
+        return {"rollout/pool/math/trained": 1}
 
     manager.core_commit_exposure = AsyncMock(side_effect=commit)
     manager.core_publication_boundary = AsyncMock(side_effect=boundary)
@@ -69,7 +70,13 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider):
     monkeypatch.setattr(driver.ray, "is_initialized", lambda: True)
     monkeypatch.setattr(driver.throughput, "report", lambda *_args: {"warnings": []})
     monkeypatch.setattr(driver, "stage", lambda *_args, **_kwargs: nullcontext())
-    for name in ("init_tracking", "finish_tracking", "define_step_key_metric_group", "remove_rollout_data_refs"):
+    for name in (
+        "init_tracking",
+        "finish_tracking",
+        "define_step_key_metric_group",
+        "remove_rollout_data_refs",
+        "log",
+    ):
         monkeypatch.setattr(driver, name, Mock())
     monkeypatch.setattr(driver.wandb, "run", None)
     monkeypatch.setattr(driver.object_store, "init_instance", Mock())
@@ -112,6 +119,9 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider):
     assert manager.core_commit_exposure.await_count == int(
         provider in ("pools", "pool_exposure") and failure not in {"initial", "training"}
     )
+    assert driver.log.call_count == manager.core_commit_exposure.await_count
+    if driver.log.called:
+        driver.log.assert_called_once_with(args, {"pool/update": 1, "pool/trained/math": 1}, step_key="pool/update")
     for component in (manager, learner, inference):
         component.dispose.assert_awaited_once()
     learner.execute_workers.assert_awaited_once_with("close_weight_transport")

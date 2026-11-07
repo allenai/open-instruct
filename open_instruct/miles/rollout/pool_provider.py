@@ -5,7 +5,7 @@ import math
 import random
 from collections import Counter
 
-from open_instruct.miles.rollout import pool_sampling, replay_provider
+from open_instruct.miles.rollout import pool_metrics, pool_sampling, replay_provider
 
 SELECTION_ID = "pool_selection_id"
 POOL = "sampling_pool"
@@ -47,7 +47,7 @@ class PoolPromptProvider:
         self.sampling = pool_sampling.validate({} if sampling is None else sampling, pools)
         self.identity = copy.deepcopy(
             {
-                "version": 2,
+                "version": 3,
                 "manifest": identity,
                 "pools": pools,
                 "seed": seed,
@@ -80,6 +80,8 @@ class PoolPromptProvider:
         self.targets = Counter()
         self.terminal = Counter()
         self.proposed = Counter()
+        self.replay_proposed = Counter()
+        self.observations = Counter()
         self.tokens = Counter()
         self.committed_update = -1
 
@@ -118,6 +120,7 @@ class PoolPromptProvider:
             self.pending[self.draws] = {"pool": name, "active": active, "metadata": dict(sample.metadata)}
             self.draws += 1
             self.proposed[name] += 1
+            self.replay_proposed[name] += bool(sample.metadata.get("prompt_replay_review", False))
             result.append(sample)
         return result
 
@@ -128,10 +131,13 @@ class PoolPromptProvider:
                 continue
             if record.get("kind") == "group" and not entry.get("observed"):
                 entry["observed"] = True
+                pool_metrics.observe(self.observations, entry, record)
                 lengths = [r.get("response_tokens") for r in record.get("responses", [])]
                 if lengths and all(type(n) is int and n >= 0 for n in lengths):
                     entry["response_tokens"] = sum(lengths)
                     self.tokens[f"{entry['pool']}/generated_tokens"] += sum(lengths)
+                else:
+                    self.tokens[f"{entry['pool']}/generated_tokens_unknown_groups"] += 1
             provider = self.providers[entry["pool"]]
             if isinstance(provider, replay_provider.ReplayPromptProvider):
                 provider.feedback(
@@ -144,6 +150,9 @@ class PoolPromptProvider:
             if (record.get("kind") == "disposition" and record.get("disposition") == "discarded") or (
                 record.get("kind") == "group" and record.get("filter_decision") == "filtered"
             ):
+                if record.get("kind") == "disposition":
+                    self.observations[f"{entry['pool']}/discarded"] += 1
+                    self.observations[f"{entry['pool']}/discarded_unobserved"] += not entry.get("observed", False)
                 self.pending.pop(record[SELECTION_ID])
                 self.terminal[entry["pool"]] += 1
 
@@ -184,6 +193,8 @@ class PoolPromptProvider:
             "targets": dict(self.targets),
             "terminal": dict(self.terminal),
             "proposed": dict(self.proposed),
+            "replay_proposed": dict(self.replay_proposed),
+            "observations": dict(self.observations),
             "tokens": dict(self.tokens),
             "committed_update": self.committed_update,
             "last_commit": getattr(self, "last_commit", None),
@@ -208,11 +219,16 @@ class PoolPromptProvider:
             )
         ):
             raise ValueError("Invalid pool checkpoint pending selections")
-        for field in ("trained", "targets", "terminal", "proposed"):
+        for field in ("trained", "targets", "terminal", "proposed", "replay_proposed"):
             if not set(state[field]) <= self.providers.keys() or any(
                 type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in state[field].values()
             ):
                 raise ValueError("Invalid pool checkpoint counters")
+        observation_keys = {f"{pool}/{key}" for pool in self.providers for key in pool_metrics.OBSERVATIONS}
+        if not set(state["observations"]) <= observation_keys or any(
+            type(value) is not int or value < 0 for value in state["observations"].values()
+        ):
+            raise ValueError("Invalid pool checkpoint observations")
         if sum(state["terminal"].values()) + len(state["pending"]) != draws:
             raise ValueError("Pool checkpoint reservations do not reconcile")
         random.Random().setstate(state["rng"])
@@ -226,7 +242,7 @@ class PoolPromptProvider:
             raise
         self.rng.setstate(state["rng"])
         self.draws, self.pending = state["draws"], copy.deepcopy(state["pending"])
-        for name in ("trained", "targets", "terminal", "proposed", "tokens"):
+        for name in ("trained", "targets", "terminal", "proposed", "replay_proposed", "observations", "tokens"):
             setattr(self, name, Counter(state[name]))
         self.committed_update, self.last_commit = state["committed_update"], state["last_commit"]
 
@@ -239,6 +255,7 @@ class PoolPromptProvider:
             "draws": self.draws,
             "pending": copy.deepcopy(self.pending),
             "proposed": dict(self.proposed),
+            "replay_proposed": dict(self.replay_proposed),
         }
 
     def load_selection_state_dict(self, state):
@@ -247,6 +264,7 @@ class PoolPromptProvider:
         self.rng.setstate(state["rng"])
         self.draws, self.pending = state["draws"], copy.deepcopy(state["pending"])
         self.proposed = Counter(state["proposed"])
+        self.replay_proposed = Counter(state["replay_proposed"])
 
     def metrics(self):
         pending = Counter(entry["pool"] for entry in self.pending.values())
@@ -263,7 +281,36 @@ class PoolPromptProvider:
         if self.sampling["policy"] == "exposure":
             result.update({f"rollout/pool/{p}/target": self.targets[p] for p in self.providers})
         result.update({f"rollout/pool/{k}": v for k, v in self.tokens.items()})
+        proposed, trained = sum(self.proposed.values()), sum(self.trained.values())
+        attempted = sum(self.observations[f"{p}/attempted"] for p in self.providers)
+        generated = sum(self.tokens[f"{p}/generated_tokens"] for p in self.providers)
         for name, provider in self.providers.items():
+            base = getattr(provider, "base", provider)
+            prefix = f"rollout/pool/{name}/"
+            result.update({prefix + k: self.observations[f"{name}/{k}"] for k in pool_metrics.OBSERVATIONS})
+            result.update(
+                {
+                    prefix + "available_rows": len(base.samples),
+                    prefix + "fresh_proposed": self.proposed[name] - self.replay_proposed[name],
+                    prefix + "replay_proposed": self.replay_proposed[name],
+                    # Fresh rows are drawn once, so their first observations measure
+                    # coverage without a growing ID set. This is not content deduplication.
+                    prefix + "coverage": self.observations[f"{name}/fresh_attempted"] / max(1, len(base.samples)),
+                    prefix + "proposed_share": self.proposed[name] / max(1, proposed),
+                    prefix + "attempted_share": self.observations[f"{name}/attempted"] / max(1, attempted),
+                    prefix + "trained_share": self.trained[name] / max(1, trained),
+                    prefix + "generated_token_share": self.tokens[f"{name}/generated_tokens"] / max(1, generated),
+                }
+            )
+            for field in (
+                "generated_tokens",
+                "generated_tokens_unknown_groups",
+                "trained_tokens",
+                "trained_tokens_unknown_groups",
+                "fresh_groups",
+                "replay_groups",
+            ):
+                result[prefix + field] = self.tokens[f"{name}/{field}"]
             if isinstance(provider, replay_provider.ReplayPromptProvider):
                 result.update(
                     {
