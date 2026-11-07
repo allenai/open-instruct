@@ -3,21 +3,23 @@
 # dir (POOL) and --loss_implementation fused_linear. Same structure as h161_gpu_launch.sh (b1r arm), on one node.
 # Writes a raw Beaker spec and submits it; DRY_RUN=1 prints the spec instead.
 #
-#   S_R=<steps> REPLAY=<POOL dir> scripts/c12/h194_gpu_launch.sh <tmax|noag> <smoke|resume|train>
+#   S_R=<steps> REPLAY=<POOL dir> scripts/c12/h194_gpu_launch.sh <b1|noag|tmax> <smoke|resume|train>
 #
-#   tmax   olmo35-small-mm-ckpt2-256k-tmax step22320; noag: olmo35-small-mm-ckpt2-256k-noagentic step21159
-#          (H181's two fixed-B2 candidates; H194's base is H181's pick).
-#   S_R    two passes at 8 instances per step (H194 R4', from the offline loader replay); --num_epochs 2.
+#   b1     olmo35-small-mm-ckpt1-64k step20000 (H182's b1r base and HF reference); noag:
+#          olmo35-small-mm-ckpt2-256k-noagentic step21159; tmax: olmo35-small-mm-ckpt2-256k-tmax step22320.
+#          H194's 2026-11-06 amendment runs b1 and noag.
+#   S_R    H182's step count (18,410 for seed 34521), half an epoch at 8 instances per step; --num_epochs 1 and
+#          --max_train_steps S_R, so the LR schedule spans S_R as in H182 (H194 R4' gives the dose at S_R).
 #   smoke  G2: 30 steps, every rank dumps its step-1 batch and logs batch hashes; then h161_refce.py on GPU 0
 #          (the HF step-1 CE through H181's seeded HF copy of the base). Timeout 2 h.
 #   resume G3: the smoke's schedule with autoResume, batch hashes, an ephemeral checkpoint at step 10 and a hold after
 #          step 19 for `beaker job preempt`; the requeued job resumes from step10 and replays steps 11-19.
-#   train  the run: permanent checkpoint at the end of epoch 1, ephemeral every SAVE_EVERY (1000), keep 2.
+#   train  the run: permanent checkpoint half way (H182's), ephemeral every SAVE_EVERY (1000), keep 2.
 #
 # Env: IMAGE (default the H111/H182 image), PRIORITY (high), MIN_RUNTIME, TIMEOUT, SAVE_EVERY, AUTO_RESUME,
 # MAX_RETRIES, RUN_SUFFIX, WAIT_FOR_BASE=<minutes>, DRY_RUN=1.
 set -euo pipefail
-BASE="${1:?tmax or noag}"
+BASE="${1:?b1, noag or tmax}"
 MODE="${2:?smoke, resume or train}"
 SEED=34521
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -26,6 +28,8 @@ IMAGE="${IMAGE:-01M5KX4ZAN00BJ00ARS7FNG79T}"
 B=/weka/olmo-3p5-post-checkpoints/bases
 H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
 case "$BASE" in
+    b1)   MODEL=$B/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
+          HF_REF=$B/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed ;;
     tmax) MODEL=$B/olmo35-small-mm-ckpt2-256k-tmax/step22320-lm-olmocore/model_and_optim
           HF_REF=$H/olmo35-small-mm-ckpt2-256k-tmax-step22320-base-h149-c12seed ;;
     noag) MODEL=$B/olmo35-small-mm-ckpt2-256k-noagentic/step21159-lm-olmocore/model_and_optim
@@ -43,7 +47,7 @@ CACHE=bf82a8fab8-0a2e7a2c-rowaligned
 FROZEN=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/a7/cache-neptune/numpy_sft/bf82a8fab8-6068a350-rowaligned
 REPLAY="${REPLAY:?REPLAY=<H194 POOL dir>}"
 STEPS="${S_R:?S_R=<steps from H194 R4 prime>}"
-CKPT=$((STEPS / 2)); HOURS=96
+CKPT=$(((STEPS + 1) / 2)); HOURS=24
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="c12rlong-${BASE}-s${SEED}${RUN_SUFFIX:-}"
 case "$MODE" in
@@ -63,7 +67,7 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
 --row_aligned_parts --document_boundaries_from_metadata --max_seq_length 131072 \
 --per_device_train_batch_size 1 --gradient_accumulation_steps 1 --learning_rate 2e-4 --warmup_ratio 0.03 \
---weight_decay 0.0 --max_grad_norm 1.0 --num_epochs 2 --max_train_steps $STEPS --attn_implementation flash_2 \
+--weight_decay 0.0 --max_grad_norm 1.0 --num_epochs 1 --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --loss_implementation fused_linear \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
