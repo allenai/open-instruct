@@ -474,6 +474,8 @@ def _check_ddp_model_args(
         raise ValueError("An OLMoDDPModel (MoE v2) model loads from an olmo-core checkpoint, not a HuggingFace one.")
     if cp_config is not None:
         raise ValueError("Context parallelism is not wired for OLMoDDPModel (MoE v2) models; drop --cp_degree.")
+    # Before the dataset is built, so a config without the sections fails fast.
+    olmo_core_utils.read_checkpoint_train_module(config_name)
 
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:

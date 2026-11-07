@@ -511,6 +511,7 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     Raises:
         ValueError: If model/config not found.
     """
+    # Only olmo_core_finetune.py can train the MoE v2 (OLMoDDPModel) models such a file may describe.
     if model_name_or_config.endswith(".json") and os.path.isfile(model_name_or_config):
         return transformer_config_from_json(model_name_or_config, vocab_size)
 
@@ -580,6 +581,16 @@ def require_transformer_engine() -> None:
         )
 
 
+def read_checkpoint_train_module(config_path: str) -> dict[str, Any]:
+    """The `train_module` section of an olmo-core `config.json`, which must hold `optim` and `dp_config`."""
+    with open(config_path) as config_file:
+        train_module = json.load(config_file).get("train_module")
+    missing = [key for key in ("optim", "dp_config") if key not in (train_module or {})]
+    if missing:
+        raise ValueError(f"{config_path} has no train_module {' or '.join(missing)} to build the MoE v2 trainer from.")
+    return train_module
+
+
 def build_ddp_train_module_config(
     config_path: str,
     rank_microbatch_size: int,
@@ -600,12 +611,7 @@ def build_ddp_train_module_config(
     The z-loss multiplier is the checkpoint's, as on the GPU SFT line whose runs this path reproduces
     (the FSDP path turns z-loss off).
     """
-    with open(config_path) as config_file:
-        payload = json.load(config_file)
-    if "train_module" not in payload:
-        raise ValueError(f"{config_path} has no train_module section to take the optimizer and dp_config from.")
-    checkpoint_train_module = payload["train_module"]
-
+    checkpoint_train_module = read_checkpoint_train_module(config_path)
     optim_config = OLMoDDPOptimizerConfig.from_dict(checkpoint_train_module["optim"])
     optim_config.lr = learning_rate
     optim_config.weight_decay = weight_decay

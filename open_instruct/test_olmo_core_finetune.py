@@ -841,7 +841,7 @@ class BuildDdpTrainModuleConfigTest(unittest.TestCase):
     def test_config_without_train_module_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL})
-            with self.assertRaisesRegex(ValueError, "no train_module section"):
+            with self.assertRaisesRegex(ValueError, "no train_module optim or dp_config"):
                 olmo_core_utils.build_ddp_train_module_config(
                     path,
                     rank_microbatch_size=4096,
@@ -865,8 +865,27 @@ class CheckDdpModelArgsTest(unittest.TestCase):
     def _args(config_name: str | None):
         return types.SimpleNamespace(model=types.SimpleNamespace(config_name=config_name))
 
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.config_path = _write_checkpoint_config(
+            tmp.name, {"model": _TINY_MOE_V2_MODEL, "train_module": _CHECKPOINT_TRAIN_MODULE}
+        )
+
     def test_checkpoint_config_json_passes(self) -> None:
-        olmo_core_finetune._check_ddp_model_args(self._args("/ckpt/config.json"), use_hf_ckpt=False, cp_config=None)
+        olmo_core_finetune._check_ddp_model_args(self._args(self.config_path), use_hf_ckpt=False, cp_config=None)
+
+    @parameterized.expand(
+        [
+            ("no_train_module", {}, "train_module optim or dp_config"),
+            ("no_dp_config", {"train_module": {"optim": {}}}, "train_module dp_config"),
+        ]
+    )
+    def test_config_without_train_module_sections_fails(self, _name: str, extra: dict, message: str) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL, **extra})
+            with self.assertRaisesRegex(ValueError, message):
+                olmo_core_finetune._check_ddp_model_args(self._args(path), use_hf_ckpt=False, cp_config=None)
 
     @parameterized.expand([("missing", None), ("preset", "olmo3_7B")])
     def test_config_name_must_be_a_json_file(self, _name: str, config_name: str | None) -> None:
@@ -875,12 +894,12 @@ class CheckDdpModelArgsTest(unittest.TestCase):
 
     def test_hf_checkpoint_fails(self) -> None:
         with self.assertRaisesRegex(ValueError, "HuggingFace"):
-            olmo_core_finetune._check_ddp_model_args(self._args("/ckpt/config.json"), use_hf_ckpt=True, cp_config=None)
+            olmo_core_finetune._check_ddp_model_args(self._args(self.config_path), use_hf_ckpt=True, cp_config=None)
 
     def test_context_parallelism_fails(self) -> None:
         with self.assertRaisesRegex(ValueError, "Context parallelism"):
             olmo_core_finetune._check_ddp_model_args(
-                self._args("/ckpt/config.json"), use_hf_ckpt=False, cp_config=mock.sentinel.cp_config
+                self._args(self.config_path), use_hf_ckpt=False, cp_config=mock.sentinel.cp_config
             )
 
 
