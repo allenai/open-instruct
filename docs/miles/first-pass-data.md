@@ -20,6 +20,7 @@ coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
 qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
 records verification on shared storage. The corrected release is **offline
 qualified; shared staging is pending**, including all 48 routes and 2,288,298 rows.
+Wait for a verified `STAGED.json` before using the paths and commands below.
 `configs/<name>.toml` provides a ready
 single-source `[data]` fragment
 with absolute shared paths. The versioned S3 archive
@@ -68,8 +69,8 @@ in `CODE_REVISION` and `VALIDATION.json`. Use Beaker image
 `01M6SZCSXG790WNDXV1J4121Z0`, built from that revision; **253 regression tests
 passed inside this image**. It retains the previously tested MILES runtime and
 private execution-client pins. A subsequent preparation-only guard rejects
-non-string source values outside their declared union; use PR-head preparation
-code when rebuilding raw ToolRL data. It reproduced all 3,587 converted records
+non-string source values outside their declared union; use preparation code at
+`0fcedabb85377e27d2db5750645763a28c558057` or later when rebuilding raw ToolRL data. It reproduced all 3,587 converted records
 exactly and passed a 247-test focused suite, so the released data and training
 runtime are unchanged. The earlier GPU training smoke used image
 `01M6SHC8Z3BF1GW3G9R9AFNPZY` at `2c622531eb33302a3e337c7db179ea6b24d15379`;
@@ -82,7 +83,7 @@ it does not replace the pinned MILES runtime. Building that overlay requires
 `--secret id=github_token,env=GH_TOKEN` with access to the private execution client.
 BuildKit mounts the token only for installation; do not pass it as a build argument.
 The archive's `README.md` and `VALIDATION.json` are offline snapshots. This document
-and PR #2178 record final shared staging and the current credential configuration.
+and PR #2178 record the current shared-staging status and credential configuration.
 
 These are explicit **16,384-token prompt variants**, rendered with the bundled
 Olmo Pythonic tool template and tokenizer. Allow response tokens in addition to
@@ -159,7 +160,8 @@ catalog lists the exact available combinations; unsupported routes are absent.
 
 Every retained row went through the training loader. Reviewed gold, wrong,
 near-miss, empty and truncated controls went through the training reward bridge.
-The **5,200 runtime control checks** passed. Each receipt binds the checked prompt
+The **5,200 runtime control checks** passed: the original 5,195 plus five controls
+for the recovered ToolRL row. Each receipt binds the checked prompt
 and verifier files to their content hashes.
 Code controls exercised the live service with complete test suites.
 
