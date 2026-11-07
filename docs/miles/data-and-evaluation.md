@@ -299,6 +299,120 @@ measuring the realized allocation. Frozen exclusion tables are currently rejecte
 with ReMind to avoid silently consuming queued reviews without outcomes. This is a
 CPU-tested interface example, not a GPU-validated reproduction of ReMind's results.
 
+### Low-success history and length-triggered prompt replay
+
+A group with zero or one successful response and several truncations may become
+more productive as the policy changes its answer delivery or subject-matter
+ability. The opt-in prompt-replay layer records that history and
+can regenerate failed prompts after recent response length falls. It wraps the
+ordinary shuffle or mixture provider; it reuses the original prompt and verifier
+targets, never old completions. Existing configurations remain unchanged.
+
+Add these options to an existing fully async run:
+
+```toml
+[core]
+prompt_replay_enabled = true
+prompt_replay_fraction = 0.10
+prompt_replay_length_drop = 0.20
+prompt_replay_window = 256
+prompt_replay_max_successes = 1
+prompt_replay_truncation = "any"
+prompt_replay_answer_probe = true
+
+[records]
+enabled = true
+root = "/weka/your-workspace/inference-records"
+```
+
+| Option | Meaning |
+|---|---|
+| `prompt_replay_fraction` | Fraction of proposed prompt draws reserved for eligible retries. Zero enables tracking only. An empty eligible pool falls back to fresh draws; unused slots do not accumulate. |
+| `prompt_replay_length_drop` | Relative reduction since the failed attempt: 0.20 requires the recent mean to fall to at most 80% of its failure-time value. |
+| `prompt_replay_window` | Number of valid fresh groups in each source's rolling window. Require this many additional fresh groups after a failure before retrying. |
+| `prompt_replay_max_successes` | Maximum successful responses in a complete, valid binary-reward group. Default 1 includes 0/K and 1/K; set 0 for all-zero only. Graded nonbinary groups are tracked but excluded from replay eligibility. |
+| `prompt_replay_truncation` | `any` requires at least one capped response; `half` requires at least half; `all` requires every response capped; `none` imposes no truncation requirement. Default `any`. |
+| `prompt_replay_answer_probe` | Record a bounded literal-reference match for scalar `math` targets, including unfinished text. Unsupported targets are unknown. This is a diagnostic, **not verified correctness**, and never changes a reward. |
+
+The length statistic is mean generated tokens per response across the recent
+fresh groups **within the same source**, including intentional truncation zeroes.
+The failure baseline is that rolling mean when feedback arrives, rather than the
+failed prompt's own length. For example, a 20% threshold with a 10,000-token
+failure baseline permits a retry once a full fresh window has elapsed and the
+source mean is at most 8,000. Replay responses do not update this baseline. Sparse
+sources therefore take longer to become eligible. Shortening is a heuristic for
+when to retry, not evidence that the answer is now within reach.
+
+Complete all-zero groups are counted separately as no truncations, some
+truncations, or all truncations. A capped response deliberately assigned zero by
+`reward_zero_truncated` is valid evidence under that reward policy. Verifier
+errors, unknown outcomes, incomplete groups and aborted generations do not count
+as task failures. Historical IF diagnostics with the successful `ifeval: scored`
+status are recognized despite older recorder validity bookkeeping. Truncation
+membership does not establish that truncation caused an otherwise correct answer
+to fail.
+
+Eligible prompts are visited in first-observation order, without concurrent
+replays of the same prompt. A valid group outside the selected criteria retires the
+candidate; later qualifying fresh observations can enroll it again. A one-success
+group can already train through the normal zero-variance filter and also become a
+future replay candidate. A qualifying replay waits for another
+full fresh window and a further relative length drop. An invalid replay retains
+the candidate but also resets its cooldown. The first scored generation counts;
+staleness regeneration is not counted twice.
+
+History, length windows, pending reviews and base-provider cursor are checkpointed
+with the rollout ledger. Resume requires the same replay configuration and prompt
+catalog. Enabling replay on an old run requires an explicit new continuation;
+it cannot reconstruct unrecorded history from a legacy cursor. Frozen exclusions,
+ReMind, synchronous rollouts and nonglobal datasets are currently rejected.
+Like ReMind, this feature requires working recorder feedback and fails if the
+recorder cannot construct outcomes; disk queue drops remain separately reported.
+
+`rollout/prompt_replay/*` metrics report category counts, candidates, replay outcomes
+and literal-match counts (including zero-group and truncated-response subsets).
+Group records carry stable prompt identity, a replay flag, outcome classification,
+and the baseline/current source lengths. Prompt identity hashes all rendered turns
+and verifier targets, scoped by source. It is not semantic deduplication across
+sources. Both online feedback order and async policy lag affect future selections.
+
+Replay fractions refer to proposed groups, not accepted groups, tokens, or compute.
+The base mixture controls fresh draws; replays can change the overall source mix.
+Inspect source attribution and accepted-group/token costs when comparing runs.
+Even a fraction of 1 falls back to fresh draws when no candidate is eligible: this
+is not a finite, frozen-pool replay experiment.
+
+For a compact historical inventory, stream explicitly chosen record attempts:
+
+```bash
+python -m open_instruct.miles records replay-pool \
+  --manifest /records/run/manifest-ATTEMPT.json \
+  --manifest /records/resume/manifest-RESUME.json \
+  --max-policy-version 400 \
+  --max-successes 1 --truncation any \
+  --attempt-ranges attempt-ranges.json \
+  --output zero-reward-history
+```
+
+The optional ranges file maps attempt IDs to inclusive policy-version bounds,
+for example `{"ATTEMPT": [0, 100], "RESUME": [100, 400]}`. Select these from the
+actual checkpoint ancestry to exclude abandoned recovery branches. The CPU reader
+exports `summary.json`, the selected `replay-prompts.jsonl`, all ever-zero IDs in
+`zero-prompts.jsonl`, and `low-success-prompts.jsonl` for comparing alternate
+truncation thresholds locally. They contain per-source counts, stable IDs, success
+and truncation histograms, and each prompt's latest valid outcome. The latter file
+keeps both 0/K and 1/K observations, irrespective of the chosen pool threshold.
+A prompt is included if it **ever** qualified; later outcomes remain visible so
+you can choose a latest-outcome rule when preparing a historical experiment.
+These runs can have K=4 or K=8: do not label a 1/4 observation as 1/8. The reader does not
+copy response text or create a training dataset. Old records without answer probes
+remain unknown; this command does not retrospectively verify their text. Missing
+records and verifier errors are reported separately from valid zeroes.
+
+A 0/K-to-mixed transition alone does not show improvement: ordinary resampling can
+produce it at a frozen policy. Compare replay productivity and downstream evaluations
+against matched continuation controls before adopting this experimental sampler.
+
 <!-- Preserve the former section anchor for existing links. -->
 <a id="large-training-mixture"></a>
 
@@ -606,3 +720,177 @@ reporting unsupported rows. The [reward verifier guide](dataset-verifiers.md)
 describes their runtime contracts. CPU qualification checks the complete prepared
 pool and reviewed reward controls before a named source enters a MILES mixture;
 it does not require a separate inference study or establish downstream benefit.
+
+## Named pools and independent sampling policies
+
+Named pools organize labeled training data independently of how it is sampled.
+The same prepared inventory can use a finite global shuffle, uniform pool draws,
+fixed weighted pool draws, or adaptive training-exposure balancing. The default is
+one global shuffle without replacement. Pool exposure is recorded for every
+policy; only the explicit `exposure` policy uses those counts to adjust draws.
+Selective truncation replay is independently enabled and retains original verifiers.
+
+To treat entire datasets as pools, add `pool` to each source entry. The pool is
+created automatically; neither `[data.pools]` nor row-level `pool_id` is needed:
+
+```toml
+[data.sampling]
+policy = "uniform"
+
+[[data.sources]]
+name = "deepmath"
+pool = "deepmath"
+prompt_data = "/data/deepmath.jsonl.gz"
+reward_config = "/data/verifiers.json"
+
+[[data.sources]]
+name = "polaris"
+pool = "polaris"
+prompt_data = "/data/polaris.jsonl.gz"
+reward_config = "/data/verifiers.json"
+```
+
+Use distinct pool names for dataset-uniform draws, or the same `pool = "math"`
+on multiple sources to group them. Source identity remains separate in records.
+The same assignment works with every sampling policy and optional replay.
+An explicit source `pool` takes precedence over any existing row `pool_id` in the
+prepared training copy; input files, prompts, answers and verifiers are preserved.
+If the named pool already has a configured label, that label becomes the prepared
+row's canonical `pool_id`. Held-out evaluation rows are not reassigned.
+
+Sources without `pool` can still use their row labels when `[data.pools]` is
+provided. Without that label mapping, every source must specify `pool`; there is
+no implicit fallback for unassigned sources. Source fractions remain prohibited
+in pool mode; fixed pool weights belong in `data.sampling.weights`.
+
+| `data.sampling.policy` | Selection |
+|---|---|
+| `shuffle` (default) | One global permutation of all fresh rows, regardless of pool sizes. Replay inserts retries without changing the relative order of fresh rows. |
+| `uniform` | Choose uniformly among currently available pools, then draw the next row from that pool. |
+| `weighted` | Choose available pools by the configured positive weights, renormalizing as pools empty. |
+| `exposure` | Adjust proposals toward uniform trained prompt-group exposure, compensating for delivery rate, accumulated deficits and outstanding work. |
+
+All policies consume each fresh row once and allow pools to empty. With replay
+turned off and a complete traversal, they consume the same fresh inventory; they
+differ in order, not membership. With a shorter budget, their coverage can differ.
+`data.shuffle=false` disables the initial row shuffle; static pool selection still
+uses its seeded RNG. Existing non-pool shuffle/source-mixture epoch behavior is
+unchanged.
+
+Exposure counts groups, not draws or tokens: a prompt with eight responses counts
+as one unit only after the optimizer update using it succeeds. If Math delivers a
+trained group on 25% of draws and IF on 50%, equal exposure needs approximately
+two Math draws per IF draw. Only `exposure` tries to compensate in this way;
+`shuffle`, `uniform` and `weighted` do not react to those outcome counts.
+
+```toml
+[data.sampling]
+policy = "shuffle" # alternatively: uniform, weighted, exposure
+# With policy="weighted", supply every configured pool name:
+# weights = { math = 3, if = 1, code = 1, science = 1, logic = 1, general = 1 }
+
+[data.pools]
+math = { label = "math" }
+if = { label = "instruction_following" }
+code = { label = "code" }
+science = { label = "science_knowledge" }
+logic = { label = "logic_reasoning" }
+general = { label = "general" }
+
+[[data.sources]]
+name = "labeled_data"
+prompt_data = "/data/labeled-trainer-rows.jsonl.gz"
+reward_config = "/data/verifiers.json"
+# Add additional labeled sources in the same way. Omit fraction in pool mode.
+
+[async]
+fully_async = true
+
+[records]
+enabled = true
+root = "/run/inference-records"
+
+[core]
+prepared_batch_overlap = false
+prompt_replay_enabled = true
+prompt_replay_max_successes = 0
+prompt_replay_truncation = "any"
+prompt_replay_fraction = 0.1
+prompt_replay_length_drop = 0.1
+prompt_replay_window = 256
+```
+
+This is a fragment to apply to an otherwise valid MILES run, not a complete
+launch configuration. Prepared inputs must already have the standard rendered
+`input`, `label`, and verifier `metadata` fields. Dolci's prompt-inventory records
+still require target resolution and rendering. Compressed JSONL is supported.
+There must be exactly one optimizer update per collection. Sample count is
+unchanged by the sampler; an eight-response recipe remains eight-response.
+
+| Contract | Behavior |
+|---|---|
+| Membership | A source-level `pool` assigns the whole source; otherwise rows need a configured top-level `pool_id`. Missing/unknown labels, duplicate label definitions and conflicting runtime annotations fail preparation. |
+| Source fractions | Rejected in pool mode, rather than silently ignored. Use `data.sampling.weights` for fixed pool weights; every configured pool requires a finite positive weight. Weights are rejected for other policies. |
+| Finite fresh data | Each row is drawn once; there are no automatic epochs. Empty pools are skipped. |
+| Exposure credit | One group per completed optimizer update that used it. Scored, queued, filtered, or stale groups earn no credit. |
+| Exposure reservations only | Outstanding draws reserve estimated delivery, reducing over-correction during asynchronous generation. |
+| Exposure controller only | Delivery estimate `(trained + 1)/(terminal + 2)`, floored at 0.05; target deficit corrected over a 64-group horizon. Proposal weights are bounded to `[0.25, 5]`, limiting draw ratios to 20:1. |
+| Exposure target only | Each trained group's unit target is divided over the pools active when it was drawn. Inactive pools accrue no new target from later draws. Exact equality is not promised after pools empty or for sources with effectively zero delivery. |
+| Replay | Within the selected pool, eligible retries may replace a fresh draw. The replay fraction caps that pool's proposed draws. In global shuffle, a retry does not advance the fresh permutation; after it drains, any remaining budget-eligible replays are selected uniformly across available pools. |
+| Replay trigger | Existing PR 2187 history, with fresh-response length windows scoped to source within pool. Invalid verifier results are separate from valid zeros. |
+| Exhaustion | A pool without fresh rows or a budget-eligible replay is inactive. Once all pools and outstanding generation drain, an incomplete final collection is not trained; the last completed checkpoint is saved when configured. |
+| Stale work | Pool mode defaults to `async_unused_samples_handler="drop"`; explicit retry is rejected. Drops release reservations. |
+| Recovery | Manifest and selection-policy identity, cursors, RNG, targets, delivery counters, reservations, and replay histories are checkpointed with pending prompts. |
+
+The first implementation supports fully asynchronous disaggregated serving,
+without prepared-batch overlap. The application requires the companion MILES
+runtime's `core_commit_exposure` callback and finite-pool termination support,
+included in this branch's runtime source pin. Older images fail explicitly.
+Build an image from this branch before launching this mode; the existing image
+alone is insufficient. Full distributed GPU validation remains pending.
+
+Inference records retain `pool_id`, `sampling_pool`, `mixture_source`, and
+`pool_selection_id`. Per-update `pool-exposure-<attempt>.jsonl` receipts live in
+`records.root` and contain trained/proposed/pending counts, generated and
+trained response tokens, fresh/replay training counts, and replay diagnostics.
+Every policy also reports cumulative pool metrics through the normal tracking
+backends, including W&B. After each completed optimizer update, the driver publishes
+`pool/<metric>/<pool-name>` against `pool/update` (the completed update count),
+including the final update. The recorder retains `rollout/pool/<pool-name>/<metric>`
+for compatibility; its snapshots can precede training.
+
+| Metric | Interpretation |
+|---|---|
+| `proposed`, `fresh_proposed`, `replay_proposed` | Sampler selections, including work still in flight. |
+| `attempted`, `fresh_attempted`, `replay_attempted` | Selections with a first returned group record, including invalid or aborted results. Duplicate feedback does not add another attempt. |
+| `scored`, `invalid`, `aborted` | Partition of observed attempts by grading validity. Service failures are not evidence of an all-zero reward group. |
+| `filtered`, `filtered_all_zero`, `filtered_all_one`, `filtered_constant_nonzero`, `filtered_other` | Groups removed by the filter, with reward breakdown; invalid outcomes belong to `other`. |
+| `discarded`, `discarded_unobserved` | Explicitly discarded selections, and those discarded before a group record arrived. Observed discarded work also appears in attempts. |
+| `trained`, `fresh_groups`, `replay_groups` | Prompt groups committed after successful optimizer updates, with fresh/replay breakdown. |
+| `available_rows`, `coverage` | Initial fresh-row inventory and fraction observed at least once. Replay does not increase coverage. These are prepared rows, not globally deduplicated questions. |
+| `generated_tokens`, `trained_tokens` | Response tokens in first observed groups and the subset subsequently used in completed training. Regenerations reuse the first observation; these counters are not complete compute or loss-token accounting. Groups with incomplete token counts are omitted and counted in the corresponding `*_unknown_groups`. |
+| `groups_with_truncation`, `truncated_responses`, `returned_responses` | Counts for assessing truncation pressure, with a response denominator. |
+| `proposed_share`, `attempted_share`, `trained_share`, `generated_token_share` | Each pool's share of the corresponding cumulative count; zero before any observations. |
+
+For a first W&B view, put `pool/attempted/*`, `pool/trained/*`, and
+`pool/generated_tokens/*` in adjacent multi-series panels, using `pool/update` as
+the x-axis. Add shares and coverage to compare allocation, training exposure and
+breadth. These are logged scalars; no W&B workspace layout is created automatically.
+Counts restore from the checkpoint, including pending observations, so reconcile
+failed-attempt tails rather than summing them. These measurements do not change
+sampling weights or impose an exposure target.
+
+Exposure targets are reported only for the `exposure` policy. Unknown token counts
+are recorded separately. Receipts identify the resume point;
+if an attempt fails before checkpointing, reconcile its tail against the restored
+checkpoint instead of adding counts from different attempts. Captured response
+tokens are not loss-mask tokens or GPU cost.
+
+An empty pool does not force another epoch or a replay. When fresh data is gone,
+replay must still satisfy its budget and shortening trigger; otherwise training
+can finish before the requested update count. Different pool labels do not change
+verifiers, reward semantics, truncation policy, or the zero-variance filter.
+
+Changing the policy or weights is a new sampling experiment: checkpoint restore rejects
+a mismatched identity. Checkpoints from earlier draft pool implementations (before the version-3
+observation counters) also require a new run; missing history is not silently reset. No pool-mode production runs have been qualified yet.

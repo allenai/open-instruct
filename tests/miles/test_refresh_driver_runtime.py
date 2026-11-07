@@ -10,9 +10,10 @@ import pytest
 from open_instruct.miles.execution import driver
 
 
+@pytest.mark.parametrize("provider", ["shuffle", "pools", "pool_exposure"])
 @pytest.mark.parametrize("mode", ["refresh", "barrier"])
 @pytest.mark.parametrize("failure", [None, "initial", "update", "timeout", "training"])
-def test_publication_and_failure_cleanup(monkeypatch, mode, failure):
+def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider):
     events = []
     manager = SimpleNamespace(get=AsyncMock(return_value={}), dispose=AsyncMock())
     learner = SimpleNamespace(train=AsyncMock(), execute_workers=AsyncMock(), dispose=AsyncMock())
@@ -20,6 +21,7 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure):
     args = SimpleNamespace(
         olmo_core=SimpleNamespace(
             publication_mode=mode,
+            prompt_provider=provider,
             max_run_seconds=None,
             diagnostic_interval=0,
             engine_update_timeout=0.01,
@@ -57,12 +59,24 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure):
         if failure == "training":
             raise RuntimeError("training failed")
 
+    async def commit(i):
+        assert ("train",) in events and failure != "training"
+        events.append(("exposure", i))
+        return {"rollout/pool/math/trained": 1}
+
+    manager.core_commit_exposure = AsyncMock(side_effect=commit)
     manager.core_publication_boundary = AsyncMock(side_effect=boundary)
     learner.train.side_effect = train
     monkeypatch.setattr(driver.ray, "is_initialized", lambda: True)
     monkeypatch.setattr(driver.throughput, "report", lambda *_args: {"warnings": []})
     monkeypatch.setattr(driver, "stage", lambda *_args, **_kwargs: nullcontext())
-    for name in ("init_tracking", "finish_tracking", "define_step_key_metric_group", "remove_rollout_data_refs"):
+    for name in (
+        "init_tracking",
+        "finish_tracking",
+        "define_step_key_metric_group",
+        "remove_rollout_data_refs",
+        "log",
+    ):
         monkeypatch.setattr(driver, name, Mock())
     monkeypatch.setattr(driver.wandb, "run", None)
     monkeypatch.setattr(driver.object_store, "init_instance", Mock())
@@ -102,6 +116,12 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure):
         assert len(boundaries) == expected_boundaries[failure]
     assert learner.train.await_count == (0 if failure == "initial" else 1)
     assert manager.get.await_count == learner.train.await_count
+    assert manager.core_commit_exposure.await_count == int(
+        provider in ("pools", "pool_exposure") and failure not in {"initial", "training"}
+    )
+    assert driver.log.call_count == manager.core_commit_exposure.await_count
+    if driver.log.called:
+        driver.log.assert_called_once_with(args, {"pool/update": 1, "pool/trained/math": 1}, step_key="pool/update")
     for component in (manager, learner, inference):
         component.dispose.assert_awaited_once()
     learner.execute_workers.assert_awaited_once_with("close_weight_transport")

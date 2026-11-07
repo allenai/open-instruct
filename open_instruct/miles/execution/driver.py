@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import ray
 import wandb
 from miles.backends.core_utils.publication.rolling_publication import RollingPublication
+from miles.backends.core_utils.rollout import errors as rollout_errors
 from miles.backends.core_utils.rollout import prepared_batch
 from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
@@ -22,7 +23,7 @@ from miles.utils.compiler_cache import startup_cache
 from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_utils.config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
-from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
+from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking, log
 
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
@@ -30,6 +31,7 @@ from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution import serving, startup
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
+from open_instruct.miles.rollout import pool_metrics
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -37,13 +39,20 @@ logger = logger_utils.setup_logger(__name__)
 async def train(args, *, export_hf=None):
     if getattr(args, "cluster_backend", "ray") != "ray":
         raise ValueError("Core currently requires the Ray cluster backend")
+    pooled = getattr(args.olmo_core, "prompt_provider", "shuffle") in ("pools", "pool_exposure")
+    exhaustion_type = None
+    if pooled:
+        exhaustion_type = getattr(rollout_errors, "PromptPoolExhausted", None)
+        supported = getattr(rollout_errors, "FINITE_POOL_PROVIDERS", ("pool_exposure",))
+        if exhaustion_type is None or args.olmo_core.prompt_provider not in supported:
+            raise RuntimeError("Named pools require the companion MILES runtime with trained-exposure callbacks")
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
     # A time stop saves and leaves the run open, like a debug exit: no final export
     # or final evaluation at the stopped update. max_run_final, or no save path,
     # makes it final.
     resumable = not getattr(args.olmo_core, "max_run_final", False) and bool(getattr(args, "save", None))
-    stopped_for_time = final_stop = False
+    stopped_for_time = final_stop = exhausted = False
     for warning in throughput.report(vars(args), args.olmo_core)["warnings"]:
         logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
     with stage(args, "startup_cache_prepare"):
@@ -55,6 +64,7 @@ async def train(args, *, export_hf=None):
     rollouts_per_epoch = None
     failure = None
     completed = []
+    last_saved_rollout = args.start_rollout_id - 1 if getattr(args, "load", None) else None
     rolling = None
     refresh = args.olmo_core.publication_mode == "refresh"
     overlap = prepared_batch.enabled(args)
@@ -76,6 +86,8 @@ async def train(args, *, export_hf=None):
         # specs. Later mutations in the driver cannot reach those worker copies.
         init_tracking(args)
         define_step_key_metric_group("errors", "errors/elapsed_seconds")
+        if pooled:
+            define_step_key_metric_group("pool", "pool/update")
         with stage(args, "placement"):
             worker_manager = wiring.launch_worker_manager(args, transform_specs=partial(serving.configure_specs, args))
         object_store.init_instance(args, contribute_segment=False)
@@ -215,14 +227,28 @@ async def train(args, *, export_hf=None):
         for rollout_id in range(args.start_rollout_id, args.num_rollout):
             # A prefetched batch was filtered for this publication's version.
             # Its prompts remain outstanding until the executor accepts consumption.
-            with stage(args, "generation_wait", rollout_id):
-                if rolling is None:
-                    await inference.prepare_rollout(rollout_id)
-                if prefetched:
-                    batch = await manager.core_get_prepared(rollout_id)
-                    prefetched = False
-                else:
-                    batch = await manager.get(rollout_id)
+            try:
+                with stage(args, "generation_wait", rollout_id):
+                    if rolling is None:
+                        await inference.prepare_rollout(rollout_id)
+                    if prefetched:
+                        batch = await manager.core_get_prepared(rollout_id)
+                        prefetched = False
+                    else:
+                        batch = await manager.get(rollout_id)
+            except Exception as error:
+                # Ray wraps application errors; preserve unrelated failures.
+                unwrap = getattr(error, "as_instanceof_cause", None)
+                cause = unwrap() if callable(unwrap) else error
+                if not pooled or exhaustion_type is None or not isinstance(cause, exhaustion_type):
+                    raise
+                logger.info("Named prompt pools exhausted after %s completed collections", len(completed))
+                exhausted = final_stop = True
+                if completed and getattr(args, "save", None) and last_saved_rollout != completed[-1]:
+                    await manager.save(completed[-1])
+                    await learner.save_model(completed[-1], force_sync=True)
+                    await learner.finalize_checkpoint(completed[-1])
+                break
             if args.offload_rollout:
                 await inference.offload()
             try:
@@ -241,6 +267,9 @@ async def train(args, *, export_hf=None):
                     prefetched = True
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
+                if pooled:
+                    exposure = await manager.core_commit_exposure(rollout_id)
+                    log(args, pool_metrics.dashboard(exposure, rollout_id + 1), step_key="pool/update")
                 completed.append(rollout_id)
                 # Persist newly compiled kernels even when model checkpointing is
                 # disabled. This schedules bounded background CPU work, not a save.
@@ -278,6 +307,7 @@ async def train(args, *, export_hf=None):
                     await manager.save(rollout_id)
                     await learner.save_model(rollout_id, force_sync=True)
                     await learner.finalize_checkpoint(rollout_id)
+                    last_saved_rollout = rollout_id
                 if sentinel:
                     os.remove(args.save_trigger_sentinel)
             if rolling is None and not refresh and (rollout_id + 1) % args.update_weights_interval == 0:
@@ -315,7 +345,7 @@ async def train(args, *, export_hf=None):
                 await manager.core_publication_boundary(True)
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
-        if final_stop and coordinator is not None and background is not None and background["final"]:
+        if final_stop and completed and coordinator is not None and background is not None and background["final"]:
             last = completed[-1]
             update = (last + 1) * args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
             target = export_hf or str(background_eval.snapshot(background["root"], update))
@@ -391,6 +421,7 @@ async def train(args, *, export_hf=None):
             raise cleanup_error
     return {
         "completed_rollout_ids": completed,
+        "pools_exhausted": exhausted,
         "start_rollout_id": args.start_rollout_id,
         "export_hf": export_hf,
         "stopped_for_time": stopped_for_time,

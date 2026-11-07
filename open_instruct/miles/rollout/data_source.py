@@ -21,9 +21,11 @@ for dashboard telemetry to drain before the rollout actor shuts down.
 from __future__ import annotations
 
 import copy
+import json
 import os
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +35,7 @@ from miles.dashboard import backend, hooks
 from miles.utils.types import Sample
 
 from open_instruct import logger_utils
-from open_instruct.miles.datasets import record_selection, recording
+from open_instruct.miles.datasets import record_selection, recording, replay_evidence
 from open_instruct.miles.rollout import prompt_provider, provider_source
 
 logger = logger_utils.setup_logger(__name__)
@@ -101,6 +103,12 @@ class DashboardDrainingRolloutDataSource:
                             for key in (
                                 prompt_provider.SELECTION_ID,
                                 prompt_provider.REVIEW,
+                                replay_evidence.SELECTION_ID,
+                                replay_evidence.REPLAY,
+                                replay_evidence.KEY,
+                                "pool_selection_id",
+                                "pool_id",
+                                "sampling_pool",
                                 "mixture_source",
                                 "mixture_source_epoch",
                             )
@@ -109,6 +117,62 @@ class DashboardDrainingRolloutDataSource:
                     )
                     record["expected_group_size"] = len(group)
             self._delegate.provider.feedback(records)
+
+    def provider_metrics(self):
+        """Read feedback-provider metrics under the same lock as selection/checkpoints."""
+        with self._cursor_lock:
+            metrics = getattr(self._delegate.provider, "metrics", None)
+            return metrics() if metrics else {}
+
+    def pool_exhausted(self):
+        with self._cursor_lock:
+            return (
+                getattr(self._delegate.args.olmo_core, "prompt_provider", "") in ("pools", "pool_exposure")
+                and not self._delegate.buffer
+                and not self._delegate.provider.available()
+            )
+
+    def stage_training_batch(self, rollout_id, samples):
+        if self._delegate.args.olmo_core.prompt_provider not in ("pools", "pool_exposure"):
+            return
+        with self._cursor_lock:
+            counts = {}
+            for sample in samples:
+                identity = sample.metadata["pool_selection_id"]
+                counts[identity] = counts.get(identity, 0) + 1
+            if len(counts) != self._delegate.args.rollout_batch_size or any(
+                count != self._delegate.args.n_samples_per_prompt for count in counts.values()
+            ):
+                raise ValueError("Exposure batch must contain complete prompt groups")
+            if getattr(self, "_exposure_batch", None) is not None:
+                raise RuntimeError("Uncommitted exposure batch")
+            self._exposure_batch = (rollout_id, sorted(counts))
+
+    def commit_training_batch(self, rollout_id):
+        with self._cursor_lock:
+            batch = getattr(self, "_exposure_batch", None)
+            if batch is None and self._delegate.provider.committed_update == rollout_id:
+                return self._delegate.provider.metrics()
+            if batch is None or batch[0] != rollout_id:
+                raise RuntimeError("Missing or mismatched exposure batch")
+            self._delegate.provider.commit(rollout_id, batch[1])
+            self._exposure_batch = None
+            metrics = self._delegate.provider.metrics()
+            if not hasattr(self, "_exposure_attempt"):
+                self._exposure_attempt = uuid.uuid4().hex
+            receipt = {
+                "update": rollout_id + 1,
+                "selection_ids": batch[1],
+                "metrics": metrics,
+                "attempt": self._exposure_attempt,
+                "resume_from_update": self._delegate.args.start_rollout_id,
+            }
+            # Small, durable per-update records; no response text or token dumps.
+            root = Path(self._delegate.args.olmo_core.records_root)
+            root.mkdir(parents=True, exist_ok=True)
+            with (root / f"pool-exposure-{self._exposure_attempt}.jsonl").open("a") as stream:
+                stream.write(json.dumps(receipt, sort_keys=True) + "\n")
+            return metrics
 
     def get_samples(self, num_samples: int) -> Any:
         """Return samples from the underlying MILES data source."""
@@ -222,6 +286,8 @@ class DashboardDrainingRolloutDataSource:
         if not delegate.args.rollout_global_dataset:
             return
         with self._cursor_lock:
+            if getattr(self, "_exposure_batch", None) is not None:
+                raise RuntimeError("Cannot checkpoint an uncommitted exposure batch")
             state = {
                 key: getattr(delegate, key)
                 for key in ("sample_offset", "epoch_id", "sample_group_index", "sample_index", "metadata")
