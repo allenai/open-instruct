@@ -1,0 +1,157 @@
+diff -ruN a/src/maxtext/input_pipeline/hf_data_processing.py b/src/maxtext/input_pipeline/hf_data_processing.py
+--- a/src/maxtext/input_pipeline/hf_data_processing.py	2026-11-07 11:03:17
++++ b/src/maxtext/input_pipeline/hf_data_processing.py	2026-11-07 11:05:44
+@@ -405,7 +405,10 @@
+       extra_special_tokens={},
+   )
+ 
+-  dataset = dataset.select_columns(data_column_names)
++  # masked_turns (H200): per-row message indices whose assistant spans are excluded from the loss. Kept through the
++  # chat-template map, which consumes it; absent or empty, the pipeline is unchanged.
++  mask_column = "masked_turns" if use_sft and dataset.features and "masked_turns" in dataset.features else None
++  dataset = dataset.select_columns(data_column_names + ([mask_column] if mask_column else []))
+ 
+   if use_sft:
+     if not chat_template:
+@@ -437,7 +440,9 @@
+           features=dataset_features,
+       )
+ 
+-    data_column_names = list(dataset.features.keys())
++    data_column_names = [c for c in dataset.features.keys() if c != mask_column]
++    if mask_column:
++      max_logging.log("SFT labels: masked_turns column present; those assistant turns are context, not loss")
+     template_workers = int(os.environ.get("MAXTEXT_SFT_TEMPLATE_WORKERS", "0"))
+     if template_workers > 0:
+       # The same rows in the same order, templated in parallel: a resume replays every trained batch through this.
+@@ -445,16 +450,19 @@
+           input_pipeline_utils.apply_chat_template_batched,
+           batched=True,
+           batch_size=16 * template_workers,
++          remove_columns=[mask_column] if mask_column else None,
+           fn_kwargs={
+               "tokenizer_model": tokenizer,
+               "data_column_name": data_column_names[0],
+               "workers": template_workers,
++              "mask_column": mask_column,
+           },
+       )
+     else:
+       dataset = dataset.map(
+           input_pipeline_utils.apply_chat_template,
+-          fn_kwargs={"tokenizer_model": tokenizer, "data_column_name": data_column_names[0]},
++          remove_columns=[mask_column] if mask_column else None,
++          fn_kwargs={"tokenizer_model": tokenizer, "data_column_name": data_column_names[0], "mask_column": mask_column},
+       )
+ 
+   pad_id = _get_pad_id(tokenizer)
+diff -ruN a/src/maxtext/input_pipeline/input_pipeline_utils.py b/src/maxtext/input_pipeline/input_pipeline_utils.py
+--- a/src/maxtext/input_pipeline/input_pipeline_utils.py	2026-11-07 11:03:17
++++ b/src/maxtext/input_pipeline/input_pipeline_utils.py	2026-11-07 11:05:44
+@@ -339,7 +339,7 @@
+   return _segments_from_spans(full_tokens, spans)
+ 
+ 
+-def _split_conversation_into_segments(tokenizer_model, conversation):
++def _split_conversation_into_segments(tokenizer_model, conversation, masked_turns=()):
+   """Splits a conversation into formatted (text, is_prompt) segments covering its whole rendering.
+ 
+   The conversation is templated once, as a whole, and every segment is cut from that rendering, so
+@@ -370,7 +370,16 @@
+   # generation prompt ends inside the block, e.g. Olmo 3.5's trailing <think>.
+   template = tokenizer_model.get_chat_template()
+   use_blocks = os.environ.get("MAXTEXT_SFT_LABELS", "generation_blocks") == "generation_blocks"
++  # masked_turns (H200): message indices of assistant turns excluded from the loss. Their tokens stay in the
++  # rendering as context (prompt segments); every other span is computed exactly as without a mask. Defined for
++  # prefix labels only: generation blocks label by template, which cannot see a per-message mask.
++  masked = frozenset(int(i) for i in (masked_turns if masked_turns is not None else ()))
++  for i in masked:
++    if not (0 <= i < len(conversation)) or conversation[i]["role"] != "assistant":
++      raise ValueError(f"masked_turns index {i} is not an assistant message of this {len(conversation)}-message conversation")
+   if use_blocks and isinstance(template, str) and _GENERATION_BLOCK.search(template):
++    if masked:
++      raise ValueError("masked_turns needs MAXTEXT_SFT_LABELS=prefix; generation-block labels cannot mask a message")
+     return _generation_block_segments(tokenizer_model, conversation, template)
+ 
+   def n_tokens(messages, add_generation_prompt):
+@@ -385,7 +394,7 @@
+   )
+   rendered = tokenizer_model.apply_chat_template(conversation, add_generation_prompt=False, tokenize=False)
+   decode = lambda tokens: tokenizer_model.decode(tokens, skip_special_tokens=False)
+-  assistant_indices = [idx for idx, message in enumerate(conversation) if message["role"] == "assistant"]
++  assistant_indices = [idx for idx, message in enumerate(conversation) if message["role"] == "assistant" and idx not in masked]
+   # Conversations whose prefixes render as literal prefixes of the whole need no check; the rest (e.g. a
+   # template closing the last message with end-of-sequence) are checked turn by turn, as in open-instruct.
+   prefix_stable = all(
+@@ -427,7 +436,7 @@
+   return _segments_from_spans(full_tokens, spans)
+ 
+ 
+-def apply_chat_template(example, tokenizer_model, data_column_name):
++def apply_chat_template(example, tokenizer_model, data_column_name, mask_column=None):
+   """Formats conversational data by applying the tokenizer's chat template
+   and identifying prompt/completion segments for SFT masking.
+ 
+@@ -448,20 +457,28 @@
+         prompt (if applicable). `False` indicates the expected LLM
+         completion, excluding the assistant's start tokens.
+   """
+-  segments = _conversation_segments(tokenizer_model, example[data_column_name])
++  segments = _conversation_segments(tokenizer_model, example[data_column_name], example.get(mask_column) if mask_column else ())
+   example["is_prompt"] = [is_prompt for _, is_prompt in segments]
+   example[data_column_name] = [text for text, _ in segments]
+   return example
+ 
+ 
+-def _conversation_segments(tokenizer_model, conversation):
++_MASK_STATS = [0, 0]  # rows with a non-empty mask, masked turns; per process (pool workers count their own rows)
++
++
++def _conversation_segments(tokenizer_model, conversation, masked_turns=()):
+   """The (token ids, is_prompt) segments of one conversation; see apply_chat_template."""
+   conversation = list(conversation)
++  if masked_turns is not None and len(masked_turns) > 0:
++    _MASK_STATS[0] += 1
++    _MASK_STATS[1] += len(masked_turns)
++    if _MASK_STATS[0] in (1, 10, 100) or _MASK_STATS[0] % 1000 == 0:
++      max_logging.log(f"MASKED-TURNS pid={os.getpid()} rows={_MASK_STATS[0]} turns={_MASK_STATS[1]}")
+   try:
+     for idx, message in enumerate(conversation):
+       if message["role"] == "system" and idx != 0:
+         raise ValueError(f"System message found at index {idx}. System messages must be at index 0.")
+-    return _split_conversation_into_segments(tokenizer_model, conversation)
++    return _split_conversation_into_segments(tokenizer_model, conversation, masked_turns)
+   except ValueError as e:
+     max_logging.log(f"Unable to apply chat template: {e}")
+     raise e
+@@ -476,8 +493,9 @@
+   _POOL_TOKENIZER = tokenizer_model
+ 
+ 
+-def _template_pool_segments(conversation):
+-  return _conversation_segments(_POOL_TOKENIZER, conversation)
++def _template_pool_segments(item):
++  conversation, masked_turns = item
++  return _conversation_segments(_POOL_TOKENIZER, conversation, masked_turns)
+ 
+ 
+ def _template_pool(tokenizer_model, workers):
+@@ -502,15 +520,16 @@
+   return _TEMPLATE_POOL[1]
+ 
+ 
+-def apply_chat_template_batched(batch, tokenizer_model, data_column_name, workers):
++def apply_chat_template_batched(batch, tokenizer_model, data_column_name, workers, mask_column=None):
+   """apply_chat_template over a batch, its conversations templated in order by `workers` spawned processes.
+ 
+   The rows and their order are those of apply_chat_template; only the work is spread. Templating with prefix labels
+   dominates the cost of replaying already-trained batches on resume.
+   """
+   conversations = batch[data_column_name]
++  masks = batch[mask_column] if mask_column else [()] * len(conversations)
+   pool = _template_pool(tokenizer_model, workers)
+-  all_segments = pool.map(_template_pool_segments, conversations, chunksize=max(1, len(conversations) // (4 * workers)))
++  all_segments = pool.map(_template_pool_segments, list(zip(conversations, masks)), chunksize=max(1, len(conversations) // (4 * workers)))
+   batch["is_prompt"] = [[is_prompt for _, is_prompt in segments] for segments in all_segments]
+   batch[data_column_name] = [[text for text, _ in segments] for segments in all_segments]
+   return batch
