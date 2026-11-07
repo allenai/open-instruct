@@ -103,7 +103,33 @@ calculate_per_token_loss = false
 
 This works with every verifier, managed judges included; only
 `reward_final_answer_only` is restricted to text verifiers. It cannot be combined
-with a `custom_reward_post_process_path`.
+with a `custom_reward_post_process_path` other than the default ungraded-response
+exclusion described below.
+
+## Ungraded responses
+
+A verifier or judge request can fail for reasons unrelated to the response: a
+code-service outage, a judge transport error, an unparseable verdict. That
+response has no grade. Scoring it zero would place a correct answer below its
+siblings' baseline and push the policy away from it; dropping its prompt group
+would waste every graded sibling. By default (`core.exclude_ungraded = true`) the
+compiler installs
+`custom_reward_post_process_path = "open_instruct.miles.rewards.exclusion.exclude_ungraded"`:
+the ungraded response gets zero advantage and a zeroed loss mask, its group's
+baseline uses only the graded responses, and the paired group filter ignores it
+when checking reward variation (groups with fewer than two graded responses are
+dropped). The failed response keeps `metadata.reward_omission` with the verifier
+name and error, and W&B reports `rollout/verification/ungraded_samples` and
+`ungraded_fraction` per collection. With response-averaged loss, excluded responses
+still count in the batch denominator.
+
+Set `core.exclude_ungraded = false` to return to omitting the whole prompt group
+(`rollout/verification/omitted_records`). The compiler also leaves the hook out
+under `core.expert_balanced_packing`, which supports no reward post-process, and
+under `miles.partial_rollout`, since the hook supports single-segment rollouts
+only. Math verifier timeouts and code-service rejections (4xx, or a 500 that
+persists through its retries) are not ungraded: they keep their zero reward, as
+documented under [reward-service failure policies](data-and-evaluation.md#reward-service-failure-policies).
 
 For an explicitly documented overlong-filtering experiment that excludes truncated
 responses from training instead, override the baseline with:
@@ -117,11 +143,12 @@ custom_reward_post_process_path = "open_instruct.miles.rewards.truncation.exclud
 ```
 
 Truncated responses then get zero advantage and a zeroed loss mask, and each group's
-baseline uses only its finished responses. Raw reward metrics are unchanged. With
-response-averaged loss, excluded responses still count in the batch denominator.
-When zero-variance group filtering is enabled, it also considers only finished
-responses: groups with fewer than two finished responses or no variation in
-their rewards are dropped before occupying training batch slots.
+baseline uses only its finished, graded responses (this hook also excludes
+ungraded responses). Raw reward metrics are unchanged. With response-averaged
+loss, excluded responses still count in the batch denominator. When zero-variance
+group filtering is enabled, it also considers only finished, graded responses:
+groups with fewer than two of them or no variation in their rewards are dropped
+before occupying training batch slots.
 
 ## Final-answer-only rewards
 

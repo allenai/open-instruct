@@ -356,11 +356,18 @@ packing/scoring. Mixed groups retain every response, including zero-reward ones.
 This requires more than one training response per prompt. Evaluation is unfiltered
 and may still use one response per prompt.
 
+By default the compiler installs the ungraded-response exclusion
+(`core.exclude_ungraded`, see [the GRPO guide](grpo.md#ungraded-responses)) and
+pairs it with `open_instruct.miles.rewards.exclusion.filter_graded_reward_variance`,
+which ignores responses whose grade failed and drops groups with fewer than two
+graded responses. A placeholder zero from a failed grade cannot keep an otherwise
+constant-reward group in the training batch.
+
 With `custom_reward_post_process_path="open_instruct.miles.rewards.truncation.exclude_truncated"`,
 the compiler instead selects the built-in finished-response filter. It ignores
-truncated responses when checking reward variation and drops groups with fewer
-than two finished responses. A reward earned by unfinished text cannot keep an
-otherwise constant-reward group in the training batch.
+truncated and ungraded responses when checking reward variation and drops groups
+with fewer than two finished, graded responses. A reward earned by unfinished text
+cannot keep an otherwise constant-reward group in the training batch.
 
 Generation continues until the configured number of accepted groups fills the
 collection; global batch size counts retained responses. This works with barrier,
@@ -418,13 +425,19 @@ artifacts, not a replacement for per-sample auditing. See [operations](operation
 
 ## Reward-service failure policies
 
-MILES inherits the existing Open Instruct GRPO verifiers' default of assigning
-zero reward when judge or code-service requests fail after retries. This keeps
-training running through transient failures, but a fallback zero is an ungraded
-response. In a group with successfully graded responses, it can affect relative
-advantages as though the response were incorrect. Failures correlated with
-response content or length can therefore bias learning. Use the strict policies
-below when failed grading should stop the run.
+The original Open Instruct GRPO verifiers assign zero reward when judge or
+code-service requests fail after retries. That keeps training running through
+transient failures, but a fallback zero is an ungraded response: in a group with
+successfully graded responses it lowers the failed response's advantage as though
+it were incorrect, and failures correlated with response content or length bias
+learning. MILES training therefore treats a reported `service_error` or
+`judge_error` as **ungraded** rather than zero. By default the response stays in
+its group with zero advantage and a zeroed loss mask and leaves the group
+baseline (`core.exclude_ungraded`, see [the GRPO guide](grpo.md#ungraded-responses));
+with that exclusion disabled the whole prompt group is omitted and replaced.
+Evaluation and distillation scoring still request zero for failed grades. The
+verifier-level policies below decide whether a failure is reported at all or stops
+the run.
 
 Service-error and timeout metrics cover the consumed collection, after group
 filtering. Dropped groups are absent from those fractions, so the metrics can
@@ -435,11 +448,14 @@ does not establish service health.
 
 ### Code-service failure policy
 
-Code rewards default to Open Instruct's zero-reward continuation behavior.
-After existing HTTP retries are exhausted, a transport/gateway failure or
-invalid service reply receives zero reward, logs a warning, and leaves the
-rollout running. This is a fallback reward, not proof that the generated code
-failed its tests. Existing HTTP rejection handling is unchanged.
+Code rewards default to Open Instruct's zero-reward continuation behavior at
+the verifier level. After existing HTTP retries are exhausted, a transport/gateway
+failure or invalid service reply is reported as `service_error` with a zero
+component, logs a warning, and leaves the rollout running. In training the reward
+adapter then treats the response as ungraded (excluded or group-omitted as above);
+in evaluation the zero stands. This is a fallback, not proof that the generated
+code failed its tests. HTTP rejections (4xx, or a 500 that persists through its
+retries) are scored zero as program failures and are not ungraded.
 
 Set `OI_MILES_CODE_FAILURE_POLICY = "raise"` in `[launch.env]` for strict
 service-failure handling, or set `failure_policy` to `"zero"` or `"raise"` in
@@ -456,8 +472,9 @@ samples generated. Retain these metrics when comparing learning curves.
 
 ### General judge failures
 
-Judge transport failures and invalid or incomplete replies default to zero
-reward after retries, with a warning and per-sample `judge_error` diagnostics.
+Judge transport failures and invalid or incomplete replies default to a zero
+component after retries, with a warning and per-sample `judge_error` diagnostics;
+training treats the response as ungraded, as above.
 Set `OI_MILES_JUDGE_FAILURE_POLICY="raise"` in `[launch.env]` to stop on those
 failures. Detected context overflow and configuration errors raise regardless
 of that fallback policy. The three-node example explicitly selects `"zero"` for judge

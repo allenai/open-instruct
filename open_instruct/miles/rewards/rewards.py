@@ -297,6 +297,33 @@ def _registry(path):
     return {name: _resolve_verifier(spec, isolate_symbolic=True) for name, spec in document.items()}
 
 
+@functools.lru_cache(maxsize=8)
+def _masks_ungraded_path(path):
+    module, _, symbol = path.rpartition(".")
+    return bool(getattr(getattr(importlib.import_module(module), symbol), "masks_ungraded", False))
+
+
+def masks_ungraded(args) -> bool:
+    """Whether the configured reward post-process excludes ungraded responses itself.
+
+    ``open_instruct.miles.rewards.exclusion`` hooks declare ``masks_ungraded``. For
+    them an ungraded training response keeps reward 0 plus its ``reward_omission``
+    marker, and the post-process masks it. Without such a hook the response has no
+    reward and the pinned MILES collector drops its whole prompt group.
+    """
+    path = getattr(args, "custom_reward_post_process_path", None)
+    return bool(path) and _masks_ungraded_path(path)
+
+
+def ungraded_count(samples) -> int:
+    """Count consumed responses whose reward is a placeholder for a failed grade."""
+    return sum(
+        1
+        for sample in samples
+        if isinstance(getattr(sample, "metadata", None), dict) and "reward_omission" in sample.metadata
+    )
+
+
 def _capture_verifier_failure(args, sample, spec, response, error, *, capture_kind="exception"):
     """Capture one raised exception and one returned timeout per run/process.
 
@@ -415,6 +442,17 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                 raise
             metadata["reward_omission"] = {"verifier": name, "error": f"{type(error).__name__}: {error}"}
             metadata.pop("reward_components", None)
+            if masks_ungraded(args):
+                # The configured post-process gives this response zero advantage and
+                # a zeroed loss mask and leaves it out of its group's baseline, so
+                # the stored zero never acts as a grade. Its graded siblings train.
+                logger.warning(
+                    "Excluding ungraded response from prompt group %s after verifier %s failed: %s",
+                    sample.group_index,
+                    name,
+                    metadata["reward_omission"]["error"],
+                )
+                return 0.0
             logger.warning(
                 "Omitting prompt group %s after verifier %s failed: %s",
                 sample.group_index,

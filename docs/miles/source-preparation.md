@@ -184,15 +184,19 @@ unexpected failures still raise from the verifier. Qualification rejects timed-o
 though training can continue with zero reward for a timed-out response.
 
 Managed training uses `rollout_reward`: if an individual verifier raises or a
-judge reports a failed grade, its reward is missing rather than zero. The pinned
-MILES collector discards the entire prompt group (including healthy sibling
-responses) and draws replacements. `rollout/verification/omitted_records` in W&B
-counts these missing-reward prompt groups per collection interval, including groups
-that never enter the training batch. It counts sampling attempts, not distinct
-source IDs; legitimate wrong answers and local validation timeouts do not count.
-The native `rollout/dynamic_filter/drop_group_has_missing_reward` counter remains
-available too. Diagnostics retain the verifier name/error on the failed sample,
-with bounded failed-input captures under `<save>/verifier_failures`.
+judge reports a failed grade, the response is ungraded rather than scored zero.
+By default (`core.exclude_ungraded`) it stays in its prompt group with zero
+advantage and a zeroed loss mask and leaves the group baseline; W&B reports
+`rollout/verification/ungraded_samples` and `ungraded_fraction` per collection.
+With that exclusion disabled, the reward is missing instead and the pinned MILES
+collector discards the entire prompt group (including healthy sibling responses)
+and draws replacements; `rollout/verification/omitted_records` counts these
+missing-reward prompt groups per collection interval, including groups that never
+enter the training batch. Both count sampling attempts, not distinct source IDs;
+legitimate wrong answers and local validation timeouts do not count. The native
+`rollout/dynamic_filter/drop_group_has_missing_reward` counter remains available
+too. Diagnostics retain the verifier name/error on the failed sample, with bounded
+failed-input captures under `<save>/verifier_failures`.
 
 Offline qualification and evaluation remain strict; registry construction and
 routing/configuration errors also remain fatal. **Open decision:** how many or
@@ -412,8 +416,8 @@ the configured total client deadline, and each test uses a fresh interpreter.
 Syntax/runtime errors and execution timeouts are zero; infrastructure, incomplete
 result and service-source mismatches raise. A returned partition must explicitly
 report `ok` or `completed`; any other or missing status becomes a top-level
-service failure. Training omits the ungraded group, while offline scoring and
-qualification fail. Reports retain partition diagnostics and request identifiers,
+service failure. Training excludes the ungraded response (or omits its group
+when exclusion is disabled), while offline scoring and qualification fail. Reports retain partition diagnostics and request identifiers,
 and complete-code records participate in `rollout/code_verifier/*` metrics.
 
 The service owner's 2026-11-06 scaling panel supersedes the original eight-request
@@ -465,8 +469,8 @@ construction and optimality tasks need their own checks. This would intentionall
 diverge from upstream grading and requires a separate review of reward changes.
 For now, preserve the upstream tests and comparisons; this concern does not
 introduce new filtering, repairs or a qualification blocker. Such false negatives
-are ordinary zero rewards, not missing grades, so they do not increment
-`rollout/verification/omitted_records`.
+are ordinary zero rewards, not missing grades, so they do not count as ungraded
+responses or omitted records.
 
 ## Native language constraints
 

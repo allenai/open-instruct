@@ -21,6 +21,11 @@ PREFLIGHT_ATTENTION_BACKENDS = ("torch", "flash_2", "flash_3", "flash_4")
 ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
 FINISHED_STD_FILTER = "open_instruct.miles.rewards.truncation.filter_finished_reward_variance"
 EXCLUDE_TRUNCATED = "open_instruct.miles.rewards.truncation.exclude_truncated"
+GRADED_STD_FILTER = "open_instruct.miles.rewards.exclusion.filter_graded_reward_variance"
+EXCLUDE_UNGRADED = "open_instruct.miles.rewards.exclusion.exclude_ungraded"
+# Reward post-processes that leave ungraded responses out of their group baseline,
+# paired with the group filter that ignores the same responses.
+EXCLUSION_FILTERS = {EXCLUDE_TRUNCATED: FINISHED_STD_FILTER, EXCLUDE_UNGRADED: GRADED_STD_FILTER}
 EXPERT_SCHEDULE = "miles.backends.core_utils.expert_schedule.reorder_samples"
 RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
@@ -29,6 +34,7 @@ RECORD_RESPONSE_MODES = ("off", "all", "sample")
 class CoreConfig:
     reward_zero_truncated: bool = True
     reward_final_answer_only: bool = False
+    exclude_ungraded: bool = True
     max_run_seconds: float | None = None
     max_run_final: bool = False
     filter_zero_std_groups: bool = True
@@ -176,6 +182,7 @@ class CoreConfig:
         for name in (
             "reward_zero_truncated",
             "reward_final_answer_only",
+            "exclude_ungraded",
             "filter_zero_std_groups",
             "compiler_cache",
             "compiler_cache_restore",
@@ -310,12 +317,18 @@ class RunConfig:
             if options.get("sglang_enable_fp32_lm_head") is False:
                 raise constraints.error("core.fp32_lm_head conflicts with miles.sglang_enable_fp32_lm_head=false")
             options["sglang_enable_fp32_lm_head"] = True
+        post_process = options.get("custom_reward_post_process_path")
+        if (
+            post_process is None
+            and self.core.exclude_ungraded
+            # Expert-balanced packing rejects every post-process, and the exclusion
+            # hooks support single-segment rollouts only.
+            and not self.core.expert_balanced_packing
+            and not options.get("partial_rollout")
+        ):
+            post_process = options["custom_reward_post_process_path"] = EXCLUDE_UNGRADED
         path = options.get("dynamic_sampling_filter_path")
-        builtin_filter = (
-            FINISHED_STD_FILTER
-            if options.get("custom_reward_post_process_path") == EXCLUDE_TRUNCATED
-            else ZERO_STD_FILTER
-        )
+        builtin_filter = EXCLUSION_FILTERS.get(post_process, ZERO_STD_FILTER)
         if self.core.filter_zero_std_groups:
             if path not in (None, ZERO_STD_FILTER, builtin_filter):
                 raise constraints.error(
@@ -327,7 +340,7 @@ class RunConfig:
                     "filter_zero_std_groups requires samples_per_prompt > 1; disable it for single samples"
                 )
             options["dynamic_sampling_filter_path"] = builtin_filter
-        elif path in (ZERO_STD_FILTER, FINISHED_STD_FILTER):
+        elif path in (ZERO_STD_FILTER, *EXCLUSION_FILTERS.values()):
             raise constraints.error(
                 "core.filter_zero_std_groups=false conflicts with the explicit zero-std filter path"
             )
@@ -405,7 +418,10 @@ class RunConfig:
             if self.core.packing_max_tokens < self.core.max_sequence_length:
                 raise constraints.error("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = self.resolved_miles()
-        if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path"):
+        if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path") not in (
+            None,
+            EXCLUDE_UNGRADED,
+        ):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
         if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
@@ -611,7 +627,7 @@ class RunConfig:
                 "engine_drain currently supports blocking shared-engine evaluation only",
                 constraints.Category.NOT_IMPLEMENTED,
             )
-        if options.get("dynamic_sampling_filter_path") not in (None, ZERO_STD_FILTER, FINISHED_STD_FILTER):
+        if options.get("dynamic_sampling_filter_path") not in (None, ZERO_STD_FILTER, *EXCLUSION_FILTERS.values()):
             raise constraints.error(
                 "engine_drain supports only the built-in zero-std dynamic sampling filter",
                 constraints.Category.NOT_IMPLEMENTED,

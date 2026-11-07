@@ -16,6 +16,7 @@ from miles.ray.rollout.metrics import compute_rollout_step
 from miles.utils.tracking_utils import tracking
 
 from open_instruct import logger_utils
+from open_instruct.miles.rewards import rewards
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -99,6 +100,16 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
     metrics = {"rollout/verification/omitted_records": omitted}
     if omitted:
         logger.warning("verification %d: omitted %d prompt records with missing rewards", rollout_id, omitted)
+    if samples:
+        # Ungraded responses stay in the consumed batch with a placeholder zero; the
+        # configured exclusion post-process masks them. Report how many there were.
+        ungraded = rewards.ungraded_count(samples)
+        metrics["rollout/verification/ungraded_samples"] = ungraded
+        metrics["rollout/verification/ungraded_fraction"] = ungraded / len(samples)
+        if ungraded:
+            logger.warning(
+                "verification %d: %d of %d consumed responses were ungraded", rollout_id, ungraded, len(samples)
+            )
     service_metrics = code_service_metrics(samples)
     metrics.update(service_metrics)
     if service_metrics:
