@@ -64,6 +64,9 @@ The patches live as commits on abhishekraok/maxtext; each image directory's `max
   - *Resume skips trained batches.* MaxText's data hooks bypassed Tunix's skip, so a resumed run replayed the data from
     the start.
 
+Runs on the earlier `e259ed61-pc16bd395` used `e259ed61..0cf54796`: prefix labels instead of `{% generation %}` blocks,
+and none of the three data fixes.
+
 ## Traps
 
 - **Tokenizer:** `allenai/olmo-3-tokenizer-instruct-dev` loads as `GPT2Tokenizer` under transformers 5 and drops the Dolma2 pre-tokenizer. Train with a `PreTrainedTokenizerFast.from_pretrained(...).save_pretrained(dir)` copy.
