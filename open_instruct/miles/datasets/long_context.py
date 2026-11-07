@@ -38,8 +38,12 @@ def transduction_reference(raw):
                 [row[0], *[" ".join(lookup[k] for k in cell.split("+")) for cell in row[1:]]] for row in rows[1:]
             ]
         elif task in {"csv_permutation_homogeneous", "csv_permutation_heterogeneous"} and instructions:
-            row_order = re.search(r"New row order: (.*)", instructions)[1].split(",")
-            col_order = re.search(r"New col order: (.*)", instructions)[1].split(",")
+            row_match = re.search(r"New row order: (.*)", instructions)
+            col_match = re.search(r"New col order: (.*)", instructions)
+            if row_match is None or col_match is None:
+                raise ValueError("Missing source permutation order")
+            row_order = row_match[1].split(",")
+            col_order = col_match[1].split(",")
             by_row = {row[0]: row for row in rows[1:]}
             if (
                 set(row_order) != set(by_row)

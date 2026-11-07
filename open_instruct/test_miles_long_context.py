@@ -112,6 +112,16 @@ def test_independent_reference(task, body, gold):
         sources.adapt(raw, "lc_transduction_v1")
 
 
+@pytest.mark.parametrize("order", ["New row order: r1", "New col order: c1"])
+def test_missing_permutation_order(order):
+    raw = {
+        "messages": [{"content": "Here is the real task:\nInput:\n\n,c1\nr1,A\n\nReordering Instructions:\n" + order}],
+        "metadata": {"task_type": "csv_permutation_homogeneous"},
+    }
+    with pytest.raises(ValueError, match="Missing source permutation order"):
+        adapters.transduction_reference(raw)
+
+
 def docqa():
     return {
         "prompt": [{"role": "user", "content": "An intact long document. Question?"}],

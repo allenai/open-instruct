@@ -102,7 +102,7 @@ def score(prediction, target):
     # do not obtain extra relevance. Their last occurrence has the native rank.
     relevance = {value: len(expected) - i for i, value in enumerate(expected)}
     positions = {value: i for i, value in enumerate(actual)}
-    ranked = sorted(positions, key=positions.get)[: len(expected)]
+    ranked = sorted(positions, key=positions.__getitem__)[: len(expected)]
     dcg = sum(relevance.get(value, 0) / math.log2(i + 2) for i, value in enumerate(ranked))
     ideal = sum((len(expected) - i) / math.log2(i + 2) for i in range(len(expected)))
     return dcg / ideal
