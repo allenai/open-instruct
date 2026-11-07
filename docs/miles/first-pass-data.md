@@ -19,8 +19,9 @@ The versioned release destination is:
 coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
 qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
 records verification on shared storage. The corrected release is **offline
-qualified; shared staging is pending**, including all 48 routes and 2,288,298 rows.
-Wait for a verified `STAGED.json` before using the paths and commands below.
+qualified and verified on shared storage**, including all 48 routes and
+2,288,298 rows. The [staging run](https://beaker.org/ex/01M6T0G6P2KWJ6KYE3X8GPPDKW)
+passed all catalog and qualification-receipt hash checks.
 `configs/<name>.toml` provides a ready
 single-source `[data]` fragment
 with absolute shared paths. The versioned S3 archive
@@ -200,6 +201,7 @@ for the full release or a representative accuracy evaluation.
 
 | Check | Observed result | Evidence |
 |---|---|---|
+| Corrected v2 staging | All 48 routes and 2,288,298 rows verified against catalog and receipt hashes | [Staging run](https://beaker.org/ex/01M6T0G6P2KWJ6KYE3X8GPPDKW) |
 | Original v1 staging | All 48 routes and 2,288,518 rows verified against the catalog hashes | [Staging run](https://beaker.org/ex/01M6SMNTM585MPTKQ7WQ6Z611S) |
 | First non-code training leg | 43 configured routes; 12 updates on both trainer ranks; finite losses and gradient norms; zero OOMs and omitted records; committed checkpoint at 12 completed steps | [Training run](https://beaker.org/ex/01M6SKMECBC8MGHADXA179ZSM1) |
 | Code training | Five configured routes using the authenticated service; four updates on both ranks; finite losses and gradient norms; zero OOMs and omitted records; committed final checkpoint | [Code run](https://beaker.org/ex/01M6SNFM7KHH9X4DB3PXPAK9BW) |

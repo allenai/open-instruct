@@ -88,7 +88,7 @@ async def controls(entry, args):
         sample(row, text, i, Sample.Status.TRUNCATED if i == 3 else Sample.Status.COMPLETED)
         for i, text in enumerate(texts)
     ]
-    values = await rewards.registered_reward(args, samples)
+    values = await rewards.registered_reward(args, samples, failure_policy="raise")
     if values != [1.0, 0.0, 0.0, 0.0]:
         raise ValueError(f"positive/wrong/empty/cap controls: {values}")
     extra_values = []
@@ -102,7 +102,7 @@ async def controls(entry, args):
             gold = target["answer"].strip()
             wrong = [f"1{gold}", f"{gold}1", f"The answer is {gold}"]
             extra_values = await rewards.registered_reward(
-                args, [sample(row, text, i) for i, text in enumerate(wrong)]
+                args, [sample(row, text, i) for i, text in enumerate(wrong)], failure_policy="raise"
             )
             if any(v != 0.0 for v in extra_values):
                 raise ValueError(f"Gold-containing wrong answers earned reward: {extra_values}")

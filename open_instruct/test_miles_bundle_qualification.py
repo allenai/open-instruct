@@ -256,7 +256,8 @@ def test_quarantine_requires_exact_omission_identities(tmp_path, monkeypatch, ac
 def test_timeout_cannot_pass_a_zero_reward_control(tmp_path, monkeypatch):
     catalog, controls, hf = setup_bundle(tmp_path, monkeypatch)
 
-    async def reward(args, sample):
+    async def reward(args, sample, *, failure_policy):
+        assert failure_policy == "raise"
         if sample.response == "2":
             return 1.0
         sample.metadata["verifier_diagnostics"] = {"test": {"status": "timeout"}}
@@ -274,7 +275,8 @@ def test_native_partial_credit_is_an_explicit_control_expectation(tmp_path, monk
     value["cases"][2]["expected"] = 0.5
     controls.write_text(json.dumps(value) + "\n")
 
-    async def reward(args, sample):
+    async def reward(args, sample, *, failure_policy):
+        assert failure_policy == "raise"
         if sample.status == "truncated":
             return 0.0
         return {"2": 1.0, "3": 0.0, "12": 0.5, "": 0.0}[sample.response]
@@ -491,7 +493,8 @@ def test_failed_negative_grades_cannot_qualify_after_successful_gold(tmp_path, m
     ]
     seen = []
 
-    async def grade(args, sample):
+    async def grade(args, sample, *, failure_policy):
+        assert failure_policy == "raise"
         seen.append(sample.response)
         if sample.response == failed_case:
             sample.metadata["verifier_diagnostics"] = {"judge": {"status": status, "error": "backend unavailable"}}

@@ -1,3 +1,4 @@
+- Let MILES scoring callers explicitly raise or zero reported service/judge failures; preserve zero fallback for distillation and ordinary evaluation, strict offline qualification, and training group omission (https://github.com/allenai/open-instruct/pull/2178).
 - Fix reasoning-panel GPQA/context budgets, normalize SciCode disabled top-k, and retain independent evaluation progress after task failures (https://github.com/allenai/open-instruct/pull/2136).
 # Changelog
 

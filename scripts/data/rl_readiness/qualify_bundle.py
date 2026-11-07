@@ -73,7 +73,7 @@ async def check_control(row, cases, reward_path):
             response_length=0,
             status="truncated" if case["kind"] == "truncated" else "completed",
         )
-        actual = await rewards.registered_reward(args, sample)
+        actual = await rewards.registered_reward(args, sample, failure_policy="raise")
         diagnostics = sample.metadata.get("verifier_diagnostics", {})
         for value in diagnostics.values():
             status = value.get("status")

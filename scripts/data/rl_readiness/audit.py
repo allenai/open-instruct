@@ -60,7 +60,7 @@ async def audit(options):
                 tokens=raw["tokens"],
                 response_length=raw["response_length"],
             )
-            independent = await rewards.registered_reward(args, sample)
+            independent = await rewards.registered_reward(args, sample, failure_policy="raise")
             checks.require(independent == raw["reward"], "Recomputed reward differs from rollout reward")
             statuses[status.value] += 1
             counts[prompt["metadata"]["source_name"]] += 1

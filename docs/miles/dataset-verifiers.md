@@ -6,6 +6,22 @@ XML and CSV using its existing registered reward path. This guide explains the
 supported contracts, runtime dependencies and limits needed to prepare and
 validate these training sources.
 
+## Caller failure handling
+
+`registered_reward(..., failure_policy="raise" | "zero")` lets callers choose
+how reported `service_error` and `judge_error` results affect scoring. The default
+is `raise`. Offline qualification and reward audits explicitly request `raise`;
+OPD held-out evaluation and ordinary MILES evaluation explicitly request `zero`.
+The zero policy assigns zero to the failed verifier component, retains the
+original failure diagnostics, and records `scoring_failure_policy: zero`.
+Other successfully graded components keep their configured weights.
+
+Training continues to omit and replace ungraded prompt groups. This option does
+not suppress exceptions thrown by a verifier, including invalid targets,
+configuration errors or unexpected failures; a backend configured to raise still
+raises. Local validation timeouts retain their existing zero-with-diagnostics
+contract and are not service failures.
+
 ## Structured output sources
 
 Install `scripts/data/rl_readiness/requirements.txt` in the training

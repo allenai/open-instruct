@@ -333,7 +333,7 @@ def _capture_verifier_failure(args, sample, spec, response, error, *, capture_ki
         logger.exception("Could not save failed verifier input; preserving original verifier exception")
 
 
-async def _score(args, sample, *, omit_failures=False):
+async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
     registry = _registry(args.olmo_core.reward_config)
     metadata = sample.metadata
     if not isinstance(metadata, dict) or not isinstance(metadata.get("verifiers"), list) or not metadata["verifiers"]:
@@ -393,8 +393,14 @@ async def _score(args, sample, *, omit_failures=False):
                     _capture_verifier_failure(args, sample, spec, response, error, capture_kind="timeout")
                 score, cost = result.score, result.cost
             if isinstance(diagnostics, dict) and diagnostics.get("status") in {"judge_error", "service_error"}:
+                diagnostics = {**diagnostics, "scoring_failure_policy": failure_policy}
                 metadata.setdefault("verifier_diagnostics", {})[name] = diagnostics
-                raise RuntimeError("Verifier failed to grade the response; see verifier diagnostics")
+                if omit_failures or failure_policy == "raise":
+                    raise RuntimeError("Verifier failed to grade the response; see verifier diagnostics")
+                logger.warning(
+                    "Verifier %s failed to grade the response; caller requested zero: %s", name, diagnostics
+                )
+                score = 0.0
             score = _finite(score, "verifier score")
             total = _finite(total + weight * score, "combined reward")
         except Exception as error:
@@ -423,26 +429,35 @@ async def _score(args, sample, *, omit_failures=False):
     return total
 
 
-async def registered_reward(args, samples, **kwargs):
+async def registered_reward(args, samples, *, failure_policy="raise", **kwargs):
+    """Score with explicit handling of reported service/judge failures.
+
+    The zero policy zeroes the failed verifier component and preserves diagnostics.
+    Exceptions (including invalid targets/configuration) still propagate.
+    """
+    if failure_policy not in {"raise", "zero"}:
+        raise ValueError("Reward failure_policy must be 'raise' or 'zero'")
     if not args.olmo_core.reward_config:
         raise ValueError("Set core.reward_config for the open-instruct verifier adapter")
     if isinstance(samples, list):
-        return list(await asyncio.gather(*(_score(args, sample) for sample in samples)))
-    return await _score(args, samples)
+        return list(await asyncio.gather(*(_score(args, sample, failure_policy=failure_policy) for sample in samples)))
+    return await _score(args, samples, failure_policy=failure_policy)
 
 
 async def rollout_reward(args, samples, **kwargs):
-    """Omit ungraded training groups; keep standalone/evaluation scoring strict.
+    """Omit ungraded training groups; zero reported failures in evaluation.
 
     MILES assigns group_index when drawing training prompts. Evaluation samples
     have no group_index and are not passed through the replacement/filter loop.
-    Registry construction and routing errors remain fatal in either path.
+    Evaluation explicitly requests zero for reported service/judge failures.
+    Registry, routing and unexpected evaluation exceptions remain fatal.
     """
     if not args.olmo_core.reward_config:
         raise ValueError("Set core.reward_config for the open-instruct verifier adapter")
 
     async def score(sample):
-        return await _score(args, sample, omit_failures=getattr(sample, "group_index", None) is not None)
+        training = getattr(sample, "group_index", None) is not None
+        return await _score(args, sample, omit_failures=training, failure_policy="raise" if training else "zero")
 
     if isinstance(samples, list):
         return list(await asyncio.gather(*(score(sample) for sample in samples)))
