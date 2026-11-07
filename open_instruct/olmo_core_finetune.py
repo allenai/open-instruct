@@ -47,6 +47,7 @@ from olmo_core.config import DType
 from olmo_core.data import utils as oc_data_utils
 from olmo_core.distributed import parallel
 from olmo_core.distributed.utils import is_distributed
+from olmo_core.nn.ddp import model as ddp_model_lib
 from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, teardown_training_environment
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -459,6 +460,22 @@ class SFTArguments:
     sft: SFTConfig
 
 
+def _check_ddp_model_args(
+    args: SFTArguments, use_hf_ckpt: bool, cp_config: train_module_lib.TransformerContextParallelConfig | None
+) -> None:
+    """Raise for settings the OLMoDDPModel (MoE v2) path cannot honour."""
+    config_name = args.model.config_name
+    if config_name is None or not config_name.endswith(".json"):
+        raise ValueError(
+            "An OLMoDDPModel (MoE v2) model needs --config_name to be the checkpoint's olmo-core config.json: "
+            "its train_module section supplies the optimizer and data-parallel settings."
+        )
+    if use_hf_ckpt:
+        raise ValueError("An OLMoDDPModel (MoE v2) model loads from an olmo-core checkpoint, not a HuggingFace one.")
+    if cp_config is not None:
+        raise ValueError("Context parallelism is not wired for OLMoDDPModel (MoE v2) models; drop --cp_degree.")
+
+
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
     # Fail before tokenizing, not after, if the installed OLMo-core cannot honour the flag.
     document_boundary_kwargs = _document_boundary_kwargs(
@@ -572,8 +589,13 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     model, model_config = olmo_core_utils.setup_model(
         args.model, tc, init_device="meta", emo_segments_from_doc_lens=args.sft.document_boundaries_from_metadata
     )
+    # MoE v2 models refuse FSDP and train through OLMo-core's DDP train module instead.
+    is_ddp_model = isinstance(model, ddp_model_lib.OLMoDDPModel)
 
     cp_config = olmo_core_utils.build_cp_config(args.training)
+    if is_ddp_model:
+        _check_ddp_model_args(args, use_hf_ckpt, cp_config)
+        olmo_core_utils.require_transformer_engine()
     cp_degree = args.training.cp_degree or 1
     gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 1
     dp_shard_degree = gpus_per_node // cp_degree
@@ -624,22 +646,40 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
     )
 
-    train_module_config = train_module_lib.TransformerTrainModuleConfig(
-        rank_microbatch_size=rank_microbatch_size,
-        max_sequence_length=args.training.max_seq_length,
-        z_loss_multiplier=None,
-        compile_model=args.training.compile_model,
-        optim=optim.SkipStepAdamWConfig(
-            lr=args.training.learning_rate, weight_decay=args.training.weight_decay, betas=(0.9, 0.95), compile=False
-        ),
-        dp_config=dp_config,
-        cp_config=cp_config,
-        ac_config=ac_config,
-        scheduler=scheduler,
-        max_grad_norm=args.training.max_grad_norm
-        if args.training.max_grad_norm and args.training.max_grad_norm > 0
-        else None,
+    max_grad_norm = (
+        args.training.max_grad_norm if args.training.max_grad_norm and args.training.max_grad_norm > 0 else None
     )
+    if is_ddp_model:
+        assert args.model.config_name is not None  # checked by _check_ddp_model_args
+        train_module_config = olmo_core_utils.build_ddp_train_module_config(
+            args.model.config_name,
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            learning_rate=args.training.learning_rate,
+            weight_decay=args.training.weight_decay,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+            compile_model=args.training.compile_model,
+            ac_config=ac_config,
+        )
+    else:
+        train_module_config = train_module_lib.TransformerTrainModuleConfig(
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            z_loss_multiplier=None,
+            compile_model=args.training.compile_model,
+            optim=optim.SkipStepAdamWConfig(
+                lr=args.training.learning_rate,
+                weight_decay=args.training.weight_decay,
+                betas=(0.9, 0.95),
+                compile=False,
+            ),
+            dp_config=dp_config,
+            cp_config=cp_config,
+            ac_config=ac_config,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+        )
 
     train_module = train_module_config.build(model)
 
@@ -729,7 +769,11 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             resumed = True
     if not resumed and not use_hf_ckpt:
         logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
-        trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
+        # A MoE v2 base checkpoint carries its pretraining optimizer state (moments, step counts and
+        # skip-step statistics); SFT starts a fresh optimizer, so load only the weights.
+        trainer.load_checkpoint(
+            args.model.model_name_or_path, load_trainer_state=False, load_optim_state=False if is_ddp_model else None
+        )
 
     # Last point at which the base weights are settled: the HF path loaded them before the
     # trainer was built, the olmo-core path just above, and the trainer is configured with
