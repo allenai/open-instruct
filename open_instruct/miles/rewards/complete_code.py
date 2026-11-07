@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from open_instruct.miles.rewards import deterministic_verifiers as common
 
-CLIENT_REVISION = "4cab7e85e8748db501163e6cbbc5ab7c041692af"
+CLIENT_REVISION = "103ca279b35e8e81d118947f82b72c22676c6540"
 _SUITE_LIMIT = 2000
 
 
