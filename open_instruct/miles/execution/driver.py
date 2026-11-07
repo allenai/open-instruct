@@ -238,8 +238,9 @@ async def train(args, *, export_hf=None):
                         batch = await manager.get(rollout_id)
             except Exception as error:
                 # Ray wraps application errors; preserve unrelated failures.
-                cause = error.as_instanceof_cause() if hasattr(error, "as_instanceof_cause") else error
-                if not pooled or not isinstance(cause, exhaustion_type):
+                unwrap = getattr(error, "as_instanceof_cause", None)
+                cause = unwrap() if callable(unwrap) else error
+                if not pooled or exhaustion_type is None or not isinstance(cause, exhaustion_type):
                     raise
                 logger.info("Named prompt pools exhausted after %s completed collections", len(completed))
                 exhausted = final_stop = True

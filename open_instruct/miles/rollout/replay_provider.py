@@ -10,9 +10,18 @@ import hashlib
 import json
 from collections import Counter, deque
 from fractions import Fraction
+from typing import TypedDict
 
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.datasets import replay_evidence
+
+
+class ReplayConfig(TypedDict):
+    fraction: float
+    length_drop: float
+    window: int
+    max_successes: int
+    truncation: str
 
 
 def identity(sample):
@@ -55,7 +64,7 @@ class ReplayPromptProvider:
         validation.choice(truncation, "prompt_replay_truncation", ("none", "any", "half", "all"))
         self.base = base
         self.dataset_guard = dataset_guard
-        self.config = dict(
+        self.config: ReplayConfig = dict(
             fraction=fraction,
             length_drop=length_drop,
             window=window,
