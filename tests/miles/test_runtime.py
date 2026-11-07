@@ -517,7 +517,7 @@ def test_scoring_check_failure_stops_before_the_optimizer_step(parsed_args, tmp_
 
         def drifted_score(module, batches, *, use_replay):
             # Emulate a no-grad kernel path that rounds differently from the gradient path.
-            return [value + 0.01 for value in original_score(module, batches, use_replay=use_replay)]
+            return [value + 0.02 for value in original_score(module, batches, use_replay=use_replay)]
 
         monkeypatch.setattr(worker, "_score", drifted_score)
         before = {name: tensor.detach().clone() for name, tensor in worker.model.state_dict().items()}
@@ -532,7 +532,7 @@ def test_scoring_check_failure_stops_before_the_optimizer_step(parsed_args, tmp_
         worker.train(0, None)
         assert worker.clock.completed_steps == 1
         checks = [record for record in _contract_records(worker.args) if record["event"] == "scoring_check"]
-        assert len(checks) == 1 and checks[0]["mean_abs"] == pytest.approx(0.01, abs=1e-6)
+        assert len(checks) == 1 and checks[0]["mean_abs"] == pytest.approx(0.02, abs=1e-6)
     finally:
         dist.destroy_process_group()
 

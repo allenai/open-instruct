@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Treat modest MILES standalone/training scoring drift as a warning; fail above ten times the configured warning tolerance (defaults 0.001/0.01) (https://github.com/allenai/open-instruct/pull/2187).
 - Preserve unquoted ToolRL string-union arguments, reject unresolved schema references during preparation, and surface complete-code partition failures and service metrics instead of treating failed grades as wrong answers (https://github.com/allenai/open-instruct/pull/2178).
 - Reject failed judge/service requests during offline qualification and preserve native schema-list boundaries during NeMo strictification, including satisfiable `allOf` targets (https://github.com/allenai/open-instruct/pull/2178).
 - Add explicit offline instruction-family qualification, streaming complete-pool checks, and runtime-tested shared witnesses for compatible duplicate math/citation targets; publish the first-pass dataset handoff (https://github.com/allenai/open-instruct/pull/2178).
