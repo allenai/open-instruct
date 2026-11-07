@@ -21,6 +21,7 @@ from olmo_core import optim
 from olmo_core.nn.ddp import model as ddp_model
 from olmo_core.nn.transformer import config as oc_transformer_config
 from olmo_core.train.train_module.transformer import config as train_module_config
+from olmo_core.train.train_module.transformer import ddp_train_module
 from parameterized import parameterized
 
 from open_instruct import dataset_transformation, olmo_core_finetune, olmo_core_utils, utils
@@ -901,6 +902,23 @@ class CheckDdpModelArgsTest(unittest.TestCase):
             olmo_core_finetune._check_ddp_model_args(
                 self._args(self.config_path), use_hf_ckpt=False, cp_config=mock.sentinel.cp_config
             )
+
+
+class SaveAsyncTest(unittest.TestCase):
+    @parameterized.expand(
+        [("fsdp_async", True, False, True), ("fsdp_sync", False, False, False), ("ddp_sync", False, True, False)]
+    )
+    def test_flag_is_kept(self, _name: str, save_async: bool, is_ddp_model: bool, expected: bool) -> None:
+        self.assertIs(olmo_core_finetune._save_async(save_async, is_ddp_model), expected)
+
+    def test_ddp_model_saves_synchronously(self) -> None:
+        # OLMo-core's Checkpointer.save_async raises for train modules with save_state_dict_direct.
+        with self.assertLogs(olmo_core_finetune.logger, level="WARNING"):
+            self.assertFalse(olmo_core_finetune._save_async(True, is_ddp_model=True))
+
+    def test_olmo_ddp_train_module_saves_its_own_state(self) -> None:
+        # The reason for the override: if this attribute goes away, async saves may work again.
+        self.assertTrue(hasattr(ddp_train_module.OLMoDDPTrainModule, "save_state_dict_direct"))
 
 
 class RequireTransformerEngineTest(unittest.TestCase):

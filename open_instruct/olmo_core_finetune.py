@@ -478,6 +478,18 @@ def _check_ddp_model_args(
     olmo_core_utils.read_checkpoint_train_module(config_name)
 
 
+def _save_async(save_async: bool, is_ddp_model: bool) -> bool:
+    """Whether to checkpoint asynchronously: never for OLMoDDPModel (MoE v2) models.
+
+    OLMo-core's async save rejects train modules that save their own state dict, as the DDP
+    train module does, so the first checkpoint would end the run.
+    """
+    if save_async and is_ddp_model:
+        logger.warning("Saving checkpoints synchronously: OLMo-core cannot save an OLMoDDPModel asynchronously.")
+        return False
+    return save_async
+
+
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
     # Fail before tokenizing, not after, if the installed OLMo-core cannot honour the flag.
     document_boundary_kwargs = _document_boundary_kwargs(
@@ -737,7 +749,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",
         max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
-        save_async=args.sft.save_async,
+        save_async=_save_async(args.sft.save_async, is_ddp_model),
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
