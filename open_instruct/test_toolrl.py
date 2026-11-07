@@ -232,9 +232,33 @@ def test_string_union_reference_survives_preparation_and_native_reward(kind):
     assert result.score == 4
 
 
-@pytest.mark.parametrize("value,expected", [("Paris", "Paris"), ('"Paris"', "Paris"), ("null", None)])
+@pytest.mark.parametrize(
+    "value,expected", [("Paris", "Paris"), ('"Paris"', "Paris"), ("null", None), ("12345", "12345"), ("true", "true")]
+)
 def test_string_union_native_parameter(value, expected):
     assert tool_call_parsing.parameter_value(value, {"type": ["string", "null"]}) == expected
+
+
+@pytest.mark.parametrize("value", ["5", "true", "false", "null", '"Paris"'])
+@pytest.mark.parametrize("kind", [["string", "integer"], ["string", "null"]])
+def test_canonical_string_union_keeps_source_string_type_and_pythonic_reward(value, kind):
+    tools = copy.deepcopy(TOOLS)
+    tools[0]["function"]["parameters"]["properties"]["platform"]["type"] = kind
+    calls = toolrl.canonical_calls([call(value)], tools)
+    assert calls == [call(value)]
+    label = {**target(calls, tools), "tool_format": "olmo_pythonic_v1"}
+    prediction = f"<think>plan</think>\n<function_calls>giveaways(platform={value!r})</function_calls>"
+    assert asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], prediction, label)).score == 4
+
+
+def test_union_keeps_typed_nonstring_source_and_explicit_string_disambiguation():
+    tools = copy.deepcopy(TOOLS)
+    tools[0]["function"]["parameters"]["properties"]["platform"]["type"] = ["string", "integer", "null"]
+    assert toolrl.canonical_calls([call(5), call(None)], tools) == [call(5), call(None)]
+    schema = {"type": ["string", "integer", "null"]}
+    assert tool_call_parsing.parameter_value("5", schema) == 5
+    assert tool_call_parsing.parameter_value('"5"', schema) == "5"
+    assert tool_call_parsing.parameter_value('"null"', schema) == "null"
 
 
 @pytest.mark.parametrize("value", ["NaN", "1e999", '{"x":1,"x":2}'])

@@ -63,8 +63,9 @@ use the same representation expected in training responses.
 
 With `as_declared`, use `required` and `minItems` where the task demands nonempty
 objects or arrays: an empty TOML document or header-only CSV can otherwise satisfy
-the schema. `nemo_strict_v1` requires all declared object properties and does not
-add array length requirements; qualification controls must validate each target's
+the schema. `nemo_strict_v1` requires declared object properties outside
+combinator and tuple-list branches, and does not add array length requirements;
+qualification controls must validate each target's
 intended behavior. The qualification script uses the default one-second budget.
 
 ## Native instruction and calendar sources

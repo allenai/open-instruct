@@ -63,7 +63,9 @@ def validate_target(target):
     # resource in its own $id scope before accepting a source row, including
     # optional branches that a qualification control might never exercise.
     root = DRAFT202012.create_resource(schema)
-    pending = [(root, Registry().resolver_with_root(root))]
+    root_uri = root.id() or ""
+    registry = Registry().with_resource(root_uri, root).crawl()
+    pending = [(root, registry.resolver(root_uri))]
     while pending:
         resource, resolver = pending.pop()
         if isinstance(resource.contents, dict):

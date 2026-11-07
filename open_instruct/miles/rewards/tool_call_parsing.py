@@ -53,6 +53,8 @@ def parameter_value(value, schema):
         "string": isinstance(decoded, str),
     }
     if not any(matches.get(item, False) for item in kinds):
+        if "string" in kinds:
+            return value
         raise ValueError("Parameter value does not match its declared type")
     return decoded
 

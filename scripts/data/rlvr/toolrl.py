@@ -111,8 +111,15 @@ def canonical_calls(calls, tools):
         for key, value in call["parameters"].items():
             if key not in schemas[call["name"]]:
                 raise ValueError("Reference/history uses an undeclared parameter")
-            raw = value if isinstance(value, str) else json.dumps(value, allow_nan=False)
-            parameters[key] = tool_call_parsing.parameter_value(raw, schemas[call["name"]][key])
+            schema = schemas[call["name"]][key]
+            kinds = schema.get("type", "string")
+            # Source JSON already distinguishes strings from other values. Do
+            # not reinterpret "5", "null", or quoted text in string unions.
+            if isinstance(value, str) and isinstance(kinds, list) and "string" in kinds:
+                parameters[key] = value
+            else:
+                raw = value if isinstance(value, str) else json.dumps(value, allow_nan=False)
+                parameters[key] = tool_call_parsing.parameter_value(raw, schema)
         result.append({"name": call["name"], "parameters": parameters})
     return result
 

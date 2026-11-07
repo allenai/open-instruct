@@ -98,6 +98,10 @@ as omissions; it does not silently truncate long histories or choose rows by rew
 Native XML parameters allow unquoted strings when `string` is one of a union's
 types, such as `["string", "null"]`. JSON values still use their declared types;
 duplicate JSON keys and nonfinite values remain invalid.
+Canonical source strings in unions retain their original type, including numeric-looking
+IDs and the literal string `null`. In XML calls, quote a string as JSON when its
+bare form would also match another allowed type (for example, `"5"` for a
+string/integer union); Pythonic calls carry literal types explicitly.
 
 `options.tool_format` is `olmo_pythonic_v1` by default; use `olmo_xml_v1` for
 the XML template from the earlier ToolRL experiments. Preparation checks the
