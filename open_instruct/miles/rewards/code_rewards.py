@@ -49,8 +49,8 @@ class CodeVerifierConfig:
     failure_policy: str = "zero"
 
 
-def extract_python_code(model_output: str) -> str | None:
-    """Select a Python submission, rejecting unfinished final code fences."""
+def extract_python_code(model_output: str) -> str:
+    """Select the last Python or unlabelled block, preserving legacy fallbacks."""
     return code_extraction.extract_python_code(model_output)
 
 
@@ -161,15 +161,11 @@ async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = Fals
         "status": "ok",
         "http_status": None,
         "http_500_retries": 0,
-        "program_chars": len(program) if program is not None else 0,
+        "program_chars": len(program),
         "tests": len(target) if isinstance(target, list) else -1,
         "stdio": stdio,
         "failure_policy": config.failure_policy,
     }
-
-    if program is None or not program.strip():
-        diagnostics.update(status="completed", outcome="invalid_code", elapsed_seconds=0.0)
-        return 0.0, diagnostics
 
     def post() -> Any:
         response = infra_timeouts.request(

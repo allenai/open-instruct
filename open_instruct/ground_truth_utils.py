@@ -896,8 +896,8 @@ class CodeVerifier(VerifierFunction):
         self.pass_rate_reward_threshold = verifier_config.code_pass_rate_reward_threshold
         self.apply_perf_penalty = verifier_config.code_apply_perf_penalty
 
-    def extract_python_code(self, model_output: str) -> str | None:
-        """Select a Python submission, rejecting unfinished final code fences."""
+    def extract_python_code(self, model_output: str) -> str:
+        """Select the last Python or unlabelled block, preserving legacy fallbacks."""
         return code_extraction.extract_python_code(model_output)
 
     # Create a session pool for better performance
@@ -941,8 +941,6 @@ class CodeVerifier(VerifierFunction):
         """
         # Extract Python code from the model output
         python_code = self.extract_python_code(prediction)
-        if python_code is None or not python_code.strip():
-            return VerificationResult(score=0.0)
 
         # Test data
         payload = {
