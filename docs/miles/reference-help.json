@@ -39,7 +39,7 @@
     "router_z_loss_weight": "Router z-loss coefficient; replay does not itself disable router losses or gradients.",
     "row_specialization": "static specializes no-gradient SwiGLU on capacity; dynamic avoids capacity-specific compilation. Independent of arithmetic flags.",
     "scoring_check_interval": "Periodic standalone-versus-training score check; startup/resume also checks the first update.",
-    "scoring_check_tolerance": "Allowed absolute difference for the standalone/training scoring check.",
+    "scoring_check_tolerance": "Warning threshold for mean absolute standalone/training log-probability drift; fail above ten times this value (defaults: warn above 0.001, fail above 0.01).",
     "scoring_pass_required": "Default false (skip when redundant). True forces an extra full forward pass every update; use it only for like-for-like trainer comparisons or debugging, not for throughput-sensitive runs.",
     "sequence_packing": "Pack complete samples within each optimizer partition using document-isolated attention/KDA and replay alignment.",
     "snapshot_capacity": "Maximum retained immutable host snapshots during rolling publication; each snapshot holds a full BF16 export in the Ray object store.",

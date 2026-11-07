@@ -73,7 +73,11 @@ def _distributed_check(rank, rendezvous, output):
                 worker._check_training_scores(rollout, [scores])
         report = worker._check_training_scores(rollout, [torch.zeros(2)])
         assert report["active_tokens"] == 4 and report["mean_abs"] == 0
-        Path(output, str(rank)).write_text("both rank-local failures coordinated; valid check passed")
+        warning = worker._check_training_scores(rollout, [torch.full((2,), 0.00350197)])
+        assert warning["warning"] and warning["fatal_tolerance"] == 0.01
+        with pytest.raises(RuntimeError, match="fatal tolerance"):
+            worker._check_training_scores(rollout, [torch.full((2,), 0.02)])
+        Path(output, str(rank)).write_text("rank-local errors and fatal drift coordinated; warning drift passed")
     finally:
         dist.destroy_process_group()
 
