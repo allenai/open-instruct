@@ -1,0 +1,88 @@
+/* AI2 brand colors custom theme */
+
+/* Custom color scheme for primary usage - Light variant */
+[data-md-color-scheme="ai2"] {
+  /* Primary colors */
+  --md-primary-fg-color:        #105257; /* AI2 Pink (actually Teal) */
+  --md-primary-fg-color--light: #F0529C; /* AI2 Teal (actually Pink) */
+  --md-primary-fg-color--dark:  #0A3235; /* AI2 Dark Teal */
+
+  /* Accent colors */
+  --md-accent-fg-color:         #B11BE8; /* AI2 Purple */
+  --md-accent-fg-color--transparent: rgba(177, 27, 232, 0.1);
+
+  /* Background colors */
+  --md-default-bg-color:        #FAF2E9; /* AI2 Off White */
+
+  /* Typography */
+  --md-typeset-a-color:         #F0529C; /* AI2 Pink for links */
+}
+
+/* Custom color scheme for dark mode */
+[data-md-color-scheme="ai2-dark"] {
+  /* Primary colors */
+  --md-primary-fg-color:        #105257; /* AI2 Pink (actually Teal) */
+  --md-primary-fg-color--light: #F0529C; /* AI2 Teal (actually Pink) */
+  --md-primary-fg-color--dark:  #0A3235; /* AI2 Dark Teal */
+
+  /* Accent colors */
+  --md-accent-fg-color:         #F0529C; /* AI2 Teal (actually Pink) */
+  --md-accent-fg-color--transparent: rgba(240, 82, 156, 0.1);
+
+  /* Background colors - Dark mode */
+  --md-default-bg-color:        #0A3235; /* AI2 Dark Teal as background */
+  --md-default-fg-color:        #FFFFFF; /* Pure white for maximum contrast */
+  --md-default-fg-color--light: rgba(255, 255, 255, 0.87); /* White with transparency */
+  --md-default-fg-color--lighter: rgba(255, 255, 255, 0.72); /* White with more transparency */
+  --md-default-fg-color--lightest: rgba(255, 255, 255, 0.38); /* White with most transparency */
+
+  /* Code blocks */
+  --md-code-fg-color:           rgba(255, 255, 255, 0.87); /* Light text for code */
+  --md-code-bg-color:           #1E2D2F; /* Slightly lighter than background */
+
+  /* Code highlighting syntax color shades */
+  --md-code-hl-number-color:    #FF8B8B;   /* Light red for numbers */
+  --md-code-hl-special-color:   #FFB2FF;   /* Light pink for special */
+  --md-code-hl-function-color:  #B4A1FF;   /* Light purple for functions */
+  --md-code-hl-constant-color:  #92D9FF;   /* Light blue for constants */
+  --md-code-hl-keyword-color:   #FF92B2;   /* Light pink for keywords */
+  --md-code-hl-string-color:    #A8FF92;   /* Light green for strings */
+  --md-code-hl-name-color:      #FFFFFF;   /* White for names */
+  --md-code-hl-operator-color:  #FFE092;   /* Light yellow for operators */
+  --md-code-hl-punctuation-color: rgba(255, 255, 255, 0.7); /* Semi-transparent white */
+  --md-code-hl-comment-color:   rgba(255, 255, 255, 0.5);   /* More transparent white */
+  --md-code-hl-generic-color:   #FFFFFF;   /* White for generic */
+  --md-code-hl-variable-color:  #92FFED;   /* Light cyan for variables */
+
+  /* Code highlighting */
+  --md-code-hl-color:          rgba(255, 255, 255, 0.15);   /* Subtle highlight */
+  --md-code-hl-color--light:   rgba(255, 255, 255, 0.05);   /* Very subtle highlight */
+
+  /* Typography */
+  --md-typeset-a-color:         #F0529C; /* AI2 Teal (Pink) for links in dark mode */
+  --md-typeset-color:           #FFFFFF; /* Ensure main text is white */
+
+  /* Headers */
+  --md-typeset-h1-color:        #F0529C; /* AI2 Teal (Pink) */
+  --md-typeset-h2-color:        #F0529C; /* AI2 Teal (Pink) */
+  --md-typeset-h3-color:        #FFFFFF; /* White */
+  --md-typeset-h4-color:        #FFFFFF; /* White */
+
+  /* Navigation */
+  --md-nav-color:               #FFFFFF; /* Navigation text color */
+
+  /* Admonitions */
+  --md-admonition-bg-color:     rgba(10, 50, 53, 0.8); /* Darker AI2 Dark Teal */
+  --md-admonition-fg-color:     #FFFFFF; /* White */
+
+  /* Tables */
+  --md-typeset-table-color:     rgba(255, 255, 255, 0.87); /* Table text color */
+}
+
+/* Default color overrides */
+:root > * {
+  /* Primary colors */
+  --md-primary-fg-color:        #105257; /* AI2 Pink (actually Teal) */
+  --md-primary-fg-color--light: #F0529C; /* AI2 Teal (actually Pink) */
+  --md-primary-fg-color--dark:  #0A3235; /* AI2 Dark Teal */
+}

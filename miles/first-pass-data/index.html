@@ -1,0 +1,3068 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/miles/first-pass-data/">
+      
+      
+        <link rel="prev" href="../source-preparation/">
+      
+      
+        <link rel="next" href="../managed-judges/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>First-pass data handoff - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#first-pass-data-for-miles-mixing-experiments" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              First-pass data handoff
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Olmo 3 &amp; Olmo Hybrid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo 2 Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu3 Reproduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu1_tulu2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu1 tulu2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/trained_model_location/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trained Model Location
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/sft_running_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tpu_sft_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT on TPU: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/olmo_core_sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo-core Sharding and Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tool_training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../verify-tokenization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verifying SFT tokenization is byte-identical to origin/main
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../slack-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    MILES
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_2" id="__nav_5_1_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GRPO guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../feature-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support and limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development-defaults/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development defaults
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_3" id="__nav_5_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models and training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models-and-checkpoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and checkpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../moe-model-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hybrid MoE support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core-compatible-serving/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core-compatible serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topology and capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../long-sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Long sequences
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sequence-packing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence packing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine-drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../opd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experimental OPD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_4" id="__nav_5_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and evaluation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data and evaluation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-and-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and rewards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset-verifiers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset reward verifiers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../source-preparation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset source preparation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First-pass data handoff
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First-pass data handoff
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#start-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start here
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#available-populations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available populations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-qualification-establishes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What qualification establishes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deliberate-exclusions-and-follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deliberate exclusions and follow-ups
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managed-judges/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed judges
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../background-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Background evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inference-records/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inference records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_5" id="__nav_5_1_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations and development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations and development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../throughput-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Throughput
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compiler-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compiler caches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_6" id="__nav_5_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-training-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-serving-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SGLang options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#start-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start here
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#available-populations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available populations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-qualification-establishes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What qualification establishes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#training-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Training validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deliberate-exclusions-and-follow-ups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deliberate exclusions and follow-ups
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="first-pass-data-for-miles-mixing-experiments">First-pass data for MILES mixing experiments</h1>
+<p>This release turns the retained datasets from the early screening effort into
+named training inputs, so initial mixing experiments can start without repeating
+the preparation investigation. It provides <strong>2,288,298 source rows across 48 named routes
+from 22 dataset families</strong>, including ToolRL and the supported routes of all five
+Nemotron blends. Qualification checks integration and representative reward
+behavior; downstream experiments still need to establish learning benefit.</p>
+<h2 id="start-here">Start here</h2>
+<p>The versioned release destination is:</p>
+<div class="highlight"><pre><span></span><code>/weka/oe-training-default/ai2-llm/data/robertb/miles-first-pass-20261106-v2
+</code></pre></div>
+<p><code>catalog.json</code> is the entry point. <code>summary.json</code> contains per-source counts and
+coverage; <code>sources/&lt;name&gt;/</code> contains prompts, verifier configuration, controls,
+qualification receipts, hygiene evidence and quarantine records. <code>STAGED.json</code>
+records verification on shared storage. The corrected release is <strong>offline
+qualified and verified on shared storage</strong>, including all 48 routes and
+2,288,298 rows. The <a href="https://beaker.org/ex/01M6T0G6P2KWJ6KYE3X8GPPDKW">staging run</a>
+passed all catalog and qualification-receipt hash checks.
+<code>configs/&lt;name&gt;.toml</code> provides a ready
+single-source <code>[data]</code> fragment
+with absolute shared paths. The versioned S3 archive
+below reproduces this release. It contains compressed source archives, an archive
+manifest and <code>stage_release.py</code>; the staging script verifies archive hashes,
+extracts the complete release and verifies the catalog's file hashes. Use <code>s5cmd</code>
+for bulk transfer; Beaker is used only for the small staging helper and CPU job.</p>
+<table>
+<thead>
+<tr>
+<th>Release identity</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S3 archive</td>
+<td><code>s3://robertb-beaker/rl-dataset-qualification/miles-first-pass-20261106-v2/</code></td>
+</tr>
+<tr>
+<td>Final catalog SHA256</td>
+<td><code>c332b260d99a3c65f0e39262d9900024f08ce2261ebf8455c2fa58d7143e353a</code></td>
+</tr>
+</tbody>
+</table>
+<p>To restore elsewhere, use credentials with read access to this prefix (the local
+transfer uses Robert's <code>halo</code> AWS profile). Download into a local archive directory,
+then choose a <strong>new</strong> shared-storage destination:</p>
+<div class="highlight"><pre><span></span><code>mkdir<span class="w"> </span>-p<span class="w"> </span>/tmp/miles-first-pass-archives
+s5cmd<span class="w"> </span>cp<span class="w"> </span><span class="s1">&#39;s3://robertb-beaker/rl-dataset-qualification/miles-first-pass-20261106-v2/*&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>/tmp/miles-first-pass-archives/
+python<span class="w"> </span>/tmp/miles-first-pass-archives/stage_release.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>/tmp/miles-first-pass-archives<span class="w"> </span>/weka/oe-training-default/your-new-release-directory
+</code></pre></div>
+<p>The script writes <code>STAGED.json</code> only after verifying the release and regenerates
+the config fragments with the chosen destination's absolute paths. The Beaker
+helper is a small copy of the same script and transfer utility for the original
+staging job; it is not needed for this restore command. <code>v2</code> names the release
+prefix, not S3 object versions. On November 6, 2026, the bucket had neither S3
+versioning enabled nor a lifecycle expiration rule. Preserve the catalog and
+archive hashes; the prefix is not protected against later overwrites or deletion.</p>
+<p>Version 2 supersedes v1 after verifier review: it quarantines 221 structured-output
+rows with unresolved schema references and recovers one ToolRL string-union row.
+It preserves the existing 80-row ToolRL holdout and all other retained prompts.
+All six structured pools and ToolRL were requalified; the final image passed
+all 135 controls for those pools and replayed code controls are recorded separately
+(all 115 passed). <code>REVIEW_FIXES.json</code>, <code>local-controls-v2.json</code> and
+<code>code-controls-v2.json</code> preserve the scope and evidence. Version 1 remains
+available for reproducing the original training smoke.</p>
+<p>The release records runtime code
+<a href="https://github.com/allenai/open-instruct/commit/54ffddf8f68d09f4ad9eb1ec0fd2c75e60e9af20"><code>54ffddf8f68d09f4ad9eb1ec0fd2c75e60e9af20</code></a>
+in <code>CODE_REVISION</code> and <code>VALIDATION.json</code>. Use Beaker image
+<code>01M6SZCSXG790WNDXV1J4121Z0</code>, built from that revision; <strong>253 regression tests
+passed inside this image</strong>. It retains the previously tested MILES runtime and
+private execution-client pins. A subsequent preparation-only guard rejects
+non-string source values outside their declared union; use preparation code at
+<code>0fcedabb85377e27d2db5750645763a28c558057</code> or later when rebuilding raw ToolRL data. It reproduced all 3,587 converted records
+exactly and passed a 247-test focused suite, so the released data and training
+runtime are unchanged. The earlier GPU training smoke used image
+<code>01M6SHC8Z3BF1GW3G9R9AFNPZY</code> at <code>2c622531eb33302a3e337c7db179ea6b24d15379</code>;
+those GPU results are baseline evidence, not a claim that v2 was run on GPUs.</p>
+<p>Requalify when changing reward behavior. A rebuilt MILES application image needs
+the dependencies in <code>scripts/data/rl_readiness/requirements.txt</code>. The readiness
+Docker overlay installs these on an application image built from matching code;
+it does not replace the pinned MILES runtime. Building that overlay requires
+<code>--secret id=github_token,env=GH_TOKEN</code> with access to the private execution client.
+BuildKit mounts the token only for installation; do not pass it as a build argument.
+The archive's <code>README.md</code> and <code>VALIDATION.json</code> are offline snapshots. This document
+and PR #2178 record the current shared-staging status and credential configuration.</p>
+<p>These are explicit <strong>16,384-token prompt variants</strong>, rendered with the bundled
+Olmo Pythonic tool template and tokenizer. Allow response tokens in addition to
+that prompt budget, for example a 32K total context with a 16K response budget.
+A different tokenizer/template needs preparation again; a smaller prompt limit
+needs an explicit smaller-context variant. <code>long-context/</code> preserves longer
+records separately, with hashes and counts, rather than truncating histories.
+These <strong>64,478</strong> records are not qualified for this release's prompt limit.</p>
+<p>Resolve a deliberately chosen mixture <strong>offline</strong>, then put the resulting
+<code>[data]</code> fragment in the run configuration:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>open_instruct.miles.datasets.source_catalog<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>/weka/oe-training-default/ai2-llm/data/robertb/miles-first-pass-20261106-v2/catalog.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--source<span class="w"> </span><span class="nv">c031</span><span class="o">=</span><span class="m">0</span>.5<span class="w"> </span>--source<span class="w"> </span><span class="nv">c029</span><span class="o">=</span><span class="m">0</span>.3<span class="w"> </span>--source<span class="w"> </span><span class="nv">toolrl</span><span class="o">=</span><span class="m">0</span>.2<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output<span class="w"> </span>data.toml
+</code></pre></div>
+<p>These weights illustrate the interface; they are not a recommended recipe.
+ToolRL has a different reward scale from the other two sources; see below.
+Training trusts the resulting configuration and performs ordinary preparation.
+It does not rerun qualification. Preserve the release/catalog hash with the run.</p>
+<p>The qualification tokenizer came from the local
+<code>rl-dataset-qualification/checkpoints/rhea-preflight-v3/checkpoint/tokenizer</code>
+snapshot. Compare content hashes rather than inferring compatibility from a
+model name:</p>
+<table>
+<thead>
+<tr>
+<th>Bundled file</th>
+<th>SHA256</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tokenizer/tokenizer.json</code></td>
+<td><code>18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300</code></td>
+</tr>
+<tr>
+<td><code>tokenizer/chat_template.jinja</code></td>
+<td><code>43b0c225dd327d4af450809bfb3abfbd828eb19d6546d3e9ae33782464874d6a</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="available-populations">Available populations</h2>
+<p>Counts are retained <strong>source rows</strong>, not globally unique questions. Standalone
+sources and blend routes can overlap, and some upstream blends repeat examples.
+Select sources deliberately rather than combining every row by default. Earlier
+hygiene exclusions and protected holdouts remain excluded; this release does not
+claim a new independent decontamination pass.</p>
+<table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th>Source name or prefix</th>
+<th style="text-align: right;">Rows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Litmus v0.2</td>
+<td><code>c010</code></td>
+<td style="text-align: right;">41,638</td>
+</tr>
+<tr>
+<td>Llama-Nemotron IF</td>
+<td><code>c016</code></td>
+<td style="text-align: right;">51,189</td>
+</tr>
+<tr>
+<td>Nemotron Citation Formatting</td>
+<td><code>c018</code></td>
+<td style="text-align: right;">9,540</td>
+</tr>
+<tr>
+<td>Nemotron Free-Form Formatting</td>
+<td><code>c019</code></td>
+<td style="text-align: right;">9,037</td>
+</tr>
+<tr>
+<td>Nemotron IF</td>
+<td><code>c021</code></td>
+<td style="text-align: right;">44,538</td>
+</tr>
+<tr>
+<td>Calendar v2</td>
+<td><code>c023</code></td>
+<td style="text-align: right;">9,659</td>
+</tr>
+<tr>
+<td>Structured Outputs v2</td>
+<td><code>c029</code></td>
+<td style="text-align: right;">57,485</td>
+</tr>
+<tr>
+<td>Nemotron Knowledge MCQA</td>
+<td><code>c031</code></td>
+<td style="text-align: right;">610,469</td>
+</tr>
+<tr>
+<td>ReasoningGym</td>
+<td><code>c036</code></td>
+<td style="text-align: right;">14,525</td>
+</tr>
+<tr>
+<td>Nemotron Cascade Math</td>
+<td><code>c037</code></td>
+<td style="text-align: right;">14,379</td>
+</tr>
+<tr>
+<td>Nemotron OpenMathReasoning</td>
+<td><code>c039</code></td>
+<td style="text-align: right;">112,647</td>
+</tr>
+<tr>
+<td>Nemotron Math Stack Overflow</td>
+<td><code>c040</code></td>
+<td style="text-align: right;">434,156</td>
+</tr>
+<tr>
+<td>Nemotron Nano blend</td>
+<td><code>c043_*</code></td>
+<td style="text-align: right;">60,243</td>
+</tr>
+<tr>
+<td>Nemotron Cascade-2 blend</td>
+<td><code>c044_*</code></td>
+<td style="text-align: right;">60,459</td>
+</tr>
+<tr>
+<td>Nemotron Lightning blend</td>
+<td><code>c045_*</code></td>
+<td style="text-align: right;">55,901</td>
+</tr>
+<tr>
+<td>Nemotron Super blend</td>
+<td><code>c046_*</code></td>
+<td style="text-align: right;">269,333</td>
+</tr>
+<tr>
+<td>Nemotron Ultra blend</td>
+<td><code>c047_*</code></td>
+<td style="text-align: right;">163,720</td>
+</tr>
+<tr>
+<td>AceCode</td>
+<td><code>c076</code></td>
+<td style="text-align: right;">87,149</td>
+</tr>
+<tr>
+<td>AceReason Math</td>
+<td><code>c091</code></td>
+<td style="text-align: right;">49,538</td>
+</tr>
+<tr>
+<td>DeepMath-103K</td>
+<td><code>c094</code></td>
+<td style="text-align: right;">100,985</td>
+</tr>
+<tr>
+<td>Dolci IF</td>
+<td><code>dolci-if</code></td>
+<td style="text-align: right;">28,207</td>
+</tr>
+<tr>
+<td>ToolRL</td>
+<td><code>toolrl</code></td>
+<td style="text-align: right;">3,501</td>
+</tr>
+</tbody>
+</table>
+<p>Blend names have route suffixes: <code>_code</code>, <code>_if</code>, <code>_mcqa</code>, <code>_structured</code>,
+<code>_calendar</code>, <code>_rg</code>, <code>_citation</code>, <code>_format</code>, and <code>_tools</code>, where present. For
+example, <code>c046_tools</code> selects Super's offline next-action tool examples. The
+catalog lists the exact available combinations; unsupported routes are absent.</p>
+<h2 id="what-qualification-establishes">What qualification establishes</h2>
+<p>Every retained row went through the training loader. Reviewed gold, wrong,
+near-miss, empty and truncated controls went through the training reward bridge.
+The <strong>5,200 runtime control checks</strong> passed: the original 5,195 plus five controls
+for the recovered ToolRL row. Each receipt binds the checked prompt
+and verifier files to their content hashes.
+Code controls exercised the live service with complete test suites.</p>
+<p>IF uses explicit <strong>checker-family coverage</strong>: a selected real constraint is
+projected for each control, while training retains complete original constraint
+bundles. Every represented family is covered. This is not a solved witness for
+every combination. Other sources use their recorded reward/task strata. These
+checks do not independently prove every reference answer or code test correct,
+and no source was selected by whether a policy happened to solve it.</p>
+<p>ToolRL retains its historical reward scale: call targets range from -3 to 4;
+format-only targets from 0 to 1. NeMo tool message targets reward nonempty prose,
+not semantic answer quality. Tool-call rows preserve their history and declared
+tools, but grade the next action offline; they do not execute an environment.</p>
+<p>Code uses deployment version 9 at the pinned execution endpoint. Inject
+<code>CODE_EXECUTION_TOKEN</code> from Beaker secret
+<code>robertb_MILES_PR2178_CODE_EXECUTION_TOKEN</code> in workspace <code>ai2/olmo-instruct</code>;
+credentials are absent from the artifact. The endpoint is configurable through
+the preparation plan's <code>code_service.api_url</code>, recorded in each prepared
+<code>verifiers.json</code> as <code>config.api_url</code>. This release uses
+<code>https://1n7avfskve.execute-api.us-west-2.amazonaws.com</code> and pins the service source
+revision. Changing service behavior requires requalification.
+The service owner reports zero failures
+across 38,056 requests and 542,262 outcomes, tested through concurrency 128, with
+an AWS ceiling of 900. That is a shared service limit, not a per-run entitlement.</p>
+<h2 id="training-validation">Training validation</h2>
+<p>The original v1 training smoke checks that prepared examples can be sampled, generated,
+graded and used in optimizer updates with the tested application image. It uses
+an Olmo 3.5 MoE SFT checkpoint on four B300 GPUs: two trainer ranks and two
+inference engines. The deterministic integration pool contains 16 rows per route
+(768 total), selected without policy-success filtering. It is not a substitute
+for the full release or a representative accuracy evaluation.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Observed result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Corrected v2 staging</td>
+<td>All 48 routes and 2,288,298 rows verified against catalog and receipt hashes</td>
+<td><a href="https://beaker.org/ex/01M6T0G6P2KWJ6KYE3X8GPPDKW">Staging run</a></td>
+</tr>
+<tr>
+<td>Original v1 staging</td>
+<td>All 48 routes and 2,288,518 rows verified against the catalog hashes</td>
+<td><a href="https://beaker.org/ex/01M6SMNTM585MPTKQ7WQ6Z611S">Staging run</a></td>
+</tr>
+<tr>
+<td>First non-code training leg</td>
+<td>43 configured routes; 12 updates on both trainer ranks; finite losses and gradient norms; zero OOMs and omitted records; committed checkpoint at 12 completed steps</td>
+<td><a href="https://beaker.org/ex/01M6SKMECBC8MGHADXA179ZSM1">Training run</a></td>
+</tr>
+<tr>
+<td>Code training</td>
+<td>Five configured routes using the authenticated service; four updates on both ranks; finite losses and gradient norms; zero OOMs and omitted records; committed final checkpoint</td>
+<td><a href="https://beaker.org/ex/01M6SNFM7KHH9X4DB3PXPAK9BW">Code run</a></td>
+</tr>
+<tr>
+<td>Non-code checkpoint resume</td>
+<td>Restored at step 12 and completed through step 24 on both ranks; finite losses and gradient norms; zero OOMs and omitted records</td>
+<td><a href="https://beaker.org/ex/01M6SQ4TPZJC62B5QGYTX250RX">Resume run</a></td>
+</tr>
+<tr>
+<td>Recorded route consumption and checkpoint cursor hashes</td>
+<td>All 48 routes consumed: 576 non-code and 96 code prompt groups, totaling 2,688 training responses; saved sampler cursor hashes match checkpoint manifests</td>
+<td><a href="https://beaker.org/ex/01M6SSK3PCGEVYC7H8AD044NEE">Final audit</a></td>
+</tr>
+</tbody>
+</table>
+<p>The final audit's result dataset, <code>01M6SSK3PRPEPCXCH41KNJD8QV</code>, contains
+<code>noncode-audit.json</code> and <code>code-audit.json</code>, including per-route consumption,
+reward diagnostics, checkpoint clocks and cursor hashes. Both ranks completed
+every expected update without skipping an optimizer step. All recorded rewards
+were finite; the omission metric was present and zero in every collection.
+The audit exposed an existing throughput-reporting bug: background collection
+time was compared with the driver's shorter final await. The separate
+<a href="https://github.com/allenai/open-instruct/pull/2198">reporting fix, PR #2198</a>,
+was applied only to analysis, with its exact revision and file hashes recorded
+in the audit reports. Training used the original v1 application image identified above.
+The v2 fixes were checked through preparation, qualification and reward-bridge
+regressions; no additional GPU run is claimed.</p>
+<p>The smoke uses 16K response and 32K total-context limits. It retains groups with
+zero reward variance to exercise the training path; some code batches therefore
+produce zero gradients. Long code responses frequently reach the response limit.
+Inspect response lengths and within-group reward variance when choosing a mixing
+experiment's generation budget. Passing this smoke establishes integration, not
+learning benefit.</p>
+<p>The recorded sample had no positive rewards for <code>c010</code> (Litmus),
+<code>c044_structured</code>, <code>c047_structured</code>, <code>c046_calendar</code> or <code>c047_calendar</code>. These are valid
+zero scores rather than service failures; offline positive controls passed.
+Structured/calendar parse errors describe model responses that failed the
+required format, and ToolRL's negative scores follow its native reward scale.
+Across all recorded code responses (including unused prefetch), 514 of 660
+Nemotron responses reached the limit, versus 2 of 124 AceCode responses.
+Nemotron code may need more than 16K response tokens to avoid mostly truncated,
+zero-reward samples. These small-pool observations call for inspecting examples
+and generation budgets in the first mixing experiments, not population-level
+accuracy conclusions.</p>
+<p>Startup, compilation and checkpointing dominate these short runs. For example,
+the code run spent 326 seconds in inference startup and 85 seconds saving its
+checkpoint; its first optimizer phase took 358 seconds and its last took 37
+seconds. Substantial asynchronous prefetched work remained unused at shutdown.
+These timings are not a sustained-throughput benchmark.</p>
+<h2 id="deliberate-exclusions-and-follow-ups">Deliberate exclusions and follow-ups</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>First-pass decision</th>
+<th>Follow-up</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Malformed source rows</td>
+<td>Quarantine exact IDs with reasons; retain the rest</td>
+<td>Investigate repairs separately, without changing this release</td>
+</tr>
+<tr>
+<td>Long histories</td>
+<td>Preserve outside the 16K-prompt variant</td>
+<td>Qualify a longer-context variant when an experiment needs it</td>
+</tr>
+<tr>
+<td>Math duplicate labels</td>
+<td>Quarantine two DeepMath rows labeled <code>B</code> versus <code>2</code> for the same numbered-choice question, and two AceReason rows whose <code>X</code> / <code>\text{X}</code> labels the existing verifier grades inconsistently</td>
+<td>Fix the existing MathVerifier normalization issue in a separate upstream change</td>
+</tr>
+<tr>
+<td>ReasoningGym halting</td>
+<td>Quarantine three Ultra rows: native 0.1.25 applies <code>bool()</code> to strings, awarding every nonempty response full credit</td>
+<td>Correct and validate the upstream scorer before admitting this family</td>
+</tr>
+<tr>
+<td>Judged and hybrid routes, including Nemotron Math v2 (C038), proof, GenRM, rubrics, safety and abstention</td>
+<td>Not included in this release</td>
+<td>Implement each native prompt/parsing/aggregation contract and calibrate its service; do not substitute a generic judge</td>
+</tr>
+<tr>
+<td>Workplace, SWE execution, Lean, browser and other interactive routes</td>
+<td>Not included; offline tool support does not claim their execution environments</td>
+<td>Integrate actual environments and recovery checks</td>
+</tr>
+<tr>
+<td>Alternative valid code constructions, arithmetic grammar and language detection</td>
+<td>Preserve the already documented upstream behavior</td>
+<td>Investigate deliberate grading improvements separately; do not delay initial experiments for them</td>
+</tr>
+<tr>
+<td>Schema combinations</td>
+<td>Native list-traversal behavior is preserved; all six structured pools were requalified after the fix. The audit records 38 rows with object branches under <code>allOf</code> and 16 under <code>oneOf</code></td>
+<td>Investigate upstream schema satisfiability in the cleaning PR. For example, C029 direct-generation row 1378 requires a pet <code>id</code> through <code>allOf</code> while its parent forbids that undeclared key. Integration qualification does not prove every schema satisfiable.</td>
+</tr>
+<tr>
+<td>Sustained verifier outages</td>
+<td>Individual ungraded prompt groups are omitted and replaced; W&amp;B reports <code>rollout/verification/omitted_records</code></td>
+<td>Decide the systemic-failure stopping threshold; none is introduced here</td>
+</tr>
+</tbody>
+</table>
+<p>The first experiments should examine reward distributions, omitted-group counts,
+context utilization and downstream evaluations alongside learning curves. The
+purpose is to identify useful signal and concrete failure cases, while keeping
+this release and its qualification evidence reproducible.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

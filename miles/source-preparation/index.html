@@ -1,0 +1,3315 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/miles/source-preparation/">
+      
+      
+        <link rel="prev" href="../dataset-verifiers/">
+      
+      
+        <link rel="next" href="../first-pass-data/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Dataset source preparation - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#preparing-dataset-sources" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Dataset source preparation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Olmo 3 &amp; Olmo Hybrid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo 2 Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu3 Reproduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu1_tulu2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu1 tulu2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/trained_model_location/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trained Model Location
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/sft_running_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tpu_sft_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT on TPU: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/olmo_core_sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo-core Sharding and Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tool_training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../verify-tokenization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verifying SFT tokenization is byte-identical to origin/main
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../slack-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    MILES
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_2" id="__nav_5_1_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GRPO guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../feature-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support and limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development-defaults/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development defaults
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_3" id="__nav_5_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models and training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models-and-checkpoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and checkpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../moe-model-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hybrid MoE support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core-compatible-serving/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core-compatible serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topology and capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../long-sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Long sequences
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sequence-packing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence packing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine-drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../opd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experimental OPD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_4" id="__nav_5_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and evaluation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data and evaluation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-and-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and rewards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset-verifiers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset reward verifiers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset source preparation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset source preparation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#offline-tool-call-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offline tool-call datasets
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Offline tool-call datasets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toolrl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ToolRL
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nemo-single-step-tool-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NeMo single-step tool routes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#explicit-dolci-keyword-correction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explicit Dolci keyword correction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#qualification-and-publication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Qualification and publication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#complete-test-code-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Complete-test code sources
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Complete-test code sources">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#alternative-valid-code-outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alternative valid code outputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#native-language-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native language constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reference-judges-and-routed-blends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference judges and routed blends
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-and-remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage and remaining work
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../first-pass-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First-pass data handoff
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managed-judges/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed judges
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../background-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Background evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inference-records/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inference records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_5" id="__nav_5_1_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations and development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations and development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../throughput-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Throughput
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compiler-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compiler caches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_6" id="__nav_5_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-training-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-serving-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SGLang options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#offline-tool-call-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offline tool-call datasets
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Offline tool-call datasets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toolrl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ToolRL
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nemo-single-step-tool-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NeMo single-step tool routes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#explicit-dolci-keyword-correction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explicit Dolci keyword correction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#qualification-and-publication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Qualification and publication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#complete-test-code-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Complete-test code sources
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Complete-test code sources">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#alternative-valid-code-outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alternative valid code outputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#native-language-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native language constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reference-judges-and-routed-blends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference judges and routed blends
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-and-remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage and remaining work
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="preparing-dataset-sources">Preparing dataset sources</h1>
+<p>Prepared source bundles connect datasets to MILES training without
+changing their original prompts or silently narrowing their populations. The
+preparation command consumes local JSONL exports from completed hygiene work;
+it does not download datasets or rerun decontamination. Each input and the prior
+hygiene receipt must have a SHA256. Use the latest selected dataset revision,
+including Litmus v0.2 rather than both Litmus releases.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;sources&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;structured-outputs-v2&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;adapter&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;structured_v1&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;inputs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;clean/structured.jsonl&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;REPLACE&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;revision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;PINNED_DATASET_COMMIT&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;split&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;train&quot;</span><span class="p">}],</span>
+<span class="w">      </span><span class="nt">&quot;hygiene_receipt&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;decon-receipt.json&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;REPLACE&quot;</span><span class="p">},</span>
+<span class="w">      </span><span class="nt">&quot;options&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;schema_policy&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nemo_strict_v1&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>open_instruct.miles.datasets.source_preparation<span class="w"> </span>plan.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tokenizer<span class="w"> </span>/path/to/checkpoint<span class="w"> </span>--output<span class="w"> </span>/path/to/new-bundle
+</code></pre></div>
+<p>Inputs may be raw rows or hygiene wrappers containing <code>id</code>, <code>raw_record</code> and
+<code>provenance</code>. Preserve the prior hygiene decision in the input selection and
+receipt; pointing at a receipt does not independently certify a new input's
+cleanliness. The adapter does not select on policy reward, reserve screened
+prompts, cap pool size, or rewrite messages with a new answer suffix. It records
+all unsupported rows in <code>dispositions.jsonl</code>, including rows with malformed
+messages, invalid schemas or regular expressions. An unknown adapter name is a
+plan error and stops preparation. Long prompts remain in the pool:
+set an adequate training context limit, or explicitly
+name and review a shorter-context variant. Repeated prompts are counted, not
+silently removed; resolve conflicting targets before qualification.</p>
+<p>Responses API <code>instructions</code> are placed first in a single system message,
+followed by the existing leading system/developer messages in their original
+order, separated by blank lines. This follows
+<a href="https://github.com/NVIDIA-NeMo/Gym/blob/main/nemo_gym/models/chat_completions_converter.py">NeMo Gym's Responses-to-chat conversion</a>
+and lets our chat templates render developer instructions through their supported
+system role. Instruction text and subsequent conversation turns are preserved;
+the selected tokenizer's chat template supplies the role delimiters and assistant
+generation prefix. Developer messages after the leading context remain unsupported
+and are recorded as omissions rather than moved across conversation turns.</p>
+<table>
+<thead>
+<tr>
+<th>Adapter</th>
+<th>Target and scope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nemo_v1</code></td>
+<td>Structural dispatch for formatting, structured formats, native IF, calendars and MCQA; unknown routes are reported</td>
+</tr>
+<tr>
+<td><code>structured_v1</code></td>
+<td><code>schema_type</code>/<code>schema_str</code>; explicit schema policy, all five formats and non-executing final tool calls</td>
+</tr>
+<tr>
+<td><code>instruction_v1</code></td>
+<td>Native instruction IDs and kwargs, including bundles in verifier metadata or args</td>
+</tr>
+<tr>
+<td><code>dolci_if_v1</code></td>
+<td>Published single-user Dolci IF rows or structured chat exports, with one encoded <code>ground_truth</code> bundle; optional recorded keyword correction</td>
+</tr>
+<tr>
+<td><code>calendar_v1</code></td>
+<td>Full final calendar feasibility from <code>exp_cal_state</code>, without a 20-event cutoff</td>
+</tr>
+<tr>
+<td><code>format_v1</code></td>
+<td>Existing format verifier payload; formatting only</td>
+</tr>
+<tr>
+<td><code>litmus_v02_v1</code></td>
+<td>Row-carried regex, answer type and matching policy; all scalar properties/methods are representable</td>
+</tr>
+<tr>
+<td><code>reasoning_gym_v1</code></td>
+<td>Saved entries for 104 pinned task families, including state-based graders; no regeneration or difficulty reset</td>
+</tr>
+<tr>
+<td><code>mcqa_v1</code></td>
+<td>Displayed options and expected answer, existing final-choice parser; no science-only filtering</td>
+</tr>
+<tr>
+<td><code>math_v1</code></td>
+<td>Explicit symbolic-math source contract; proof requests are reported as requiring judged support</td>
+</tr>
+<tr>
+<td><code>deterministic_v1</code></td>
+<td>Existing numeric, exact-text/JSON, countdown and knights contracts in <code>target</code></td>
+</tr>
+<tr>
+<td><code>toolrl_v1</code></td>
+<td>Canonical ToolRL messages, tools and reference calls; original partial-credit reward and format-only answer rows</td>
+</tr>
+<tr>
+<td><code>single_step_tool_v1</code></td>
+<td>NeMo offline next-action routes with native conversational, function-calling or SWE-pivot comparison rules</td>
+</tr>
+</tbody>
+</table>
+<p>New registries use
+<code>open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier</code>.</p>
+<h2 id="offline-tool-call-datasets">Offline tool-call datasets</h2>
+<p>ToolRL and NeMo's single-step tool datasets teach the next action from an existing
+conversation. Their prompts include tool definitions, previous calls, observations
+and reasoning. Training generates one next response and grades it against the
+source target; it does not execute the tools or require a live environment.
+These are separate reward contracts, even though they share native-format parsing.</p>
+<h3 id="toolrl">ToolRL</h3>
+<p>The source converter reuses the prior ToolRL integration's pinned 4,000-row source,
+schema translation, reference-argument conversion and dialogue-group train/holdout
+split. Its immutable source is
+<a href="https://github.com/qiancheng0/ToolRL/tree/8cee13ec0ca72f0461da372a93a6fd8140dbb840">ToolRL revision 8cee13ec0ca7</a>.
+To reproduce canonical rows offline:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>scripts.data.rlvr.toolrl<span class="w"> </span>--input<span class="w"> </span>/path/to/rlla_rl.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output-dir<span class="w"> </span>/path/to/toolrl-canonical
+</code></pre></div>
+<p>The converter checks the source SHA256 and writes <code>train.jsonl</code>, <code>eval.jsonl</code>
+and <code>source-manifest.json</code>, including every rejected source coordinate. These
+are intermediate records. Use <code>toolrl_v1</code> in the source plan above, with the
+hashed <code>train.jsonl</code> input and the existing hygiene receipt, then run
+<code>source_preparation</code>. Keep <code>eval.jsonl</code> out of training. The adapter validates
+reference and historical calls against their schemas and reports malformed rows
+as omissions; it does not silently truncate long histories or choose rows by reward.
+Native XML parameters allow unquoted strings when <code>string</code> is one of a union's
+types, such as <code>["string", "null"]</code>. JSON values still use their declared types;
+duplicate JSON keys and nonfinite values remain invalid.
+Canonical source strings in unions retain their original type, including numeric-looking
+IDs and the literal string <code>null</code>. In XML calls, quote a string as JSON when its
+bare form would also match another allowed type (for example, <code>"5"</code> for a
+string/integer union); Pythonic calls carry literal types explicitly.</p>
+<p><code>options.tool_format</code> is <code>olmo_pythonic_v1</code> by default; use <code>olmo_xml_v1</code> for
+the XML template from the earlier ToolRL experiments. Preparation checks the
+template and records whether its generation prefix already supplies <code>&lt;think&gt;</code>.
+Historical reasoning is embedded in assistant content for templates that do not
+consume <code>reasoning_content</code>. Literal tool/parameter names may contain spaces,
+digits or parentheses: they remain unchanged and are parsed without executing
+Python. Keep <code>core.reward_final_answer_only: false</code>, since ToolRL grades the
+reasoning/answer boundary as well as the calls.</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Preserved reward</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>One or more reference calls</td>
+<td>Format credit 0 or 1, plus native multiset-name overlap and greedy argument matching from −3 to 3; total −3 to 4</td>
+</tr>
+<tr>
+<td>No reference calls</td>
+<td>Plain response format only, from 0 to 1; no factual correctness check</td>
+</tr>
+</tbody>
+</table>
+<p>The reward factory is <code>open_instruct.miles.rewards.toolrl.ToolRLVerifier</code>.
+Qualification recognizes this native scale; it does not rescale training rewards
+to fit a generic binary control. Training's configured truncated-response gate
+still returns zero. Account for the reward scale when designing mixtures.</p>
+<p>The 2026-11-06 local first-pass check reproduced the prior 3,506 training rows
+and 80 held-out rows exactly; the converter reports 414 malformed or unsupported
+raw records separately. Six previously identified schema-invalid training
+rows were quarantined. All remaining <strong>3,500</strong> rows passed prompt preparation,
+reference-action rendering/reward checks and the whole-pool training loader:
+3,056 call targets and 444 format-only targets. Maximum prompt length was 3,570
+tokens; the nine rows previously deferred at 2,048 tokens are retained. Gold,
+wrong, near-miss, empty and truncated controls passed for both reward categories.
+This validates the integration, not an independent semantic relabeling or a new
+learning run. The existing BFCL overlap report contains only short embedded
+matches (one to four words); the receipt preserves those review flags and does
+not assert independent benchmark cleanliness.</p>
+<p>The corrected v2 release recovers one additional string-union row, reducing
+conversion omissions to 413 and increasing the qualified training pool to
+<strong>3,501</strong> rows. The original 80-row holdout and all previously retained rows are
+unchanged. Full-pool qualification and 15 runtime controls passed; see the
+<a href="../first-pass-data/">first-pass handoff</a> for the corrected release and image.</p>
+<h3 id="nemo-single-step-tool-routes">NeMo single-step tool routes</h3>
+<p><code>single_step_tool_v1</code> selects the source's <code>agent_ref.name</code>: ordinary
+<code>single_step_tool_use_with_argument_comparison_agent</code>,
+<code>toolcall_schema_single_step_tool_use_with_argument_comparison_agent</code>, or
+<code>swe_pivot_single_step_tool_use_with_argument_comparison_agent</code>. It uses the same
+explicit <code>tool_format</code> options as ToolRL. Unknown routes require an explicit
+reviewed profile, rather than guessing from the prompt.</p>
+<p>Comparison code and profile settings are pinned to
+<a href="https://github.com/NVIDIA-NeMo/Gym/tree/966145fc02ae58b887fd49379675604cc38fdd43/resources_servers/single_step_tool_use_with_argument_comparison">NeMo Gym 966145fc02ae</a>.
+The native string word-count thresholds are 0.1 for conversational/function-calling
+and 0 for SWE-pivot; numeric tolerance is 1e-6. Zero word-count tolerance still
+ignores word order. Calls take precedence over accompanying prose; with native
+parallel-call rewarding disabled, surplus calls are not penalized when the expected
+calls match. A message target rewards any nonempty assistant prose, not semantic
+equivalence to the reference message. Preserve these upstream limitations for
+initial mixing; investigate stricter behavior separately rather than silently
+changing reward semantics. Response parsing/resource failures score zero with
+diagnostics, while malformed targets remain fatal verifier errors.</p>
+<p>These routes do not implement SWE patch execution, Workplace Assistant state
+changes, browser interaction or Lean compilation. Those environment-dependent
+routes remain separate integration work.</p>
+<p>Litmus preserves row-specific answer formats and tolerances. The versioned
+<code>litmus_scalar_v1</code> contract deliberately requires complete finite numeric or
+explicit boolean captures; it does not recover an incidental number from malformed
+text or treat arbitrary nonzero numbers as true. A row needs an explicit
+one-capture <code>output_regex</code> and a nonempty scalar <code>expected_answer</code>. The matching rules are <code>isclose</code>, rounded-integer
+<code>exact</code>, absolute/relative windows, boolean equality and normalized string
+equality. This expands <em>verifier wiring</em>, not independent scientific validation:
+new property/method strata still need reference checks and positive/near-miss
+controls before qualification. Tool-dependent chemistry remains unsupported by
+single-turn training even when its final scalar can be graded.</p>
+<p>Litmus regex matching has a 100 ms budget. As with the other local validation
+adapters, a timeout always returns zero with <code>status: timeout</code>, the error and
+elapsed time in diagnostics; there is no policy setting. Invalid targets and
+unexpected failures still raise from the verifier. Qualification rejects timed-out controls, even
+though training can continue with zero reward for a timed-out response.</p>
+<p>Managed training uses <code>rollout_reward</code>: if an individual verifier raises or a
+judge reports a failed grade, its reward is missing rather than zero. The pinned
+MILES collector discards the entire prompt group (including healthy sibling
+responses) and draws replacements. <code>rollout/verification/omitted_records</code> in W&amp;B
+counts these missing-reward prompt groups per collection interval, including groups
+that never enter the training batch. It counts sampling attempts, not distinct
+source IDs; legitimate wrong answers and local validation timeouts do not count.
+The native <code>rollout/dynamic_filter/drop_group_has_missing_reward</code> counter remains
+available too. Diagnostics retain the verifier name/error on the failed sample,
+with bounded failed-input captures under <code>&lt;save&gt;/verifier_failures</code>.</p>
+<p>Offline qualification and evaluation remain strict; registry construction and
+routing/configuration errors also remain fatal. <strong>Open decision:</strong> how many or
+what fraction of omissions should stop a run. No tolerance setting or abort
+threshold is introduced here. A sustained verifier outage can therefore keep
+collection waiting for replacements; W&amp;B receives the count when collection
+logs, while individual failures are logged immediately.</p>
+<p>Structured tool-call rows are final-answer tasks, not tool-execution environments.
+The adapter preserves every function declaration and renders it through the Olmo
+Pythonic tool template. The verifier requires exactly one <code>&lt;function_calls&gt;</code> call,
+the declared function name and payload key, and a schema-valid payload. It never
+executes the call. CSV/object and TOML/array root requirements are recorded as
+unrepresentable: the native parsers cannot produce those shapes.
+Structured preparation resolves each local schema reference in its own <code>$id</code>
+scope, without fetching external resources. Missing pointers or anchors are
+quarantined as invalid targets before training, even in optional branches.
+Valid nested resource identifiers remain supported.</p>
+<p>ReasoningGym uses <code>reasoning-gym==0.1.25</code>. The 33 families inheriting its substring
+scorer use exact answers; custom scorers retain native partial credit. Empty and
+ambiguous answers score zero. Legitimate empty AB/equation solutions can use the
+explicit <code>""</code> answer. State-based tasks need their puzzle metadata, not a fabricated
+reference. Literal and symbolic answers are checked against a non-executable
+grammar before native parsing. Malformed factorization, grid, action-plan and
+nonfinite probability answers score zero with diagnostics. Puzzle24 additionally
+requires the actual puzzle numbers and an exact total of 24. A five-second response
+budget and outer worker deadline return zero on timeout; qualification rejects
+such controls. Invalid targets and unexpected worker errors remain fatal.</p>
+<p>The catalog initially says <code>prepared</code>, not <code>qualified</code>. It cannot be resolved by
+the named-source resolver until reviewed controls and the training loader path
+have passed. Integration readiness, representative policy evidence and downstream
+training benefit remain separate fields of evidence. Historical measurements
+from changed populations do not qualify these bundles.</p>
+<p>See <a href="../dataset-verifiers/">dataset reward verifiers</a> for the structured-output,
+instruction and calendar contracts and their runtime dependencies.</p>
+<h2 id="explicit-dolci-keyword-correction">Explicit Dolci keyword correction</h2>
+<p>Historical Dolci IF prompts say “Include keyword X” but use <code>keywords:word_once</code>,
+whose historical grader requires exactly one regex match. Preserve that identifier
+for compatibility. To keep those prompts unchanged while grading inclusion,
+select the correction explicitly in the source plan:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;adapter&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dolci_if_v1&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;options&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;keyword_inclusion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;at_least_once_v1&quot;</span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Include the usual pinned <code>inputs</code> and <code>hygiene_receipt</code> fields alongside this fragment.
+This adapter consumes Dolci IF rows with one <code>ground_truth</code> entry
+(the existing JSON/Python singleton wrappers are accepted). <code>dataset</code> may be absent
+for Dolci-RLZero-IF-7B; if supplied, it must be <code>["ifeval"]</code>. The explicit adapter
+selection identifies the IF-only source; it does not infer a route for mixed data.</p>
+<p>Published single-user <code>prompt</code> strings such as <code>user: Solve this problem…</code> are
+converted directly to <code>[{"role": "user", "content": "Solve this problem…"}]</code>.
+Only the initial, exact <code>user:</code> serialization prefix is removed; all remaining
+whitespace and text are preserved. No separate conversation exporter is needed.
+Use the preparation command above on local JSONL rows (or hygiene wrappers),
+selecting the IF-only rows when exporting a mixed Dolci dataset to JSONL. Existing
+source hashes, revision, split, and hygiene receipt requirements still apply.</p>
+<p>Flattened strings with additional newline-delimited role labels are ambiguous:
+they could represent additional turns or quoted dialogue. These receive an
+<code>ambiguous_dolci_conversation</code> omission in <code>dispositions.jsonl</code>. Other leading
+role serializations receive <code>unsupported_dolci_role_serialization</code>. Recover these
+from an authoritative conversation representation and supply structured messages,
+e.g. <code>input: [{"role": "user", "content": "..."}]</code>; do not guess turn boundaries.
+Structured message content is never scanned for role labels or stripped, so real
+text starting with <code>user:</code> remains intact. Ordinary strings without a role prefix
+remain ordinary user content. Token-only exports still need upstream decoding.
+This conversion is specific to <code>dolci_if_v1</code>; other adapters are unchanged. The
+prepared bundle uses <code>ManifestIFVerifier</code> and normal fraction-of-constraints grading.</p>
+<p>The default policy is <code>preserve</code>. With <code>at_least_once_v1</code>, each <code>keywords:word_once</code>
+constraint becomes <code>keywords:frequency</code> with arguments
+<code>{"keyword": X, "frequency": 1, "relation": "at least"}</code>. The final user message
+must contain the audited sentence <code>Include keyword X in your response.</code>. The
+keyword must contain only ASCII letters with no surrounding whitespace, matching
+the audited Dolci rows: the existing frequency checker treats keywords as regexes,
+so expanding this repair to arbitrary punctuation would require a separate decision.
+Unrecognized wording or keyword shapes are reported as omitted rows. Other
+constraints and prompt text are preserved; existing admission screens still apply.
+An already-present frequency constraint remains a separate constraint in the bundle.</p>
+<p>Each prepared row records <code>original_target_sha256</code> and <code>target_transformations</code>,
+including the correction version, constraint index, old/new identifiers, and
+<code>from_kwargs</code>/<code>to_kwargs</code>. The catalog records the selected options and transformed
+row/constraint counts; the original input hash and saved plan remain available.
+Write a new bundle rather than replacing historical artifacts. The option is
+rejected for other adapters: NeMo sources retain their original keyword identifiers
+and grading. Existing <code>run_data</code> and older trainer paths also keep exactly-once
+grading unless they explicitly consume corrected prepared targets. There is no
+runtime switch based on dataset origin and no new checker identifier.</p>
+<p>The shared <code>word_once</code> prompt generator now explicitly says “exactly once” for
+future generated examples. This does not rewrite existing dataset prompts.</p>
+<h2 id="qualification-and-publication">Qualification and publication</h2>
+<p>Source preparation and qualification run before training. Keep the qualified
+bundle together: <code>catalog.json</code>, <code>qualification.json</code>, and each source's
+<code>prompts.jsonl</code>, <code>verifiers.json</code>, hygiene receipt, and dispositions. The prompt
+JSONL contains rendered input text, verifier targets, and source metadata; the
+verifier registry selects trusted reward implementations and their configuration.</p>
+<p>Qualification receipts bind each source to the SHA-256 hashes of its prompt data
+and reward configuration. Catalog resolution verifies both those bindings and the
+files themselves. Updating a catalog's file hashes cannot reuse an old receipt:
+changed artifacts must be requalified. Receipts without these bindings also need
+requalification. Moving an unchanged bundle preserves qualification because the
+bindings use content hashes rather than absolute paths. These checks apply to
+machine-readable qualification receipts; trusted catalogs with manual qualification
+annotations remain a separate, manually reviewed path.</p>
+<p>The catalog command emits source paths and mixture weights for the training
+config. It does not embed the receipt into that config. At run preparation, MILES
+writes its own source JSONL files, verifier registry, <code>mixture.json</code>, and
+<code>manifest.json</code> containing input/output hashes and preparation settings. Resume
+checks those hashes. Retain the qualified bundle alongside the run evidence:
+the run manifest establishes what data was used, while the qualification receipt
+records which controls passed for those source artifacts. Direct-path training
+configs do not automatically enforce catalog qualification.</p>
+<p>Provide reviewed controls keyed to actual prepared sample IDs. Each stratum needs
+at least one case set containing <code>gold</code> (expected 1), <code>wrong</code> and <code>near_miss</code>
+(expected 0 for binary graders; an explicit score below 1 for native partial-credit graders). A near miss should exercise the likely shortcut: a wrong number containing
+the gold digits, a calendar constraint violation, a malformed schema field, or a
+wrong MCQA option. The command additionally checks empty and truncated responses. Timeout,
+<code>judge_error</code> and <code>service_error</code> diagnostics fail qualification even when a
+negative control otherwise receives the expected zero.
+Do not manufacture a positive witness by assuming the model's response is right.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="s2">&quot;my-source&quot;</span><span class="p">,</span><span class="nt">&quot;sample_id&quot;</span><span class="p">:</span><span class="s2">&quot;original-stable-id&quot;</span><span class="p">,</span><span class="nt">&quot;cases&quot;</span><span class="p">:[{</span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="s2">&quot;gold&quot;</span><span class="p">,</span><span class="nt">&quot;response&quot;</span><span class="p">:</span><span class="s2">&quot;2&quot;</span><span class="p">,</span><span class="nt">&quot;expected&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">},{</span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="s2">&quot;wrong&quot;</span><span class="p">,</span><span class="nt">&quot;response&quot;</span><span class="p">:</span><span class="s2">&quot;3&quot;</span><span class="p">,</span><span class="nt">&quot;expected&quot;</span><span class="p">:</span><span class="mi">0</span><span class="p">},{</span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="s2">&quot;near_miss&quot;</span><span class="p">,</span><span class="nt">&quot;response&quot;</span><span class="p">:</span><span class="s2">&quot;12&quot;</span><span class="p">,</span><span class="nt">&quot;expected&quot;</span><span class="p">:</span><span class="mi">0</span><span class="p">}]}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>scripts.data.rl_readiness.qualify_bundle<span class="w"> </span>new-bundle/catalog.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--controls<span class="w"> </span>reviewed-controls.jsonl<span class="w"> </span>--tokenizer<span class="w"> </span>/path/to/checkpoint<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-prompt-length<span class="w"> </span><span class="m">8192</span><span class="w"> </span>--output<span class="w"> </span>qualified-bundle
+python<span class="w"> </span>-m<span class="w"> </span>open_instruct.miles.datasets.source_catalog<span class="w"> </span>qualified-bundle/catalog.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--source<span class="w"> </span>my-source<span class="o">=</span><span class="m">1</span>.0<span class="w"> </span>--output<span class="w"> </span>data.toml
+</code></pre></div>
+<p>Qualification validates the complete pool through <code>run_data.prepare_data</code> and
+scores controls through <code>registered_reward</code>. It rejects conflicting targets for
+the same prompt. Different code suites, citation-marker sets and equivalent math labels may share
+a prompt only when every row has a reviewed common gold response that passes its
+original target through the runtime bridge. A shared witness establishes joint
+satisfiability, not identical rewards for every response; compatible duplicate
+code/citation targets can still contribute label noise. ReasoningGym export UUIDs are
+provenance only; all scoring fields remain part of duplicate-target comparison. Missing strata, failed controls, unresolved judge services, or
+loader failures leave the source unqualified. Passing control rows never replace
+the full source. Quarantine genuinely malformed source rows without repairing their
+prompts or targets. Pass <code>--quarantine reviewed-quarantine.jsonl</code>, with one record
+<code>{"source":"my-source","id":"original-stable-id","reason":"Invalid original schema"}</code>
+per reviewed omission. The identities must match <strong>every</strong> omitted row exactly;
+unsupported valid rows cannot silently disappear. The qualifier preserves the
+hashed dispositions and quarantine report, and records the retained population.
+This qualifies the explicitly retained variant, not the original malformed rows.
+The report includes source/controls
+hashes, loader manifest hash, context limit, judge registry fingerprint and all
+missing strata. It does not claim that a GPU optimizer update was exercised.</p>
+<p>For a lightweight first IF pass, explicitly select
+<code>--instruction-family-coverage</code> and give each control a zero-based
+<code>constraint_index</code>. The qualifier projects that real row's selected constraint
+for the control, and requires coverage of every checker family found in the
+complete population. Training retains the original complete constraint bundles.
+The receipt calls this <strong>family coverage</strong>, not a solved witness for every
+combination of constraints. The default remains per-stratum coverage; projected
+controls without the flag are rejected. The flag applies to the invocation, so
+qualify IF and non-IF source catalogs separately before assembling a mixed catalog.</p>
+<p>Large prepared files are streamed during qualification, training preparation,
+serialization and resume hashing. Code-test payloads remain complete without
+requiring several whole-file copies in memory. Identity and prompt-hash indexes
+still scale with the number of rows.</p>
+<p>Use the readiness Docker overlay on an application image built from this stack,
+so training receives the pinned optional verifier versions. Its build checks the
+qualification and source-preparation entry points. After CPU checks, use the
+existing local toy-model coverage workflow for a GPU mechanics exercise. Controls
+validate reward behavior; training continues to use the complete qualified pool.</p>
+<h2 id="complete-test-code-sources">Complete-test code sources</h2>
+<p><code>acecode_v1</code> uses the original <code>context_messages</code> when present and preserves every
+<code>test_cases</code> assertion. <code>livecodebench_v1</code> reads
+<code>verifier_metadata.unit_tests</code> (<code>inputs</code>, <code>outputs</code>, optional <code>fn_name</code>). It retains
+all aligned pairs and distinguishes stdio from module/Solution function calls.
+The readiness requirements pin the maintained execution client to commit
+<code>4cab7e85e8748db501163e6cbbc5ab7c041692af</code>.</p>
+<p>Each source plan must supply trusted service configuration, outside raw rows:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">&quot;code_service&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;api_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://1n7avfskve.execute-api.us-west-2.amazonaws.com&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;expected_source_sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;f8ee353acb3e49580439ae1dbdb1cbb66550e9f4fbc5f2dcb64feb5c64cc5905&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;max_execution_time&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;total_timeout&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">600.0</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Inject <code>CODE_EXECUTION_TOKEN</code> at runtime from the authorized Beaker secret;
+credentials never belong in plans, rows or qualification reports. Reward is one
+only when <strong>every</strong> test passes. All tests execute, including after a failure;
+suites above 2,000 tests are partitioned without truncation. Each partition uses
+the configured total client deadline, and each test uses a fresh interpreter.
+Syntax/runtime errors and execution timeouts are zero; infrastructure, incomplete
+result and service-source mismatches raise. A returned partition must explicitly
+report <code>ok</code> or <code>completed</code>; any other or missing status becomes a top-level
+service failure. Training omits the ungraded group, while offline scoring and
+qualification fail. Reports retain partition diagnostics and request identifiers,
+and complete-code records participate in <code>rollout/code_verifier/*</code> metrics.</p>
+<p>The service owner's 2026-11-06 scaling panel supersedes the original eight-request
+guidance. Reserved Lambda concurrency is now 900, with no provisioned warm
+baseline. The panel tested 12, 16, 32, 64 and 128 concurrent HTTP requests:
+38,056 requests and 542,262 test outcomes completed with no retries,
+infrastructure failures, throttles or scoring differences from the sequential
+baseline. Timeout recovery passed, and CloudWatch confirmed scaling with zero
+throttles. At 128 concurrent requests, the selected workload sustained 266.6
+requests/second (about 60 complete solutions/second).</p>
+<p>The configured ceiling of 900 is not a tested operating point: load qualification
+reached 128 concurrent HTTP requests, with roughly one minute of submissions per
+phase followed by draining. Capacity is shared across runs; keep pending work
+bounded and account for overload. End-to-end multi-run admission/backpressure
+remains to be validated. Service version 9 and the client/source pins above are
+unchanged. Evidence: <code>docs/scaling-load-validation-20261106.md</code> and its companion
+JSON in the <code>allenai/code-execution-service</code> repository (service-owner report).</p>
+<p>The Nemotron-backed <code>livecodebench_v1</code> adapter automatically selects the pinned
+<code>nemo_v1</code> output comparison through <code>prepare_nemotron_tests</code>; there is no training
+comparison option. Whole-line yes/no verdicts ignore case, floating stdio tokens
+use NeMo's 1e-6 tolerance while integer tokens stay exact, and function results
+use the native scalar/list comparison rules. AceCode retains its original assertions.
+The client rejects a service that does not advertise the required comparison;
+unknown outcomes never become zero rewards. Existing prepared Nemotron bundles
+must be rebuilt and qualified so they contain the new comparison metadata and
+function assertions. Update their trusted service source pin as well.
+See the pinned <a href="https://github.com/allenai/code-execution-service/blob/4cab7e85e8748db501163e6cbbc5ab7c041692af/docs/nemotron-comparison-contract.md">NeMo comparison contract</a>
+for exact rules and the 10,053-case native-checker differential validation.
+This closes the comparison implementation gap; whole-source dataset qualification
+and end-to-end training-load validation remain separate gates; the bounded
+service-load panel above is complete.</p>
+<h3 id="alternative-valid-code-outputs">Alternative valid code outputs</h3>
+<p>Some questions permit arbitrary output order, any tied optimum or any valid
+construction, while their supplied tests accept only one reference output. For
+example, an AceCode TwoSum question allows either index order but its assertion
+accepts <code>[0, 1]</code> and rejects <code>[1, 0]</code>; a Nemotron string-construction task similarly
+rejects a different valid string. These are limitations of the supplied grading
+contracts: <a href="https://github.com/NVIDIA-NeMo/Gym/blob/bd6f5f0d8f3a56cbf3f7e1d2d4a1d2220b7ff6fe/resources_servers/code_gen/lcb_integration/testing_util.py">NeMo compares reference outputs</a>,
+and <a href="https://github.com/TIGER-AI-Lab/AceCoder/blob/e37ef2aea2e3710be6b06e9a91dd92c98321df96/src/acecoder/evalplus_eval.py#L160-L168">AceCode executes the supplied assertions</a>.</p>
+<p><strong>Deferred investigation:</strong> consider recovering original special judges or adding
+task-specific property checkers, with valid-alternative and invalid-output
+controls. Unordered comparison must preserve multiplicity where required;
+construction and optimality tasks need their own checks. This would intentionally
+diverge from upstream grading and requires a separate review of reward changes.
+For now, preserve the upstream tests and comparisons; this concern does not
+introduce new filtering, repairs or a qualification blocker. Such false negatives
+are ordinary zero rewards, not missing grades, so they do not increment
+<code>rollout/verification/omitted_records</code>.</p>
+<h2 id="native-language-constraints">Native language constraints</h2>
+<p>Preserve the native checkers' behavior when language detection raises
+<code>LangDetectException</code>: the language constraint passes. Both our existing IFEvalG
+checker and <a href="https://github.com/abukharin-nv/verifiable-instructions/blob/f46a5ac87b1400a4f8973039844b6be9b56e3faf/verifiable_instructions/instructions.py#L137-L186">NeMo's pinned upstream checker</a>
+use this fallback. An unclassifiable answer is not necessarily a language
+violation: <code>42</code> can correctly answer an English question without containing
+detectable language. This is an intentional acceptance of ambiguity; do not
+replace it with a zero reward or omit the source row solely for that reason.</p>
+<p>The uppercase/lowercase English checkers retain their separate case tests;
+digits alone fail those tests before language detection runs. A successfully
+detected language that differs from the required language still fails.
+The NeMo adapter admits all three language-related checkers using their existing
+native semantics, without a separate classifier-calibration gate.</p>
+<p>The upstream detector is randomized: identical responses can receive different
+language labels and therefore different rewards. Short or ambiguous text is
+particularly susceptible, but length alone does not guarantee stability (for
+example, a long multilingual response can remain ambiguous). See the
+<a href="https://github.com/Mimino666/langdetect#basic-usage">detector's documentation</a>.
+Preserve upstream behavior without introducing a fixed seed or replacing the
+classifier in this integration. TODO: evaluate a better language classifier on
+representative training responses, including short answers, mixed languages and
+case constraints; measure accuracy, repeatability and reward changes before
+adopting it. This follow-up is outside the current integration's scope and is
+not a qualification blocker. Admission does not establish classifier accuracy.</p>
+<h2 id="reference-judges-and-routed-blends">Reference judges and routed blends</h2>
+<p><code>reference_judge_v1</code> preserves a nonempty reference from <code>expected_answer</code> (or
+explicit <code>options.reference_field</code>) and the full conversation in <code>judge_query</code>.
+It uses the named judge marker <code>reference_judge</code>. Configure that
+name in the run's <code>[judging.bindings]</code> using the same approved service and rubric
+for training. Qualification requires a resolved registry and live
+positive/negative controls. This draft has not launched or calibrated a new
+judge service. A generic reference judge is a new explicit reward contract, not
+an assertion of parity with a dataset's original judge prompt/model or a hybrid
+math-plus-judge scorer.</p>
+<p>For blends, <code>routed_v1</code> selects adapters through an explicit field and mapping:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;adapter&quot;</span><span class="p">:</span><span class="s2">&quot;routed_v1&quot;</span><span class="p">,</span><span class="nt">&quot;options&quot;</span><span class="p">:{</span><span class="nt">&quot;field&quot;</span><span class="p">:</span><span class="s2">&quot;agent_ref.name&quot;</span><span class="p">,</span><span class="nt">&quot;routes&quot;</span><span class="p">:{</span><span class="nt">&quot;math_with_judge_simple_agent&quot;</span><span class="p">:{</span><span class="nt">&quot;adapter&quot;</span><span class="p">:</span><span class="s2">&quot;reference_judge_v1&quot;</span><span class="p">},</span><span class="nt">&quot;instruction_following_simple_agent&quot;</span><span class="p">:{</span><span class="nt">&quot;adapter&quot;</span><span class="p">:</span><span class="s2">&quot;instruction_v1&quot;</span><span class="p">}}}}</span>
+</code></pre></div>
+<p>Unknown routes are reported as omissions; no fallback turns them into math or
+incorrect answers. Routes cannot recursively dispatch. Select <code>math_v1</code> only
+when intentionally declaring a symbolic-answer contract; use
+<code>options.reference_field="final_answer"</code> for DeepMath. The source's native
+messages remain intact. The runtime registry and prepared target encode the
+selected reward semantics.</p>
+<h2 id="coverage-and-remaining-work">Coverage and remaining work</h2>
+<p>The <a href="../first-pass-data/">first-pass data handoff</a> records the released source
+variants, counts, qualification scope, artifact location and an example mixture.
+Use that snapshot for initial mixing experiments. Source support does not imply
+that every route in a heterogeneous upstream blend has its required judge or
+execution environment.</p>
+<p>Keep these follow-ups separate from the released maintained-verifier pools:</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Remaining work</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Judged/hybrid math, proof, GenRM, rubrics, safety and abstention</td>
+<td>Preserve each upstream judge prompt, parsing and aggregation contract; deploy and calibrate the matching service. A generic reference judge is not parity.</td>
+</tr>
+<tr>
+<td>Workplace, SWE execution, Lean, browser and other interactive tasks</td>
+<td>Actual environment integration and recovery checks; offline next-action tool grading does not implement these environments.</td>
+</tr>
+<tr>
+<td>Alternative valid code constructions, arithmetic grammar and language detection</td>
+<td>Preserve the documented upstream behavior for the first pass; investigate deliberate changes separately.</td>
+</tr>
+<tr>
+<td>Runtime verifier outages</td>
+<td>Omitted-group W&amp;B metric is implemented; the systemic-failure stopping threshold remains an explicit open decision.</td>
+</tr>
+<tr>
+<td>Semantic data quality</td>
+<td>Qualification covers loader/reward integration and reviewed controls, not every source reference's scientific or mathematical correctness. Investigate observed training failures without retroactively selecting rows by policy success.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
