@@ -131,13 +131,15 @@ without calling a verifier. This applies to text/code verifiers and named judges
 judge rubrics retain their normal answer-tag extraction within that final region.
 The full response and its token IDs remain available for training and recording.
 
-Registered text/code verifiers must provide a callable
-`async_call_final_answer(tokens, prediction, label, **kwargs)` to use this mode;
-unsupported verifiers raise before reward gates or scoring. Verifiers that
-validate the raw thinking boundary must implement `async_call_final_answer`.
-The adapter calls that method after the missing/empty-final and truncation gates;
-`prediction` is the extracted suffix and `tokens` is empty. Raw-response mode
-always uses `async_call`. Named judges use their separate final-region dispatch.
+Verifiers can optionally implement
+`async_call_final_answer(tokens, prediction, label, **kwargs)`. In final-answer
+mode, the adapter uses this method when present; otherwise it calls `async_call`
+with the extracted suffix, preserving existing math and code verifier behavior.
+Both paths run after the missing/empty-final and truncation gates; `prediction`
+is the extracted suffix and `tokens` is empty. Verifiers that validate the raw
+thinking boundary need the optional method to grade an already extracted final
+answer. Raw-response mode always uses `async_call`. Named judges use their
+separate final-region dispatch.
 
 The built-in `R1FormatVerifier` implements this interface: after the outer gate
 selects the final section, it checks for optional leading whitespace followed by

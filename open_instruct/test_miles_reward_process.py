@@ -58,7 +58,8 @@ def _request(prediction="ok"):
     )
 
 
-def test_symbolic_fraction_equivalence_through_async_registry(tmp_path):
+@pytest.mark.parametrize("final_only", [False, True])
+def test_symbolic_fraction_equivalence_through_async_registry(tmp_path, final_only):
     registry = tmp_path / "verifiers.json"
     registry.write_text(
         json.dumps(
@@ -68,12 +69,12 @@ def test_symbolic_fraction_equivalence_through_async_registry(tmp_path):
             }
         )
     )
-    args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(registry)))
+    args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(registry), reward_final_answer_only=final_only))
     samples = [
         SimpleNamespace(
             tokens=[],
             response_length=0,
-            response=response,
+            response="scratch </think>" + response,
             prompt="Compute one half",
             metadata={"verifiers": [{"name": name, "target": r"\frac{1}{2}"}]},
         )

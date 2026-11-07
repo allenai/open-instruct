@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Require explicit final-answer verifier dispatch, support native IF and R1 format scoring, and preserve raw-response behavior (https://github.com/allenai/open-instruct/pull/2188).
+- Fix R1 format scoring with optional final-answer verifier dispatch while preserving existing math, code, and raw-response behavior (https://github.com/allenai/open-instruct/pull/2188).
 - Let MILES scoring callers explicitly raise or zero reported service/judge failures; preserve zero fallback for distillation and ordinary evaluation, strict offline qualification, and training group omission (https://github.com/allenai/open-instruct/pull/2178).
 - Fix reasoning-panel GPQA/context budgets, normalize SciCode disabled top-k, and retain independent evaluation progress after task failures (https://github.com/allenai/open-instruct/pull/2136).
 - Preserve unquoted ToolRL string-union arguments, reject unresolved schema references during preparation, and surface complete-code partition failures and service metrics instead of treating failed grades as wrong answers (https://github.com/allenai/open-instruct/pull/2178).

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.rewards import rewards
+from open_instruct.miles.rewards import code_rewards, rewards
 
 
 def sample(response, status="completed", label="computer", verifier="ifeval"):
@@ -21,53 +21,40 @@ def sample(response, status="completed", label="computer", verifier="ifeval"):
     )
 
 
-def score(registry, item, final_only, reward_function=rewards.registered_reward):
+def score(registry, item, final_only):
     args = SimpleNamespace(
         olmo_core=CoreConfig(
             reward_config=str(registry), reward_final_answer_only=final_only, reward_zero_truncated=True
         )
     )
-    return asyncio.run(reward_function(args, item))
+    return asyncio.run(rewards.registered_reward(args, item))
 
 
-@pytest.fixture
-def legacy_verifier(tmp_path):
-    registry = tmp_path / "legacy.json"
+@pytest.mark.parametrize("final_only", [False, True])
+def test_code_verifier_keeps_normal_method_dispatch(tmp_path, monkeypatch, final_only):
+    registry = tmp_path / "code.json"
     registry.write_text(
-        json.dumps({"legacy": {"factory": "open_instruct.miles.rewards.task_verifiers.MultiplicationVerifier"}})
+        json.dumps(
+            {
+                "code": {
+                    "factory": "open_instruct.miles.rewards.code_rewards.CodeVerifier",
+                    "config": {"api_url": "https://unused.invalid"},
+                }
+            }
+        )
     )
-    return registry
+    observed = []
 
+    async def execute(args, prediction, label, **kwargs):
+        observed.append((prediction, label))
+        return 1.0, {"status": "completed"}
 
-@pytest.mark.parametrize("reward_function", [rewards.registered_reward, rewards.rollout_reward])
-@pytest.mark.parametrize(
-    "response,status",
-    [
-        ("reasoning </think><answer>42</answer>", "completed"),
-        ("<answer>42</answer>", "completed"),
-        ("reasoning </think> ", "completed"),
-        ("reasoning </think><answer>42</answer>", "truncated"),
-    ],
-)
-def test_final_only_rejects_unsupported_verifier_even_when_gated(legacy_verifier, response, status, reward_function):
-    item = sample(response, status=status, label="42", verifier="legacy")
-    item.group_index = 7
-    with pytest.raises(ValueError, match="Verifier 'legacy' must implement async_call_final_answer"):
-        score(legacy_verifier, item, True, reward_function)
-    assert "reward_omission" not in item.metadata
-    assert "reward_gate" not in item.metadata
+    monkeypatch.setattr(code_rewards, "execute", execute)
+    response = "scratch </think>draft </think>print(42)"
+    item = sample(response, label=["assert True"], verifier="code")
+    assert score(registry, item, final_only) == 1.0
+    assert observed == [("print(42)" if final_only else response, ["assert True"])]
     assert item.response == response and item.tokens == [1, 2, 3]
-
-
-def test_raw_mode_keeps_legacy_verifier_support(legacy_verifier):
-    assert score(legacy_verifier, sample("<answer>42</answer>", label="42", verifier="legacy"), False) == 1
-
-
-def test_final_only_rejects_noncallable_entry_point(legacy_verifier, monkeypatch):
-    verifier = rewards._registry(str(legacy_verifier))["legacy"]
-    monkeypatch.setattr(verifier, "async_call_final_answer", None, raising=False)
-    with pytest.raises(ValueError, match="must implement async_call_final_answer"):
-        score(legacy_verifier, sample("reasoning </think><answer>42</answer>", verifier="legacy"), True)
 
 
 @pytest.fixture
