@@ -52,11 +52,17 @@ the cluster context or local log directory. It exits nonzero on a failed job, ti
 
 ## What the patch fixes
 
-The patches live as commits on abhishekraok/maxtext; each image directory's `maxtext_source` names the fork, base and head commit, and `build.sh` writes `patches/` from them with `fetch_patches.sh`. The Olmo 3 patch is `e259ed61..55bc76ae` (branch `olmo3-sft-image`). The fixes are not upstream yet; diffs are posted on the linked issues.
+The patches live as commits on abhishekraok/maxtext; each image directory's `maxtext_source` names the fork, base and head commit, and `build.sh` writes `patches/` from them with `fetch_patches.sh`. The Olmo 3 patch is `e259ed61..bfb69899` (branch `olmo3-sft-datafix`, image `e259ed61-pdd67f71d`). The fixes are not upstream yet; diffs are posted on the linked issues.
 
 - **YaRN on full-attention layers only** (AI-Hypercomputer/maxtext#5544), as Olmo 3 was trained. Unpatched, the starting loss is 0.105 nats/token too high.
 - **Chat templating** (AI-Hypercomputer/maxtext#5522). The whole conversation is rendered once. Assistant spans are derived the way open-instruct derives them: common-prefix starts when the prefixes render stably, otherwise token counts with a content check. Messages after the last assistant turn are kept as untrained context. Unpatched, every multi-turn row differs.
 - **HF export shape table for Olmo 3** (AI-Hypercomputer/maxtext#5587). MaxText's exported `config.json` is still wrong, so `export_hf.sh` replaces it with the base model's.
+- **SFT data fixes**, the three the Olmo 3.5 images carry (cherry-picked from `51f8cc4b..9f55e7b6`):
+  - *EOS in the loss.* Olmo's BOS is its EOS, and MaxText dropped every target equal to BOS, so SFT never learned to stop.
+  - *Only trained rows are loaded.* With a fractional per-device batch (the `4x4x8` overlay's 0.25), hosts packed rows
+    the loss then dropped: a run trained on half of each pass and ran dry at step 2,464.
+  - *Resume skips trained batches.* MaxText's data hooks bypassed Tunix's skip, so a resumed run replayed the data from
+    the start.
 
 ## Traps
 

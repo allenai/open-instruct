@@ -127,7 +127,8 @@ This tag is r2's image (`51f8cc4b-p907d86f3`, built from `image-olmo35/`) plus `
 fix for resuming from a checkpoint (without it, restore runs out of HBM) and batch-hash logging. Training numerics are
 unchanged: a replay produced bit-identical CE and 9,952 of 9,952 equal batch hashes. This is the default image for the
 recipe above. The optional [pooled resume image](#6-checkpoints-preemption-and-resume) includes additional patches;
-its parity checks compare against its own base image. The Olmo 3 image is built by `image/build.sh <maxtext commit>`.
+its parity checks compare against its own base image. The Olmo 3 image (`e259ed61-pdd67f71d`, which carries the
+Olmo 3.5 images' SFT data fixes: EOS in the loss, trained rows only, resume skip) is built by `image/build.sh <maxtext commit>`.
 
 To build a new image, run `build.sh` from any host with `gcloud` (a Beaker session works). Cloud Build carries the context base64-encoded inside the build
 config. Builds use Cloud Build's default service account. Set `BUILD_SERVICE_ACCOUNT` to a full
@@ -295,7 +296,8 @@ HF Olmo 3.5 needs `fla`, so every pass runs on GPU. Where exports and checkpoint
 Each of these trained silently on wrong data or a wrong model before it was found.
 
 - **Dropped EOS targets.** Olmo tokenizers have `bos == eos`, and MaxText's target shift ignored BOS targets, so SFT
-  never learned to stop while the loss looked fine. Fixed in the image. Check P(EOS) after an answer on any new pipeline.
+  never learned to stop while the loss looked fine. Fixed in the Olmo 3.5 images and in the Olmo 3 image from
+  `e259ed61-pdd67f71d`. Check P(EOS) after an answer on any new pipeline.
 - **YaRN.** Olmo 3 applies YaRN to full-attention layers only. Unpatched MaxText also applies it to sliding-window
   layers, which costs +0.1 nats/token at the start. Fixed in the image.
 - **Vocab padding.** 100,278 isn't divisible by tensor parallelism. Zero-padding to 100,352 is wrong (+3.2 nats/token).
