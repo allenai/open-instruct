@@ -70,20 +70,30 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
     if seconds <= 0 or any(not math.isfinite(v) or v < 0 for values in durations.values() for v in values):
         raise ValueError("Invalid measured duration")
     queue_waits = [r["queue_metrics"].get(prefix + "consumer_wait_seconds") for r in chosen]
-    wait_breakdown = None
-    if all(value is not None for value in queue_waits):
-        if any(
-            not math.isfinite(value) or value < 0 or value > outer + 0.001
-            for value, outer in zip(queue_waits, durations["generation_wait"], strict=True)
+    collection_times = [r.get("collection_wait_seconds") for r in chosen]
+    if any(value is not None and (not math.isfinite(value) or value < 0) for value in collection_times):
+        raise ValueError("Invalid full collection duration")
+    for queue_wait, collection_time in zip(queue_waits, collection_times, strict=True):
+        if queue_wait is not None and (
+            not math.isfinite(queue_wait)
+            or queue_wait < 0
+            or (collection_time is not None and queue_wait > collection_time + 0.001)
         ):
-            raise ValueError("Completed-queue wait is invalid or exceeds its enclosing collection stage")
+            raise ValueError("Completed-queue wait is invalid or exceeds its full collection duration")
+    wait_breakdown = None
+    if all(value is not None for value in queue_waits + collection_times):
+        # Prefetch can perform most of this collection during the preceding
+        # update. The driver's generation_wait measures only its final await.
         queue_seconds = sum(queue_waits)
+        collection_seconds = sum(collection_times)
+        other_seconds = max(0, collection_seconds - queue_seconds)
         wait_breakdown = {
-            "scope": "Completed-buffer get time includes expiry filtering; the remainder includes collection and handoff, not solely transfer.",
+            "scope": "Full collection work, possibly overlapping training. Fractions use collection time, not the awaited driver cycle. Buffer get includes expiry filtering; the remainder is not solely transfer.",
+            "collection_seconds": collection_seconds,
             "completed_queue_get_seconds": queue_seconds,
-            "completed_queue_get_cycle_fraction": queue_seconds / seconds,
-            "other_collection_seconds": max(0, sum(durations["generation_wait"]) - queue_seconds),
-            "other_collection_cycle_fraction": max(0, sum(durations["generation_wait"]) - queue_seconds) / seconds,
+            "completed_queue_get_collection_fraction": queue_seconds / collection_seconds if collection_seconds else 0,
+            "other_collection_seconds": other_seconds,
+            "other_collection_fraction": other_seconds / collection_seconds if collection_seconds else 0,
         }
     dropped = sum(r["queue_metrics"].get(prefix + "dropped_response_tokens", 0) for r in chosen)
     delivered = sum(r["response_tokens"] for r in chosen)
@@ -134,10 +144,11 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
                 "rollout_id": row["rollout_id"],
                 "response_tokens": row["response_tokens"],
                 "mixed_responses": row["mixed_responses"],
+                "collection_seconds": collection_times[index],
                 "completed_queue_get_seconds": queue_waits[index],
                 "other_collection_seconds": (
-                    max(0, durations["generation_wait"][index] - queue_waits[index])
-                    if wait_breakdown is not None
+                    max(0, collection_times[index] - queue_waits[index])
+                    if collection_times[index] is not None and queue_waits[index] is not None
                     else None
                 ),
                 **{name + "_seconds": values[index] for name, values in durations.items()},
