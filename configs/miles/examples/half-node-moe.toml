@@ -1,0 +1,161 @@
+# Olmo 3.5 Tiny (~12.5B total / ~0.8B active): 1 trainer GPU (EP1), 3 inference GPUs.
+# Background Platinum evaluation currently uses a separate GPU.
+# Replace YOUR_USERNAME and YOUR_WANDB_ENTITY; see the adjacent README before launch.
+schema_version = 1
+name = "half-node-moe"
+
+[model]
+source = "/weka/oe-training-default/jasonr/olmo35-vision-alignment/exports/olmo35-small-hero-14T-dec600-mt-lc-256k-textonly/hf-step9708-local"
+
+[output]
+root = "/weka/oe-adapt-default/YOUR_USERNAME/open-instruct/runs/half-node-moe"
+export_hf = true
+
+[launch]
+workspace = "ai2/olmo-instruct"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = "30m"
+timeout = "24h"
+auto_resume = true
+gpus_per_replica = 4
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
+
+[launch.env]
+OI_MILES_RAY_CPUS = "64"
+OI_MILES_MATH_TIMEOUT_POLICY = "zero"
+OI_MILES_CODE_FAILURE_POLICY = "zero"
+SGLANG_TIMEOUT_KEEP_ALIVE = "60"
+NCCL_SOCKET_IFNAME = "ib"
+NCCL_IB_HCA = "^=mlx5_bond_0"
+
+[launch.secrets]
+BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
+HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
+WANDB_API_KEY = "YOUR_USERNAME_WANDB_API_KEY"
+
+# Full GSM8K training split, shuffled deterministically.
+[[data.tasks]]
+task = "gsm8k"
+train_count = 7473
+prompt_wrapper = "qwen_math"
+
+[training]
+num_rollouts = 1000
+save_interval = 50
+
+[evaluation]
+mode = "background"
+interval = 100
+initial = true
+final = true
+# Evaluator image with the inline olmo-eval SGLang provider.
+image = "01M5ZGD5K01GNW3ASDPNXXPEJ3"
+revision = "3536fe751e40162cc33d5e647085e986375aadce"
+gpus = 1 # Additional allocation per task group, outside the 4-GPU training layout.
+cluster = "ai2/holmes"
+submit_timeout = 30
+timeout = "3h"
+# Explicit settings verified by the full Platinum prompt comparison on B300.
+# This export omits number_of_conv_states, which the evaluator's named profile requires.
+# Automatic harness batches use the engine's sequence capacity.
+[evaluation.provider_kwargs]
+profile = "generic"
+dtype = "bfloat16"
+context_length = 6144
+max_running_requests = 64
+disable_radix_cache = true
+max_total_tokens = 393216
+max_mamba_cache_size = 128
+mem_fraction_static = 0.7
+cuda_graph_backend_decode = "full"
+cuda_graph_max_bs_decode = 64
+cuda_graph_backend_prefill = "disabled"
+chunked_prefill_size = 4096
+attention_backend = "triton"
+sampling_backend = "pytorch"
+random_seed = 17
+
+[[evaluation.tasks]]
+task = "gsm8k:platinum:chat"
+generation = { temperature = 1.0, top_p = 1.0, max_tokens = 4096, num_samples = 1, stop_sequences = [] }
+scoring = { num_fewshot = 0 }
+
+[trainer]
+gpus = 1
+expert_parallel_size = 1
+sequence_packing = true
+packing_max_tokens = 6144
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 3
+rollout_batch_size = 8
+samples_per_prompt = 8
+global_batch_size = 64
+max_response_length = 4096
+max_context_length = 6144
+# Explicit smoke-test pools for 6K context; requires GPU memory qualification.
+profile = "generic"
+sglang_disable_radix_cache = true
+sglang_mamba_radix_cache_strategy = "extra_buffer"
+sglang_max_running_requests = 64
+sglang_server_concurrency = 64
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 64
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_chunked_prefill_size = 4096
+sglang_max_total_tokens = 393216
+sglang_max_mamba_cache_size = 128
+sglang_mem_fraction_static = 0.7
+
+[tracking]
+wandb_mode = "online"
+wandb_team = "YOUR_WANDB_ENTITY"
+wandb_project = "open-instruct-miles"
+wandb_group = "half-node-moe"
+
+[core]
+max_policy_lag = 4
+# A response cut off at max_response_length scores 0 (capped = wrong).
+reward_zero_truncated = true
+checkpoint_keep_last = 2
+publication_mode = "refresh"
+engine_drain_timeout = 900.0
+pipeline_observation_interval = 2.0
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+scoring_check_interval = 0
+
+[miles]
+rollout_max_prompt_len = 2048
+# Keep active-request KV/recurrent state across weight updates; prefix reuse is disabled.
+pause_generation_mode = "in_place"
+# HTTP workers decode replies before handing them to the producer.
+use_distributed_post = true
+http_post_actors_per_node = 16
+http_post_num_cpus = 1.0
+rollout_executor_num_cpus = 2.0
+# Keep response weighting independent of generation length.
+calculate_per_token_loss = false
+# Trainer ranks only; do not change the serving allocator.
+train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }
+sglang_enable_metrics = true
+use_rollout_routing_replay = true
+
+[async]
+fully_async = true
+# Bound unfinished samples independently of the three engines' reserved capacity.
+# Compare trainer wait and stale-work discards before increasing this budget.
+async_max_concurrent_samples = 128
+
+[compiler_cache]
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

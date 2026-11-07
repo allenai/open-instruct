@@ -172,9 +172,9 @@ def validate_data(data):
                     raise InputError(f"{name}.{key} must be a positive integer")
             if not (task.get("train_count") or task.get("eval_count")):
                 raise InputError(f"{name} requires a train_count or eval_count")
-            if task.get("prompt_wrapper", "none") not in ("none", "auto", "open_instruct_rlzero_answer"):
+            if task.get("prompt_wrapper", "none") not in ("none", "auto", "open_instruct_rlzero_answer", "qwen_math"):
                 raise InputError(
-                    f"data.tasks[{len(names) - 1}].prompt_wrapper: Unsupported prompt_wrapper; use 'none', 'auto', or 'open_instruct_rlzero_answer'."
+                    f"data.tasks[{len(names) - 1}].prompt_wrapper: Unsupported prompt_wrapper; use 'none', 'auto', 'open_instruct_rlzero_answer', or 'qwen_math'."
                 )
         if len(set(names)) != len(names) or not any(task.get("train_count") for task in tasks):
             raise InputError("Tasks must be unique and include training data")
@@ -462,6 +462,10 @@ def _tasks(data, tokenizer, template, seed):
                 wrapper = "none" if name == "ifeval" else "open_instruct_rlzero_answer"
             if wrapper == "open_instruct_rlzero_answer":
                 messages[-1]["content"] = f"{ANSWER_PREFIX}\n\n{messages[-1]['content']}\n\n{ANSWER_SUFFIX}"
+            elif wrapper == "qwen_math":
+                messages[-1]["content"] += (
+                    "\n\nPlease reason step by step, and put your final answer within \\boxed{}."
+                )
             metadata = {
                 # "train" is the source dataset split, not this run's partition.
                 # Keep source identities equal even if a row is assigned to eval.
