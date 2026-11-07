@@ -781,13 +781,19 @@ class TransformerConfigFromJsonTest(unittest.TestCase):
             config = olmo_core_utils.get_transformer_config(path, vocab_size=128, attn_backend="torch")
         self.assertIsInstance(config, oc_transformer_config.OLMoDDPModelConfig)
 
-    def test_keeps_the_config_vocab_size(self) -> None:
+    def test_keeps_a_larger_config_vocab_size(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL})
             with self.assertLogs(olmo_core_utils.logger, level="WARNING") as logs:
-                config = olmo_core_utils.get_transformer_config(path, vocab_size=256, attn_backend="torch")
+                config = olmo_core_utils.get_transformer_config(path, vocab_size=64, attn_backend="torch")
         self.assertEqual(config.vocab_size, 128)
         self.assertIn("keeping the config's value", "\n".join(logs.output))
+
+    def test_tokenizer_vocab_beyond_the_config_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL})
+            with self.assertRaisesRegex(ValueError, "below the tokenizer's padded vocab 256"):
+                olmo_core_utils.get_transformer_config(path, vocab_size=256, attn_backend="torch")
 
     def test_missing_json_file_is_not_a_config(self) -> None:
         with self.assertRaisesRegex(ValueError, "not found"):
@@ -824,7 +830,7 @@ class BuildDdpTrainModuleConfigTest(unittest.TestCase):
         # The train-module-level threshold would replace the optimizer's; it is left unset.
         self.assertIsNone(config.max_grad_norm)
 
-    def test_everything_else_comes_from_the_checkpoint(self) -> None:
+    def test_optim_dp_config_and_z_loss_come_from_the_checkpoint(self) -> None:
         config, _ = self._build(max_grad_norm=1.0)
         self.assertEqual(tuple(config.optim.betas), (0.9, 0.95))
         self.assertTrue(config.optim.compile)

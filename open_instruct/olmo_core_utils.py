@@ -552,6 +552,11 @@ def transformer_config_from_json(config_path: str, vocab_size: int) -> Transform
         f"Built {type(config).__name__} from {config_path}: {config.num_params:,} params, "
         f"{config.n_layers} layers, vocab {config.vocab_size}"
     )
+    if vocab_size > config.vocab_size:
+        raise ValueError(
+            f"{config_path} has vocab_size {config.vocab_size}, below the tokenizer's padded vocab {vocab_size}: "
+            "token ids past the embedding would fail on the GPU. Is this the right tokenizer?"
+        )
     if config.vocab_size != vocab_size:
         logger.warning(
             f"Config vocab_size {config.vocab_size} != tokenizer-derived {vocab_size}; "
@@ -591,7 +596,9 @@ def build_ddp_train_module_config(
     These models refuse FSDP and train through OLMo-core's DDP train module. The optimizer and
     dp_config come from the checkpoint config's `train_module` section, the combination that
     pretrained the model, with only the SFT knobs overridden: lr, weight decay, scheduler, batch
-    geometry, grad clipping and compilation. The z-loss multiplier is the checkpoint's.
+    geometry, grad clipping and compilation. Per-group overrides are kept as they are, and logged.
+    The z-loss multiplier is the checkpoint's, as on the GPU SFT line whose runs this path reproduces
+    (the FSDP path turns z-loss off).
     """
     with open(config_path) as config_file:
         payload = json.load(config_file)
@@ -605,6 +612,8 @@ def build_ddp_train_module_config(
     # This optimizer always clips; an infinite threshold makes the clip coefficient 1, which is
     # what `max_grad_norm=None` means on the FSDP path.
     optim_config.max_grad_norm = max_grad_norm if max_grad_norm is not None else math.inf
+    for override in optim_config.group_overrides or []:
+        logger.info(f"Keeping the checkpoint's optimizer group override {override.params}: {override.opts}")
 
     return OLMoDDPTrainModuleConfig(
         rank_microbatch_size=rank_microbatch_size,
