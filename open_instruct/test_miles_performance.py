@@ -30,7 +30,8 @@ def test_reconstructed_rates_use_global_counts_and_slowest_rank(tmp_path, monkey
         generation_wait_seconds=1,
         training_seconds=10,
         publication_seconds=1,
-        completed_queue_get_seconds=0.2,
+        collection_seconds=5,
+        completed_queue_get_seconds=4.2,
         other_collection_seconds=0.8,
     )
     monkeypatch.setattr(capacity_metrics.analyze_throughput, "analyze", lambda *a, **k: {"per_update": [cycle]})
@@ -64,4 +65,8 @@ def test_reconstructed_rates_use_global_counts_and_slowest_rank(tmp_path, monkey
     assert row["trainer/scoring_model_tokens_per_gpu_second"] == pytest.approx(1000 / 3 / 2)
     assert row["inference/useful_response_tokens_per_gpu_cycle_second"] == 25
     assert row["pipeline/useful_response_tokens_per_allocated_gpu_second"] == 12.5
+    assert row["pipeline/collection_seconds"] == 1
+    assert row["pipeline/collection_work_seconds"] == 5
+    assert row["pipeline/completed_queue_get_seconds"] == 4.2
+    assert row["pipeline/other_collection_seconds"] == 0.8
     assert "inference/observed_decode_tokens_per_gpu_second" not in row
