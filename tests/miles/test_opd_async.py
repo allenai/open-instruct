@@ -10,12 +10,20 @@ from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, Da
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
 from open_instruct.miles.distillation import async_buffer, opd_async
+from open_instruct.miles.megatron_grpo import grpo_async
 
 
+@pytest.mark.parametrize(
+    "producer_type,eval_reward",
+    [
+        (opd_async.OPDAsyncRollout, "open_instruct.miles.distillation.opd_hooks.eval_reward"),
+        (grpo_async.VerifierAsyncRollout, "open_instruct.miles.megatron_grpo.grpo_hooks.reward"),
+    ],
+)
 @pytest.mark.parametrize("fails", [False, True])
-def test_async_eval_does_not_mutate_inflight_teacher_args(monkeypatch, fails):
+def test_async_eval_does_not_mutate_inflight_teacher_args(monkeypatch, fails, producer_type, eval_reward):
     async def exercise():
-        producer = opd_async.OPDAsyncRollout.__new__(opd_async.OPDAsyncRollout)
+        producer = producer_type.__new__(producer_type)
         args = SimpleNamespace(custom_rm_path="teacher", custom_reward_post_process_path="teacher-post", num_rollout=4)
         producer.args = args
         producer.state = SimpleNamespace(args=args, semaphore=asyncio.Semaphore(1))
@@ -26,7 +34,7 @@ def test_async_eval_does_not_mutate_inflight_teacher_args(monkeypatch, fails):
         async def evaluate(state, cache):
             assert not producer._producer_resumed.is_set()
             assert state.semaphore is producer.state.semaphore
-            assert state.args.custom_rm_path.endswith("eval_reward")
+            assert state.args.custom_rm_path == eval_reward
             assert state.args.custom_reward_post_process_path is None
             await asyncio.sleep(0)
             assert args.custom_rm_path == "teacher"

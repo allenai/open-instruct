@@ -1,0 +1,111 @@
+# Short GPU check of Megatron verifier GRPO at the pinned MILES: the recipe of the tagged
+# runs/miles-qwen35-2b-rl run (rl-qwen35-2b-megatron-dppo-async-keepinflight-100u-20261003), cut to
+# 10 updates with one save and one evaluation. Open Instruct's Qwen3.5-2B verifier-RL teacher recipe
+# (Beaker 01M1TMAYJ1RCMSKCJFS5ZBVSX7): DPPO-TV 0.1 against rollout-engine log-probs, token-mean loss,
+# async with optimizer-step age <= 5 measured from the oldest policy version in each response, 4
+# Megatron learners (TP2 x DP2) and 4 SGLang engines on one 8-GPU node.
+# The tagged run's miles.keep_inflight_requests_on_weight_update is gone: the pinned MILES never
+# aborts in-flight requests at a weight publication, which is what that switch enabled.
+# Evaluation follows Open Instruct: its training sampler (temperature 1, one sample per problem) on
+# the DAPO holdout (512), AIME 2025 and BRUMO 2025.
+schema_version = 1
+name = "rl-qwen35-2b-megatron-dppo-async-10u"
+
+[model]
+source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets/Qwen3.5-2B-15852e8c1636"
+architecture = "qwen3.5-2B"
+
+[training]
+algorithm = "grpo"
+num_rollouts = 10
+save_interval = 10
+eval_interval = 10
+optimizer_steps_per_rollout = 1
+loss_aggregation = "token"
+keep_checkpoints = 0
+
+[trainer]
+backend = "megatron"
+gpus = 4
+tensor_parallel_size = 2
+
+[inference]
+gpus = 4
+tensor_parallel_size = 1
+rollout_batch_size = 128
+samples_per_prompt = 2
+max_prompt_length = 2048
+max_response_length = 16384
+max_context_length = 18432
+max_running_requests = 128
+temperature = 1.0
+top_p = 1.0
+eval_temperature = 1.0
+eval_top_p = 1.0
+eval_samples_per_prompt = 1
+
+[optimizer]
+learning_rate = 1e-6
+lr_decay_style = "constant"
+weight_decay = 0.0
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+adam_eps = 1e-8
+clip_grad = 1.0
+
+[objective]
+policy_loss = "dppo"
+use_rollout_logprobs = true
+dppo_divergence_type = "tv"
+dppo_threshold = 0.1
+std_normalization = false
+
+[output]
+root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/runs/rl-qwen35-2b-megatron-dppo-async-10u"
+assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/assets/megatron-grpo-qwen35-2b"
+
+[data]
+seed = 42
+prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/train.jsonl"
+eval_prompt_data = [
+  "dapo_math_holdout", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/dapo_math_holdout.jsonl",
+  "math_aime_2025", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/math_aime_2025.jsonl",
+  "math_brumo_2025", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/math_brumo_2025.jsonl",
+]
+reward_config = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/data/qwen35-math-v1/verifiers.json"
+
+[tracking]
+wandb_mode = "online"
+wandb_project = "rl-backend-comparison"
+wandb_entity = "allenai-team1"
+
+[launch]
+workspace = "ai2/open-instruct-dev"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "3h"
+timeout = "3h"
+auto_resume = false
+gpus_per_replica = 8
+weka_mounts = [{ weka = "oe-adapt-default", mount_path = "/weka/oe-adapt-default" }]
+
+[launch.secrets]
+WANDB_API_KEY = "kevinfarhat_WANDB_API_KEY"
+
+# Async producer as in the Qwen3.5-2B async OPD smoke (opd2b-graphon128-251-async-smoke2), with the
+# teacher run's age budget of 5. 1024 in-flight samples matches Open Instruct async 4 (4 x 256).
+[miles]
+fully_async = true
+max_weight_staleness = 5
+async_max_concurrent_samples = 1024
+async_data_buffer_capacity_factor = 2.0
+async_unused_samples_handler = "drop"
+rollout_submission_granularity = "group"
+pause_generation_mode = "retract"
+
+# Serving setting from the audited OPD 100-update run.
+sglang_disable_cuda_graph = false
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 128
+sglang_cuda_graph_backend_prefill = "disabled"

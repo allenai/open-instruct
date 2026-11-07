@@ -23,6 +23,7 @@ on a small run first. For starting settings see [development defaults](developme
 | Compiler caches | Private local Triton caches with shared immutable generations and bounded best-effort publication | Other compiler families and CUDA graphs are not persisted |
 | Background evaluation | Opt-in independent Beaker evaluator jobs that never pause rollout engines | Best effort: milestones can be skipped, and failed submissions are not retried |
 | On-policy distillation | [Experimental Megatron OPD](opd.md) with a managed SGLang teacher, sync or measured async rollout, optional EOPD loss | One node; Megatron learner rather than Core; Core GRPO rejects `miles.use_opd`; GPU runtime qualification pending |
+| Megatron verifier GRPO | [Experimental Megatron GRPO](megatron-grpo.md): teacher-free registered-verifier rewards, PPO or DPPO loss, sync or measured async rollout | One node; Qwen3.5-2B/Qwen3-1.7B dense learners; GPU runtime qualification pending at the pinned MILES |
 | Long sequences | Prompt/response budgets and serving controls for 16K–64K contexts | Trainer memory at long context depends on the model and topology; see [long sequences](long-sequences.md) |
 
 ## Differences from the Megatron implementation

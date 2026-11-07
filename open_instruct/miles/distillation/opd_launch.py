@@ -1,4 +1,5 @@
-"""Single-allocation Beaker specification for OPD and CPU asset preparation."""
+"""Single-allocation Beaker specification for the Megatron routes (OPD, verifier GRPO) and CPU
+asset preparation."""
 
 import base64
 import json
@@ -93,6 +94,6 @@ def specification(image, spec):
     return {
         "version": "v2",
         "budget": spec.launch["budget"],
-        "description": f"Miles Megatron OPD: {spec.name}",
+        "description": f"Miles Megatron {spec.document['training']['algorithm'].upper()}: {spec.name}",
         "tasks": [task],
     }
