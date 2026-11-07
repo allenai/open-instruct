@@ -853,6 +853,33 @@ Inference records retain `pool_id`, `sampling_pool`, `mixture_source`, and
 `pool_selection_id`. Per-update `pool-exposure-<attempt>.jsonl` receipts live in
 `records.root` and contain trained/proposed/pending counts, generated and
 trained response tokens, fresh/replay training counts, and replay diagnostics.
+Every policy also reports cumulative pool metrics through the normal tracking
+backends, including W&B. After each completed optimizer update, the driver publishes
+`pool/<metric>/<pool-name>` against `pool/update` (the completed update count),
+including the final update. The recorder retains `rollout/pool/<pool-name>/<metric>`
+for compatibility; its snapshots can precede training.
+
+| Metric | Interpretation |
+|---|---|
+| `proposed`, `fresh_proposed`, `replay_proposed` | Sampler selections, including work still in flight. |
+| `attempted`, `fresh_attempted`, `replay_attempted` | Selections with a first returned group record, including invalid or aborted results. Duplicate feedback does not add another attempt. |
+| `scored`, `invalid`, `aborted` | Partition of observed attempts by grading validity. Service failures are not evidence of an all-zero reward group. |
+| `filtered`, `filtered_all_zero`, `filtered_all_one`, `filtered_constant_nonzero`, `filtered_other` | Groups removed by the filter, with reward breakdown; invalid outcomes belong to `other`. |
+| `discarded`, `discarded_unobserved` | Explicitly discarded selections, and those discarded before a group record arrived. Observed discarded work also appears in attempts. |
+| `trained`, `fresh_groups`, `replay_groups` | Prompt groups committed after successful optimizer updates, with fresh/replay breakdown. |
+| `available_rows`, `coverage` | Initial fresh-row inventory and fraction observed at least once. Replay does not increase coverage. These are prepared rows, not globally deduplicated questions. |
+| `generated_tokens`, `trained_tokens` | Response tokens in first observed groups and the subset subsequently used in completed training. Regenerations reuse the first observation; these counters are not complete compute or loss-token accounting. Groups with incomplete token counts are omitted and counted in the corresponding `*_unknown_groups`. |
+| `groups_with_truncation`, `truncated_responses`, `returned_responses` | Counts for assessing truncation pressure, with a response denominator. |
+| `proposed_share`, `attempted_share`, `trained_share`, `generated_token_share` | Each pool's share of the corresponding cumulative count; zero before any observations. |
+
+For a first W&B view, put `pool/attempted/*`, `pool/trained/*`, and
+`pool/generated_tokens/*` in adjacent multi-series panels, using `pool/update` as
+the x-axis. Add shares and coverage to compare allocation, training exposure and
+breadth. These are logged scalars; no W&B workspace layout is created automatically.
+Counts restore from the checkpoint, including pending observations, so reconcile
+failed-attempt tails rather than summing them. These measurements do not change
+sampling weights or impose an exposure target.
+
 Exposure targets are reported only for the `exposure` policy. Unknown token counts
 are recorded separately. Receipts identify the resume point;
 if an attempt fails before checkpointing, reconcile its tail against the restored
@@ -865,5 +892,5 @@ can finish before the requested update count. Different pool labels do not chang
 verifiers, reward semantics, truncation policy, or the zero-variance filter.
 
 Changing the policy or weights is a new sampling experiment: checkpoint restore rejects
-a mismatched identity. Checkpoints from the earlier draft exposure-only implementation
-also require a new run. No pool-mode production runs have been qualified yet.
+a mismatched identity. Checkpoints from earlier draft pool implementations (before the version-3
+observation counters) also require a new run; missing history is not silently reset. No pool-mode production runs have been qualified yet.

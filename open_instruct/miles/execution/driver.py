@@ -23,7 +23,7 @@ from miles.utils.compiler_cache import startup_cache
 from miles.utils.data import remove_rollout_data_refs
 from miles.utils.hf_utils.config import HF_EXPORT_COMPLETE_MARKER
 from miles.utils.misc import should_run_periodic_action
-from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking
+from miles.utils.tracking_utils.tracking import define_step_key_metric_group, finish_tracking, init_tracking, log
 
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
@@ -31,6 +31,7 @@ from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution import serving, startup
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
+from open_instruct.miles.rollout import pool_metrics
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -85,6 +86,8 @@ async def train(args, *, export_hf=None):
         # specs. Later mutations in the driver cannot reach those worker copies.
         init_tracking(args)
         define_step_key_metric_group("errors", "errors/elapsed_seconds")
+        if pooled:
+            define_step_key_metric_group("pool", "pool/update")
         with stage(args, "placement"):
             worker_manager = wiring.launch_worker_manager(args, transform_specs=partial(serving.configure_specs, args))
         object_store.init_instance(args, contribute_segment=False)
@@ -264,7 +267,8 @@ async def train(args, *, export_hf=None):
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
                 if pooled:
-                    await manager.core_commit_exposure(rollout_id)
+                    exposure = await manager.core_commit_exposure(rollout_id)
+                    log(args, pool_metrics.dashboard(exposure, rollout_id + 1), step_key="pool/update")
                 completed.append(rollout_id)
                 # Persist newly compiled kernels even when model checkpointing is
                 # disabled. This schedules bounded background CPU work, not a save.

@@ -44,7 +44,7 @@ def test_exhaustion_preserves_last_complete_checkpoint_without_duplicate_save(mo
     manager = SimpleNamespace(
         get=AsyncMock(side_effect=[{}, PromptPoolExhausted("empty")]),
         core_publication_boundary=AsyncMock(),
-        core_commit_exposure=AsyncMock(),
+        core_commit_exposure=AsyncMock(return_value={"rollout/pool/math/trained": 1}),
         save=AsyncMock(),
         dispose=AsyncMock(),
     )
@@ -61,7 +61,13 @@ def test_exhaustion_preserves_last_complete_checkpoint_without_duplicate_save(mo
     monkeypatch.setattr(driver.ray, "is_initialized", lambda: True)
     monkeypatch.setattr(driver.throughput, "report", lambda *_: {"warnings": []})
     monkeypatch.setattr(driver, "stage", lambda *_a, **_k: nullcontext())
-    for name in ("init_tracking", "finish_tracking", "define_step_key_metric_group", "remove_rollout_data_refs"):
+    for name in (
+        "init_tracking",
+        "finish_tracking",
+        "define_step_key_metric_group",
+        "remove_rollout_data_refs",
+        "log",
+    ):
         monkeypatch.setattr(driver, name, Mock())
     monkeypatch.setattr(driver.wandb, "run", None)
     monkeypatch.setattr(driver.object_store, "init_instance", Mock())
@@ -81,6 +87,8 @@ def test_exhaustion_preserves_last_complete_checkpoint_without_duplicate_save(mo
     assert result["pools_exhausted"] and result["completed_rollout_ids"] == [0]
     learner.train.assert_awaited_once()
     manager.core_commit_exposure.assert_awaited_once_with(0)
+    driver.log.assert_called_once_with(args, {"pool/update": 1, "pool/trained/math": 1}, step_key="pool/update")
+    driver.define_step_key_metric_group.assert_any_call("pool", "pool/update")
     manager.save.assert_awaited_once_with(0)
     learner.save_model.assert_awaited_once_with(0, force_sync=True)
     learner.finalize_checkpoint.assert_awaited_once_with(0)
