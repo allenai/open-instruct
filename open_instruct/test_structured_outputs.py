@@ -312,6 +312,24 @@ def test_nested_resource_identifier_resolves_its_own_local_reference():
     assert verifier([], '{"child":{"n":"bad"}}', label).score == 0
 
 
+@pytest.mark.parametrize("ref_key", ["$ref", "$dynamicRef"])
+def test_nested_identifier_cannot_resolve_root_definitions_at_preparation(ref_key):
+    label = target(
+        schema={
+            "$id": "https://example.invalid/root",
+            "$defs": {"num": {"type": "integer"}},
+            "type": "object",
+            "properties": {"child": {"$id": "child", ref_key: "#/$defs/num"}},
+        }
+    )
+    with pytest.raises(ValueError, match="Unresolvable schema reference"):
+        structured.validate_target(label)
+    # Invalid configuration is fatal even when this instance omits the child;
+    # it must not become a response-dependent zero reward or worker crash.
+    with pytest.raises(RuntimeError, match="Unresolvable schema reference"):
+        asyncio.run(structured.StructuredOutputVerifier().async_call([], "{}", label))
+
+
 def tool_target(**extra):
     return target(
         response_mode="tool_call",

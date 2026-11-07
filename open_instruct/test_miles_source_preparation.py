@@ -223,6 +223,23 @@ def test_invalid_structured_schema_is_omitted_not_fatal(tmp_path):
     assert reasons[0].startswith("SchemaError: ")
 
 
+def test_unresolvable_nested_schema_reference_is_quarantined(tmp_path):
+    pytest.importorskip("xmltodict")
+    pytest.importorskip("openapi_schema_validator")
+    schema = {
+        "$id": "https://example.invalid/root",
+        "$defs": {"num": {"type": "integer"}},
+        "properties": {"child": {"$id": "child", "$ref": "#/$defs/num"}},
+    }
+    records = [
+        {"prompt": "broken reference", "schema_type": "json", "schema_str": json.dumps(schema)},
+        {"prompt": "valid row", "schema_type": "json", "schema_str": json.dumps({"type": "object"})},
+    ]
+    entry, reasons = prepare_one(tmp_path, "nemo_v1", records)
+    assert entry["counts"]["prepared_rows"] == entry["counts"]["omitted_rows"] == 1
+    assert "Unresolvable schema reference" in reasons[0]
+
+
 @pytest.mark.parametrize(
     "task,answer,metadata,error",
     [

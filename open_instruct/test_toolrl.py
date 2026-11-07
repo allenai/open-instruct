@@ -12,7 +12,7 @@ from transformers.utils import chat_template_utils
 
 from open_instruct import toolrl_utils
 from open_instruct.miles.datasets import run_data, source_preparation
-from open_instruct.miles.rewards import rewards
+from open_instruct.miles.rewards import rewards, tool_call_parsing
 from open_instruct.miles.rewards import toolrl as toolrl_verifier
 
 TOOLS = [
@@ -215,6 +215,37 @@ def test_invalid_reference_is_recorded_without_renumbering_source_rows():
     assert indices == set(range(len(source))) - {2}
     assert summary["retained_rows"] == len(source) - 1
     assert summary["rejected_rows"][0]["source_row"] == 2
+
+
+@pytest.mark.parametrize("kind", [["string", "null"], "Union[str, null]"])
+def test_string_union_reference_survives_preparation_and_native_reward(kind):
+    source = source_rows()
+    source[0]["instruction"] = source[0]["instruction"].replace('{"type": "string"}', json.dumps({"type": kind}))
+    source[0]["output"] = source_completion([call("Paris")])
+    partitions, summary = toolrl.convert_rows(source, eval_count=3)
+    assert summary["rejected_rows"] == []
+    prepared = next(row for rows in partitions.values() for row in rows if row["metadata"]["source_row"] == 0)
+    assert prepared["ground_truth"]["calls"] == [call("Paris")]
+    result = asyncio.run(
+        toolrl_verifier.ToolRLVerifier().async_call([], completion([call("Paris")]), prepared["ground_truth"])
+    )
+    assert result.score == 4
+
+
+@pytest.mark.parametrize("value,expected", [("Paris", "Paris"), ('"Paris"', "Paris"), ("null", None)])
+def test_string_union_native_parameter(value, expected):
+    assert tool_call_parsing.parameter_value(value, {"type": ["string", "null"]}) == expected
+
+
+@pytest.mark.parametrize("value", ["NaN", "1e999", '{"x":1,"x":2}'])
+def test_union_does_not_hide_invalid_json_values(value):
+    with pytest.raises(ValueError):
+        tool_call_parsing.parameter_value(value, {"type": ["string", "number", "object"]})
+
+
+def test_nonstring_union_still_rejects_bare_text():
+    with pytest.raises(ValueError):
+        tool_call_parsing.parameter_value("Paris", {"type": ["integer", "null"]})
 
 
 class Tokenizer:

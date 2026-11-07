@@ -95,6 +95,9 @@ hashed `train.jsonl` input and the existing hygiene receipt, then run
 `source_preparation`. Keep `eval.jsonl` out of training. The adapter validates
 reference and historical calls against their schemas and reports malformed rows
 as omissions; it does not silently truncate long histories or choose rows by reward.
+Native XML parameters allow unquoted strings when `string` is one of a union's
+types, such as `["string", "null"]`. JSON values still use their declared types;
+duplicate JSON keys and nonfinite values remain invalid.
 
 `options.tool_format` is `olmo_pythonic_v1` by default; use `olmo_xml_v1` for
 the XML template from the earlier ToolRL experiments. Preparation checks the
@@ -194,6 +197,10 @@ Pythonic tool template. The verifier requires exactly one `<function_calls>` cal
 the declared function name and payload key, and a schema-valid payload. It never
 executes the call. CSV/object and TOML/array root requirements are recorded as
 unrepresentable: the native parsers cannot produce those shapes.
+Structured preparation resolves each local schema reference in its own `$id`
+scope, without fetching external resources. Missing pointers or anchors are
+quarantined as invalid targets before training, even in optional branches.
+Valid nested resource identifiers remain supported.
 
 ReasoningGym uses `reasoning-gym==0.1.25`. The 33 families inheriting its substring
 scorer use exact answers; custom scorers retain native partial credit. Empty and
@@ -393,7 +400,11 @@ only when **every** test passes. All tests execute, including after a failure;
 suites above 2,000 tests are partitioned without truncation. Each partition uses
 the configured total client deadline, and each test uses a fresh interpreter.
 Syntax/runtime errors and execution timeouts are zero; infrastructure, incomplete
-result and service-source mismatches raise. Reports retain request identifiers.
+result and service-source mismatches raise. A returned partition must explicitly
+report `ok` or `completed`; any other or missing status becomes a top-level
+service failure. Training omits the ungraded group, while offline scoring and
+qualification fail. Reports retain partition diagnostics and request identifiers,
+and complete-code records participate in `rollout/code_verifier/*` metrics.
 
 The service owner's 2026-11-06 scaling panel supersedes the original eight-request
 guidance. Reserved Lambda concurrency is now 900, with no provisioned warm

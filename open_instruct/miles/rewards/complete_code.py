@@ -118,11 +118,18 @@ class CompleteCodeVerifier:
                 raise RuntimeError("Complete-code service returned a nonbinary aggregate")
             score *= result.score
             partitions.append(result.diagnostics)
+        # The pinned client raises infrastructure failures, but never trust a
+        # returned zero without a completed-grade status. Preserve failures at
+        # the boundary consumed by qualification and training omission checks.
+        failed = any(
+            not isinstance(partition, dict) or partition.get("status") not in {"ok", "completed"}
+            for partition in partitions
+        )
         return common.Result(
             score,
             diagnostics={
                 "kind": "complete_code_v1",
-                "status": "ok",
+                "status": "service_error" if failed else "ok",
                 "mode": label["mode"],
                 "tests": len(label["tests"]),
                 "service_source_sha256": self.config.expected_source_sha256,

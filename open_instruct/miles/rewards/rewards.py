@@ -392,11 +392,7 @@ async def _score(args, sample, *, omit_failures=False):
                     error = TimeoutError(diagnostics.get("error") or "Verifier timed out without an error message")
                     _capture_verifier_failure(args, sample, spec, response, error, capture_kind="timeout")
                 score, cost = result.score, result.cost
-            if (
-                omit_failures
-                and isinstance(diagnostics, dict)
-                and diagnostics.get("status") in {"judge_error", "service_error"}
-            ):
+            if isinstance(diagnostics, dict) and diagnostics.get("status") in {"judge_error", "service_error"}:
                 metadata.setdefault("verifier_diagnostics", {})[name] = diagnostics
                 raise RuntimeError("Verifier failed to grade the response; see verifier diagnostics")
             score = _finite(score, "verifier score")

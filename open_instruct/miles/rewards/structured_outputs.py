@@ -18,6 +18,8 @@ import xmltodict
 import yaml
 from openapi_schema_validator import OAS31Validator
 from referencing import Registry
+from referencing.exceptions import Unresolvable
+from referencing.jsonschema import DRAFT202012
 
 from open_instruct import logger_utils
 from open_instruct.miles.rewards import deterministic_verifiers as common
@@ -56,9 +58,24 @@ def validate_target(target):
         for key in ("$ref", "$dynamicRef"):
             if key in node and (not isinstance(node[key], str) or not node[key].startswith("#")):
                 raise ValueError("Only local schema references are supported")
-        # Nested $id declarations establish local resource scopes. They do not
-        # authorize retrieval; the instance validator uses a non-retrieving registry.
     OAS31Validator.check_schema(schema)
+    # check_schema checks syntax, not reference resolution. Check every schema
+    # resource in its own $id scope before accepting a source row, including
+    # optional branches that a qualification control might never exercise.
+    root = DRAFT202012.create_resource(schema)
+    pending = [(root, Registry().resolver_with_root(root))]
+    while pending:
+        resource, resolver = pending.pop()
+        if isinstance(resource.contents, dict):
+            for key in ("$ref", "$dynamicRef"):
+                if key in resource.contents:
+                    try:
+                        resolver.lookup(resource.contents[key])
+                    except Unresolvable as error:
+                        raise ValueError(
+                            f"Unresolvable schema reference {resource.contents[key]!r}: {type(error).__name__}"
+                        ) from error
+        pending.extend((child, resolver.in_subresource(child)) for child in resource.subresources())
     return schema
 
 

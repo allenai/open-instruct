@@ -33,9 +33,16 @@ def parameter_value(value, schema):
     kind = schema.get("type", "string")
     if kind == "string":
         return value
-    decoded = json.loads(value, object_pairs_hook=_unique_keys, parse_constant=_invalid_constant)
-    json.dumps(decoded, allow_nan=False)  # Reject overflow such as 1e999, including nested values.
     kinds = kind if isinstance(kind, list) else [kind]
+    try:
+        decoded = json.loads(value, object_pairs_hook=_unique_keys, parse_constant=_invalid_constant)
+    except json.JSONDecodeError:
+        # Native tool calls leave string arguments unquoted, including strings
+        # admitted by a union. Keep duplicate-key/nonfinite checks strict.
+        if "string" in kinds:
+            return value
+        raise
+    json.dumps(decoded, allow_nan=False)  # Reject overflow such as 1e999, including nested values.
     matches = {
         "null": decoded is None,
         "boolean": type(decoded) is bool,

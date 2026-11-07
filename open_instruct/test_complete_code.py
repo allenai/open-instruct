@@ -8,14 +8,16 @@ from types import SimpleNamespace
 import pytest
 import requests
 
+from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.datasets import source_preparation as sources
-from open_instruct.miles.rewards import complete_code
+from open_instruct.miles.rewards import complete_code, rewards
 
 CONFIG = complete_code.Config(api_url="https://service.example", expected_source_sha256="a" * 64)
 
 
 def mock_client(monkeypatch, scores):
     calls = []
+    native_import = importlib.import_module
 
     class Client:
         def __init__(self, config):
@@ -28,12 +30,18 @@ def mock_client(monkeypatch, scores):
             score = next(scores)
             if isinstance(score, Exception):
                 raise score
-            return SimpleNamespace(score=score, diagnostics={"tests": len(tests)})
+            if isinstance(score, SimpleNamespace):
+                return score
+            return SimpleNamespace(score=score, diagnostics={"status": "ok", "tests": len(tests)})
 
     monkeypatch.setattr(
         complete_code.importlib,
         "import_module",
-        lambda name: SimpleNamespace(CodeVerifier=Client, ServiceConfig=SimpleNamespace),
+        lambda name: (
+            SimpleNamespace(CodeVerifier=Client, ServiceConfig=SimpleNamespace)
+            if name == "code_execution_client.verifier"
+            else native_import(name)
+        ),
     )
     return calls
 
@@ -59,6 +67,56 @@ def test_unknown_service_failure_is_not_zero(monkeypatch):
         asyncio.run(
             complete_code.CompleteCodeVerifier(CONFIG).async_call([], "pass", {"mode": "assert", "tests": ["pass"]})
         )
+
+
+@pytest.mark.parametrize("status", ["service_error", "timeout", "incomplete", "rejected", None])
+@pytest.mark.parametrize("training", [True, False])
+def test_failed_partition_is_not_a_wrong_answer(monkeypatch, tmp_path, status, training):
+    mock_client(monkeypatch, iter([0, SimpleNamespace(score=0.0, diagnostics={"status": status})]))
+    verifier = complete_code.CompleteCodeVerifier(CONFIG)
+    monkeypatch.setattr(rewards, "_registry", lambda path: {"complete_code": verifier})
+    sample = SimpleNamespace(
+        group_index=0,
+        tokens=[],
+        response_length=0,
+        response="pass",
+        prompt="Write code",
+        metadata={"verifiers": [{"name": "complete_code", "target": {"mode": "assert", "tests": ["pass"] * 2001}}]},
+    )
+    args = SimpleNamespace(olmo_core=CoreConfig(reward_config="unused"), save=str(tmp_path))
+    if training:
+        assert asyncio.run(rewards.rollout_reward(args, sample)) is None
+        assert "reward_components" not in sample.metadata
+    else:
+        with pytest.raises(RuntimeError, match="failed to grade"):
+            asyncio.run(rewards.registered_reward(args, sample))
+    diagnostics = sample.metadata["verifier_diagnostics"]["complete_code"]
+    assert diagnostics["status"] == "service_error"
+    assert diagnostics["partitions"][-1]["status"] == status
+
+
+def test_completed_invalid_code_remains_a_zero_reward(monkeypatch):
+    mock_client(
+        monkeypatch, iter([SimpleNamespace(score=0, diagnostics={"status": "completed", "outcome": "invalid_code"})])
+    )
+    result = asyncio.run(
+        complete_code.CompleteCodeVerifier(CONFIG).async_call([], "", {"mode": "assert", "tests": ["pass"]})
+    )
+    assert result.score == 0
+    assert result.diagnostics["status"] == "ok"
+
+
+def test_complete_code_service_metrics_include_partition_failures(monkeypatch):
+    metrics = pytest.importorskip("open_instruct.miles.rollout.rollout_metrics")
+    mock_client(monkeypatch, iter([1, SimpleNamespace(score=0, diagnostics={"status": "service_error"})]))
+    verifier = complete_code.CompleteCodeVerifier(CONFIG)
+    results = [asyncio.run(verifier.async_call([], "pass", {"mode": "assert", "tests": ["pass"]})) for _ in range(2)]
+    values = metrics.code_service_metrics(
+        [SimpleNamespace(metadata={"verifier_diagnostics": {"code": r.diagnostics}}) for r in results]
+    )
+    assert values["rollout/code_verifier/samples"] == 2
+    assert values["rollout/code_verifier/service_errors"] == 1
+    assert values["rollout/code_verifier/service_error_fraction"] == 0.5
 
 
 @pytest.mark.parametrize(
