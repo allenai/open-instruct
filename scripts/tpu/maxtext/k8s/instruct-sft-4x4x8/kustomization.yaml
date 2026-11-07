@@ -31,7 +31,8 @@ patches:
     # hero preempts post-training, and slices fail. A restart resumes from the latest checkpoint, and the image's data
     # hooks skip the batches it already trained on (the streaming HF iterator itself is not checkpointed). Dense
     # Olmo 3 7B restores without the Olmo 3.5 restore-fix image, whose fix is for MoE expert Adam moments: s0b
-    # restored checkpoints/2000 on this MaxText line (tpu-maxtext-validation, #1933).
+    # restored checkpoints/2000 on this MaxText line (tpu-maxtext-validation, #1933). Restore with the skip has not yet run
+    # on TPU on this image; skipping costs time per trained batch (TPU SFT guide, section 6).
     - op: replace
       path: /spec/failurePolicy/maxRestarts
       value: 3
