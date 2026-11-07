@@ -54,6 +54,7 @@ _COMPATIBILITY_CASES = [
     "1. Solution:\n\t```python\nx = 1\n\t```",
     "```python\nx = 1```",
     "```python x = 1```",
+    "```PYTHON x = 1```",
     "```x = 1```",
     "```python``` is the format.\n```python\nx = 1\n```",
     "```python\nx = 1\n```unexpected",
@@ -102,3 +103,19 @@ def test_language_selection(response, expected):
         ground_truth_utils.CodeVerifierConfig("https://service.invalid/test_program", 1.0, 1.0, False)
     )
     assert verifier.extract_python_code(response) == expected
+
+
+@pytest.mark.parametrize(
+    "tag", ["python3.11", "python3.10", "python2", "python2.7", "python-3.11", "PYTHON3.11", "py3.11"]
+)
+def test_versioned_python_submission_reaches_service(adapter, tag):
+    verifier, session, tests, _ = adapter
+    # Include an earlier draft: skipping the versioned block would silently
+    # select that draft, not just send an invalid raw response.
+    program = "def f(): return 42"
+    response = f"```python\ndef f(): return 0\n```\n```{tag}\n{program}\n```"
+    result = asyncio.run(verifier.async_call([], response, tests))
+    assert result.score == 1.0
+    session.post.assert_called_once()
+    assert session.post.call_args.kwargs["json"]["program"] == program
+    assert code_extraction.extract_python_code(response) == program

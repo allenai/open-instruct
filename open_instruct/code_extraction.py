@@ -8,7 +8,7 @@ import re
 
 _CODE_BLOCK = re.compile(r"```(.*?)```", re.DOTALL)
 _LANGUAGE = re.compile(r"[a-zA-Z][a-zA-Z0-9_+#.-]*")
-_PYTHON = {"python", "python3", "py"}
+_PYTHON = re.compile(r"(?:python|py)(?:-?[0-9]+(?:\.[0-9]+)*)?", re.IGNORECASE)
 
 
 def extract_python_code(response: str) -> str:
@@ -23,11 +23,12 @@ def extract_python_code(response: str) -> str:
     for block in _CODE_BLOCK.findall(response):
         header, newline, body = block.partition("\n")
         if newline and _LANGUAGE.fullmatch(header.strip()):
-            if header.strip().lower() not in _PYTHON:
+            if not _PYTHON.fullmatch(header.strip()):
                 continue
             selected = body.strip()
         else:
             # Preserve legacy handling of inline/unlabelled blocks, including
             # inline Python openings without a newline after the language.
+            # Prefix removal here stays case-sensitive, as before.
             selected = block.removeprefix("python").strip()
     return response if selected is None else selected
