@@ -131,12 +131,13 @@ without calling a verifier. This applies to text/code verifiers and named judges
 judge rubrics retain their normal answer-tag extraction within that final region.
 The full response and its token IDs remain available for training and recording.
 
-Verifiers with their own raw-response boundary checks can implement
-`async_call_final_answer(tokens, prediction, label, **kwargs)`. The adapter calls
-that method only after the missing/empty-final and truncation gates; `prediction`
-is the extracted suffix and `tokens` is empty. Without this method, text verifiers
-continue to receive the suffix through `async_call`. Raw-response mode always
-uses `async_call`.
+Registered text/code verifiers must provide a callable
+`async_call_final_answer(tokens, prediction, label, **kwargs)` to use this mode;
+unsupported verifiers raise before reward gates or scoring. Verifiers that
+validate the raw thinking boundary must implement `async_call_final_answer`.
+The adapter calls that method after the missing/empty-final and truncation gates;
+`prediction` is the extracted suffix and `tokens` is empty. Raw-response mode
+always uses `async_call`. Named judges use their separate final-region dispatch.
 
 The built-in `R1FormatVerifier` implements this interface: after the outer gate
 selects the final section, it checks for optional leading whitespace followed by
@@ -160,32 +161,6 @@ The native adapter uses `IFEvalVerifier`, including its existing
 `remove_thinking_section` normalization in both modes. That removes answer tags,
 `<|assistant|>` and outer whitespace before grading IF constraints. R1 format
 reward checks the tags themselves; IF reward grades the normalized answer.
-
-`QualifiedIFVerifier` adapts an externally supplied, source-pinned IF module. The
-module must expose `IFVerifier` (with `get_config_class` and `async_call`) and
-`grade_answer(answer, target)`. Set `config.module` to the installed module's
-import path, replacing `my_verifiers.qualified_if` in this example:
-
-```json
-{
-  "ifeval": {
-    "factory": "open_instruct.miles.rewards.task_verifiers.QualifiedIFVerifier",
-    "config": {"module": "my_verifiers.qualified_if"}
-  }
-}
-```
-
-The module name is required explicitly. Raw mode calls its `IFVerifier`;
-final-only mode applies Open Instruct's `remove_thinking_section` to the selected
-suffix before calling `grade_answer`. A compatible module must use the same
-normalization in its raw path. Its target validation, constraint semantics and
-source-pin checks remain in effect.
-
-External modules are not bundled with MILES. Install the module and its qualified
-dependencies in the application image, then validate construction and scoring in
-that exact image. Changes to pinned sources or dependencies require requalification;
-pin mismatches must not be bypassed. Native and external IF implementations can
-have different constraint semantics.
 
 This option defaults to false and assumes the Olmo thinking format. It permits
 multiple closing markers, so it is not an exactly-one-tag format validator.

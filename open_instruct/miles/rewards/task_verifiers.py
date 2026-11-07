@@ -90,38 +90,6 @@ class ManifestIFVerifier(MultiplicationVerifier):
         factory = importlib.import_module("open_instruct.ground_truth_utils").IFEvalVerifier
         return await factory().async_call(tokens, prediction, repr([target]), **kwargs)
 
-
-@dataclasses.dataclass
-class QualifiedIFConfig:
-    # Qualified modules are supplied by their separately pinned runtime, not OI.
-    module: str
-
-
-class QualifiedIFVerifier:
-    """Use a qualified IF module's raw-response or extracted-answer entry point.
-
-    The separately supplied module retains ownership of target validation,
-    constraint grading and dependency pins. A historical qualified module is not
-    interchangeable with current-main native IF. Raw responses use its IFVerifier
-    unchanged. Final-only mode normalizes the selected suffix just as the raw
-    path does, without fabricating a closing marker or bypassing pin checks.
-    """
-
-    def __init__(self, verifier_config=None):
-        if verifier_config is None or not verifier_config.module:
-            raise InputError("QualifiedIFVerifier requires an explicit module and its matching qualified runtime")
-        config = verifier_config
-        module = importlib.import_module(config.module)
-        self.verifier = module.IFVerifier(verifier_config=module.IFVerifier.get_config_class()())
-        self.grade_answer = module.grade_answer
-        self.normalize_answer = importlib.import_module("open_instruct.ground_truth_utils").remove_thinking_section
-
-    @classmethod
-    def get_config_class(cls):
-        return QualifiedIFConfig
-
-    async def async_call(self, tokens, prediction, label, **kwargs):
-        return await self.verifier.async_call(tokens, prediction, label, **kwargs)
-
     async def async_call_final_answer(self, tokens, prediction, label, **kwargs):
-        return self.grade_answer(self.normalize_answer(prediction), label)
+        # Native IF normalizes both full responses and extracted final answers.
+        return await self.async_call(tokens, prediction, label, **kwargs)

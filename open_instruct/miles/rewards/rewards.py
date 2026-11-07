@@ -284,7 +284,7 @@ def _math_worker():
 
 
 def _finite(value, field):
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError(f"{field} must be a finite number")
     return float(value)
 
@@ -343,6 +343,15 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
     for spec in metadata["verifiers"]:
         if spec["name"] not in registry:
             raise ValueError(f"Verifier {spec['name']!r} is absent from the trusted reward registry")
+        if (
+            args.olmo_core.reward_final_answer_only
+            and not judge_registry.bound(spec["name"])
+            and not callable(getattr(registry[spec["name"]], "async_call_final_answer", None))
+        ):
+            raise ValueError(
+                f"Verifier {spec['name']!r} must implement async_call_final_answer "
+                "when core.reward_final_answer_only=true"
+            )
         weighted_specs.append((spec, _finite(spec.get("weight", 1.0), "weight")))
     status = getattr(sample.status, "value", sample.status) if hasattr(sample, "status") else None
     reason = None
@@ -379,12 +388,12 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                 diagnostics = metadata.get("verifier_diagnostics", {}).get(name, {})
                 cost = 0.0
             else:
-                # A verifier that validates raw thinking boundaries needs a separate
-                # entry point after this adapter has already validated/extracted the final.
+                # The contract was checked before the gates; never silently fall back
+                # to a raw-response entry point with an extracted answer.
                 verifier = registry[name]
                 score_response = verifier.async_call
                 if args.olmo_core.reward_final_answer_only:
-                    score_response = getattr(verifier, "async_call_final_answer", score_response)
+                    score_response = verifier.async_call_final_answer
                 result = await score_response(
                     tokens,
                     response,

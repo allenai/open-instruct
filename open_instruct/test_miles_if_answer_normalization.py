@@ -1,12 +1,7 @@
-"""Exercise real native IF; opt into a separately qualified module in its image.
-
-Set OPEN_INSTRUCT_TEST_QUALIFIED_IF_MODULE to run the same parity cases against
-that module. Source qualification failures must propagate, never be patched out.
-"""
+"""Exercise answer-normalization parity with the real native IF verifier."""
 
 import asyncio
 import json
-import os
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,22 +11,11 @@ import pytest
 from open_instruct.miles.rewards import rewards
 
 
-@pytest.fixture(params=["native", "qualified"])
-def if_registry(request, tmp_path):
-    if request.param == "native":
-        guide = Path(__file__).resolve().parents[1] / "docs/miles/grpo.md"
-        blocks = re.findall(r"```json\n(.*?)\n```", guide.read_text(), re.DOTALL)
-        registry = json.loads(next(block for block in blocks if "ManifestIFVerifier" in block))
-    else:
-        module = os.environ.get("OPEN_INSTRUCT_TEST_QUALIFIED_IF_MODULE")
-        if not module:
-            pytest.skip("Run in the separately qualified image with OPEN_INSTRUCT_TEST_QUALIFIED_IF_MODULE")
-        registry = {
-            "ifeval": {
-                "factory": "open_instruct.miles.rewards.task_verifiers.QualifiedIFVerifier",
-                "config": {"module": module},
-            }
-        }
+@pytest.fixture
+def if_registry(tmp_path):
+    guide = Path(__file__).resolve().parents[1] / "docs/miles/grpo.md"
+    blocks = re.findall(r"```json\n(.*?)\n```", guide.read_text(), re.DOTALL)
+    registry = json.loads(next(block for block in blocks if "ManifestIFVerifier" in block))
     path = tmp_path / "if-registry.json"
     path.write_text(json.dumps(registry))
     # Exercise construction from the documented entry, not a monkeypatched registry.
