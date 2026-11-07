@@ -21,7 +21,7 @@ logger = logger_utils.setup_logger(__name__)
 
 
 def code_service_metrics(samples) -> dict[str, float]:
-    """Aggregate code-service outcomes recorded by ``code_rewards.execute``."""
+    """Aggregate legacy and complete-code verifier diagnostics."""
     counts = collections.Counter()
     by_status = collections.Counter()
     service_errors = collections.Counter()
@@ -31,7 +31,9 @@ def code_service_metrics(samples) -> dict[str, float]:
         if not isinstance(diagnostics, dict):
             continue
         for record in diagnostics.values():
-            if not isinstance(record, dict) or "program_chars" not in record:
+            if not isinstance(record, dict) or (
+                "program_chars" not in record and record.get("kind") != "complete_code_v1"
+            ):
                 continue
             counts["samples"] += 1
             if record.get("status") == "rejected":
@@ -91,9 +93,16 @@ def general_judge_metrics(samples) -> dict[str, float]:
 
 
 def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_time) -> bool:
-    metrics = code_service_metrics(samples)
-    if metrics:
-        logger.info("code_verifier %d: %s", rollout_id, metrics)
+    # Dropped groups are absent from samples. Use the collector's per-interval
+    # counter, which is transported from async producer/buffer actors as well.
+    omitted = (rollout_extra_metrics or {}).get("rollout/dynamic_filter/drop_group_has_missing_reward", 0)
+    metrics = {"rollout/verification/omitted_records": omitted}
+    if omitted:
+        logger.warning("verification %d: omitted %d prompt records with missing rewards", rollout_id, omitted)
+    service_metrics = code_service_metrics(samples)
+    metrics.update(service_metrics)
+    if service_metrics:
+        logger.info("code_verifier %d: %s", rollout_id, service_metrics)
     math_metrics = math_verifier_metrics(samples)
     if math_metrics:
         logger.info("math_verifier %d: %s", rollout_id, math_metrics)

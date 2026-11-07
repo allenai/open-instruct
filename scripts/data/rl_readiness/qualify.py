@@ -1,4 +1,4 @@
-"""Qualify exported candidate controls through the real MILES reward and loader paths.
+"""Qualify exported dataset controls through the real MILES reward and loader paths.
 
 Run in the pinned MILES image plus requirements.txt. Exports are trusted inputs
 produced by a reviewed adapter; arbitrary dataset rows cannot choose factories.
@@ -27,8 +27,12 @@ from open_instruct.miles.datasets import run_data
 from open_instruct.miles.rewards import reasoning_gym, rewards
 
 FACTORIES = {
+    "open_instruct.miles.rewards.litmus.LitmusVerifier",
+    "open_instruct.miles.rewards.nvidia_constraints.InstructionVerifier",
+    "open_instruct.miles.rewards.nvidia_constraints.CalendarVerifier",
+    "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
     "open_instruct.ground_truth_utils.MathVerifier",
-    "open_instruct.miles.rewards.candidate_verifiers.CandidateVerifier",
+    "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
     "open_instruct.miles.rewards.reasoning_gym.ReasoningGymVerifier",
     "open_instruct.miles.rewards.json_schema.JSONSchemaVerifier",
 }
@@ -84,7 +88,7 @@ async def controls(entry, args):
         sample(row, text, i, Sample.Status.TRUNCATED if i == 3 else Sample.Status.COMPLETED)
         for i, text in enumerate(texts)
     ]
-    values = await rewards.registered_reward(args, samples)
+    values = await rewards.registered_reward(args, samples, failure_policy="raise")
     if values != [1.0, 0.0, 0.0, 0.0]:
         raise ValueError(f"positive/wrong/empty/cap controls: {values}")
     extra_values = []
@@ -98,7 +102,7 @@ async def controls(entry, args):
             gold = target["answer"].strip()
             wrong = [f"1{gold}", f"{gold}1", f"The answer is {gold}"]
             extra_values = await rewards.registered_reward(
-                args, [sample(row, text, i) for i, text in enumerate(wrong)]
+                args, [sample(row, text, i) for i, text in enumerate(wrong)], failure_policy="raise"
             )
             if any(v != 0.0 for v in extra_values):
                 raise ValueError(f"Gold-containing wrong answers earned reward: {extra_values}")
@@ -219,7 +223,7 @@ async def main(args):
             "shuffle": False,
         }
         record = {
-            "candidate": values[0]["candidate"],
+            "source": name,
             "rows": len(rows),
             "status": "deferred",
             "strata": sorted({v["stratum"] for v in values}),

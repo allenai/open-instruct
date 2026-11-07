@@ -1,6 +1,10 @@
-# Optional dependencies for the local candidate qualification image.
+# Optional dependencies for the local dataset qualification image.
 # regex is supplied by the main transformers dependency; the schema verifier
 # explicitly requires openapi-schema-validator rather than its transitive presence.
 reasoning-gym==0.1.25
 rdkit==2025.9.3
 openapi-schema-validator==0.6.3
+xmltodict==0.14.2
+
+# Complete-test client: authenticated v2 API, LiveCodeBench labels and source pinning.
+code-execution-service[client] @ git+https://github.com/allenai/code-execution-service.git@4cab7e85e8748db501163e6cbbc5ab7c041692af

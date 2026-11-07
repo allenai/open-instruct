@@ -2,7 +2,7 @@
 
 import importlib
 
-from open_instruct.miles.rewards import candidate_verifiers, task_verifiers
+from open_instruct.miles.rewards import deterministic_verifiers, task_verifiers
 
 
 def validate_schema(schema):
@@ -44,10 +44,12 @@ class JSONSchemaVerifier:
     async def async_call(self, tokens, prediction, label, **kwargs):
         validator = validate_schema(label)
         try:
-            value = candidate_verifiers.strict_json(candidate_verifiers.answer_text(prediction))
+            value = deterministic_verifiers.strict_json(deterministic_verifiers.answer_text(prediction))
         except (ValueError, RecursionError):
-            return candidate_verifiers.Result(0.0, diagnostics={"kind": "json_schema_v1", "status": "invalid_json"})
+            return deterministic_verifiers.Result(
+                0.0, diagnostics={"kind": "json_schema_v1", "status": "invalid_json"}
+            )
         # Schema resolution failures propagate; only instance failures are reward zero.
-        return candidate_verifiers.Result(
+        return deterministic_verifiers.Result(
             float(validator.is_valid(value)), diagnostics={"kind": "json_schema_v1", "status": "ok"}
         )

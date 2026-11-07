@@ -2,6 +2,8 @@
 
 This document details some best practices when working with our cluster.
 
+CI no longer refreshes the `open_instruct_auto*` images used in the historical examples below. Build and launch from the intended revision with `./scripts/train/build_image_and_launch.sh <script>`, or substitute an image you have validated.
+
 ## (One-time setup) VScode + Weka setup
 
 You should join the `#vscode-weka-dev-workflow` slack channel to setup your VScode to work with weka.

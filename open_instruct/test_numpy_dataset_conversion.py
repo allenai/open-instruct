@@ -17,6 +17,7 @@ import unittest.mock
 import numpy as np
 from olmo_core import data as oc_data
 from parameterized import parameterized
+from transformers import AutoTokenizer
 
 from open_instruct import dataset_transformation, numpy_dataset_conversion, olmo_core_finetune
 
@@ -409,53 +410,11 @@ _CHAT_ROWS = [_MULTI_TURN, _TOOL_CALL, _SINGLE_TURN] * 3
 _PART_TOKENS = 8
 
 
-_requires_metadata_boundaries = unittest.skipUnless(
-    olmo_core_finetune._olmo_core_supports_metadata_boundaries(),
-    "installed OLMo-core lacks use_array_if_local (allenai/OLMo-core#843)",
-)
-
-
 class TestRowAlignedParts(_NumpySftTestBase):
     """Parts of a cache written with `row_aligned_parts` hold whole rows only."""
 
     def _convert(self, name, row_aligned_parts, rows=None):
-        rows = _CHAT_ROWS if rows is None else rows
-        dataset = dataset_transformation.Dataset.from_dict(
-            {
-                dataset_transformation.INPUT_IDS_KEY: [tokens for tokens, _ in rows],
-                dataset_transformation.ATTENTION_MASK_KEY: [[1] * len(tokens) for tokens, _ in rows],
-                dataset_transformation.LABELS_KEY: [labels for _, labels in rows],
-                dataset_transformation.DATASET_ORIGIN_KEY: ["chat"] * len(rows),
-            }
-        )
-        output_dir = pathlib.Path(self.temp_dir.name) / name
-        real_write = numpy_dataset_conversion._write_memmap_chunked_from_file
-
-        def write_small_parts(base_filename, source_path, total_items, dtype, **kwargs):
-            max_size_gb = _PART_TOKENS * np.dtype(dtype).itemsize / 1024**3
-            return real_write(base_filename, source_path, total_items, dtype, max_size_gb=max_size_gb, **kwargs)
-
-        with (
-            unittest.mock.patch.object(
-                dataset_transformation, "get_cached_dataset_tulu_with_statistics", return_value=(dataset, {})
-            ),
-            unittest.mock.patch.object(
-                numpy_dataset_conversion, "_write_memmap_chunked_from_file", side_effect=write_small_parts
-            ),
-        ):
-            numpy_dataset_conversion.convert_hf_to_numpy_sft(
-                output_dir=output_dir,
-                dataset_mixer_list=[],
-                dataset_mixer_list_splits=[],
-                tc=self._make_tc(),
-                dataset_transform_fn=[],
-                transform_fn_args=[],
-                dataset_target_columns=dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
-                dataset_config_hash="rows",
-                shuffle_seed=0,
-                row_aligned_parts=row_aligned_parts,
-            )
-        return output_dir
+        return _convert_rows(self, name, _CHAT_ROWS if rows is None else rows, row_aligned_parts, _PART_TOKENS)
 
     def _shuffled_rows(self):
         order = dataset_transformation.Dataset.from_dict({"i": list(range(len(_CHAT_ROWS)))}).shuffle(seed=0)["i"]
@@ -505,7 +464,6 @@ class TestRowAlignedParts(_NumpySftTestBase):
             )
         self.assertGreater(sum(len(spans) for _, _, spans in default), len(_CHAT_ROWS))
 
-    @_requires_metadata_boundaries
     def test_both_arms_read_identical_rows_from_one_cache(self):
         """The EOS and metadata arms of H049 share one row-aligned cache. Placing every token each
         arm trains on back at its offset in the cache, both arms read the same token ids and label
@@ -541,7 +499,6 @@ class TestRowAlignedParts(_NumpySftTestBase):
         # The EOS scan splits the multi-turn rows and merges the tool-call rows into their neighbours.
         self.assertNotEqual(documents[False], expected)
 
-    @_requires_metadata_boundaries
     def test_legacy_layout_splits_cut_rows_under_metadata_boundaries(self):
         """Why --document_boundaries_from_metadata requires --row_aligned_parts: in the legacy layout
         a cut row is two metadata lines, one per file, so it trains as two documents."""
@@ -555,6 +512,48 @@ class TestRowAlignedParts(_NumpySftTestBase):
         # Every token still reaches training; the cut rows are just split in two.
         for _, _, seen in _place_instances(dataset):
             self.assertTrue(seen.all())
+
+
+def _convert_rows(test, name, rows, row_aligned_parts, part_tokens=None):
+    """Write (token_ids, labels) rows to a numpy SFT cache under the test's temp dir, in parts of
+    `part_tokens` tokens if given (the 1 GiB rule otherwise)."""
+    dataset = dataset_transformation.Dataset.from_dict(
+        {
+            dataset_transformation.INPUT_IDS_KEY: [tokens for tokens, _ in rows],
+            dataset_transformation.ATTENTION_MASK_KEY: [[1] * len(tokens) for tokens, _ in rows],
+            dataset_transformation.LABELS_KEY: [labels for _, labels in rows],
+            dataset_transformation.DATASET_ORIGIN_KEY: ["chat"] * len(rows),
+        }
+    )
+    output_dir = pathlib.Path(test.temp_dir.name) / name
+    real_write = numpy_dataset_conversion._write_memmap_chunked_from_file
+
+    def write_parts(base_filename, source_path, total_items, dtype, **kwargs):
+        if part_tokens is not None:
+            kwargs["max_size_gb"] = part_tokens * np.dtype(dtype).itemsize / 1024**3
+        return real_write(base_filename, source_path, total_items, dtype, **kwargs)
+
+    with (
+        unittest.mock.patch.object(
+            dataset_transformation, "get_cached_dataset_tulu_with_statistics", return_value=(dataset, {})
+        ),
+        unittest.mock.patch.object(
+            numpy_dataset_conversion, "_write_memmap_chunked_from_file", side_effect=write_parts
+        ),
+    ):
+        numpy_dataset_conversion.convert_hf_to_numpy_sft(
+            output_dir=output_dir,
+            dataset_mixer_list=[],
+            dataset_mixer_list_splits=[],
+            tc=test._make_tc(),
+            dataset_transform_fn=[],
+            transform_fn_args=[],
+            dataset_target_columns=dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
+            dataset_config_hash="rows",
+            shuffle_seed=0,
+            row_aligned_parts=row_aligned_parts,
+        )
+    return output_dir
 
 
 def _oc_tokenizer(tc, eos_token_id, pad_token_id):
@@ -688,7 +687,6 @@ class TestFreshRender(_NumpySftTestBase):
         self.assertGreater(len(truncated), 0)
         olmo_core_finetune._check_row_aligned_cache(str(output_dir))
 
-    @_requires_metadata_boundaries
     def test_full_length_rows_stay_one_document_under_metadata_boundaries(self):
         """Rows truncated to exactly the sequence length have no EOS. With metadata boundaries each
         is a document of its own; the EOS scan merges it into the next row and truncates the merged
@@ -702,6 +700,69 @@ class TestFreshRender(_NumpySftTestBase):
         eos = _build_packed(output_dir, tokenizer, self.MAX_SEQ_LENGTH, from_metadata=False)
         trained = sum(int(eos[i]["label_mask"].sum()) for i in range(len(eos)))
         self.assertLess(trained, sum(sum(mask) for _, mask in fresh))
+
+
+class TestOlmo35MultiTurnRow(_NumpySftTestBase):
+    """A two-turn olmo35 row has an EOS after its first assistant turn. By default it trains as one
+    document; the opt-out (legacy layout, EOS scan) splits it there, as training did before."""
+
+    SEQUENCE_LENGTH = 256
+
+    def _row(self):
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.add_tokens(["<|im_start|>", "<|im_end|>"], special_tokens=True)
+        with open(os.path.join(TEST_DATA_DIR, "olmo35_chat_template.jinja")) as f:
+            tokenizer.chat_template = f.read()
+        messages = [
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "4"},
+            {"role": "user", "content": "And 3+3?"},
+            {"role": "assistant", "content": "6"},
+        ]
+        ids, _, labels, _ = dataset_transformation._tokenize_tulu_sft_with_assistant_labels(
+            messages, tokenizer, None, self.SEQUENCE_LENGTH
+        )
+        tokens, labels = ids.flatten().tolist(), labels.flatten().tolist()
+        eos_positions = [i for i, token in enumerate(tokens) if token == tokenizer.eos_token_id]
+        self.assertEqual(len(eos_positions), 2)
+        self.assertEqual(eos_positions[1], len(tokens) - 1)
+        oc_tokenizer = oc_data.TokenizerConfig(
+            vocab_size=len(tokenizer), eos_token_id=tokenizer.eos_token_id, pad_token_id=tokenizer.pad_token_id
+        )
+        return tokens, labels, eos_positions[0] + 1, oc_tokenizer
+
+    def _pack(self, name, sft_config, tokens, labels, oc_tokenizer):
+        output_dir = _convert_rows(self, name, [(tokens, labels)], sft_config.row_aligned_parts)
+        config = olmo_core_finetune._numpy_dataset_config(
+            str(output_dir),
+            oc_tokenizer,
+            work_dir=str(output_dir / "work"),
+            sequence_length=self.SEQUENCE_LENGTH,
+            document_boundary_kwargs=olmo_core_finetune._document_boundary_kwargs(
+                sft_config.document_boundaries_from_metadata, sft_config.row_aligned_parts
+            ),
+        )
+        dataset = config.build()
+        dataset.prepare()
+        self.assertEqual(len(dataset), 1)
+        positions = np.concatenate([np.arange(length) for length in dataset[0]["doc_lens"].tolist()])
+        return _documents(dataset), positions[: len(tokens)].tolist()
+
+    def test_default_keeps_the_row_one_document(self):
+        tokens, labels, _, oc_tokenizer = self._row()
+        mask = [label != -100 for label in labels]
+        documents, positions = self._pack("default", olmo_core_finetune.SFTConfig(), tokens, labels, oc_tokenizer)
+        self.assertEqual(documents, [(tokens, mask)])
+        # Positions run on across the turn boundary instead of restarting after the first EOS.
+        self.assertEqual(positions, list(range(len(tokens))))
+
+    def test_opt_out_splits_the_row_at_the_first_assistant_eos(self):
+        tokens, labels, split, oc_tokenizer = self._row()
+        mask = [label != -100 for label in labels]
+        opt_out = olmo_core_finetune.SFTConfig(row_aligned_parts=False, document_boundaries_from_metadata=False)
+        documents, positions = self._pack("opt-out", opt_out, tokens, labels, oc_tokenizer)
+        self.assertEqual(documents, sorted([(tokens[:split], mask[:split]), (tokens[split:], mask[split:])]))
+        self.assertEqual(positions, list(range(split)) + list(range(len(tokens) - split)))
 
 
 class TestResumeEquivalence(_NumpySftTestBase):

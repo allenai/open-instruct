@@ -25,6 +25,13 @@ previous blockers are resolved and no new blockers remain, approve explicitly
 rather than only commenting that the code looks good. If a decision still cannot
 be made, explain the specific unresolved concern.
 
+CI does not launch or verify Beaker experiments. A `GPU_TESTS=[...]` line is a
+manual validation record, not a CI override. For a change that touches GPU code
+paths, inspect the linked run and confirm the tested revision, command, and result.
+A GPU pytest claim must run `scripts/test/run_gpu_pytest.sh` and exit 0; training
+smokes are separate evidence. For local GPU tests, check the recorded command,
+revision, hardware, and result.
+
 ## Review output
 
 For each finding, give a severity, the repository path and line at the PR head,

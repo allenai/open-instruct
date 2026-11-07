@@ -54,14 +54,22 @@ nodes. The layout changes as the cluster's admins reslice it, so check it before
 `kubectl get nodes -L cloud.google.com/gke-tpu-topology --no-headers | awk '{print $NF}' | sort | uniq -c` (hosts per
 topology, 32 per `4x4x8`; the 2026-11-03 layout prints 96 `4x4x8`, 128 `8x8x8` and 768 `8x8x48`). A slice runs one job at a time. Kueue admits jobs from four queues in one cohort:
 
-| Queue | Who | Preempted by |
+| Queue | Who | Nominal quota (chips) |
 |---|---|---|
-| `hero` | the main pretraining run; owns all the quota | nothing |
-| `dev` | tests | hero |
-| `post-training`, `data-adaptation` | us; share what is left | hero, dev |
+| `hero` | the main pretraining run | `8x8x48`: 3,072 |
+| `dev` | tests | one `4x4x8`: 128 |
+| `post-training` | us | the `8x8x8`: 512; two `4x4x8`s: 256 |
+| `data-adaptation` | | none |
 
-**Use `post-training`.** Its jobs run on borrowed quota and are preempted whenever hero or dev needs the slice, so
-checkpoint often enough to lose little. Never hold a slice in a way that delays hero.
+Every queue has `reclaimWithinCohort: Any`, `borrowWithinCohort: Never` and `withinClusterQueue: Never`, so a job
+running within its own queue's nominal quota is never preempted, and a queue can reclaim only quota that another has
+borrowed from it. Dev may borrow an idle post-training `4x4x8`, which we reclaim when we need it; a post-training job
+on quota borrowed from hero or dev is preempted when they want it back. Read from
+`kubectl get clusterqueues -o json` (`spec.resourceGroups[].flavors[].resources[].nominalQuota`) on 2026-11-05 at
+11:30 PST; re-read it before planning, since the admins change it.
+
+**Use `post-training`.** Checkpoint often enough to lose little on a preemption, and never hold a slice in a way that
+delays hero.
 
 The recipe needs exactly a `4x4x8`: its mesh puts one 64K row on 8 chips, so 128 chips hold its 16 rows. The
 `8x8x8` ran the same mesh at 64 rows per step, which is a different recipe (H078's 4x batch). Its measured 16-row
@@ -80,11 +88,17 @@ step time over steps 31-100, so a stalled step counts at its full cost.
 | `8x8x8` | same, no shim and no batch hashes (H088 opt-b) | 64 | 4.23 | 1,887 | 0 |
 | `8x8x8` | opt-b + `remat_policy=save_dot_except_mlp` (H088 opt-c) | 64 | 4.18 | 1,900 | 0; a tie, keep `full` |
 
+Measurement windows: the `4x4x8` row is from 2026-10-14 and the `8x8x8` rows from 2026-10-18 (H088, the pre-split
+slice), each taking tokens/s/chip from the mean step over steps 31-100. The 2026-11-05 sweep figures quoted below
+(4.24 s, 1,934 tokens/s/chip for opt-b's config) take the median of steps 3-14 on the recreated slice, so they don't
+mix with this table.
+
 Startup before step 1 (pods, restore, an 11-12 min compile) adds 20-35 min on either slice, paid again at every
 resume.
 
 - **Use a `4x4x8` for this recipe.** Among the measured configurations it used the fewest chip-hours per token.
-  The `8x8x8` rows above date from before its 2026-10-21 split; it was recreated on 2026-11-03 and they have not been re-measured since. The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
+  The `8x8x8` rows above date from before its 2026-10-21 split. On the slice recreated on 2026-11-03, opt-b's config
+  measured 4.24 s and 1,934 tokens/s/chip (median of steps 3-14, 2026-11-05; see [Changing the recipe](#changing-the-recipe)). The `8x8x8` overlay is `k8s/olmo35-sft-8x8x8/`: the same token budget at 64 rows and 2,942 steps. Its data order
   differs from the `4x4x8` recipe's, so an arm on it needed a control on the same slice and config. Without the shim
   the `8x8x8` is projected at ~1.09x the chip-hours of the `4x4x8`, finishing a run ~3.6x sooner (H088, allenai/open-instruct#2020). This is a steady-state projection,
   not a measured cost. Both rates come from stall-free 70-step windows on different days (`4x4x8` 10-14, `8x8x8`
@@ -161,6 +175,16 @@ arm and seed into 512 files with `experiments/h067/shard.py` in olmo-post-traini
 The tokenizer is a directory on the bucket. For Olmo 3.5, `olmo35/tok_oi35.py` saves H045's tokenizer and template
 (`allenai/dolma2-tokenizer-olmo35` @8b971706, `olmo35`). For Olmo 3, save
 `PreTrainedTokenizerFast.from_pretrained("allenai/olmo-3-tokenizer-instruct-dev")` (see Traps).
+
+Plain-text rows (long-context replay documents) need `scripts/tpu/maxtext/image-olmo35-dr/`: a conversation of exactly
+one `{"role": "document"}` message is tokenized without the chat template, gets one EOS and is trained on every token
+([1e612a76 → 1e23ebbc](https://github.com/abhishekraok/maxtext/compare/1e612a76e2e50e0ce86ef7b7280353248c3e0520...1e23ebbc88059cfdd062655a9d7e1911de9afe06));
+chat rows tokenize as before. Other images do not special-case the role. It is built on the same `...-dc88c6c7ea`
+base as the pooled image in section 6, not on top of it, so `MAXTEXT_SFT_TEMPLATE_WORKERS` does nothing there:
+
+```text
+us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e-bs3ec936c3-dc88c6c7ea-dra35420de
+```
 
 ## 4. Launch
 
@@ -322,6 +346,9 @@ Each of these trained silently on wrong data or a wrong model before it was foun
 - **An HBM OOM at compile names its buffers only in libtpu's log.** The pod log gives the total;
   `/tmp/tpu_logs/tpu_driver.ERROR` in the container lists the largest buffers and the ops that made them. Copy it out
   in the launcher's EXIT trap, since it dies with the pod.
+- **Narrowed mounts hide `scratch/`.** Overlays mount only `data/` and `tokenizers/`, so a launcher reading
+  `/mnt/post-training/scratch/...` finds no file and its pods exit at startup. Add a read-only gcsfuse volume for that
+  folder alone (`only-dir=post-training/scratch/<dir>`, mounted at the same path), never all of `post-training/`.
 - **GCS egress quota.** Two big slices loading the base checkpoint at once hit `google_egress_bandwidth` (us-central2)
   and failed at startup. Stagger big-slice launches.
 - **The control host is a single point of failure.** Watchers and log tailers die with the host they run on (a Beaker
@@ -347,8 +374,30 @@ Each of these trained silently on wrong data or a wrong model before it was foun
   fsdp 16 x context 4 x expert 8, `remat_policy=full`, image `-ks5932379d`: 6.5 s/step, 315 tokens/s/chip. At
   `ragged_buffer_factor=3.0` it dropped 1.1% of routed assignments (up to 9.2% in one layer); dropping none would need `ragged_buffer_factor` up to 8.5 in the worst layer.
 
-  Each mesh was picked to keep r2's per-device layout, not tuned. No sweep of the parallelism split, remat policy or
-  per-device batch has been run, so these are known-good points, not optima. Any other slice or mesh needs its own
-  same-slice control.
+  Each mesh was picked to keep r2's per-device layout. A short sweep on the `8x8x8` on 2026-11-05 (up to 20 steps per
+  config, profiler off, median of steps from 3) found one faster split, but no tiny config ran reliably finite there:
+
+  | tiny, 64 rows, change from the recipe | s/step | tokens/s/chip | result |
+  |---|---|---|---|
+  | none (fsdp 64 x expert 8) | 4.24 | 1,934 | ~3.6% MFU (TFLOP/s/device ÷ 275) |
+  | data 8 x fsdp 8 x expert 8 | 3.93-3.95 | 2,073-2,085 | +7-8%; NaN at step 13 in one run, finite to step 20 in its repeat |
+  | data 4 x fsdp 16 x expert 8 | - | - | NaN at step 3 |
+  | `num_vocab_tiling=4` (from 16) | 4.15 | 1,972 | NaN at step 10 |
+  | async collective-fusion `LIBTPU_INIT_ARGS` | 4.24 | 1,930 | no gain |
+  | 128 rows (per-device batch 0.25) | - | - | compile OOM (33.8 of 31.75 GB) |
+  | data 16 or 32 | - | - | OOM |
+
+  - Small's config is the only one that fits in HBM; other meshes, remat policies and vocab tiling ran out of memory.
+    The collective-fusion flags left it at 6.47 s/step; every fourth step takes ~7.4 s.
+  - libtpu on v4 rejects `--xla_tpu_enable_async_collective_fusion_fuse_all_gather=true` ("not supported" outside
+    Viperlite); the rest of that flag set loads.
+  - Tiny's loss went NaN in 5 of 8 runs on this slice, between steps 3 and 13. The cause is the libtpu flag
+    `--xla_tpu_enable_async_ragged_all_to_all=true`, which the overlays set until 2026-11-06: it hands one MoE router
+    gate's backward an unwritten buffer, giving ~1e33 gradient elements while the forward loss is unchanged, and
+    clipping then zeroes that step's update. Without it, the failing configs ran 10 of 10 steps finite. On a `4x4x8` it
+    did not fire: H161's hero and both H190 seeds (~99k steps) have no pre-clip `train/grad_norm` above 1e3 after
+    step 4.
+
+  Speedups beyond these need code changes. Any other slice or mesh needs its own same-slice control.
 - **Comparing against a GPU result.** TPU and GPU runs of the same recipe differ in data order and numerics. Compare
   TPU arms with a TPU control on the same slice shape.
