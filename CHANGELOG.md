@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Update the complete-code client with jittered retries, cancellation of later batches/retries, and queue-inclusive deadlines (https://github.com/allenai/open-instruct/pull/2203).
 - Preserve unquoted ToolRL string-union arguments, reject unresolved schema references during preparation, and surface complete-code partition failures and service metrics instead of treating failed grades as wrong answers (https://github.com/allenai/open-instruct/pull/2178).
 - Reject failed judge/service requests during offline qualification and preserve native schema-list boundaries during NeMo strictification, including satisfiable `allOf` targets (https://github.com/allenai/open-instruct/pull/2178).
 - Add explicit offline instruction-family qualification, streaming complete-pool checks, and runtime-tested shared witnesses for compatible duplicate math/citation targets; publish the first-pass dataset handoff (https://github.com/allenai/open-instruct/pull/2178).
