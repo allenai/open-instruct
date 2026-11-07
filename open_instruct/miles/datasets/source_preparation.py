@@ -19,7 +19,7 @@ from jsonschema.exceptions import SchemaError
 from transformers import AutoTokenizer
 
 from open_instruct import ifeval_constraints
-from open_instruct.miles.datasets import tool_conversations, toolrl
+from open_instruct.miles.datasets import long_context, tool_conversations, toolrl
 from open_instruct.miles.rewards import (
     complete_code,
     litmus,
@@ -31,6 +31,7 @@ from open_instruct.miles.rewards import (
 from open_instruct.miles.rewards import deterministic_verifiers as local
 
 FACTORIES = {
+    "long_context": "open_instruct.miles.rewards.long_context.LongContextVerifier",
     "toolrl": "open_instruct.miles.rewards.toolrl.ToolRLVerifier",
     "single_step_tool": "open_instruct.miles.rewards.nemo_tool_calls.SingleStepToolVerifier",
     "complete_code": "open_instruct.miles.rewards.complete_code.CompleteCodeVerifier",
@@ -183,6 +184,8 @@ def adapt(raw, kind, options=None):
             and options["profile"] not in nemo_tool_calls.THRESHOLDS
         ):
             raise PlanError("Unknown native tool comparison profile")
+    if kind in long_context.ADAPTERS:
+        return long_context.adapt(raw, kind, messages)
     if kind == "toolrl_v1":
         return toolrl.adapt(raw, options)
     if kind == "routed_v1":
@@ -447,6 +450,8 @@ def prepare(plan_path, output, tokenizer):
                             "verifiers": [{"name": verifier, "target": target}],
                         },
                     }
+                    if spec["adapter"] in long_context.ADAPTERS:
+                        row["metadata"]["pool_id"] = "long_context"
                     if spec["adapter"] == "dolci_if_v1":
                         original = dolci_if_target(raw)
                         changes = [

@@ -17,14 +17,18 @@ import ray
 
 
 def main(options):
+    if getattr(options, "context_length", 8192) < 64 or getattr(options, "samples_per_prompt", 8) < 2:
+        raise ValueError("Require context >= 64 and at least two completions")
     options.catalog = options.catalog.resolve()
     root = options.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
     hf = root / "hf"
     shutil.copytree(options.fixture, hf)
     config = json.loads((hf / "config.json").read_text())
-    config["max_position_embeddings"] = 8192
-    config["sliding_window"] = 8192
+    context = getattr(options, "context_length", 8192)
+    samples = getattr(options, "samples_per_prompt", 8)
+    config["max_position_embeddings"] = context
+    config["sliding_window"] = context
     (hf / "config.json").write_text(json.dumps(config, indent=2) + "\n")
     prompts = [json.loads(line) for line in (options.catalog / "gpu-prompts.jsonl").open()]
     steps = len(prompts)
@@ -33,7 +37,7 @@ def main(options):
     spec = {
         "core": {
             "attention_backend": "torch",
-            "max_sequence_length": 8192,
+            "max_sequence_length": context,
             "activation_checkpointing": False,
             "reward_config": str(options.catalog / "gpu-verifiers.json"),
             "reward_zero_truncated": True,
@@ -44,9 +48,9 @@ def main(options):
         },
         "miles": {
             "hf_checkpoint": str(hf),
-            "global_batch_size": 4,
+            "global_batch_size": samples,
             "rollout_batch_size": 1,
-            "n_samples_per_prompt": 4,
+            "n_samples_per_prompt": samples,
             "num_rollout": steps,
             "rollout_num_gpus": 1,
             "rollout_num_gpus_per_engine": 1,
@@ -61,10 +65,10 @@ def main(options):
             "rollout_shuffle": False,
             "rollout_seed": 17,
             "rollout_max_response_len": 32,
-            "sglang_context_length": 8192,
-            "sglang_max_total_tokens": 32768,
-            "sglang_max_running_requests": 4,
-            "sglang_server_concurrency": 4,
+            "sglang_context_length": context,
+            "sglang_max_total_tokens": max(32768, context * 2),
+            "sglang_max_running_requests": samples,
+            "sglang_server_concurrency": samples,
             "sglang_mem_fraction_static": 0.2,
             "sglang_disable_cuda_graph": True,
             "sglang_disable_radix_cache": True,
@@ -87,11 +91,11 @@ def main(options):
         json.dumps(
             {
                 "source": str(options.fixture),
-                "config_change": "8192 context for bounded actual prompts; unchanged weights",
+                "config_change": f"{context} context for bounded actual prompts; unchanged weights",
                 "weights": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in hf.glob("*.safetensors")},
                 "purpose": "Mechanics only. Router auxiliary loss can update weights even when policy rewards are zero.",
                 "groups": steps,
-                "completions_per_group": 4,
+                "completions_per_group": samples,
                 "max_new_tokens": 32,
             },
             indent=2,
@@ -112,4 +116,6 @@ if __name__ == "__main__":
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--context-length", type=int, default=8192)
+    parser.add_argument("--samples-per-prompt", type=int, default=8)
     main(parser.parse_args())

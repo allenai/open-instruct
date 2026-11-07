@@ -27,6 +27,10 @@ async def audit(options):
     root, catalog_root = options.run, options.catalog
     prompt_path = catalog_root / "gpu-prompts.jsonl"
     prompts = [json.loads(line) for line in prompt_path.open()]
+    config = json.loads((root / "config.json").read_text())
+    samples_per_prompt = config["miles"]["n_samples_per_prompt"]
+    expected_counts = Counter(p["metadata"]["source_name"] for p in prompts)
+    expected_counts = Counter({name: count * samples_per_prompt for name, count in expected_counts.items()})
     args = SimpleNamespace(
         olmo_core=CoreConfig(reward_config=str(catalog_root / "gpu-verifiers.json"), reward_zero_truncated=True),
         reward_key=None,
@@ -37,7 +41,8 @@ async def audit(options):
         data = torch.load(path, weights_only=False, map_location="cpu")
         timestamps.append(path.stat().st_mtime)
         checks.require(
-            data["rollout_id"] == index and len(data["samples"]) == 4, f"Invalid rollout/group size: {index}"
+            data["rollout_id"] == index and len(data["samples"]) == samples_per_prompt,
+            f"Invalid rollout/group size: {index}",
         )
         for raw in data["samples"]:
             checks.require(
@@ -47,6 +52,9 @@ async def audit(options):
             checks.require(
                 raw["metadata"]["source_name"] == prompt["metadata"]["source_name"], "Source attribution mismatch"
             )
+            for key in ("pool_id", "subtask"):
+                if key in prompt["metadata"]:
+                    checks.require(raw["metadata"].get(key) == prompt["metadata"][key], f"{key} attribution mismatch")
             checks.require(raw["response_length"] > 0, "Empty coverage completion")
             checks.require(len(raw["rollout_log_probs"]) == raw["response_length"], "Logprob/response length mismatch")
             checks.require(all(math.isfinite(v) for v in raw["rollout_log_probs"]), "Nonfinite rollout logprob")
@@ -102,7 +110,7 @@ async def audit(options):
         all(math.isfinite(v) for v in differences.values()) and max(differences.values()) > 0,
         "Optimizer did not produce finite parameter changes",
     )
-    checks.require(all(count == 4 for count in counts.values()), "Incomplete or duplicate source coverage")
+    checks.require(counts == expected_counts, "Incomplete or duplicate source coverage")
     summary = {
         "status": "passed",
         "groups": len(prompts),
@@ -118,7 +126,8 @@ async def audit(options):
         "all_weight_versions_match": True,
         "all_rewards_recomputed": True,
         "first_to_last_rollout_seconds": max(timestamps) - min(timestamps),
-        "scope": "One actual prompt/source, four draws, 32 tokens; zero-variance filtering disabled. Auxiliary losses drive updates. Not a learning-signal experiment.",
+        "completions_per_group": samples_per_prompt,
+        "scope": "Actual coverage prompts with recorded source/subtask labels; plain-prompt provider. Runtime mixture attribution is checked separately on CPU. Zero-variance filtering disabled; auxiliary losses drive toy updates. Not a learning-signal experiment.",
     }
     (root / "audit.json").write_text(json.dumps(summary, indent=2) + "\n")
     (root / "audited-completions.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
