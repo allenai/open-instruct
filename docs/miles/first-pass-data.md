@@ -18,8 +18,8 @@ The versioned release destination is:
 `catalog.json` is the entry point. `summary.json` contains per-source counts and
 coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
 qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
-records verification on shared storage; use the release after its status is
-`verified`. `configs/<name>.toml` provides a ready single-source `[data]` fragment
+records verification on shared storage. The release is **verified**, including
+all 48 routes and 2,288,518 rows. `configs/<name>.toml` provides a ready single-source `[data]` fragment
 with absolute shared paths. The versioned S3 archive
 below reproduces this release. It contains compressed source archives, an archive
 manifest and `stage_release.py`; the staging script verifies archive hashes,
@@ -65,8 +65,12 @@ those dependencies on an application image already built from this code. Keep
 the pinned MILES runtime; the overlay does not replace that runtime. Building the
 overlay requires `--secret id=github_token,env=GH_TOKEN`, with a GitHub token that
 can read the private code-execution client repository. BuildKit mounts the token
-only for dependency installation; do not pass it as a build argument. No new GPU
-training run is claimed by this release.
+only for dependency installation; do not pass it as a build argument. The tested
+application image is Beaker `01M6SHC8Z3BF1GW3G9R9AFNPZY`, built from
+`2c622531eb33302a3e337c7db179ea6b24d15379`; 294 verifier tests passed inside it.
+The archive's `README.md` and `VALIDATION.json` describe the offline qualification
+snapshot. This document and PR #2178 record subsequent training validation and
+the current runtime credential configuration.
 
 These are explicit **16,384-token prompt variants**, rendered with the bundled
 Olmo Pythonic tool template and tokenizer. Allow response tokens in addition to
@@ -161,8 +165,13 @@ tools, but grade the next action offline; they do not execute an environment.
 
 Code uses deployment version 9 at the pinned execution endpoint. Inject
 `CODE_EXECUTION_TOKEN` from Beaker secret
-`robertb_CODE_EXECUTION_OE_DATA_STAGING` in workspace `ai2/open-instruct-dev`;
-credentials are absent from the artifact. The service owner reports zero failures
+`robertb_MILES_PR2178_CODE_EXECUTION_TOKEN` in workspace `ai2/olmo-instruct`;
+credentials are absent from the artifact. The endpoint is configurable through
+the preparation plan's `code_service.api_url`, recorded in each prepared
+`verifiers.json` as `config.api_url`. This release uses
+`https://1n7avfskve.execute-api.us-west-2.amazonaws.com` and pins the service source
+revision. Changing service behavior requires requalification.
+The service owner reports zero failures
 across 38,056 requests and 542,262 outcomes, tested through concurrency 128, with
 an AWS ceiling of 900. That is a shared service limit, not a per-run entitlement.
 
