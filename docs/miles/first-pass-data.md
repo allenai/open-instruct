@@ -19,7 +19,8 @@ The versioned release destination is:
 coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
 qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
 records verification on shared storage. The release is **verified**, including
-all 48 routes and 2,288,518 rows. `configs/<name>.toml` provides a ready single-source `[data]` fragment
+all 48 routes and 2,288,518 rows. `configs/<name>.toml` provides a ready
+single-source `[data]` fragment
 with absolute shared paths. The versioned S3 archive
 below reproduces this release. It contains compressed source archives, an archive
 manifest and `stage_release.py`; the staging script verifies archive hashes,
@@ -174,6 +175,57 @@ revision. Changing service behavior requires requalification.
 The service owner reports zero failures
 across 38,056 requests and 542,262 outcomes, tested through concurrency 128, with
 an AWS ceiling of 900. That is a shared service limit, not a per-run entitlement.
+
+## Training validation
+
+The training smoke checks that prepared examples can be sampled, generated,
+graded and used in optimizer updates with the tested application image. It uses
+an Olmo 3.5 MoE SFT checkpoint on four B300 GPUs: two trainer ranks and two
+inference engines. The deterministic integration pool contains 16 rows per route
+(768 total), selected without policy-success filtering. It is not a substitute
+for the full release or a representative accuracy evaluation.
+
+| Check | Observed result | Evidence |
+|---|---|---|
+| Full-release staging | All 48 routes and 2,288,518 rows verified against the catalog hashes | [Staging run](https://beaker.org/ex/01M6SMNTM585MPTKQ7WQ6Z611S) |
+| First non-code training leg | 43 configured routes; 12 updates on both trainer ranks; finite losses and gradient norms; zero OOMs and omitted records; committed checkpoint at 12 completed steps | [Training run](https://beaker.org/ex/01M6SKMECBC8MGHADXA179ZSM1) |
+| Code training | Five configured routes using the authenticated service; four updates on both ranks; finite losses and gradient norms; zero OOMs and omitted records; committed final checkpoint | [Code run](https://beaker.org/ex/01M6SNFM7KHH9X4DB3PXPAK9BW) |
+| Non-code checkpoint resume | Restored at step 12 and completed through step 24 on both ranks; finite losses and gradient norms; zero OOMs and omitted records | [Resume run](https://beaker.org/ex/01M6SQ4TPZJC62B5QGYTX250RX) |
+| Recorded route consumption and checkpoint cursor hashes | All 48 routes consumed: 576 non-code and 96 code prompt groups, totaling 2,688 training responses; saved sampler cursor hashes match checkpoint manifests | [Final audit](https://beaker.org/ex/01M6SSK3PCGEVYC7H8AD044NEE) |
+
+The final audit's result dataset, `01M6SSK3PRPEPCXCH41KNJD8QV`, contains
+`noncode-audit.json` and `code-audit.json`, including per-route consumption,
+reward diagnostics, checkpoint clocks and cursor hashes. Both ranks completed
+every expected update without skipping an optimizer step. All recorded rewards
+were finite; the omission metric was present and zero in every collection.
+The audit exposed an existing throughput-reporting bug: background collection
+time was compared with the driver's shorter final await. The separate
+[reporting fix, PR #2198](https://github.com/allenai/open-instruct/pull/2198),
+was applied only to analysis, with its exact revision and file hashes recorded
+in the audit reports. Training used the unchanged application image above.
+
+The smoke uses 16K response and 32K total-context limits. It retains groups with
+zero reward variance to exercise the training path; some code batches therefore
+produce zero gradients. Long code responses frequently reach the response limit.
+Inspect response lengths and within-group reward variance when choosing a mixing
+experiment's generation budget. Passing this smoke establishes integration, not
+learning benefit.
+
+The recorded sample had no positive rewards for Litmus, Cascade-2 and Ultra
+structured-output routes, or Super and Ultra calendar routes. These are valid
+zero scores rather than service failures; offline positive controls passed.
+Structured/calendar parse errors describe model responses that failed the
+required format, and ToolRL's negative scores follow its native reward scale.
+Across all recorded code responses (including unused prefetch), 514 of 660
+Nemotron responses reached the limit, versus 2 of 124 AceCode responses. These
+small-pool observations call for inspecting examples and generation budgets in
+the first mixing experiments, not population-level accuracy conclusions.
+
+Startup, compilation and checkpointing dominate these short runs. For example,
+the code run spent 326 seconds in inference startup and 85 seconds saving its
+checkpoint; its first optimizer phase took 358 seconds and its last took 37
+seconds. Substantial asynchronous prefetched work remained unused at shutdown.
+These timings are not a sustained-throughput benchmark.
 
 ## Deliberate exclusions and follow-ups
 
