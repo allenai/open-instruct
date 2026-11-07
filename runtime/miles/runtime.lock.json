@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Pinned MILES/Core runtime plus named-pool exposure callbacks; pool mode CPU-tested, distributed GPU validation pending; see docs/miles/data-and-evaluation.md and docs/miles/throughput-profiles.md",
+  "status": "Qualified binary/runtime baseline plus pool exposure, supported eager policy scoring, SwiGLU int64 offsets, and source-bundle record IDs; combined GPU smoke pending",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -8,11 +8,11 @@
   "sources": {
     "olmo-core": {
       "repository": "https://github.com/allenai/Olmo-core.git",
-      "revision": "6ceda6530625caa5d23e3be8a455c600f62a7338"
+      "revision": "903e57d46cc2c62cb5611e49c4d0e2052eb798d2"
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "9ff4e93d7f85777db03c63d17d19d53677571086"
+      "revision": "3245d3bf2830db599fbf01169b60100d78a88917"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",

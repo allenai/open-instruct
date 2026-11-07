@@ -337,3 +337,15 @@ not include RPC dispatch delay. The completed-queue consumer-wait metric identif
 waiting for eligible generations within preparation. A longer preparation time
 can therefore be harmless overlap, or genuine inference wait; inspect these
 metrics together.
+
+
+### Policy scoring activation
+
+MILES selects Core's supported `fused_no_grad_activation=false` setting so regular
+SwiGLU policy scoring uses the same eager SiLU-then-multiply implementation as
+training. Scoring still runs under `no_grad`; it does not retain a backward graph.
+The consistency check remains enabled on the first update after process startup
+(including resume), and at any configured check interval. This requires the Core
+revision in the runtime lock; older revisions fail early rather than silently
+ignoring the selection. The eager path computes all capacity rows, so its cost
+should be measured on the chosen packing and expert-parallel layout.
