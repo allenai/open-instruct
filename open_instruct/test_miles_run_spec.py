@@ -385,7 +385,7 @@ def test_explicit_prepared_input_and_tracking_disable(tmp_path):
 def test_all_researcher_examples_compile_to_native_arguments():
     root = Path(__file__).parents[1] / "configs" / "miles"
     paths = sorted((root / "examples").glob("*.toml"))
-    assert {path.stem for path in paths} == {"dev", "node", "three-node"}
+    assert {path.stem for path in paths} == {"dev", "node", "half-node-moe", "three-node"}
     for path in paths:
         run = RunSpec.load(path)
         config = run.compile()
@@ -402,7 +402,7 @@ def test_all_researcher_examples_compile_to_native_arguments():
             assert config.miles["use_tis"] is True
             assert config.miles["use_rollout_logprobs"] is False
             assert config.core.publication_mode == "refresh"
-            assert config.core.max_policy_lag == 12
+            assert config.core.max_policy_lag == (4 if path.stem == "half-node-moe" else 12)
         else:
             assert config.core.publication_mode == "barrier"
             assert config.core.filter_zero_std_groups is False

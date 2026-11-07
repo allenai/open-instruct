@@ -50,7 +50,7 @@ exist on the submitting host.
 
 ## Laptop: choose or build an image
 
-Choose a starter from the three maintained examples and an image built from the
+Choose a starter from the maintained examples and an image built from the
 intended application revision and runtime lock. Building requires access to the
 private sources described in [architecture](architecture.md#runtime-sources-and-images).
 Supply model/data paths and any secrets needed by your run. Beaker resource
