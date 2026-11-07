@@ -42,6 +42,23 @@ def test_no_prompt_rewrite_and_native_fields():
     ]
 
 
+@pytest.mark.parametrize(
+    "instruction,args",
+    [
+        ("language:response_language", {"language": "en"}),
+        ("change_case:english_capital", {}),
+        ("change_case:english_lowercase", {}),
+    ],
+)
+def test_native_language_constraints_are_prepared(instruction, args):
+    raw = {"prompt": "Original question", "instruction_id_list": [instruction], "kwargs": [args]}
+    messages, target, name, _ = sources.adapt(raw, "instruction_v1")
+    assert messages == [{"role": "user", "content": "Original question"}]
+    assert name == "instruction"
+    assert target["target"]["instruction_id_list"] == [instruction]
+    assert target["target"]["kwargs"] == [args]
+
+
 def test_explicit_math_and_no_topic_subsetting():
     assert sources.adapt({"problem": "Compute 1+1", "answer": "2"}, "math_v1")[:3] == (
         [{"role": "user", "content": "Compute 1+1"}],
@@ -204,6 +221,53 @@ def test_invalid_structured_schema_is_omitted_not_fatal(tmp_path):
     entry, reasons = prepare_one(tmp_path, "nemo_v1", records)
     assert entry["counts"]["prepared_rows"] == 1 and entry["counts"]["omitted_rows"] == 1
     assert reasons[0].startswith("SchemaError: ")
+
+
+def test_unresolvable_nested_schema_reference_is_quarantined(tmp_path):
+    pytest.importorskip("xmltodict")
+    pytest.importorskip("openapi_schema_validator")
+    schema = {
+        "$id": "https://example.invalid/root",
+        "$defs": {"num": {"type": "integer"}},
+        "properties": {"child": {"$id": "child", "$ref": "#/$defs/num"}},
+    }
+    records = [
+        {"prompt": "broken reference", "schema_type": "json", "schema_str": json.dumps(schema)},
+        {"prompt": "valid row", "schema_type": "json", "schema_str": json.dumps({"type": "object"})},
+    ]
+    entry, reasons = prepare_one(tmp_path, "nemo_v1", records)
+    assert entry["counts"]["prepared_rows"] == entry["counts"]["omitted_rows"] == 1
+    assert "Unresolvable schema reference" in reasons[0]
+
+
+@pytest.mark.parametrize(
+    "task,answer,metadata,error",
+    [
+        ("number_sorting", "[1,", {}, "SyntaxError"),
+        ("bitwise_arithmetic", "1", {"problem": "1 <<"}, "SyntaxError"),
+        ("polynomial_multiplication", "x +", {}, "SyntaxError"),
+        ("simple_integration", "x + C", {"integrand": "x +"}, "SyntaxError"),
+        ("intermediate_integration", "x + C", {"integrand": "("}, "SyntaxError"),
+        ("coin_flip", "1/0", {}, "ZeroDivisionError"),
+        ("coin_flip", "1" + "0" * 310, {}, "OverflowError"),
+    ],
+)
+def test_malformed_reasoning_gym_references_do_not_drop_later_rows(tmp_path, task, answer, metadata, error):
+    bad = {"question": "Malformed source", "answer": answer, "metadata": {"source_dataset": task, **metadata}}
+    valid = {"question": "Convert 10 to binary", "answer": "1010", "metadata": {"source_dataset": "base_conversion"}}
+    original = copy.deepcopy(bad)
+    records = [{"id": "bad", "raw_record": bad}, {"id": "valid", "raw_record": valid}]
+    entry, reasons = prepare_one(tmp_path, "reasoning_gym_v1", records)
+    assert bad == original
+    assert entry["counts"]["input_rows"] == 2
+    assert entry["counts"]["omitted_rows"] == entry["counts"]["prepared_rows"] == 1
+    assert len(reasons) == 1 and reasons[0].startswith(
+        f"ValueError: Invalid ReasoningGym reference for {task}: {error}:"
+    )
+    disposition = json.loads((tmp_path / "out/source/dispositions.jsonl").read_text())
+    assert disposition["id"] == "bad" and disposition["status"] == "omitted"
+    row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
+    assert row["metadata"]["sample_id"] == "valid" and row["label"] == valid
 
 
 def test_responses_instructions_are_preserved():
@@ -545,3 +609,68 @@ def test_dolci_remap_preserves_existing_frequency_constraint():
     verifier = task_verifiers.ManifestIFVerifier()
     assert asyncio.run(verifier.async_call([], "apple apple pear pear", label)).score == 1.0
     assert asyncio.run(verifier.async_call([], "apple apple pear", label)).score == 0.5
+
+
+def test_structured_tool_declarations_preserved_and_target_declared():
+    pytest.importorskip("xmltodict")
+    pytest.importorskip("openapi_schema_validator")
+    raw = {
+        "responses_create_params": {
+            "input": [
+                {"role": "system", "content": "Return the result through the tool."},
+                {"role": "user", "content": "Extract the count."},
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "submit",
+                    "description": "Submit result",
+                    "parameters": '{"type":"object","properties":{"result":{"type":"object"}}}',
+                }
+            ],
+        },
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "tool_payload_key": "result",
+        "schema_type": "json",
+        "schema_str": '{"type":"object","properties":{"n":{"type":"integer"}}}',
+    }
+    original = copy.deepcopy(raw)
+    messages, label, name, stratum = sources.adapt(raw, "nemo_v1")
+    assert messages == raw["responses_create_params"]["input"]
+    assert label["tool_name"] == "submit" and label["tool_payload_key"] == "result"
+    assert label["tool_call_format"] == "olmo3_pythonic_v1"
+    assert name == "structured" and stratum == "structured_v1:tool_call"
+    tools = sources.structured_tool_calls.tools_for_template(raw)
+    assert tools[0]["function"]["parameters"]["type"] == "object"
+    assert raw == original
+
+
+def test_tool_response_marker_does_not_enable_unrelated_tool_tasks():
+    raw = {
+        "response_mode": "tool_call",
+        "responses_create_params": {"input": "Question", "tools": [{"type": "function", "name": "search"}]},
+    }
+    with pytest.raises(ValueError, match="requires_tool_environment"):
+        sources.adapt(raw, "nemo_v1")
+
+
+@pytest.mark.parametrize("kind,root_type", [("csv", "object"), ("toml", "array")])
+def test_incompatible_format_schema_is_an_omission(kind, root_type):
+    pytest.importorskip("xmltodict")
+    pytest.importorskip("openapi_schema_validator")
+    raw = {
+        "prompt": "Return the structured result",
+        "schema_type": kind,
+        "schema_str": json.dumps({"type": root_type}),
+    }
+    with pytest.raises(ValueError, match="unrepresentable_"):
+        sources.adapt(raw, "structured_v1")
+
+
+def test_legacy_source_system_prompt_is_preserved():
+    raw = {"system_prompt": "detailed thinking off", "input": [{"role": "user", "content": "Question"}]}
+    assert sources.messages(raw) == [
+        {"role": "system", "content": "detailed thinking off"},
+        {"role": "user", "content": "Question"},
+    ]

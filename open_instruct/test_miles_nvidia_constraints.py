@@ -80,6 +80,7 @@ def target(name, args, **extra):
         ("letters:letter_counting", {"N": 4, "relation": "at least"}, "中文中文", "cat"),
         ("keywords:existence", {"keywords": ["apple"]}, "an apple", "a pear"),
         ("punctuation:no_comma", {}, "one two", "one, two"),
+        ("count:count_increment_word", {"keyword1": ["plan"], "keyword2": ["let"]}, "plan let let", "plan let"),
         ("detectable_format:json_format", {}, '{"a":1}', "hello"),
     ],
 )
@@ -104,7 +105,7 @@ def test_grading_mode_and_argument_repairs():
         target("keywords:frequency", {}),
         target("count:lowercase_counting", {"N": 0}),
         target("letters:letter_counting", {"N": 2, "relation": "less than"}),
-        target("language:response_language", {"language": "en"}),
+        target("language:response_language", {}),
         target("punctuation:no_comma", {}, grading_mode="typo"),
     ]:
         with pytest.raises(ValueError):
@@ -135,6 +136,38 @@ def test_actual_worker_path():
     label = target("count:lowercase_counting", {"N": 2})
     assert asyncio.run(nv.InstructionVerifier().async_call([], "one two three", label)).score == 1
     assert asyncio.run(nv.CalendarVerifier().async_call([], "[]", {})).score == 1
+
+
+@pytest.mark.parametrize(
+    "name,args,text",
+    [
+        ("language:response_language", {"language": "en"}, "hello world"),
+        ("change_case:english_capital", {}, "HELLO WORLD"),
+        ("change_case:english_lowercase", {}, "hello world"),
+    ],
+)
+def test_language_constraints_use_native_detector_result(name, args, text):
+    label = target(name, args)
+    with mock.patch("open_instruct.IFEvalG.instructions.langdetect.detect", side_effect=["en", "fr"]) as detect:
+        verifier = nv.InstructionVerifier()
+        assert score(verifier, text, label) == 1
+        assert score(verifier, text, label) == 0
+    assert detect.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "name,args,text,expected",
+    [
+        ("language:response_language", {"language": "en"}, "42", 1),
+        ("change_case:english_capital", {}, "ＡＢＣ", 1),
+        ("change_case:english_lowercase", {}, "ａｂｃ", 1),
+        ("change_case:english_capital", {}, "42", 0),
+        ("change_case:english_lowercase", {}, "42", 0),
+    ],
+)
+def test_language_detection_fallback_through_worker(name, args, text, expected):
+    result = asyncio.run(nv.InstructionVerifier().async_call([], text, target(name, args)))
+    assert result.score == expected
 
 
 @pytest.mark.parametrize(

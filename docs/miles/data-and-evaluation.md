@@ -541,14 +541,19 @@ python -m scripts.data.rl_readiness.audit --catalog /path/to/new-catalog --run /
 ```
 
 Direct file-path invocation is not the supported entry point. To package these
-tools, build the readiness image with the **repository root** as its context:
+tools, build the readiness image with the **repository root** as its context.
+Set `GH_TOKEN` to a GitHub token with read access to the private code-execution
+client repository; BuildKit mounts it only during dependency installation:
 
 ```bash
-docker build -f scripts/data/rl_readiness/Dockerfile --build-arg BASE_IMAGE=YOUR_MATCHING_MILES_IMAGE -t rl-readiness .
+docker build -f scripts/data/rl_readiness/Dockerfile \
+  --build-arg BASE_IMAGE=YOUR_MATCHING_MILES_IMAGE \
+  --secret id=github_token,env=GH_TOKEN -t rl-readiness .
 ```
 
-The image copies the readiness package under `/opt/core-rl/scripts/data/` and
-checks all three module entry points with `--help` during the build.
+The image copies the readiness and RLVR preparation packages under
+`/opt/core-rl/scripts/data/` and checks the readiness and source-preparation
+entry points with `--help` during the build.
 
 Formatting matching shares a one-second monotonic deadline across the response,
 with each regex call additionally capped at 100 ms or the remaining time,
@@ -591,3 +596,13 @@ because the random model generally earns zero; the separate controls test the
 real filter. Router auxiliary losses can produce optimizer updates even with
 zero task rewards. This is a training-machinery check, not evidence of learning,
 endpoint transfer, or a recommendation to use four samples in a real run.
+
+
+## Dataset integration
+
+Use [source preparation](source-preparation.md) to convert
+reviewed dataset exports into named training sources, preserving provenance and
+reporting unsupported rows. The [reward verifier guide](dataset-verifiers.md)
+describes their runtime contracts. CPU qualification checks the complete prepared
+pool and reviewed reward controls before a named source enters a MILES mixture;
+it does not require a separate inference study or establish downstream benefit.

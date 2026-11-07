@@ -1,3 +1,4 @@
+- Let MILES scoring callers explicitly raise or zero reported service/judge failures; preserve zero fallback for distillation and ordinary evaluation, strict offline qualification, and training group omission (https://github.com/allenai/open-instruct/pull/2178).
 - Fix reasoning-panel GPQA/context budgets, normalize SciCode disabled top-k, and retain independent evaluation progress after task failures (https://github.com/allenai/open-instruct/pull/2136).
 # Changelog
 
@@ -5,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Preserve unquoted ToolRL string-union arguments, reject unresolved schema references during preparation, and surface complete-code partition failures and service metrics instead of treating failed grades as wrong answers (https://github.com/allenai/open-instruct/pull/2178).
+- Reject failed judge/service requests during offline qualification and preserve native schema-list boundaries during NeMo strictification, including satisfiable `allOf` targets (https://github.com/allenai/open-instruct/pull/2178).
+- Add explicit offline instruction-family qualification, streaming complete-pool checks, and runtime-tested shared witnesses for compatible duplicate math/citation targets; publish the first-pass dataset handoff (https://github.com/allenai/open-instruct/pull/2178).
+- Stream prepared MILES source JSONL, output serialization and resume hashes so complete code-test bundles do not require multiple whole-file copies in memory; retain validation metadata and immutable resume checks (https://github.com/allenai/open-instruct/pull/2178).
+- Support offline ToolRL and native NeMo next-action tool datasets in source preparation, preserving histories and source-specific rewards; add literal tool-call parsing and ToolRL qualification at its original reward scale (https://github.com/allenai/open-instruct/pull/2178).
+- Preserve Unicode line separators inside prompts when reading offline source qualification JSONL artifacts (https://github.com/allenai/open-instruct/pull/2178).
+- Admit native NeMo language constraints while preserving upstream classification and detection-error behavior; defer classifier improvements (https://github.com/allenai/open-instruct/pull/2178).
+- Omit and replace ungraded MILES training prompt groups after verifier failures, and report omitted prompt records in W&B; leave the systemic-failure tolerance threshold open (https://github.com/allenai/open-instruct/pull/2178).
+- Record malformed ReasoningGym syntax and numeric references as preparation omissions instead of aborting the remaining source population (https://github.com/allenai/open-instruct/pull/2178).
+- Bind source qualification receipts to prompt-data and reward-configuration hashes so changed bundles require requalification (https://github.com/allenai/open-instruct/pull/2178).
+- Preserve native NeMo code comparison semantics automatically for Nemotron input/output labels, retain AceCode assertions, and pin the compatible service client (https://github.com/allenai/open-instruct/pull/2178).
+- Validate complete source bundles with whole-pool loader checks and per-stratum runtime reward controls; preserve explicit quarantine receipts and reference-judge routing, support final structured tool answers, 104 ReasoningGym families with bounded safe grading, and complete-test code rewards through an authenticated source-pinned service (https://github.com/allenai/open-instruct/pull/2178).
 - Add full-population, hash-pinned dataset source preparation with preserved system/developer instructions, explicit omissions for malformed rows and deterministic reward adapters, including Litmus scalar answer formats. Make local validation timeouts consistently return zero with diagnostics, removing the math/format timeout policy settings while keeping invalid targets and unexpected failures fatal (https://github.com/allenai/open-instruct/pull/2177).
 - Add shared, isolated native instruction and calendar reward adapters with deterministic argument/regex validation that accepts known native normalization, explicit grading modes, and diagnostic zero scores for calendar parse failures and worker timeouts (https://github.com/allenai/open-instruct/pull/2176).
 - Add opt-in, process-isolated structured output rewards for JSON, YAML, TOML, XML and CSV with explicit schema/coercion policies and a response deadline (https://github.com/allenai/open-instruct/pull/2175).

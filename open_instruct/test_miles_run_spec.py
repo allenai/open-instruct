@@ -25,6 +25,7 @@ def spec(tmp_path, **sections):
 
 def test_async_defaults_are_real_tis_and_eight_by_eight(tmp_path):
     config = spec(tmp_path, **{"async": {"fully_async": True}}).compile()
+    assert config.miles["custom_rm_path"] == "open_instruct.miles.rewards.rewards.rollout_reward"
     assert config.miles["use_tis"] is True
     assert config.miles["use_rollout_logprobs"] is False
     assert config.miles["async_data_buffer_capacity_factor"] == 1

@@ -228,12 +228,17 @@ def instruction_contract(serialized):
         raise ValueError("IF grading_mode must be all or fraction")
     compiled = []
     for name, args in zip(ids, arguments, strict=True):
-        if name in {"language:response_language", "change_case:english_capital", "change_case:english_lowercase"}:
-            raise ValueError("Language classification needs separate calibration")
+        # Preserve native language classification, including randomness and the
+        # detection-error fallback. TODO: evaluate a better classifier separately;
+        # see docs/miles/source-preparation.md#native-language-constraints.
         if name not in registry:
             raise ValueError(f"Unknown instruction family: {name}")
         checker = registry[name](name)
         args = {k: v for k, v in (args or {}).items() if v is not None}
+        # NeMo exports singleton keyword lists for this native scalar checker.
+        # Unwrap only this documented shape; multiple keywords are not guessed.
+        if name == "count:count_increment_word":
+            args = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in args.items()}
         if set(args) != set(checker.get_instruction_args_keys()):
             raise ValueError(f"Missing or unexpected arguments for {name}")
         for key, value in args.items():

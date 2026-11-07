@@ -271,3 +271,147 @@ def test_target_and_constructor_resource_errors_remain_fatal(monkeypatch, error_
     monkeypatch.setattr(structured, stage, mock.Mock(side_effect=error_type("invalid target")))
     with pytest.raises(error_type, match="invalid target"):
         structured.StructuredOutputVerifier()([], "0", target())
+
+
+def test_strictification_visits_schemas_not_property_maps_or_defaults():
+    schema = {
+        "type": "object",
+        "properties": {
+            "properties": {"type": "string"},
+            "default": {"type": "object", "default": {"properties": {"literal": 1}}},
+            "variants": {"anyOf": [{"type": "object", "properties": {"x": {"type": "integer"}}}]},
+        },
+    }
+    label = target(schema=schema, schema_policy="nemo_strict_v1")
+    validated = structured.validate_target(label)
+    assert set(validated["properties"]) == {"properties", "default", "variants"}
+    assert validated["properties"]["default"]["default"] == {"properties": {"literal": 1}}
+    assert "required" not in validated["properties"]["variants"]["anyOf"][0]
+    verifier = structured.StructuredOutputVerifier()
+    assert verifier([], '{"properties":"literal","default":{},"variants":{"x":1}}', label).score == 1
+    assert verifier([], '{"properties":"literal","default":{},"variants":{}}', label).score == 1
+    assert "required" not in schema
+
+
+def test_nested_resource_identifier_resolves_its_own_local_reference():
+    schema = {
+        "$id": "https://example.invalid/root",
+        "type": "object",
+        "properties": {
+            "child": {
+                "$id": "child",
+                "$defs": {"num": {"type": "integer"}},
+                "type": "object",
+                "properties": {"n": {"$ref": "#/$defs/num"}},
+            }
+        },
+    }
+    verifier = structured.StructuredOutputVerifier()
+    label = target(schema=schema)
+    assert verifier([], '{"child":{"n":1}}', label).score == 1
+    assert verifier([], '{"child":{"n":"bad"}}', label).score == 0
+
+
+@pytest.mark.parametrize("ref_key", ["$ref", "$dynamicRef"])
+def test_nested_identifier_cannot_resolve_root_definitions_at_preparation(ref_key):
+    label = target(
+        schema={
+            "$id": "https://example.invalid/root",
+            "$defs": {"num": {"type": "integer"}},
+            "type": "object",
+            "properties": {"child": {"$id": "child", ref_key: "#/$defs/num"}},
+        }
+    )
+    with pytest.raises(ValueError, match="Unresolvable schema reference"):
+        structured.validate_target(label)
+    # Invalid configuration is fatal even when this instance omits the child;
+    # it must not become a response-dependent zero reward or worker crash.
+    with pytest.raises(RuntimeError, match="Unresolvable schema reference"):
+        asyncio.run(structured.StructuredOutputVerifier().async_call([], "{}", label))
+
+
+def tool_target(**extra):
+    return target(
+        response_mode="tool_call",
+        tool_name="submit",
+        tool_payload_key="result",
+        tool_call_format="olmo3_pythonic_v1",
+        **extra,
+    )
+
+
+def test_structured_tool_answer_through_worker():
+    verifier = structured.StructuredOutputVerifier()
+    result = asyncio.run(
+        verifier.async_call([], '<function_calls>submit(result={"n":3})</function_calls>', tool_target())
+    )
+    assert result.score == 1
+    assert result.diagnostics["status"] == "completed"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        '{"n":3}',
+        '<function_calls>wrong(result={"n":3})</function_calls>',
+        '<function_calls>submit(result={"n":3})\nsubmit(result={"n":3})</function_calls>',
+        '<function_calls>submit(result={"n":"wrong"})</function_calls>',
+        "<function_calls>submit(n=3)</function_calls>",
+        '<function_calls>submit(result={"n":1,"n":3})</function_calls>',
+        '<function_calls>submit(result={"n":3}, result={"n":3})</function_calls>',
+        '<function_calls>submit(result={"n":__import__("os").getpid()})</function_calls>',
+        '<function_calls>submit(result={"n":3}, **{"result":{"n":3}})</function_calls>',
+    ],
+)
+def test_structured_tool_answer_rejects_wrong_ambiguous_or_executable_calls(response):
+    assert structured.StructuredOutputVerifier()([], response, tool_target()).score == 0
+
+
+def test_tool_answers_accept_template_json_literals():
+    label = tool_target(
+        schema={"type": "object", "properties": {"ok": {"type": "boolean"}, "value": {"type": "null"}}}
+    )
+    assert (
+        structured.StructuredOutputVerifier()(
+            [], '<function_calls>submit(result={"ok":true,"value":null})</function_calls>', label
+        ).score
+        == 1
+    )
+
+
+def test_tool_configuration_errors_remain_fatal():
+    label = tool_target()
+    label["tool_name"] = "not.a.function"
+    with pytest.raises(ValueError, match="tool_name"):
+        structured.validate_target(label)
+
+
+def test_tool_answer_can_represent_a_reserved_field_name():
+    label = target(
+        response_mode="tool_call",
+        tool_name="submit",
+        tool_call_format="olmo3_pythonic_v1",
+        schema={"type": "object", "properties": {"class": {"type": "string"}}, "required": ["class"]},
+    )
+    result = asyncio.run(
+        structured.StructuredOutputVerifier().async_call(
+            [], '<function_calls>submit(**{"class":"Mammalia"})</function_calls>', label
+        )
+    )
+    assert result.score == 1
+
+
+def test_native_strictification_does_not_close_allof_branches():
+    schema = {
+        "type": "object",
+        "allOf": [
+            {"properties": {"a": {"type": "integer"}}, "required": ["a"]},
+            {"properties": {"b": {"type": "integer"}}, "required": ["b"]},
+        ],
+    }
+    label = target(schema=schema, schema_policy="nemo_strict_v1")
+    assert structured.validate_target(label) == schema
+    verifier = structured.StructuredOutputVerifier()
+    assert asyncio.run(verifier.async_call([], '{"a":1,"b":2}', label)).score == 1
+    assert asyncio.run(verifier.async_call([], '{"a":1}', label)).score == 0
+    assert asyncio.run(verifier.async_call([], '{"a":1,"b":"wrong"}', label)).score == 0

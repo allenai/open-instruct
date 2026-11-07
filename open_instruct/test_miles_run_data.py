@@ -628,3 +628,47 @@ def test_mixture_preparation_screens_each_training_source(environment, tmp_path)
     with pytest.raises(InputError, match="source-constraints row 1:.*letter_counting_tiny_less_than"):
         prepare(environment, data)
     assert not environment[1].exists()
+
+
+def test_prepared_jsonl_streams_and_preserves_validation_metadata(environment, tmp_path, monkeypatch):
+    source = tmp_path / "large.jsonl"
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({"gsm8k": {"factory": run_data.FACTORIES["gsm8k"]}}))
+    with source.open("w") as stream:
+        for index in range(12):
+            stream.write(
+                json.dumps(
+                    {
+                        "input": f"question {index}\u2028inside a JSON string",
+                        "label": "42",
+                        "metadata": {
+                            "payload": "x" * 1000000,
+                            "prepared_sample_id": str(index),
+                            "verifiers": [{"name": "gsm8k", "target": "42"}],
+                        },
+                    }
+                )
+                + "\n"
+            )
+    original = Path.read_bytes
+
+    def guarded(path):
+        if path.suffix == ".jsonl":
+            raise AssertionError("JSONL must not be materialized as one bytes object")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+    data = {
+        "sources": [{"name": "large", "fraction": 1.0, "prompt_data": str(source), "reward_config": str(registry)}]
+    }
+    result = prepare(environment, data)
+    with Path(result["prompt_data"]).open() as stream:
+        rows = [json.loads(line) for line in stream]
+    assert len(rows) == 12
+    assert all(len(r["metadata"]["payload"]) == 1000000 for r in rows)
+    assert rows[0]["metadata"]["run_prompt_tokens"] == len(rows[0]["input"].encode())
+    assert len(rows[0]["metadata"]["run_prompt_token_ids_sha256"]) == 64
+    assert prepare(environment, data) == result
+    source.write_text(source.read_text().replace('"42"', '"43"', 1))
+    with pytest.raises(InputError, match="source changed"):
+        prepare(environment, data)

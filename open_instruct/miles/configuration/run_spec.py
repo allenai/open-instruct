@@ -689,7 +689,7 @@ class RunSpec:
             "input_key": "input",
             "label_key": "label",
             "metadata_key": "metadata",
-            "custom_rm_path": "open_instruct.miles.rewards.rewards.registered_reward",
+            "custom_rm_path": "open_instruct.miles.rewards.rewards.rollout_reward",
             "custom_rollout_log_function_path": "open_instruct.miles.rollout.rollout_metrics.log_rollout_data",
             "rollout_global_dataset": True,
             "rollout_shuffle": self.data["shuffle"],

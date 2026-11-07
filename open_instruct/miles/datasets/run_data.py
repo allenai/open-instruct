@@ -77,6 +77,57 @@ def _read(path, inputs):
     return raw
 
 
+def _file_sha(path):
+    try:
+        with Path(path).open("rb") as stream:
+            return hashlib.file_digest(stream, "sha256").hexdigest()
+    except OSError as error:
+        raise InputError(f"Cannot read input {path}: {error}. Check the path and the job's WEKA mounts.") from error
+
+
+class _JsonlRows:
+    """Replay a prepared file without retaining large verifier targets in RAM."""
+
+    def __init__(self, path, inputs):
+        self.path = Path(path).resolve()
+        self.annotations = {}
+        self.count = 0
+        digest = hashlib.sha256()
+        try:
+            with self.path.open("rb") as stream:
+                for line in stream:
+                    digest.update(line)
+                    self.count += bool(line.decode().strip())
+        except UnicodeError as error:
+            raise InputError(f"{self.path} must be UTF-8 JSONL.") from error
+        except OSError as error:
+            raise InputError(f"Cannot read input {self.path}: {error}") from error
+        inputs[str(self.path)] = digest.hexdigest()
+
+    def __len__(self):
+        return self.count
+
+    def __iter__(self):
+        index = 0
+        with self.path.open("rb") as stream:
+            for line_number, line in enumerate(stream, 1):
+                if not line.strip():
+                    continue
+                parsed = _rows(line, f"{self.path}: line {line_number}")
+                if not parsed:
+                    continue
+                row = parsed[0]
+                index += 1
+                if index in self.annotations:
+                    row["metadata"].update(self.annotations[index])
+                yield row
+
+    def remember_validation(self, index, row):
+        self.annotations[index] = {
+            key: row["metadata"][key] for key in ("run_prompt_tokens", "run_prompt_token_ids_sha256")
+        }
+
+
 def _read_json_object(path, inputs):
     raw = _read(path, inputs)
     try:
@@ -378,7 +429,7 @@ def _prepared(data, inputs):
     evaluation = data.get("eval_prompt_data", [])
     if not isinstance(evaluation, list) or len(evaluation) % 2:
         raise InputError("eval_prompt_data must alternate dataset names and paths")
-    partitions = {"train": _rows(_read(data["prompt_data"], inputs), data["prompt_data"])}
+    partitions = {"train": _JsonlRows(data["prompt_data"], inputs)}
     for name, path in zip(evaluation[::2], evaluation[1::2], strict=True):
         if (
             not isinstance(name, str)
@@ -387,7 +438,7 @@ def _prepared(data, inputs):
             or name in partitions
         ):
             raise InputError("Evaluation names must be unique safe identifiers distinct from train")
-        partitions[name] = _rows(_read(path, inputs), str(path))
+        partitions[name] = _JsonlRows(path, inputs)
     return partitions, {"already_rendered": True}, registry
 
 
@@ -584,10 +635,10 @@ def prepare_data(
         if manifest["contract"] != contract:
             raise InputError("Preparation contract changed; refusing to alter resumed run data")
         for path, digest in validation.mapping(manifest["inputs"], f"{manifest_path}: inputs").items():
-            if _sha(_read(path, {})) != digest:
+            if _file_sha(path) != digest:
                 raise InputError(f"Preparation source changed: {path}")
         for filename, digest in validation.mapping(manifest["outputs"], f"{manifest_path}: outputs").items():
-            if _sha(_read(output / filename, {})) != digest:
+            if _file_sha(output / filename) != digest:
                 raise InputError(f"Prepared artifact changed: {filename}")
         result = _required_mapping(
             manifest["result"],
@@ -630,7 +681,9 @@ def prepare_data(
                     _verify_if_training_row(row, if_verifiers)
             except InputError as error:
                 raise InputError(f"{split} row {index}: {error}") from error
-            (train_prompts if split in training else eval_prompts).add(row["input"])
+            if isinstance(rows, _JsonlRows):
+                rows.remember_validation(index, row)
+            (train_prompts if split in training else eval_prompts).add(_sha(row["input"].encode()))
             identity = row["metadata"].get("prepared_sample_id")
             if identity:
                 (train_ids if split in training else eval_ids).add(identity)
@@ -647,10 +700,14 @@ def prepare_data(
         for split, rows in partitions.items():
             if not rows:
                 continue
-            raw = b"".join(_encoded(row) for row in rows)
             filename = f"{split}.jsonl"
-            (staging / filename).write_bytes(raw)
-            outputs[filename] = _sha(raw)
+            digest = hashlib.sha256()
+            with (staging / filename).open("wb") as stream:
+                for row in rows:
+                    raw = _encoded(row)
+                    stream.write(raw)
+                    digest.update(raw)
+            outputs[filename] = digest.hexdigest()
             if split not in training:
                 evaluation.extend(["heldout" if split == "eval" else split, str(output / filename)])
         raw = _encoded(registry)
@@ -695,7 +752,7 @@ def prepare_data(
         }
         (staging / "manifest.json").write_bytes(_encoded(manifest))
         for path, digest in inputs.items():
-            if _sha(_read(path, {})) != digest:
+            if _file_sha(path) != digest:
                 raise InputError(f"Preparation source changed while preparing: {path}")
         staging.rename(output)
     finally:
