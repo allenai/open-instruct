@@ -18,6 +18,50 @@ unchanged. These adapters do not alter existing dataset routes or sampling polic
 The existing [source catalog](first-pass-data.md) resolver turns qualified sources
 into `[data.sources]` entries; the ordinary training preparation path still runs.
 
+## First qualified variant
+
+The first release retains **11,569 rows across 33 task strata** at a 16,384-token
+prompt and 16,384-token reference limit. These are explicit length variants;
+most longer GoLong examples remain outside this initial release.
+
+| Source | Upstream train rows | Qualified rows | Covered strata | Other dispositions |
+|---|---:|---:|---:|---|
+| Transduction | 10,000 | 5,112 | 12 | 4,832 over prompt budget; 56 over reference budget |
+| DocQA | 1,591 | 1,231 | 4 | 360 over prompt budget; all three abilities represented |
+| GoLong | 22,965 | 5,226 | 17 | 16,112 over prompt budget; 1,597 deferred contracts; 2 duplicate ranking references; 28 duplicate prompts |
+
+All NVIDIA references were independently recomputed, including examples outside
+the released context budget. Every retained row passed the training loader, and
+165 gold/wrong/near-miss/empty/truncated controls passed through the runtime reward
+bridge. The complete 33-stratum local 4090 run produced 264 completions and 33
+optimizer updates; its audit checked identities, labels, rewards, log probabilities,
+weight versions and finite parameter changes. The random toy model hit its 32-token
+cap on every draw; auxiliary losses drove updates. This proves mechanics, not
+policy learning. It uses the plain-prompt provider; CPU qualification separately
+checks named-source preparation and attribution.
+
+Decon checked full prompt-plus-reference records against the existing endpoint
+panel plus RULER QA at thresholds 0.8 and 0.9, finding no flagged matches among
+11,569 rows. The index contained 10,317 references after skipping five duplicates
+and 19 very short entries. Both injected positive controls (GPQA and RULER QA)
+were detected. Complete RULER inputs and DocQA test prompts had no exact retained
+prompt matches. These scoped checks do not prove absence of all contamination.
+The initial scan with a malformed RULER reference is superseded and is not used
+as release evidence.
+
+Runtime image: `01M6T9QX5TZQQWNFMK4WPR51EE`, application revision
+`dd1d9d988eee7d812ed416d60a103b9d07501395`, with the unchanged pinned MILES runtime.
+The focused image suite passed 165 tests. The subsequent audit/preparation-script
+updates do not change training reward semantics.
+
+The local artifacts are under
+`~/storage/rl-dataset-qualification/long-context-v1/`. The archive is
+`s3://robertb-beaker/rl-dataset-qualification/long-context-rlvr-20261106-v1/`.
+Its `ARCHIVES.json` records the archive and catalog hashes; the catalog SHA256 is
+`9de821d98f79818514803b1ffc7fbf4f79f5be29bf33461aa5fdffcd5bacea38`.
+Shared staging and policy-screen job status are recorded on draft PR #2199.
+No 100-update learning or RULER preservation result is claimed yet.
+
 ## Reward contracts
 
 `LongContextVerifier` is a local, versioned deterministic verifier, with no judge

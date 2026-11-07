@@ -180,7 +180,13 @@ def inventory(raw_root, output, tokenizer, max_prompt, max_response, workers=1, 
                         stream.write(json.dumps(wrapper, ensure_ascii=False, allow_nan=False) + "\n")
                         questions.write(
                             json.dumps(
-                                {"id": identity, "text": "\n".join(m["content"] for m in ms)}, ensure_ascii=False
+                                {
+                                    "id": identity,
+                                    "text": "\n".join(m["content"] for m in ms)
+                                    + "\nReference answer:\n"
+                                    + (t if isinstance(t, str) else "\n".join(t["answers"])),
+                                },
+                                ensure_ascii=False,
                             )
                             + "\n"
                         )
