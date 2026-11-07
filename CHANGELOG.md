@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Exclude ungraded responses from their MILES prompt group instead of omitting the group: a failed verifier or judge grade now gets zero advantage and a zeroed loss mask and leaves the group baseline (`core.exclude_ungraded`, default true), with `rollout/verification/ungraded_samples` metrics (PR_URL_PLACEHOLDER).
+- Exclude ungraded responses from their MILES prompt group instead of omitting the group: a failed verifier or judge grade now gets zero advantage and a zeroed loss mask and leaves the group baseline (`core.exclude_ungraded`, default true), with `rollout/verification/ungraded_samples` metrics (https://github.com/allenai/open-instruct/pull/2209).
 - Fix R1 format scoring with optional final-answer verifier dispatch while preserving existing math, code, and raw-response behavior (https://github.com/allenai/open-instruct/pull/2188).
 - Let MILES scoring callers explicitly raise or zero reported service/judge failures; preserve zero fallback for distillation and ordinary evaluation, strict offline qualification, and training group omission (https://github.com/allenai/open-instruct/pull/2178).
 - Fix reasoning-panel GPQA/context budgets, normalize SciCode disabled top-k, and retain independent evaluation progress after task failures (https://github.com/allenai/open-instruct/pull/2136).
