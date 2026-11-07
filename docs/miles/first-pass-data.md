@@ -2,7 +2,7 @@
 
 This release turns the retained datasets from the early screening effort into
 named training inputs, so initial mixing experiments can start without repeating
-the preparation investigation. It provides **2,288,518 source rows across 48 named routes
+the preparation investigation. It provides **2,288,298 source rows across 48 named routes
 from 22 dataset families**, including ToolRL and the supported routes of all five
 Nemotron blends. Qualification checks integration and representative reward
 behavior; downstream experiments still need to establish learning benefit.
@@ -12,14 +12,15 @@ behavior; downstream experiments still need to establish learning benefit.
 The versioned release destination is:
 
 ```text
-/weka/oe-training-default/ai2-llm/data/robertb/miles-first-pass-20261106-v1
+/weka/oe-training-default/ai2-llm/data/robertb/miles-first-pass-20261106-v2
 ```
 
 `catalog.json` is the entry point. `summary.json` contains per-source counts and
 coverage; `sources/<name>/` contains prompts, verifier configuration, controls,
 qualification receipts, hygiene evidence and quarantine records. `STAGED.json`
-records verification on shared storage. The release is **verified**, including
-all 48 routes and 2,288,518 rows. `configs/<name>.toml` provides a ready
+records verification on shared storage. The corrected release is **offline
+qualified; shared staging is pending**, including all 48 routes and 2,288,298 rows.
+`configs/<name>.toml` provides a ready
 single-source `[data]` fragment
 with absolute shared paths. The versioned S3 archive
 below reproduces this release. It contains compressed source archives, an archive
@@ -29,8 +30,8 @@ for bulk transfer; Beaker is used only for the small staging helper and CPU job.
 
 | Release identity | Value |
 |---|---|
-| S3 archive | `s3://robertb-beaker/rl-dataset-qualification/miles-first-pass-20261106-v1/` |
-| Final catalog SHA256 | `3616ec5ed4861c12a572af64d1df3fe9e9d3ac326cd5d736e302b3455aaed1eb` |
+| S3 archive | `s3://robertb-beaker/rl-dataset-qualification/miles-first-pass-20261106-v2/` |
+| Final catalog SHA256 | `c332b260d99a3c65f0e39262d9900024f08ce2261ebf8455c2fa58d7143e353a` |
 
 To restore elsewhere, use credentials with read access to this prefix (the local
 transfer uses Robert's `halo` AWS profile). Download into a local archive directory,
@@ -38,7 +39,7 @@ then choose a **new** shared-storage destination:
 
 ```bash
 mkdir -p /tmp/miles-first-pass-archives
-s5cmd cp 's3://robertb-beaker/rl-dataset-qualification/miles-first-pass-20261106-v1/*' \
+s5cmd cp 's3://robertb-beaker/rl-dataset-qualification/miles-first-pass-20261106-v2/*' \
   /tmp/miles-first-pass-archives/
 python /tmp/miles-first-pass-archives/stage_release.py \
   /tmp/miles-first-pass-archives /weka/oe-training-default/your-new-release-directory
@@ -47,31 +48,41 @@ python /tmp/miles-first-pass-archives/stage_release.py \
 The script writes `STAGED.json` only after verifying the release and regenerates
 the config fragments with the chosen destination's absolute paths. The Beaker
 helper is a small copy of the same script and transfer utility for the original
-staging job; it is not needed for this restore command. `v1` names the release
+staging job; it is not needed for this restore command. `v2` names the release
 prefix, not S3 object versions. On November 6, 2026, the bucket had neither S3
 versioning enabled nor a lifecycle expiration rule. Preserve the catalog and
 archive hashes; the prefix is not protected against later overwrites or deletion.
 
-The archive includes refreshed receipts from requalifying all six structured-output
-pools after preserving native schema combinator behavior. This changes no training
-rows.
+Version 2 supersedes v1 after verifier review: it quarantines 221 structured-output
+rows with unresolved schema references and recovers one ToolRL string-union row.
+It preserves the existing 80-row ToolRL holdout and all other retained prompts.
+All six structured pools and ToolRL were requalified; the final image passed
+all 135 controls for those pools and replayed code controls are recorded separately
+(all 115 passed). `REVIEW_FIXES.json`, `local-controls-v2.json` and
+`code-controls-v2.json` preserve the scope and evidence. Version 1 remains
+available for reproducing the original training smoke.
 
-The release records runtime code baseline
-[`1e79b6210005abcea355354d30f0d83b4537f8cb`](https://github.com/allenai/open-instruct/commit/1e79b6210005abcea355354d30f0d83b4537f8cb)
-in `CODE_REVISION` and `VALIDATION.json`. Subsequent PR commits update tests, CI,
-image packaging and documentation. Requalify when changing reward behavior. Use a
-matching MILES application image with the dependencies in
-`scripts/data/rl_readiness/requirements.txt`. The readiness Docker overlay installs
-those dependencies on an application image already built from this code. Keep
-the pinned MILES runtime; the overlay does not replace that runtime. Building the
-overlay requires `--secret id=github_token,env=GH_TOKEN`, with a GitHub token that
-can read the private code-execution client repository. BuildKit mounts the token
-only for dependency installation; do not pass it as a build argument. The tested
-application image is Beaker `01M6SHC8Z3BF1GW3G9R9AFNPZY`, built from
-`2c622531eb33302a3e337c7db179ea6b24d15379`; 294 verifier tests passed inside it.
-The archive's `README.md` and `VALIDATION.json` describe the offline qualification
-snapshot. This document and PR #2178 record subsequent training validation and
-the current runtime credential configuration.
+The release records runtime code
+[`54ffddf8f68d09f4ad9eb1ec0fd2c75e60e9af20`](https://github.com/allenai/open-instruct/commit/54ffddf8f68d09f4ad9eb1ec0fd2c75e60e9af20)
+in `CODE_REVISION` and `VALIDATION.json`. Use Beaker image
+`01M6SZCSXG790WNDXV1J4121Z0`, built from that revision; **253 regression tests
+passed inside this image**. It retains the previously tested MILES runtime and
+private execution-client pins. A subsequent preparation-only guard rejects
+non-string source values outside their declared union; use PR-head preparation
+code when rebuilding raw ToolRL data. It reproduced all 3,587 converted records
+exactly and passed a 247-test focused suite, so the released data and training
+runtime are unchanged. The earlier GPU training smoke used image
+`01M6SHC8Z3BF1GW3G9R9AFNPZY` at `2c622531eb33302a3e337c7db179ea6b24d15379`;
+those GPU results are baseline evidence, not a claim that v2 was run on GPUs.
+
+Requalify when changing reward behavior. A rebuilt MILES application image needs
+the dependencies in `scripts/data/rl_readiness/requirements.txt`. The readiness
+Docker overlay installs these on an application image built from matching code;
+it does not replace the pinned MILES runtime. Building that overlay requires
+`--secret id=github_token,env=GH_TOKEN` with access to the private execution client.
+BuildKit mounts the token only for installation; do not pass it as a build argument.
+The archive's `README.md` and `VALIDATION.json` are offline snapshots. This document
+and PR #2178 record final shared staging and the current credential configuration.
 
 These are explicit **16,384-token prompt variants**, rendered with the bundled
 Olmo Pythonic tool template and tokenizer. Allow response tokens in addition to
@@ -86,7 +97,7 @@ Resolve a deliberately chosen mixture **offline**, then put the resulting
 
 ```bash
 python -m open_instruct.miles.datasets.source_catalog \
-  /weka/oe-training-default/ai2-llm/data/robertb/miles-first-pass-20261106-v1/catalog.json \
+  /weka/oe-training-default/ai2-llm/data/robertb/miles-first-pass-20261106-v2/catalog.json \
   --source c031=0.5 --source c029=0.3 --source toolrl=0.2 \
   --output data.toml
 ```
@@ -122,22 +133,22 @@ claim a new independent decontamination pass.
 | Nemotron Free-Form Formatting | `c019` | 9,037 |
 | Nemotron IF | `c021` | 44,538 |
 | Calendar v2 | `c023` | 9,659 |
-| Structured Outputs v2 | `c029` | 57,658 |
+| Structured Outputs v2 | `c029` | 57,485 |
 | Nemotron Knowledge MCQA | `c031` | 610,469 |
 | ReasoningGym | `c036` | 14,525 |
 | Nemotron Cascade Math | `c037` | 14,379 |
 | Nemotron OpenMathReasoning | `c039` | 112,647 |
 | Nemotron Math Stack Overflow | `c040` | 434,156 |
-| Nemotron Nano blend | `c043_*` | 60,255 |
-| Nemotron Cascade-2 blend | `c044_*` | 60,467 |
+| Nemotron Nano blend | `c043_*` | 60,243 |
+| Nemotron Cascade-2 blend | `c044_*` | 60,459 |
 | Nemotron Lightning blend | `c045_*` | 55,901 |
-| Nemotron Super blend | `c046_*` | 269,361 |
+| Nemotron Super blend | `c046_*` | 269,333 |
 | Nemotron Ultra blend | `c047_*` | 163,720 |
 | AceCode | `c076` | 87,149 |
 | AceReason Math | `c091` | 49,538 |
 | DeepMath-103K | `c094` | 100,985 |
 | Dolci IF | `dolci-if` | 28,207 |
-| ToolRL | `toolrl` | 3,500 |
+| ToolRL | `toolrl` | 3,501 |
 
 Blend names have route suffixes: `_code`, `_if`, `_mcqa`, `_structured`,
 `_calendar`, `_rg`, `_citation`, `_format`, and `_tools`, where present. For
@@ -148,7 +159,7 @@ catalog lists the exact available combinations; unsupported routes are absent.
 
 Every retained row went through the training loader. Reviewed gold, wrong,
 near-miss, empty and truncated controls went through the training reward bridge.
-The **5,195 runtime control checks** passed. Each receipt binds the checked prompt
+The **5,200 runtime control checks** passed. Each receipt binds the checked prompt
 and verifier files to their content hashes.
 Code controls exercised the live service with complete test suites.
 
@@ -178,7 +189,7 @@ an AWS ceiling of 900. That is a shared service limit, not a per-run entitlement
 
 ## Training validation
 
-The training smoke checks that prepared examples can be sampled, generated,
+The original v1 training smoke checks that prepared examples can be sampled, generated,
 graded and used in optimizer updates with the tested application image. It uses
 an Olmo 3.5 MoE SFT checkpoint on four B300 GPUs: two trainer ranks and two
 inference engines. The deterministic integration pool contains 16 rows per route
@@ -187,7 +198,7 @@ for the full release or a representative accuracy evaluation.
 
 | Check | Observed result | Evidence |
 |---|---|---|
-| Full-release staging | All 48 routes and 2,288,518 rows verified against the catalog hashes | [Staging run](https://beaker.org/ex/01M6SMNTM585MPTKQ7WQ6Z611S) |
+| Original v1 staging | All 48 routes and 2,288,518 rows verified against the catalog hashes | [Staging run](https://beaker.org/ex/01M6SMNTM585MPTKQ7WQ6Z611S) |
 | First non-code training leg | 43 configured routes; 12 updates on both trainer ranks; finite losses and gradient norms; zero OOMs and omitted records; committed checkpoint at 12 completed steps | [Training run](https://beaker.org/ex/01M6SKMECBC8MGHADXA179ZSM1) |
 | Code training | Five configured routes using the authenticated service; four updates on both ranks; finite losses and gradient norms; zero OOMs and omitted records; committed final checkpoint | [Code run](https://beaker.org/ex/01M6SNFM7KHH9X4DB3PXPAK9BW) |
 | Non-code checkpoint resume | Restored at step 12 and completed through step 24 on both ranks; finite losses and gradient norms; zero OOMs and omitted records | [Resume run](https://beaker.org/ex/01M6SQ4TPZJC62B5QGYTX250RX) |
@@ -202,7 +213,9 @@ The audit exposed an existing throughput-reporting bug: background collection
 time was compared with the driver's shorter final await. The separate
 [reporting fix, PR #2198](https://github.com/allenai/open-instruct/pull/2198),
 was applied only to analysis, with its exact revision and file hashes recorded
-in the audit reports. Training used the unchanged application image above.
+in the audit reports. Training used the original v1 application image identified above.
+The v2 fixes were checked through preparation, qualification and reward-bridge
+regressions; no additional GPU run is claimed.
 
 The smoke uses 16K response and 32K total-context limits. It retains groups with
 zero reward variance to exercise the training path; some code batches therefore
@@ -211,15 +224,17 @@ Inspect response lengths and within-group reward variance when choosing a mixing
 experiment's generation budget. Passing this smoke establishes integration, not
 learning benefit.
 
-The recorded sample had no positive rewards for Litmus, Cascade-2 and Ultra
-structured-output routes, or Super and Ultra calendar routes. These are valid
+The recorded sample had no positive rewards for `c010` (Litmus),
+`c044_structured`, `c047_structured`, `c046_calendar` or `c047_calendar`. These are valid
 zero scores rather than service failures; offline positive controls passed.
 Structured/calendar parse errors describe model responses that failed the
 required format, and ToolRL's negative scores follow its native reward scale.
 Across all recorded code responses (including unused prefetch), 514 of 660
-Nemotron responses reached the limit, versus 2 of 124 AceCode responses. These
-small-pool observations call for inspecting examples and generation budgets in
-the first mixing experiments, not population-level accuracy conclusions.
+Nemotron responses reached the limit, versus 2 of 124 AceCode responses.
+Nemotron code may need more than 16K response tokens to avoid mostly truncated,
+zero-reward samples. These small-pool observations call for inspecting examples
+and generation budgets in the first mixing experiments, not population-level
+accuracy conclusions.
 
 Startup, compilation and checkpointing dominate these short runs. For example,
 the code run spent 326 seconds in inference startup and 85 seconds saving its

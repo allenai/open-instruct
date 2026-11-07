@@ -119,6 +119,10 @@ def canonical_calls(calls, tools):
                 parameters[key] = value
             else:
                 raw = value if isinstance(value, str) else json.dumps(value, allow_nan=False)
+                if not isinstance(value, str) and isinstance(kinds, list):
+                    # Typed source values must match a non-string union member;
+                    # the model-output fallback must not stringify bad labels.
+                    schema = {**schema, "type": [kind for kind in kinds if kind != "string"]}
                 parameters[key] = tool_call_parsing.parameter_value(raw, schema)
         result.append({"name": call["name"], "parameters": parameters})
     return result

@@ -267,6 +267,24 @@ def test_union_does_not_hide_invalid_json_values(value):
         tool_call_parsing.parameter_value(value, {"type": ["string", "number", "object"]})
 
 
+@pytest.mark.parametrize("value", [True, 1.5, [1, 2], {"x": 1}, None])
+def test_source_union_rejects_nonstring_values_outside_declared_types(value):
+    tools = copy.deepcopy(TOOLS)
+    tools[0]["function"]["parameters"]["properties"]["platform"]["type"] = ["string", "integer"]
+    with pytest.raises(ValueError, match="declared type"):
+        toolrl.canonical_calls([call(value)], tools)
+
+
+@pytest.mark.parametrize("value", ["5", "null", '"Paris"'])
+def test_native_xml_union_explicit_quoting_preserves_string_reference(value):
+    tools = copy.deepcopy(TOOLS)
+    tools[0]["function"]["parameters"]["properties"]["platform"]["type"] = ["string", "integer", "null"]
+    calls = toolrl.canonical_calls([call(value)], tools)
+    label = target(calls, tools)
+    prediction = completion([call(json.dumps(value))])
+    assert asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], prediction, label)).score == 4
+
+
 def test_nonstring_union_still_rejects_bare_text():
     with pytest.raises(ValueError):
         tool_call_parsing.parameter_value("Paris", {"type": ["integer", "null"]})

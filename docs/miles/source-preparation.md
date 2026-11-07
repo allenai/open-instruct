@@ -135,6 +135,12 @@ learning run. The existing BFCL overlap report contains only short embedded
 matches (one to four words); the receipt preserves those review flags and does
 not assert independent benchmark cleanliness.
 
+The corrected v2 release recovers one additional string-union row, reducing
+conversion omissions to 413 and increasing the qualified training pool to
+**3,501** rows. The original 80-row holdout and all previously retained rows are
+unchanged. Full-pool qualification and 15 runtime controls passed; see the
+[first-pass handoff](first-pass-data.md) for the corrected release and image.
+
 ### NeMo single-step tool routes
 
 `single_step_tool_v1` selects the source's `agent_ref.name`: ordinary
