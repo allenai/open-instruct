@@ -131,6 +131,39 @@ without calling a verifier. This applies to text/code verifiers and named judges
 judge rubrics retain their normal answer-tag extraction within that final region.
 The full response and its token IDs remain available for training and recording.
 
+Verifiers can optionally implement
+`async_call_final_answer(tokens, prediction, label, **kwargs)`. In final-answer
+mode, the adapter uses this method when present; otherwise it calls `async_call`
+with the extracted suffix, preserving existing math and code verifier behavior.
+Both paths run after the missing/empty-final and truncation gates; `prediction`
+is the extracted suffix and `tokens` is empty. Verifiers that validate the raw
+thinking boundary need the optional method to grade an already extracted final
+answer. Raw-response mode always uses `async_call`. Named judges use their
+separate final-region dispatch.
+
+The built-in `R1FormatVerifier` implements this interface: after the outer gate
+selects the final section, it checks for optional leading whitespace followed by
+`<answer>...</answer>`, without requiring another closing-think marker. Its
+raw-response check is unchanged. This remains a format reward, not an answer
+correctness or content check; it retains the existing allowance for empty answer
+tags and trailing text. In final-only mode, only the last closing marker's suffix
+is checked, so answer tags in an earlier section cannot earn format reward.
+
+For native IF grading, use the built-in adapter. A complete reward registry is:
+
+```json
+{
+  "ifeval": {
+    "factory": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier"
+  }
+}
+```
+
+The native adapter uses `IFEvalVerifier`, including its existing
+`remove_thinking_section` normalization in both modes. That removes answer tags,
+`<|assistant|>` and outer whitespace before grading IF constraints. R1 format
+reward checks the tags themselves; IF reward grades the normalized answer.
+
 This option defaults to false and assumes the Olmo thinking format. It permits
 multiple closing markers, so it is not an exactly-one-tag format validator.
 
