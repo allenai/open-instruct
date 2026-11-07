@@ -33,7 +33,7 @@ def transduction_reference(raw):
         if not rows or any(len(row) != len(rows[0]) for row in rows):
             raise ValueError("Malformed source CSV")
         if task == "csv_kv_lookup":
-            lookup = dict(re.findall(r"(?m)^([av]\d+)=(\S+)$", before))
+            lookup = dict(re.findall(r"(?m)^([av]\d+)=(.+)$", before))
             out = [rows[0]] + [
                 [row[0], *[" ".join(lookup[k] for k in cell.split("+")) for cell in row[1:]]] for row in rows[1:]
             ]
@@ -56,7 +56,7 @@ def transduction_reference(raw):
         return stream.getvalue().strip()
     if task.endswith("var_expand"):
         definitions, sequence = body.split("Expressions:\n\n", 1)
-        lookup = dict(re.findall(r"(?m)^([0-9a-f]+)=(\S+)$", definitions))
+        lookup = dict(re.findall(r"(?m)^([0-9a-f]+)=(.+)$", definitions))
     else:
         sequence = body.split("Input:\n\n", 1)[1]
         lookup = {}

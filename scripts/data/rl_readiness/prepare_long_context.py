@@ -103,7 +103,7 @@ def analyze_record(item):
         return file, index, raw, None, str(error)
 
 
-def inventory(raw_root, output, tokenizer, max_prompt, max_response, workers=1):
+def inventory(raw_root, output, tokenizer, max_prompt, max_response, workers=1, names=None):
     global _WORKER_TOKENIZER
     _WORKER_TOKENIZER = tokenizer
     output.mkdir(parents=True, exist_ok=False)
@@ -124,6 +124,8 @@ def inventory(raw_root, output, tokenizer, max_prompt, max_response, workers=1):
         (output / "dispositions.jsonl").open("w") as dispositions,
     ):
         for name, (repo, revision, adapter) in RELEASES.items():
+            if names is not None and name not in names:
+                continue
             root = raw_root / name
             acquisition = json.loads((root / "ACQUISITION.json").read_text())
             if acquisition["repo"] != repo or acquisition["revision"] != revision:
@@ -228,11 +230,20 @@ def main():
     parser.add_argument("--max-prompt-length", type=int, required=True)
     parser.add_argument("--max-reference-tokens", type=int, required=True)
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--source", choices=sorted(RELEASES), action="append", help="Default: all sources")
     args = parser.parse_args()
     if min(args.max_prompt_length, args.max_reference_tokens, args.workers) < 1:
         parser.error("Token budgets must be positive")
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True, trust_remote_code=False)
-    inventory(args.raw_root, args.output, tokenizer, args.max_prompt_length, args.max_reference_tokens, args.workers)
+    inventory(
+        args.raw_root,
+        args.output,
+        tokenizer,
+        args.max_prompt_length,
+        args.max_reference_tokens,
+        args.workers,
+        args.source,
+    )
 
 
 if __name__ == "__main__":

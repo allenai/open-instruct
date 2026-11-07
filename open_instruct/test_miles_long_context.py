@@ -77,10 +77,10 @@ def test_duplicate_rank_reference_rejected(answers):
         ("unnumbered_uuid_sort", "Input:\n\nffffffff,00000000", "00000000,ffffffff"),
         ("streaming_uuid_sort", "Input:\n\n[1]ffffffff,00000000", "[1]00000000,ffffffff"),
         ("shuffled_streaming_uuid_sort", "Input:\n\n[1]ffffffff,00000000", "[1]00000000,ffffffff"),
-        ("unnumbered_var_expand", "a=cat\nb=dog\n\nExpressions:\n\na+b", "cat dog"),
+        ("unnumbered_var_expand", "a=cat\nb=dust storm\n\nExpressions:\n\na+b", "cat dust storm"),
         ("streaming_var_expand", "a=cat\nb=dog\n\nExpressions:\n\n[1]b+a", "[1]dog cat"),
         ("shuffled_streaming_var_expand", "a=cat\nb=dog\n\nExpressions:\n\n[1]b+a", "[1]dog cat"),
-        ("csv_kv_lookup", "a1=cat\nv1=dog\n\nInput:\n\n,c1\nr1,a1+v1", ",c1\nr1,cat dog"),
+        ("csv_kv_lookup", "a1=cat\nv1=dust storm\n\nInput:\n\n,c1\nr1,a1+v1", ",c1\nr1,cat dust storm"),
         (
             "csv_permutation_homogeneous",
             "Input:\n\n,c1,c2\nr1,A,B\n\nReordering Instructions:\nNew row order: r1\nNew col order: c2,c1",
