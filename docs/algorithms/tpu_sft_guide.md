@@ -127,8 +127,8 @@ This tag is r2's image (`51f8cc4b-p907d86f3`, built from `image-olmo35/`) plus `
 fix for resuming from a checkpoint (without it, restore runs out of HBM) and batch-hash logging. Training numerics are
 unchanged: a replay produced bit-identical CE and 9,952 of 9,952 equal batch hashes. This is the default image for the
 recipe above. The optional [pooled resume image](#6-checkpoints-preemption-and-resume) includes additional patches;
-its parity checks compare against its own base image. The Olmo 3 image (`e259ed61-pdd67f71d`, which carries the
-Olmo 3.5 images' SFT data fixes: EOS in the loss, trained rows only, resume skip) is built by `image/build.sh <maxtext commit>`.
+its parity checks compare against its own base image. The Olmo 3 image (`e259ed61-pdd67f71d`; its patch is listed in
+`scripts/tpu/maxtext/README.md`, What the patch fixes) is built by `image/build.sh <maxtext commit>`.
 
 To build a new image, run `build.sh` from any host with `gcloud` (a Beaker session works). Cloud Build carries the context base64-encoded inside the build
 config. Builds use Cloud Build's default service account. Set `BUILD_SERVICE_ACCOUNT` to a full
@@ -240,8 +240,9 @@ if a rule needs every step's value, stream that pod with `kubectl logs -f` from 
 - Tunix always saves the final step. An Olmo 3.5 checkpoint with optimizer state is ~137 GB. Agents delete nothing on
   GCS; ask the run's owner.
 - After a preemption, JobSet restarts the run from the last checkpoint, on the same overlay. A resume replays the data
-  pipeline to the restored step at ~1.4 s per skipped batch, which is hours late in a run. Resume only on the
-  restore-fix image (step 1), or a derivative that includes that fix, such as the pooled image below.
+  pipeline to the restored step at ~1.4 s per skipped batch, which is hours late in a run. Resume Olmo 3.5 only on the
+  restore-fix image (step 1), or a derivative that includes that fix, such as the pooled image below. Dense Olmo 3 7B
+  resumes on its own image, `e259ed61-pdd67f71d`.
 
 `scripts/tpu/maxtext/image-olmo35-fs/` adds an optional spawned worker pool for the SFT chat-template map. The
 published image is:
