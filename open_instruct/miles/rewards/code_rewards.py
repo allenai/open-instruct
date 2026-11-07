@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import math
 import os
-import re
 import time
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -32,13 +31,11 @@ from typing import Any
 
 import requests
 
-from open_instruct import logger_utils
+from open_instruct import code_extraction, logger_utils
 from open_instruct.miles.infrastructure import infra_timeouts
 from open_instruct.miles.rewards import service
 
 logger = logger_utils.setup_logger(__name__)
-
-_CODE_BLOCK_PATTERN = re.compile(r"```(?:python)?(.*?)```", re.DOTALL)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -52,10 +49,9 @@ class CodeVerifierConfig:
     failure_policy: str = "zero"
 
 
-def extract_python_code(model_output: str) -> str:
-    """Return the last fenced Python block, or the complete response."""
-    matches = _CODE_BLOCK_PATTERN.findall(model_output)
-    return matches[-1].strip() if matches else model_output
+def extract_python_code(model_output: str) -> str | None:
+    """Select a Python submission, rejecting unfinished final code fences."""
+    return code_extraction.extract_python_code(model_output)
 
 
 def code_verifier_config(args: Any, *, stdio: bool = False) -> CodeVerifierConfig:
@@ -165,11 +161,15 @@ async def execute(args: Any, prediction: str, target: Any, *, stdio: bool = Fals
         "status": "ok",
         "http_status": None,
         "http_500_retries": 0,
-        "program_chars": len(program),
+        "program_chars": len(program) if program is not None else 0,
         "tests": len(target) if isinstance(target, list) else -1,
         "stdio": stdio,
         "failure_policy": config.failure_policy,
     }
+
+    if program is None or not program.strip():
+        diagnostics.update(status="completed", outcome="invalid_code", elapsed_seconds=0.0)
+        return 0.0, diagnostics
 
     def post() -> Any:
         response = infra_timeouts.request(

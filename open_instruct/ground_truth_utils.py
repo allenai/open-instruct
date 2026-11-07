@@ -24,7 +24,7 @@ from typing import Any, Literal
 import numpy as np
 import requests
 
-from open_instruct import context_window_checker, logger_utils
+from open_instruct import code_extraction, context_window_checker, logger_utils
 from open_instruct.answer_utils import extract_final_answer
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
@@ -896,17 +896,9 @@ class CodeVerifier(VerifierFunction):
         self.pass_rate_reward_threshold = verifier_config.code_pass_rate_reward_threshold
         self.apply_perf_penalty = verifier_config.code_apply_perf_penalty
 
-    def extract_python_code(self, model_output: str) -> str:
-        """Extract the last code block between ``` markers from the model output."""
-        # Find content between ``` markers
-        pattern = r"```(?:python)?(.*?)```"
-        matches = re.findall(pattern, model_output, re.DOTALL)
-
-        if not matches:
-            return model_output
-
-        # Return the last match, stripped of whitespace
-        return matches[-1].strip()
+    def extract_python_code(self, model_output: str) -> str | None:
+        """Select a Python submission, rejecting unfinished final code fences."""
+        return code_extraction.extract_python_code(model_output)
 
     # Create a session pool for better performance
     _session_pool = None
@@ -949,6 +941,8 @@ class CodeVerifier(VerifierFunction):
         """
         # Extract Python code from the model output
         python_code = self.extract_python_code(prediction)
+        if python_code is None or not python_code.strip():
+            return VerificationResult(score=0.0)
 
         # Test data
         payload = {
