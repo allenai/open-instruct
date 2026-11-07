@@ -93,25 +93,31 @@ class _JsonlRows:
     def __init__(self, path, inputs):
         self.path = Path(path).resolve()
         self.annotations = {}
+        self.pool_assignment = None
         self.count = 0
         digest = hashlib.sha256()
         try:
-            with self.path.open("rb") as stream:
+            with self._open() as stream:
                 for line in stream:
                     digest.update(line)
                     self.count += bool(line.decode().strip())
         except UnicodeError as error:
             raise InputError(f"{self.path} must be UTF-8 JSONL.") from error
-        except OSError as error:
+        except (OSError, EOFError) as error:
             raise InputError(f"Cannot read input {self.path}: {error}") from error
-        inputs[str(self.path)] = digest.hexdigest()
+        # Resume identity binds the original compressed artifact, not just its
+        # decompressed contents. Neither pass materializes the file in memory.
+        inputs[str(self.path)] = _file_sha(self.path) if self.path.suffix == ".gz" else digest.hexdigest()
+
+    def _open(self):
+        return gzip.open(self.path, "rb") if self.path.suffix == ".gz" else self.path.open("rb")
 
     def __len__(self):
         return self.count
 
     def __iter__(self):
         index = 0
-        with self.path.open("rb") as stream:
+        with self._open() as stream:
             for line_number, line in enumerate(stream, 1):
                 if not line.strip():
                     continue
@@ -122,6 +128,9 @@ class _JsonlRows:
                 index += 1
                 if index in self.annotations:
                     row["metadata"].update(self.annotations[index])
+                if self.pool_assignment is not None:
+                    config, source_pool = self.pool_assignment
+                    pools.annotate(row, config, source_pool=source_pool)
                 yield row
 
     def remember_validation(self, index, row):
@@ -682,6 +691,10 @@ def prepare_data(
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
     for split, rows in partitions.items():
+        if isinstance(rows, _JsonlRows) and resolved_pools and split in training:
+            # Streaming rows are recreated for validation and output. Apply the
+            # same pool assignment on every pass, keeping held-out rows unchanged.
+            rows.pool_assignment = (resolved_pools, source_pools.get(split))
         for index, row in enumerate(rows, 1):
             try:
                 if registry_overrides is not None:
@@ -691,7 +704,7 @@ def prepare_data(
                         for verifier in verifiers:
                             if isinstance(verifier, dict) and isinstance(name := verifier.get("name"), str):
                                 judging.require_binding(name, registry_overrides, known.get(name))
-                if resolved_pools and split in training:
+                if resolved_pools and split in training and not isinstance(rows, _JsonlRows):
                     pools.annotate(row, resolved_pools, source_pool=source_pools.get(split))
                 _verify_row(row, tokenizer, max_prompt_length, known)
                 if split in training:

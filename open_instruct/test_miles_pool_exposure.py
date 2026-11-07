@@ -2,6 +2,7 @@
 
 import copy
 import gzip
+import hashlib
 import json
 import random
 from pathlib import Path
@@ -204,3 +205,40 @@ def test_corrupt_restore_fails_without_moving_cursors():
     with pytest.raises(ValueError, match="reconcile"):
         p.load_state_dict(broken)
     assert p.state_dict() == good
+
+
+def test_compressed_pool_input_streams_and_pins_artifact(environment, tmp_path, monkeypatch):
+    source = tmp_path / "prompts.jsonl.gz"
+    row = {
+        "input": "question",
+        "label": "42",
+        "pool_id": "math",
+        "metadata": {"verifiers": [{"name": "gsm8k", "target": "42"}]},
+    }
+    with gzip.open(source, "wt") as stream:
+        stream.write(json.dumps(row) + "\n")
+    rewards = tmp_path / "rewards.json"
+    rewards.write_text(json.dumps({"gsm8k": {"factory": run_data.FACTORIES["gsm8k"]}}))
+    original = Path.read_bytes
+
+    def guarded(path):
+        if path.suffix in (".gz", ".jsonl"):
+            raise AssertionError("Prompt files must stream")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+    data = {
+        "sources": [{"name": "source", "prompt_data": str(source), "reward_config": str(rewards)}],
+        "pools": {"math": {"label": "math"}},
+    }
+    result = test_miles_run_data.prepare(environment, data)
+    actual = json.loads(Path(result["prompt_data"]).read_text())
+    assert actual["pool_id"] == actual["metadata"]["sampling_pool"] == "math"
+    manifest = json.loads(Path(result["manifest"]).read_text())
+    with source.open("rb") as stream:
+        assert manifest["inputs"][str(source)] == hashlib.file_digest(stream, "sha256").hexdigest()
+    assert test_miles_run_data.prepare(environment, data) == result
+    with gzip.open(source, "wt") as stream:
+        stream.write(json.dumps(row | {"input": "changed"}) + "\n")
+    with pytest.raises(ValueError, match="source changed"):
+        test_miles_run_data.prepare(environment, data)
