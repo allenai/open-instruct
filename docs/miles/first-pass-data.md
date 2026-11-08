@@ -258,7 +258,7 @@ These timings are not a sustained-throughput benchmark.
 | Workplace, SWE execution, Lean, browser and other interactive routes | Not included; offline tool support does not claim their execution environments | Integrate actual environments and recovery checks |
 | Alternative valid code constructions, arithmetic grammar and language detection | Preserve the already documented upstream behavior | Investigate deliberate grading improvements separately; do not delay initial experiments for them |
 | Schema combinations | Native list-traversal behavior is preserved; all six structured pools were requalified after the fix. The audit records 38 rows with object branches under `allOf` and 16 under `oneOf` | Investigate upstream schema satisfiability in the cleaning PR. For example, C029 direct-generation row 1378 requires a pet `id` through `allOf` while its parent forbids that undeclared key. Integration qualification does not prove every schema satisfiable. |
-| Sustained verifier outages | Individual ungraded prompt groups are omitted and replaced; W&B reports `rollout/verification/omitted_records` | Decide the systemic-failure stopping threshold; none is introduced here |
+| Sustained verifier outages | Individual ungraded responses are excluded from their group (or the group is omitted and replaced when `core.exclude_ungraded=false`); W&B reports `rollout/verification/ungraded_samples` and `omitted_records` | Decide the systemic-failure stopping threshold; none is introduced here |
 
 The first experiments should examine reward distributions, omitted-group counts,
 context utilization and downstream evaluations alongside learning curves. The

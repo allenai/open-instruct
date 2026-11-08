@@ -15,6 +15,7 @@ stated; document deviations in each experiment, including objective changes.
 - **Off-policy correction** (TIS on, `use_rollout_logprobs = false`): TIS reweights samples toward the current policy; turning it off assumes inference and training probabilities agree closely.
 - **Group filtering** (`training.filter_zero_std_groups = true`): groups where every response gets the same reward carry no policy gradient, so dropping them saves training work at the cost of extra generation; disable it for tiny checks that cannot produce mixed rewards.
 - **Router auxiliary losses** (coefficients zero in the examples): the balancing and z-losses keep expert load even during pretraining; whether RL needs them is open, so watch the `train/moe/` load metrics if you leave them off.
+- **Ungraded responses** (`core.exclude_ungraded = true`): a response whose verifier or judge failed for infrastructure reasons has no grade; it is left out of its group's baseline with zero advantage and a zeroed loss mask instead of being scored zero or taking its graded siblings down with it. See [the GRPO guide](grpo.md#ungraded-responses).
 - **Truncated responses** (zero reward, `core.reward_zero_truncated = true`): responses that hit the length cap receive zero reward; this does not itself remove them from the training batch. Scoring them normally requires an explicit experiment override.
 
 ## Publication and capacity
