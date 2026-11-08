@@ -97,7 +97,7 @@ def prepare_tiny(root):
     return model
 
 
-def engine(model, cached, tiny=False):
+def engine(model, cached, tiny=False, native=False):
     register()
     args = dict(
         model_path=str(model),
@@ -121,7 +121,7 @@ def engine(model, cached, tiny=False):
     )
     if tiny:
         args["attention_backend"] = "torch_native"
-    if cached:
+    if cached and not native:
         args["radix_cache_backend"] = "olmo_policy_versioned_v1"
     return sgl.Engine(**args)
 
@@ -179,12 +179,12 @@ def live_response(worker, prompt, tensors, version):
     return result
 
 
-def tiny(root, cached):
+def tiny(root, cached, native=False):
     root.mkdir(parents=True, exist_ok=True)
     model = prepare_tiny(root)
     prompt = [5 + i % 30 for i in range(1024)]
     report = {"cached": cached, "rounds": []}
-    worker = engine(root / "model", cached, tiny=True)
+    worker = engine(root / "model", cached, tiny=True, native=native)
     tensors = [(name, tensor.cuda().contiguous()) for name, tensor in model.state_dict().items()]
     try:
         report["cold"] = compact(generate(worker, prompt, 512))
@@ -192,6 +192,17 @@ def tiny(root, cached):
         assert compare(report["cold"], report["warm"])["passed"]
         if cached:
             assert report["warm"]["cached_tokens"] > 0
+        # Later hits can reuse a deeper recurrent checkpoint than the first hit.
+        # Compare publication against that same-boundary control, not against a
+        # cold prefill with a different BF16 execution partition.
+        report["cached_control"] = compact(generate(worker, prompt, 512))
+        report["cached_control_repeat"] = compact(generate(worker, prompt, 512))
+        write(root / "report.json", report)
+        assert compare(report["cached_control"], report["cached_control_repeat"])["passed"]
+        if native:
+            report["passed"] = True
+            write(root / "report.json", report)
+            return
         for version in range(1, 7):
             # Version 1 deliberately republishes identical weights; later versions
             # change attention/recurrent projections, not merely the version label.
@@ -204,21 +215,21 @@ def tiny(root, cached):
             live = live_response(worker, prompt, tensors, version)
             fresh = compact(generate(worker, prompt))
             warm = compact(generate(worker, prompt))
+            report["rounds"].append(dict(version=version, live=live, fresh=fresh, warm=warm))
+            write(root / "report.json", report)
             assert fresh["cached_tokens"] == 0, "Old-policy cache leaked into fresh request"
             assert compare(fresh, warm)["passed"]
             if cached:
                 assert warm["cached_tokens"] > 0
             if version == 1:
-                assert compare(live, report["cold"])["passed"], "Identical weights changed live continuation"
-            report["rounds"].append(dict(version=version, live=live, fresh=fresh, warm=warm))
-            write(root / "report.json", report)
+                assert compare(live, report["cached_control"])["passed"], "Identical weights changed live continuation"
         report["passed"] = True
         write(root / "report.json", report)
     finally:
         worker.shutdown()
 
 
-def benchmark(root, model, data, cached):
+def benchmark(root, model, data, cached, native=False):
     tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
     with Path(data).open() as stream:
         rows = [json.loads(line) for line in stream]
@@ -227,7 +238,7 @@ def benchmark(root, model, data, cached):
         min(rows, key=lambda r: abs(r["metadata"]["prompt_tokens"] - target)) for target in (12000, 24000, 40000)
     ]
     prompts = [tokenizer.encode(r["input"], add_special_tokens=False) for r in chosen]
-    worker = engine(model, cached)
+    worker = engine(model, cached, native=native)
     report = dict(
         cached=cached,
         prompt_ids=[r["metadata"]["sample_id"] for r in chosen],
@@ -258,14 +269,15 @@ def main():
     parser.add_argument("mode", choices=["tiny", "benchmark"])
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cached", action="store_true")
+    parser.add_argument("--native-cache", action="store_true")
     parser.add_argument("--model")
     parser.add_argument("--data")
     args = parser.parse_args()
     os.environ["SGLANG_EXTERNAL_MODEL_PACKAGE"] = "olmo_sglang.models"
     if args.mode == "tiny":
-        tiny(args.output, args.cached)
+        tiny(args.output, args.cached or args.native_cache, native=args.native_cache)
     else:
-        benchmark(args.output, args.model, args.data, args.cached)
+        benchmark(args.output, args.model, args.data, args.cached or args.native_cache, native=args.native_cache)
 
 
 if __name__ == "__main__":

@@ -32,11 +32,29 @@ def parity(a, b):
     return dict(same_tokens=same, max_logprob_error=error, passed=same and error <= 1e-4)
 
 
+def trajectory_difference(a, b):
+    """Logprobs are comparable only while both runs have the same token history."""
+    common = 0
+    for x, y in zip(a["tokens"], b["tokens"], strict=True):
+        if x != y:
+            break
+        common += 1
+    errors = [abs(x - y) for x, y in zip(a["logprobs"][:common], b["logprobs"][:common], strict=True)]
+    return dict(
+        same_tokens=a["tokens"] == b["tokens"],
+        common_prefix_tokens=common,
+        total_tokens=len(a["tokens"]),
+        max_common_prefix_logprob_error=max(errors, default=None),
+    )
+
+
 def serving(root, mode, arm, model, data):
     directory = root / (mode + "-" + arm)
     command = [sys.executable, "-m", "scripts.miles.cache_panel.serving", mode, "--output", str(directory)]
     if arm == "on":
         command.append("--cached")
+    if arm == "native":
+        command.append("--native-cache")
     if mode == "benchmark":
         command += ["--model", model, "--data", data]
     directory.mkdir(parents=True, exist_ok=True)
@@ -45,24 +63,39 @@ def serving(root, mode, arm, model, data):
 
 
 def check_serving(root, model, data):
-    tiny = {arm: serving(root, "tiny", arm, model, data) for arm in ("off", "on")}
+    tiny = {arm: serving(root, "tiny", arm, model, data) for arm in ("off", "on", "native")}
     checks = [parity(tiny["off"]["cold"], tiny["on"]["cold"])]
     for a, b in zip(tiny["off"]["rounds"], tiny["on"]["rounds"], strict=True):
         checks.append(parity(a["fresh"], b["fresh"]))
+    for key in ("cold", "warm", "cached_control", "cached_control_repeat"):
+        checks.append(parity(tiny["native"][key], tiny["on"][key]))
     write(root / "tiny-parity.json", checks)
     assert all(r["passed"] for r in checks), "Fresh-policy tiny-model numerical parity failed"
-    reports = {arm: serving(root, "benchmark", arm, model, data) for arm in ("off-before", "on", "off-after")}
+    reports = {
+        arm: serving(root, "benchmark", arm, model, data) for arm in ("off-before", "on", "native", "off-after")
+    }
     comparisons = []
-    for before, cached, after in zip(*(reports[a]["waves"] for a in ("off-before", "on", "off-after")), strict=True):
+    for before, cached, native, after in zip(
+        *(reports[a]["waves"] for a in ("off-before", "on", "native", "off-after")), strict=True
+    ):
         control = [parity(a, b) for a, b in zip(before["responses"], after["responses"], strict=True)]
-        candidate = [parity(a, b) for a, b in zip(before["responses"], cached["responses"], strict=True)]
+        candidate = [parity(a, b) for a, b in zip(native["responses"], cached["responses"], strict=True)]
+        cache_effect = [
+            trajectory_difference(a, b) for a, b in zip(before["responses"], cached["responses"], strict=True)
+        ]
         comparisons.append(
             dict(
                 index=cached["index"],
                 repeat=cached["repeat"],
                 control=control,
-                candidate=candidate,
-                seconds={"before": before["seconds"], "cached": cached["seconds"], "after": after["seconds"]},
+                candidate_vs_native=candidate,
+                cache_effect_vs_off=cache_effect,
+                seconds={
+                    "before": before["seconds"],
+                    "cached": cached["seconds"],
+                    "native": native["seconds"],
+                    "after": after["seconds"],
+                },
                 cached_tokens=sum(r["cached_tokens"] for r in cached["responses"]),
             )
         )
@@ -70,8 +103,8 @@ def check_serving(root, model, data):
     assert all(r["passed"] for c in comparisons for r in c["control"]), (
         "Cache-off controls disagree; investigate before interpreting candidate"
     )
-    assert all(r["passed"] for c in comparisons for r in c["candidate"]), (
-        "Candidate numerical parity requires investigation"
+    assert all(r["passed"] for c in comparisons for r in c["candidate_vs_native"]), (
+        "Policy cache differs from native cache; investigate before training"
     )
     assert sum(c["cached_tokens"] for c in comparisons) > 0, "No prefix reuse observed"
 

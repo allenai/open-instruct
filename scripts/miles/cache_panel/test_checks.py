@@ -50,3 +50,12 @@ def test_training_coverage_uses_consumed_contract_not_generated_spans(tmp_path):
     assert result["cached_tokens"] == 100
     assert result["cache_observation_coverage"] == 1
     assert result["generated_response_records"] == 2
+
+
+def test_logprob_comparison_stops_when_token_histories_diverge():
+    a = {"tokens": [1, 2, 3], "logprobs": [-1.0, -2.0, -99.0]}
+    b = {"tokens": [1, 4, 3], "logprobs": [-1.001, -2.0, 99.0]}
+    result = run.trajectory_difference(a, b)
+    assert result["common_prefix_tokens"] == 1
+    assert result["max_common_prefix_logprob_error"] < 0.002
+    assert not result["same_tokens"]
