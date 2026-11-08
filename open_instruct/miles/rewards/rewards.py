@@ -246,6 +246,14 @@ class _IsolatedVerifier:
             "status": "ok",
             "elapsed_seconds": time.monotonic() - start,
         }
+        if symbolic_timeouts := result.diagnostics.get("symbolic_timeouts", 0):
+            result.diagnostics["symbolic_timeout_rewarded"] = result.score > 0
+            # Worker stderr is suppressed; surface the completed result here.
+            logger.warning(
+                "Math verifier completed with %d symbolic comparison timeout(s); final score=%s",
+                symbolic_timeouts,
+                result.score,
+            )
         return result
 
 
