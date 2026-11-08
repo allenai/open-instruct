@@ -250,9 +250,16 @@ def extract_json_score_with_fallback(score_str: str) -> "tuple[str, float]":
             reasoning = data.get("REASONING", "")
             score = coerce_score(data.get("SCORE", 0.0))
         except json.JSONDecodeError as e:
-            score_match = re.search(r'"SCORE"\s*:\s*"?(true|false|[0-9]+(?:\.[0-9]+)?)"?', cleaned_str, re.IGNORECASE)
+            # Match complete boolean values, not prefixes such as "Trueish".
+            # Keep the historical numeric fallback and case-sensitive SCORE key.
+            score_match = re.search(
+                r'"SCORE"\s*:\s*(?:"\s*((?i:true|false))\s*"'
+                r"|((?i:true|false))(?=\s*(?:[,}]|$))"
+                r'|"?([0-9]+(?:\.[0-9]+)?)"?)',
+                cleaned_str,
+            )
             if score_match:
-                score = coerce_score(score_match.group(1))
+                score = coerce_score(next(value for value in score_match.groups() if value is not None))
                 reasoning = cleaned_str
             else:
                 raise ValueError() from e
