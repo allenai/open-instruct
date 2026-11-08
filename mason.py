@@ -95,6 +95,49 @@ def parse_env_var(env_var_str: str) -> dict[str, str]:
     return {"name": name, "value": value}
 
 
+# Beaker accepts min runtimes of 0 (unallocated, backfill only) or at least 5 minutes. The upper bound is each
+# cluster's scheduler policy (minRuntimeUpperBound), which is 8 hours on every Ai2 cluster today; Beaker enforces it,
+# so mason only warns. Beaker maps the legacy non-preemptible default to 8 hours separately from that policy.
+MIN_RUNTIME_LOWER_BOUND_MINUTES = 5
+MIN_RUNTIME_LOWER_BOUND_NS = MIN_RUNTIME_LOWER_BOUND_MINUTES * 60 * 1_000_000_000
+MIN_RUNTIME_USUAL_UPPER_BOUND_HOURS = 8
+MIN_RUNTIME_USUAL_UPPER_BOUND_NS = MIN_RUNTIME_USUAL_UPPER_BOUND_HOURS * 60 * 60 * 1_000_000_000
+
+
+def _timeout_ends_before_min_runtime(timeout_str: str | None, min_runtime_ns: int) -> bool:
+    """Whether a nonzero --timeout ends the job no later than its min runtime does.
+
+    An unparsable timeout returns True so mason does not warn on top of the error Beaker raises for it.
+    """
+    if not timeout_str:
+        return False
+    try:
+        timeout_ns = beaker.common.to_nanoseconds(timeout_str)
+    except ValueError:
+        return True
+    return 0 < timeout_ns <= min_runtime_ns
+
+
+def parse_min_runtime(min_runtime_str: str) -> str:
+    """Validate a Beaker min runtime duration string such as '30m' or '2h'."""
+    # beaker-py reads a bare number as seconds, so '300' meant as minutes would silently protect for 5 minutes.
+    # Like the MILES launcher, require a unit for anything but a plain 0.
+    if re.fullmatch(r"[+-]?(\d+\.?\d*|\.\d+)", min_runtime_str) and min_runtime_str not in ("0", "+0", "-0"):
+        raise argparse.ArgumentTypeError(
+            f"Min runtime must be a plain 0 or have a unit (e.g., '30m', '2h'), got: {min_runtime_str}"
+        )
+    try:
+        nanoseconds = beaker.common.to_nanoseconds(min_runtime_str)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"Invalid min runtime: {min_runtime_str}") from e
+    if nanoseconds != 0 and nanoseconds < MIN_RUNTIME_LOWER_BOUND_NS:
+        raise argparse.ArgumentTypeError(
+            f"Min runtime must be 0 or at least {MIN_RUNTIME_LOWER_BOUND_MINUTES}m, got: {min_runtime_str}"
+        )
+    # Normalize spellings such as '+0', '-0' and '0s' so Beaker always receives a plain 0.
+    return "0" if nanoseconds == 0 else min_runtime_str
+
+
 # by default, we turn off vllm compile cache
 # torch compile caching seems consistently broken, but the actual compiling isn't.
 # Not sure why, for now we have disabled the caching (VLLM_DISABLE_COMPILE_CACHE=1).
@@ -144,6 +187,19 @@ def get_args():
         default=[],
     )
     parser.add_argument(
+        "--extra_weka_buckets",
+        nargs="*",
+        help="""Extra WEKA buckets to mount at `/weka/[bucket]`, in addition to
+        `oe-adapt-default` and `oe-training-default`. Only honored when every requested
+        cluster is a WEKA cluster. Opt-in because a bucket that a cluster does not export
+        cannot be detected before launch: Beaker has no bucket listing, and a bad
+        reference fails the job at mount time. For example, the Olmo 3.5 hero checkpoints
+        live in `olmo-3p5-checkpoints`.
+        """,
+        type=str,
+        default=[],
+    )
+    parser.add_argument(
         "--description",
         type=str,
         help="Optionally, a description for this job in Beaker.",
@@ -151,7 +207,32 @@ def get_args():
     )
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
-    parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
+    scheduling_group = parser.add_mutually_exclusive_group()
+    scheduling_group.add_argument(
+        "--preemptible",
+        action="store_true",
+        help="Legacy: the same as --min_runtime 0 --auto_resume. On allocation-scheduled clusters the job runs "
+        "only as unallocated backfill and may wait indefinitely. Cannot be combined with --min_runtime.",
+    )
+    scheduling_group.add_argument(
+        "--min_runtime",
+        type=parse_min_runtime,
+        default=None,
+        help="Minimum runtime before the job can be preempted, as a duration string with a unit (e.g., '30m', "
+        f"'2h'). Must be 0 or at least {MIN_RUNTIME_LOWER_BOUND_MINUTES}m, and Ai2 clusters currently allow at "
+        f"most {MIN_RUNTIME_USUAL_UPPER_BOUND_HOURS}h. On allocation-scheduled clusters, a value above 0 makes the "
+        "job allocated: it queues ahead of unallocated backfill jobs, is protected until the min runtime ends, and "
+        "needs an allocation on the cluster. Shorter min runtimes schedule sooner, so use the time the job needs "
+        "to reach a checkpoint. 0 runs as unallocated backfill. Without this flag or --preemptible, Beaker gives "
+        "the job its legacy 8h protected default, the hardest to schedule.",
+    )
+    parser.add_argument(
+        "--auto_resume",
+        action="store_true",
+        help="If given, Beaker requeues the job after it is preempted. The command restarts from the beginning and "
+        "continues only if it resumes from its own checkpoints. Requires --min_runtime; --preemptible already "
+        "implies it.",
+    )
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
     parser.add_argument(
         "--mount_docker_socket", action="store_true", help="Mount the host Docker socket for Docker-in-Docker"
@@ -210,6 +291,33 @@ def get_args():
     )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
+    if mason_args.auto_resume and mason_args.preemptible:
+        parser.error(
+            "--auto_resume cannot be combined with --preemptible, which already auto-resumes; "
+            "use --min_runtime 0 --auto_resume instead"
+        )
+    if mason_args.auto_resume and mason_args.min_runtime is None:
+        parser.error("--auto_resume requires --min_runtime")
+    # Hard errors on --min_runtime live in parse_min_runtime; these are soft warnings that need other flags.
+    if mason_args.min_runtime is not None:
+        min_runtime_ns = beaker.common.to_nanoseconds(mason_args.min_runtime)
+        if min_runtime_ns > MIN_RUNTIME_USUAL_UPPER_BOUND_NS:
+            console.log(
+                f"--min_runtime {mason_args.min_runtime} exceeds the {MIN_RUNTIME_USUAL_UPPER_BOUND_HOURS}h maximum "
+                "that Ai2 clusters currently allow; Beaker refuses it on any cluster whose scheduler policy "
+                "(minRuntimeUpperBound) keeps that limit."
+            )
+        if min_runtime_ns == 0 and not mason_args.auto_resume:
+            console.log(
+                "--min_runtime 0 without --auto_resume runs as unallocated backfill and is not requeued after "
+                "preemption; pass --auto_resume (or use --preemptible) so Beaker requeues it after preemption."
+            )
+        elif not mason_args.auto_resume and not _timeout_ends_before_min_runtime(mason_args.timeout, min_runtime_ns):
+            console.log(
+                f"--min_runtime {mason_args.min_runtime} protects the job only for that long; without --auto_resume, "
+                "a preemption after that ends the job and Beaker does not requeue it. Pass --auto_resume, or, if the "
+                "job finishes within it, a --timeout no longer than the min runtime."
+            )
     commands = parse_commands(command_args)
 
     def _commands_include_resumable_target(cmds: list[list[str]]) -> bool:
@@ -221,7 +329,14 @@ def get_args():
 
     # can resume if the command is in OPEN_INSTRUCT_RESUMABLES and --non_resumable is not set
     is_resumable = _commands_include_resumable_target(commands) and not mason_args.non_resumable
-    if not is_resumable and not mason_args.non_resumable:
+    # Only an explicit --auto_resume gets the restart warning; legacy --preemptible jobs are often short or
+    # restart-safe, so warning on them would add noise to existing scripts.
+    if mason_args.auto_resume and not is_resumable:
+        console.log(
+            "--auto_resume requeues the job after preemption, but mason does not resume this command, so each "
+            "requeue restarts it from the beginning unless it resumes from its own checkpoints."
+        )
+    elif not is_resumable and not mason_args.non_resumable:
         console.log(
             "--non_resumable is not set, but the command is not in OPEN_INSTRUCT_RESUMABLES, so the job will not be resumable"
         )
@@ -274,28 +389,21 @@ def get_env_vars(
     additional_env_vars: list[dict[str, str]],
     additional_secrets: list[dict[str, str]],
 ):
-    additional_env_var_names = {var["name"] for var in additional_env_vars}
+    collisions = sorted({var["name"] for var in additional_env_vars} & {s["name"] for s in additional_secrets})
+    if collisions:
+        raise ValueError(f"Set by both --env and --secret: {', '.join(collisions)}")
 
-    env_vars = [
-        beaker.BeakerEnvVar(name=name, value=value)
-        for name, value in DEFAULT_ENV_VARS.items()
-        if name not in additional_env_var_names
-    ]
-
-    env_vars.extend(
-        [beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars]
-    )
-
-    # add user-specific secrets
-    env_vars.extend(
-        [beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets]
-    )
+    env_vars = [beaker.BeakerEnvVar(name=name, value=value) for name, value in DEFAULT_ENV_VARS.items()]
 
     useful_secrets = [
         "HF_TOKEN",
         "WANDB_API_KEY",
         "BEAKER_TOKEN",
         "OPENAI_API_KEY",
+        # Lets jobs read gs:// paths (olmo-core's io layer speaks GCS natively).
+        # On-premise clusters have no GCE metadata server, so without this a job
+        # falls back to anonymous credentials and fails.
+        "GOOGLE_APPLICATION_CREDENTIALS",
         # litellm expects these env vars
         "AZURE_API_KEY",
         "AZURE_API_BASE",
@@ -323,7 +431,7 @@ def get_env_vars(
                 beaker.BeakerEnvVar(name="HF_HUB_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/hub"),
                 beaker.BeakerEnvVar(
                     name="CHECKPOINT_OUTPUT_DIR",
-                    value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
+                    value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{whoami}/{global_wandb_id}",
                 ),
             ]
         )
@@ -346,21 +454,29 @@ def get_env_vars(
             ]
         )
 
-    return env_vars
+    # An explicit --env or --secret replaces any default mason adds under the same name
+    # (e.g. HF_HOME off a full bucket).
+    explicit_env_vars = [
+        beaker.BeakerEnvVar(name=env_var["name"], value=env_var["value"]) for env_var in additional_env_vars
+    ]
+    explicit_env_vars.extend(
+        beaker.BeakerEnvVar(name=secret["name"], secret=secret["value"]) for secret in additional_secrets
+    )
+    explicit_names = {env_var.name for env_var in explicit_env_vars}
+    return [env_var for env_var in env_vars if env_var.name not in explicit_names] + explicit_env_vars
 
 
-def get_datasets(beaker_datasets, cluster: list[str], mount_docker_socket: bool = False):
+def get_datasets(
+    beaker_datasets, cluster: list[str], mount_docker_socket: bool = False, extra_weka_buckets: list[str] | None = None
+):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if all cluster is in weka, we mount the weka
     if all(c in launch_utils.WEKA_CLUSTERS for c in cluster):
+        buckets = ["oe-adapt-default", "oe-training-default", *(extra_weka_buckets or [])]
         res = [
-            beaker.BeakerDataMount(
-                source=beaker.BeakerDataSource(weka="oe-adapt-default"), mount_path="/weka/oe-adapt-default"
-            ),
-            beaker.BeakerDataMount(
-                source=beaker.BeakerDataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
-            ),
+            beaker.BeakerDataMount(source=beaker.BeakerDataSource(weka=bucket), mount_path=f"/weka/{bucket}")
+            for bucket in dict.fromkeys(buckets)
         ]
     if mount_docker_socket:
         res.append(
@@ -377,6 +493,21 @@ def get_datasets(beaker_datasets, cluster: list[str], mount_docker_socket: bool 
     return res
 
 
+# A tag-like argument such as `<think>`, `</answer>`, `<|im_end|>` or `<tool name="search">`. A bare
+# redirection (`>`, `2>&1`, `<input.txt`) has no closing `>` after its `<` and so does not match.
+TAG_ARG_PATTERN = re.compile(r"<[^<>]*>")
+
+
+def quote_literal_args(command: list[str]) -> list[str]:
+    """Shell-quote the args that must reach the job verbatim before the command is joined for `bash -c`.
+
+    The rest of the command is passed through untouched, since launch scripts rely on `&&`, `cd` and `$VARS`.
+    Unquoted, `<think>` is a redirection and `{"a": 1}` loses its double quotes.
+    """
+    # `</` alone is kept from the original rule, so a closing-tag prefix such as `</tool_call` stays literal.
+    return [shlex.quote(arg) if "{" in arg or "</" in arg or TAG_ARG_PATTERN.search(arg) else arg for arg in command]
+
+
 def make_internal_command(command: list[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
     # pass through WANDB_ENTITY and WANDB_PROJECT
     if "WANDB_ENTITY" in os.environ:
@@ -385,12 +516,6 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
         command = [f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}"] + command
     if "WANDB_TAGS" in os.environ:
         command = [f"WANDB_TAGS={os.environ['WANDB_TAGS']}"] + command
-
-    # escape the command (e.g., --stop_strings "</answer>")
-    for i in range(len(command)):
-        if "</" in command[i]:
-            command[i] = f"'{command[i]}'"
-    # breakpoint()
 
     is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
     if is_open_instruct_training:
@@ -523,13 +648,7 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
                         "3. in the training command, use a `--output_dir` that starts with `/weka/`"
                     )
 
-    # special logic to deal with escape like
-    # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
-    # we need to wrap the json string with single quote
-    for idx in range(len(command)):
-        if "{" in command[idx]:
-            command[idx] = "'" + command[idx] + "'"
-    joined_command = " ".join(command)
+    joined_command = " ".join(quote_literal_args(command))
     if args.num_nodes > 1:
         if "--num_processes" not in joined_command and "accelerate" in joined_command:
             raise ValueError("num_processes must be specified in the command for accelerate-based multi-node jobs.")
@@ -552,6 +671,14 @@ def make_internal_command(command: list[str], args: argparse.Namespace, whoami: 
     console.log("🔍🔍🔍 Full command")
     print(full_command)
     return full_command
+
+
+def make_task_context(args) -> beaker.BeakerTaskContext:
+    priority = beaker.BeakerJobPriority[args.priority]
+    if args.min_runtime is None:
+        return beaker.BeakerTaskContext(priority=priority, preemptible=args.preemptible)
+    # Beaker rejects specs that mix the legacy preemptible field with minRuntime/autoResume.
+    return beaker.BeakerTaskContext(priority=priority, min_runtime=args.min_runtime, auto_resume=args.auto_resume)
 
 
 def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], whoami: str, resumable: bool):
@@ -580,10 +707,8 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         command=["/bin/bash", "-c"],
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
-        datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
-        context=beaker.BeakerTaskContext(
-            priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
-        ),
+        datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket, args.extra_weka_buckets),
+        context=make_task_context(args),
         constraints=constraints,
         env_vars=get_env_vars(
             args.pure_docker_mode,

@@ -1,5 +1,5 @@
 #!/bin/bash
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+source "$(dirname "${BASH_SOURCE[0]}")/../require_beaker_image.sh"
 MODEL_NAME=allenai/Olmo-Hybrid-Instruct-DPO-7B
 LR=1e-6
 EXP_NAME=hybrid-7b-DPO-test-${LR}-$(date +%s)
@@ -49,7 +49,7 @@ uv run python mason.py \
     --beta 5 \
     --packing \
     --activation_memory_budget 0.5 \
-    --chat_template_name olmo123 \
+    --chat_template_name tokenizer_default \
     --with_tracking \
     --push_to_hub false \
     --try_launch_beaker_eval_jobs false \

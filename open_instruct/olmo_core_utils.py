@@ -5,6 +5,8 @@ OLMo-core utility functions, shared training configurations, and model configura
 import datetime
 import json
 import os
+import shlex
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -310,6 +312,43 @@ def load_hf_weights_into_olmo_core(
         load_hf_model(model_name_or_path, model_state_dict, work_dir=work_dir)
 
 
+def load_hf_weights_into_model(model: torch.nn.Module, model_name_or_path: str, work_dir: str | None = None) -> None:
+    """Load an HF checkpoint into an olmo-core model through the model-type dispatcher."""
+    model_state_dict = model.state_dict()
+    load_hf_weights_into_olmo_core(model_state_dict, model_name_or_path, work_dir=work_dir)
+    model.load_state_dict(model_state_dict)
+
+
+def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
+    """Seed the rows of reserved-slot-promoted tokens on the olmo-core path.
+
+    Call this once the base weights are in place and before the first step -- and only when the
+    run is not resuming. `pre_train` looks like the natural hook but fires after a resume load
+    too, so a callback would re-seed on every restart and throw away what those rows learned.
+
+    By this point `parallelize_model` has sharded the embedding on the vocabulary dimension, so
+    the rows being read and the row being written generally live on different ranks;
+    `model_utils.seed_embedding_rows` handles that. A no-op when the tokenizer promoted nothing.
+    Returns the number of rows written per matrix.
+    """
+    rows = model_utils.promoted_token_rows(tokenizer)
+    if not rows:
+        return 0
+
+    model = train_module.model
+    matrices = [model.embeddings.weight]
+    # The olmo2/olmo3 presets leave tie_word_embeddings False, so the head is a second matrix
+    # that needs the same seed. The qwen3 presets tie it, where writing the one parameter twice
+    # would feed the row just written back in as one of its own sources.
+    if not model.tie_word_embeddings and model.lm_head is not None:
+        matrices.append(model.lm_head.w_out.weight)
+    for weight in matrices:
+        model_utils.seed_embedding_rows(weight, rows)
+
+    logger.info(f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices: {rows}")
+    return len(rows)
+
+
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
     """Reload HF weights into a parallelized train_module.
 
@@ -317,9 +356,24 @@ def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path:
     reinitializing all model weights. This reloads the HF checkpoint on top.
     """
     logger.info("Reloading HuggingFace weights after parallelization...")
-    sd = train_module.model.state_dict()
-    load_hf_weights_into_olmo_core(sd, model_name_or_path, work_dir=work_dir)
-    train_module.model.load_state_dict(sd)
+    load_hf_weights_into_model(train_module.model, model_name_or_path, work_dir=work_dir)
+
+
+def build_wandb_config(config_dict: dict) -> dict:
+    """Merge the Beaker runtime config into the wandb config so a run records the job that produced it.
+
+    `grpo_fast.py` and `dpo_tune_cache.py` already do this; without it an olmo-core run has no
+    reference to its Beaker experiment. Returns `config_dict` unchanged when not running on Beaker.
+
+    Only rank 0 performs the lookup: `maybe_get_beaker_config` shells out to the Beaker CLI once per
+    job result, and only rank 0 creates the wandb run.
+    """
+    if get_rank() != 0:
+        return config_dict
+    beaker_config = utils.maybe_get_beaker_config()
+    if beaker_config is None:
+        return config_dict
+    return {**config_dict, **vars(beaker_config)}
 
 
 def build_base_callbacks(
@@ -346,7 +400,7 @@ def build_base_callbacks(
             name=run_name,
             entity=wandb_entity,
             project=wandb_project,
-            config=config_dict,
+            config=build_wandb_config(config_dict),
             enabled=True,
             cancel_check_interval=10,
         )
@@ -357,14 +411,30 @@ def is_hf_checkpoint(path: str) -> bool:
     """Detect whether a model path is a HuggingFace checkpoint (vs olmo-core format).
 
     Returns True for HF hub IDs (e.g. 'allenai/Olmo-3-1025-7B'), local/weka paths
-    containing config.json, and paths with a '-hf' component. Returns False for
-    olmo-core distributed checkpoints.
+    holding an HF config.json, and paths with a '-hf' component. Returns False for
+    olmo-core distributed checkpoints, including remote URLs (e.g. gs://) without
+    an '-hf' marker.
     """
     if os.path.isdir(path):
-        return os.path.isfile(os.path.join(path, "config.json"))
+        config_path = os.path.join(path, "config.json")
+        if not os.path.isfile(config_path):
+            return False
+        # An olmo-core checkpoint directory also contains a config.json -- the full
+        # experiment config -- so its presence alone does not identify the format.
+        # HF configs always carry a top-level "model_type"; olmo-core's never does.
+        try:
+            with open(config_path) as config_file:
+                config = json.load(config_file)
+        except (OSError, ValueError):
+            return False
+        return isinstance(config, dict) and "model_type" in config
     parts = path.replace("\\", "/").split("/")
     if any("-hf" in part for part in parts):
         return True
+    # A remote URL (gs://, s3://, ...) without an '-hf' marker is an olmo-core
+    # checkpoint: transformers cannot read from it, olmo-core's io layer can.
+    if "://" in path:
+        return False
     return not os.path.isabs(path)
 
 
@@ -427,8 +497,39 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     )
 
 
+def use_doc_lens_for_emo_segments(model_config: TransformerConfig) -> int:
+    """Make every EMO router take its document segments from the batch's `doc_lens`.
+
+    EMO routing otherwise splits documents at EOS, which disagrees with metadata document
+    boundaries. Returns the number of EMO router configs changed; zero for models without EMO.
+    This setting persists in the saved model config. The supporting OLMo-core runtime must
+    require `doc_lens` in training and fall back to EOS during evaluation when it is absent.
+    """
+    # Hybrid models (olmo_core_hybrid) give `block` as a dict of named blocks.
+    block = model_config.block
+    blocks = list(block.values()) if isinstance(block, dict) else [block]
+    blocks += (getattr(model_config, "block_overrides", None) or {}).values()
+    changed = 0
+    for block in blocks:
+        router = getattr(block, "routed_experts_router", None)
+        emo = getattr(router, "emo", None)
+        if emo is None:
+            continue
+        if not hasattr(emo, "segment_ids_from"):
+            raise ValueError(
+                "This model routes with EMO, and the installed OLMo-core's EmoRouterConfig has no "
+                "segment_ids_from, so EMO would keep splitting documents at EOS."
+            )
+        emo.segment_ids_from = "doc_lens"
+        changed += 1
+    return changed
+
+
 def setup_model(
-    model_config_args: ModelConfig, tc: TokenizerConfig | None = None, init_device: str = "cpu"
+    model_config_args: ModelConfig,
+    tc: TokenizerConfig | None = None,
+    init_device: str = "cpu",
+    emo_segments_from_doc_lens: bool = False,
 ) -> tuple[Transformer, TransformerConfig]:
     model_name_or_path = model_config_args.model_name_or_path
     if is_hf_checkpoint(model_name_or_path):
@@ -458,6 +559,8 @@ def setup_model(
                 old_context_len=model_config_args.rope_scaling_old_context_len,
             )
         )
+    if emo_segments_from_doc_lens and use_doc_lens_for_emo_segments(model_config):
+        logger.info("EMO routers take their document segments from doc_lens")
     model = model_config.build(init_device=init_device)
     return model, model_config
 
@@ -584,6 +687,11 @@ def verify_can_save_as_hf(model_config: TransformerConfig, original_model_name_o
 _MODERN_NAMING_MODEL_TYPES = {"olmo_hybrid"}
 
 
+def _set_hf_export_generation_config(hf_model, tokenizer: transformers.PreTrainedTokenizerBase) -> None:
+    if model_utils.uses_olmo3_generation_config(None, tokenizer, hf_model):
+        hf_model.generation_config = model_utils.get_olmo3_generation_config(tokenizer)
+
+
 def save_state_dict_as_hf(
     state_dict: dict[str, torch.Tensor],
     save_dir: str,
@@ -604,6 +712,7 @@ def save_state_dict_as_hf(
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
     hf_model.load_state_dict(converted, assign=True)
+    _set_hf_export_generation_config(hf_model, tokenizer)
 
     os.makedirs(save_dir, exist_ok=True)
     model_type = getattr(hf_config, "model_type", None)
@@ -667,3 +776,46 @@ def doc_lens_from_cu_seq_lens(cu_seq_lens_k_D1: torch.Tensor, seq_len: int) -> t
     doc_lens_BD = seq_lens_D.unsqueeze(0)
     max_doc_lens_B = [int(doc_lens_BD.max().item())]
     return doc_lens_BD, max_doc_lens_B
+
+
+def write_provenance_readme(
+    output_dir: str,
+    run_name: str,
+    model_name_or_path: str,
+    tracking_url: str | None,
+    wandb_project: str | None = None,
+    wandb_entity: str | None = None,
+) -> None:
+    """Drop a README.md into output_dir so any copy of the checkpoint traces back to its run.
+
+    Never overwrites an existing README (a resume must not clobber notes added
+    by hand) and never raises: provenance is not worth killing a run over.
+    """
+    path = os.path.join(output_dir, "README.md")
+    if os.path.exists(path):
+        return
+    try:
+        lines = [f"# {run_name}", ""]
+        if tracking_url:
+            lines.append(f"Tracking: {tracking_url}")
+        beaker_url = utils.get_beaker_experiment_url()
+        if beaker_url:
+            lines.append(f"Beaker experiment: {beaker_url}")
+        if wandb_project:
+            lines.append(f"W&B: {wandb_entity or 'ai2-llm'}/{wandb_project}, run name {run_name}")
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+        lines += [
+            f"Base model: {model_name_or_path}",
+            f"Written at {timestamp}",
+            "",
+            "Command:",
+            "```",
+            # shlex.join, not " ".join: a run name or path with a space (or a `;`) would
+            # otherwise re-parse into different arguments when someone pastes this back.
+            shlex.join(sys.argv),
+            "```",
+        ]
+        with open(path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception:
+        logger.warning(f"Could not write provenance README to {output_dir}", exc_info=True)

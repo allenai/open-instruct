@@ -86,7 +86,7 @@ for MODEL_PATH in "${SFT_MODELS[@]}"; do
             --exp_name "$EXP_NAME" \
             --model_name_or_path "$MODEL_PATH" \
             --config_name "$CONFIG_NAME" \
-            --chat_template_name olmo123 \
+            --chat_template_name tokenizer_default \
             --mixer_list allenai/Dolci-Instruct-DPO-fixed 259922 \
             --max_seq_length 16384 \
             --per_device_train_batch_size "$PER_DEVICE_TRAIN_BATCH_SIZE" \

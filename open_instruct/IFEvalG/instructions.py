@@ -891,7 +891,10 @@ class JsonFormat(Instruction):
         )
         try:
             json.loads(value)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # Deeply nested output (e.g. "[[[[...") can exceed the JSON decoder's recursion limit. Such output is not
+            # necessarily invalid JSON, but the check cannot confirm it, so it fails this constraint instead of
+            # letting the error escape the verifier and stop training.
             return False
         return True
 
@@ -917,9 +920,11 @@ class ParagraphFirstWordCheck(Instruction):
         if self._num_paragraphs is None or self._num_paragraphs < 0:
             self._num_paragraphs = random.randint(1, _NUM_PARAGRAPHS)
 
+        # A given nth_paragraph is kept even when it exceeds num_paragraphs: the prompt then asks for the
+        # impossible and every answer fails. Redrawing it here made the reward random per call.
         self._nth_paragraph = nth_paragraph
-        if self._nth_paragraph is None or self._nth_paragraph <= 0 or self._nth_paragraph > self._num_paragraphs:
-            self._nth_paragraph = random.randint(1, self._num_paragraphs + 1)
+        if self._nth_paragraph is None or self._nth_paragraph <= 0:
+            self._nth_paragraph = random.randint(1, max(self._num_paragraphs, 1))
 
         self._first_word = first_word
         if self._first_word is None:
@@ -1599,12 +1604,13 @@ class CopySpanIdxChecker(Instruction):
             raise ValueError("prompt_to_repeat must be set.")
         else:
             self._prompt_to_repeat = prompt_to_repeat
-        if not n_start:
-            self._n_start = random.randint(0, len(self._prompt_to_repeat) - 2)
+        if n_start is None:
+            last_start = len(self._prompt_to_repeat) - 1 if n_end is None else n_end
+            self._n_start = random.randint(0, last_start)
         else:
             self._n_start = n_start
-        if not n_end:
-            self._n_end = random.randint(self._n_start + 1, len(self._prompt_to_repeat) - 1)
+        if n_end is None:
+            self._n_end = random.randint(self._n_start, len(self._prompt_to_repeat) - 1)
         else:
             self._n_end = n_end
         self._description_pattern = "Copy the span of words that lies between (and including) index {n_start} and {n_end}, the indices are character indices!"
@@ -1621,8 +1627,8 @@ class CopySpanIdxChecker(Instruction):
         return ["n_start", "n_end", "prompt_to_repeat"]
 
     def check_following(self, value):
-        """Checks if the response contains the expected number of phrases with the correct modifications."""
-        return value.strip().lower() == self._prompt_to_repeat[self._n_start : self._n_end].strip().lower()
+        """Check the inclusive character span, preserving case-insensitive matching."""
+        return value.strip().lower() == self._prompt_to_repeat[self._n_start : self._n_end + 1].strip().lower()
 
 
 class SentenceHyphenChecker(Instruction):
@@ -1702,7 +1708,7 @@ class SquareBracketChecker(Instruction):
 
 
 class KeywordFrequencyOnceChecker(Instruction):
-    """Check the keyword frequency."""
+    """Preserve historical exactly-once regex grading for existing dataset identifiers."""
 
     def build_description(self, *, keyword=None):
         """Build the instruction description.
@@ -1727,7 +1733,7 @@ class KeywordFrequencyOnceChecker(Instruction):
 
         self._frequency = 1
 
-        self._description_pattern = "Include keyword {keyword} in your response."
+        self._description_pattern = "Include keyword {keyword} exactly once in your response."
 
         return self._description_pattern.format(keyword=self._keyword, frequency=self._frequency)
 
@@ -1740,10 +1746,8 @@ class KeywordFrequencyOnceChecker(Instruction):
         return ["keyword"]
 
     def check_following(self, value):
-        """Checks if the response contain the keyword with required frequency."""
-        actual_occurrences = len(re.findall(self._keyword, value, flags=re.IGNORECASE))
-
-        return actual_occurrences == 1
+        """Preserve the existing regex and case-insensitive occurrence-count contract."""
+        return len(re.findall(self._keyword, value, flags=re.IGNORECASE)) == 1
 
 
 class KeywordFrequencyCheckerDifferent(Instruction):
@@ -1839,7 +1843,7 @@ class ExcludeWordHarderChecker(Instruction):
 
     def check_following(self, value):
         """Check if the response does not contain the expected keywords."""
-        return " " + self._keyword + " " not in value
+        return re.search(r"(?<!\w)" + re.escape(self._keyword) + r"(?!\w)", value, flags=re.IGNORECASE) is None
 
 
 class ParagraphBasicChecker(Instruction):
@@ -2161,11 +2165,10 @@ class BiGramWrappingChecker(Instruction):
 
     def check_following(self, value):
         """Checks if every word bigram is enclosed within double angular brackets."""
-        words = value.split()
-        for i in range(0, len(words) - 1, 2):
-            if i + 1 < len(words) and not (words[i].startswith("<<") and words[i + 1].endswith(">>")):
-                return False
-        return True
+        # An odd word count may end with one wrapped word; no text is ignored.
+        word = r"[^\s<>]+"
+        pair, single = rf"<<{word}\s+{word}>>", rf"<<{word}>>"
+        return re.fullmatch(rf"(?:{pair}(?:\s+{pair})*(?:\s+{single})?|{single})", value.strip()) is not None
 
 
 class CopyingSimpleChecker(Instruction):
@@ -2305,9 +2308,14 @@ class LowercaseCountingChecker(Instruction):
         return ["N"]
 
     def check_following(self, value):
-        """Checks that the response does not contain lowercase words more than N times."""
-        lowercase_words = re.findall(r"\b[a-z]+\b", value)
-        return len(lowercase_words) <= self._N
+        """Checks that no lowercase word appears more than N times.
+
+        The instruction caps how often each lowercase word repeats. Counting all lowercase words together
+        capped the whole answer at N (2-3) lowercase words, which only an empty, all-caps or non-Latin answer
+        could meet.
+        """
+        counts = collections.Counter(re.findall(r"\b[a-z]+\b", value))
+        return max(counts.values(), default=0) <= self._N
 
 
 class LetterCountingChecker(Instruction):
@@ -2341,8 +2349,11 @@ class LetterCountingChecker(Instruction):
         return ["N", "relation"]
 
     def check_following(self, value):
-        """Checks that the response does not contain lowercase words more than N times."""
-        letters = re.findall(r"[a-zA-Z]", value)
+        """Checks the number of letters in the response against N.
+
+        Letters of every script count, so a non-Latin answer cannot meet "less than N letters" for free.
+        """
+        letters = [c for c in value if c.isalpha()]
         if self._relation == "at least":
             return len(letters) >= self._N
         elif self._relation == "less than":
@@ -2389,13 +2400,16 @@ class CountingCompositionChecker(Instruction):
         Returns:
           True if the response meets the requirements; otherwise, False.
         """
-        paragraphs = re.split(r"\s?\*\*\*\s?", value)
+        # Match the instructed spaced divider on its own Markdown line. Allow
+        # horizontal whitespace and CRLF without treating inline stars as dividers.
+        paragraphs = re.split(r"^[ \t]*\*[ \t]+\*[ \t]+\*[ \t]*\r?$", value, flags=re.MULTILINE)
         num_paragraphs = len(paragraphs)
 
         for index, paragraph in enumerate(paragraphs):
             if not paragraph.strip():
                 if index == 0 or index == len(paragraphs) - 1:
                     num_paragraphs -= 1
+                    continue
                 else:
                     return False
 
@@ -2406,8 +2420,9 @@ class CountingCompositionChecker(Instruction):
                 return False
 
             for sentence in sentences:
-                words = instructions_util.nltk.word_tokenize(sentence)
-                num_words = len(words)
+                # split_into_sentences keeps each sentence's terminal ".", which
+                # must not count toward the n_words total.
+                num_words = len(instructions_util.word_tokens(sentence))
 
                 if num_words != self._n_words:
                     return False
@@ -2432,7 +2447,9 @@ class CountUniqueChecker(Instruction):
 
     def check_following(self, value):
         """Checks that the response contains unique words."""
-        words = instructions_util.nltk.word_tokenize(value)
+        # Compare words only; pure-punctuation tokens (".", ",") must not count as
+        # repeated words.
+        words = instructions_util.word_tokens(value)
         unique_words = set(words)
         return len(words) == len(unique_words)
 

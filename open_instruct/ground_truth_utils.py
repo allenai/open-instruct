@@ -18,12 +18,14 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import Callable
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 import numpy as np
 import requests
 
 from open_instruct import context_window_checker, logger_utils
+from open_instruct.answer_utils import extract_final_answer
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_MILLION_TOKENS, build_messages
@@ -37,7 +39,6 @@ from open_instruct.math_utils import (
 )
 from open_instruct.rubrics.prompts import RUBRIC_SCORING_PROMPT
 from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async, run_litellm_async_raw
-from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -196,10 +197,20 @@ def remove_thinking_section(prediction: str) -> str:
     return prediction.strip()
 
 
+def _exact_number(text: str) -> Decimal | None:
+    """Parse a plain number exactly, ignoring thousands separators; None if it is not one."""
+    try:
+        value = Decimal(re.sub(r"(\d),(\d)", r"\1\2", str(text).strip()))
+    except InvalidOperation:
+        return None
+    return value if value.is_finite() else None
+
+
 class GSM8KVerifier(VerifierFunction):
     """
     Verifier for GSM8K tasks that extracts the last number from the prediction
-    and compares it (case-insensitively) to the ground truth.
+    and compares it to the ground truth as an exact number, so ``96.00`` matches
+    ``96``. Labels that are not numbers fall back to case-insensitive string equality.
     """
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
@@ -217,6 +228,9 @@ class GSM8KVerifier(VerifierFunction):
         # Preserve explicit signs on both decimals and integers when extracting the final answer.
         numbers = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", response)
         extracted = numbers[-1] if numbers else response
+        found, expected = (_exact_number(extracted) if numbers else None), _exact_number(label)
+        if found is not None and expected is not None:
+            return VerificationResult(score=float(found == expected))
         score = float(str(extracted).lower() == str(label).lower())
         return VerificationResult(score=score)
 
@@ -1353,9 +1367,13 @@ class RewardConfig:
             scores = [0.0] * len(decoded_responses)
             metrics: dict[str, Any] = {}
             format_scores: list[float] = []
+            format_valid: list[bool] = []
 
             if self.apply_r1_style_format_reward:
                 format_scores = soft_format_reward_func(decoded_responses, self.r1_style_format_reward)
+                # Validity is kept apart from the reward magnitude, so the non-additive gate still
+                # checks the format when r1_style_format_reward is 0.0 (or any other value).
+                format_valid = [score > 0 for score in soft_format_reward_func(decoded_responses, 1.0)]
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):
@@ -1391,7 +1409,7 @@ class RewardConfig:
                         if self.apply_r1_style_format_reward and self.additive_format_reward:
                             scores[i] = raw_score + scores[i]
                         elif self.apply_r1_style_format_reward and not self.additive_format_reward:
-                            scores[i] = raw_score if format_scores[i] == 1 else 0
+                            scores[i] = raw_score if format_valid[i] else 0
                         else:
                             scores[i] = raw_score
 
