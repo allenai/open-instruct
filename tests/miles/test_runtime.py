@@ -10,17 +10,17 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from olmo_core.nn.hf.config import _register_olmo3moe_auto_classes
+from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
+from torch import distributed as dist
+from transformers import AutoModelForCausalLM, Olmo3Config, Qwen3Config
+
 from miles.backends.core_utils import actor, checkpoint, data, models, scheduler
 from miles.backends.core_utils.publication.state import PolicyClock
 from miles.backends.fsdp_utils import lr_scheduler
 from miles.backends.training_utils import parallel
 from miles.utils import arguments
 from miles.utils.ft_utils.process_group_utils import GroupInfo
-from olmo_core.nn.hf.config import _register_olmo3moe_auto_classes
-from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
-from torch import distributed as dist
-from transformers import AutoModelForCausalLM, Olmo3Config, Qwen3Config
-
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 
 
@@ -517,7 +517,7 @@ def test_scoring_check_failure_stops_before_the_optimizer_step(parsed_args, tmp_
 
         def drifted_score(module, batches, *, use_replay):
             # Emulate a no-grad kernel path that rounds differently from the gradient path.
-            return [value + 0.02 for value in original_score(module, batches, use_replay=use_replay)]
+            return [value + 0.00350197 for value in original_score(module, batches, use_replay=use_replay)]
 
         monkeypatch.setattr(worker, "_score", drifted_score)
         before = {name: tensor.detach().clone() for name, tensor in worker.model.state_dict().items()}
@@ -532,7 +532,7 @@ def test_scoring_check_failure_stops_before_the_optimizer_step(parsed_args, tmp_
         worker.train(0, None)
         assert worker.clock.completed_steps == 1
         checks = [record for record in _contract_records(worker.args) if record["event"] == "scoring_check"]
-        assert len(checks) == 1 and checks[0]["mean_abs"] == pytest.approx(0.02, abs=1e-6)
+        assert len(checks) == 1 and checks[0]["mean_abs"] == pytest.approx(0.00350197, abs=1e-6)
     finally:
         dist.destroy_process_group()
 

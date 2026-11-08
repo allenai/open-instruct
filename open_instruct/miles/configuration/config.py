@@ -102,7 +102,7 @@ class CoreConfig:
     # standalone-versus-training check that guards the skipped path.
     scoring_pass_required: bool = False
     scoring_check_interval: int = 50
-    # Warn above this mean absolute gap; the runtime fails above ten times it.
+    # Fail when the mean absolute standalone/training gap exceeds this tolerance.
     scoring_check_tolerance: float = 1e-3
     # Publication layout for routed experts: per-expert HF slices, or one stacked
     # tensor per layer and projection in the serving engine's fused layout.

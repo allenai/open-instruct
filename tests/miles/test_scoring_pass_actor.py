@@ -13,7 +13,6 @@ pytest.importorskip("miles")
 
 from miles.backends.core_utils import actor  # noqa: E402
 from miles.backends.core_utils.publication.state import PolicyClock  # noqa: E402
-
 from open_instruct.miles.configuration.config import CoreConfig  # noqa: E402
 
 
@@ -73,11 +72,10 @@ def _distributed_check(rank, rendezvous, output):
                 worker._check_training_scores(rollout, [scores])
         report = worker._check_training_scores(rollout, [torch.zeros(2)])
         assert report["active_tokens"] == 4 and report["mean_abs"] == 0
-        warning = worker._check_training_scores(rollout, [torch.full((2,), 0.00350197)])
-        assert warning["warning"] and warning["fatal_tolerance"] == 0.01
-        with pytest.raises(RuntimeError, match="fatal tolerance"):
-            worker._check_training_scores(rollout, [torch.full((2,), 0.02)])
-        Path(output, str(rank)).write_text("rank-local errors and fatal drift coordinated; warning drift passed")
+        for drift in (0.00350197, 0.02):
+            with pytest.raises(RuntimeError, match="exceeds tolerance"):
+                worker._check_training_scores(rollout, [torch.full((2,), drift)])
+        Path(output, str(rank)).write_text("rank-local errors and above-tolerance drift coordinated")
     finally:
         dist.destroy_process_group()
 
