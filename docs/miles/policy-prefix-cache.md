@@ -7,10 +7,10 @@ Our long-context RL trials generate several responses per prompt. This integrati
 | Repository | Branch | Responsibility |
 |---|---|---|
 | `allenai/olmo-sglang` | `codex/policy-prefix-cache` | Register `olmo_policy_versioned_v1` through the pinned engine's existing radix-cache backend API; scope sharing to the serving policy; preserve and release retained private state. |
-| `allenai/miles-olmo-core` | `codex/policy-cache-routing` | Route siblings consistently; verify backend and committed weight version before resuming generation. |
-| `allenai/open-instruct` | `codex/policy-versioned-prefix-cache` | Permit the explicitly selected backend, validate memory/concurrency settings, and preserve existing cache-off defaults. |
+| `allenai/miles-olmo-core` | `codex/policy-cache-publication` | Route siblings consistently; verify backend and committed weight version before resuming generation. |
+| `allenai/open-instruct` | `codex/policy-cache-config` | Permit the explicitly selected backend, validate memory/concurrency settings, and preserve existing cache-off defaults. |
 
-These branches form a candidate integration. The checked-in production runtime lock and its base image have not been advanced. The stock image therefore cannot run this backend yet: build a candidate image containing both companion revisions before enabling it. Keep SGLang, OLMo-core and the base-image pins unchanged for that probe. The old local SGLang-main prototype is superseded and must not be included.
+These branches form a candidate integration. This configuration PR preserves the production runtime lock: the stock image cannot run this backend. Land the companion runtime changes and advance the lock/options provenance before enabling it in a normal application build. The successful probe used a separate integration image containing the cache changes, startup-error handling and previously exercised LC scoring fixes; those unrelated scoring/verifier changes are not part of this PR. SGLang stayed pinned throughout.
 
 ## Configuration
 
@@ -46,4 +46,10 @@ Consistent-hash routing supplies a common prompt-group key to all siblings. SGLa
 
 Focused Open Instruct configuration/cache/profile tests pass (120 tests). MILES publication, retained-state and routing tests pass (45 tests). Plugin tests against the unchanged pinned SGLang source exercise real CPU KV/KDA pools, cross-policy misses, completion/cancellation cleanup, and built-in cold-sibling scheduling (17 tests).
 
-GPU qualification remains: fixed-weight cache-off/on output comparison, weight updates with waiting and active requests, a fresh-request comparison with a cold engine at the new policy, repeated-update memory checks, then representative prefill and sustained-throughput measurement. Existing LC runs have not been changed, and no performance gain is claimed yet.
+The two-B300 DocQA integration probe completed four optimizer updates with exit code 0. The cache initialized, reused long prefixes (one request needed 15 new prefill tokens after 12,416 cached tokens), and published versions 0–4. Thirty-two logged responses continued across policy boundaries. Weight publications after training took 1.57–2.45 seconds. The first driver training call took 396 seconds including first-use compilation; subsequent calls took 19–26 seconds. This is a small mechanics probe, not a speedup comparison.
+
+All four consumed training batches came from policy version 0 because asynchronous prefetch ran ahead during compilation. Cross-version serving was exercised, but training on those cross-version responses was not. Remaining checks are fixed-weight cache-off/on output parity, fresh requests against a cold new-policy engine, training consumption of retained responses, repeated-update memory stability, and representative throughput. TP>1 and speculation remain unqualified.
+
+Runs:
+
+1. Four-update DocQA probe: [Beaker](https://beaker.org/ex/01M6Y5Q3BWZQVRVN1CG0M7NNHM). Image `01M6Y5NN3FMQGCVV2WX92AMJS6`; application `a2feaaef3`, MILES `0c2b405`, plugin `f0444a8`, Core `903e57d`. Immutable result dataset `01M6Y5Q3C5VM98YMG402TE8WSY` contains publication, driver-timing and training-contract records. These are the tested integration revisions, not a claim that the subsequently separated PR heads were GPU-tested.
