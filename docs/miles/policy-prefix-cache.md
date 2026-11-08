@@ -10,7 +10,7 @@ Our long-context RL trials generate several responses per prompt. This integrati
 | `allenai/miles-olmo-core` | `codex/policy-cache-routing` | Route siblings consistently; verify backend and committed weight version before resuming generation. |
 | `allenai/open-instruct` | `codex/policy-versioned-prefix-cache` | Permit the explicitly selected backend, validate memory/concurrency settings, and preserve existing cache-off defaults. |
 
-These branches form a candidate integration. The checked-in production runtime lock and its base image have not been advanced. The stock image therefore cannot run this backend yet: build a candidate image containing both companion revisions before enabling it. Keep SGLang, OLMo-core and the base-image pins unchanged for that probe. The old local SGLang-main prototype is superseded and must not be included.
+These branches form a candidate integration. The separate `codex/policy-cache-lc-probe` experiment branch advances its candidate lock to the companion plugin/MILES revisions and the previously exercised LC Core scoring fixes (`903e57d`). It also includes the DocQA verifier from LC support revision `cb77cbeea`. SGLang and the binary base stay unchanged. Production main and its images are unaffected. Build the candidate image before enabling the backend. The old local SGLang-main prototype is superseded and must not be included.
 
 ## Configuration
 
