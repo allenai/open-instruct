@@ -9,9 +9,10 @@ import random
 from pathlib import Path
 
 from miles.utils.data import Dataset
+from miles.utils.types import Sample
 
 from open_instruct.miles.datasets import mixture
-from open_instruct.miles.rollout import pool_provider, prompt_provider
+from open_instruct.miles.rollout import indexed_samples, pool_provider, prompt_provider
 
 
 class SourceDatasets:
@@ -99,6 +100,48 @@ def load(args, first_dataset):
         if manifest.get(key) != value:
             raise ValueError(f"Mixture manifest {key} differs from runtime: {manifest.get(key)!r} != {value!r}")
     mixture.validate_sources(manifest["sources"], pooled="pools" in manifest)
+    if args.olmo_core.prompt_provider == "pools":
+        if "pools" not in manifest:
+            raise ValueError("Pool provider requires a prepared pools manifest")
+        for source in manifest["sources"]:
+            if Path(source["path"]).name != source["path"]:
+                raise ValueError("Mixture source paths must be filenames within the prepared directory")
+        if (path.parent / manifest["sources"][0]["path"]).resolve() != Path(args.prompt_data).resolve():
+            raise ValueError("prompt_data must name the first prepared mixture source")
+        catalog = indexed_samples.Catalog(
+            path.parent,
+            manifest["sources"],
+            manifest["pools"],
+            sample_type=Sample,
+            max_prompt_length=args.rollout_max_prompt_len,
+            cache_rows=max(64, getattr(args, "rollout_batch_size", 128) * 10),
+        )
+        core = args.olmo_core
+        replay = (
+            dict(
+                fraction=core.prompt_replay_fraction,
+                length_drop=core.prompt_replay_length_drop,
+                window=core.prompt_replay_window,
+                max_successes=core.prompt_replay_max_successes,
+                truncation=core.prompt_replay_truncation,
+            )
+            if core.prompt_replay_enabled
+            else None
+        )
+        try:
+            provider = pool_provider.PoolPromptProvider(
+                catalog,
+                pools=manifest["pools"],
+                seed=args.rollout_seed,
+                shuffle=args.rollout_shuffle,
+                identity=hashlib.sha256(raw).hexdigest(),
+                replay=replay,
+                sampling=manifest.get("sampling", {}),
+            )
+        except BaseException:
+            catalog.close()
+            raise
+        return provider, catalog
     sources = []
     for index, source in enumerate(manifest["sources"]):
         filename = source["path"]
@@ -137,40 +180,6 @@ def load(args, first_dataset):
             ):
                 raise ValueError(f"Mixture source {source['name']}: missing or excessive prepared prompt length")
         sources.append(source | {"dataset": dataset})
-    if args.olmo_core.prompt_provider == "pools":
-        if "pools" not in manifest:
-            raise ValueError("Pool provider requires a prepared pools manifest")
-        templates = []
-        for source in sources:
-            for original in source["dataset"].origin_samples:
-                # These datasets belong to this loader. Annotate their templates
-                # once and keep row references, rather than a second population
-                # of Sample objects and metadata dictionaries. Delivery copies
-                # selected rows before generation can mutate them.
-                original.metadata = original.metadata | {"mixture_source": source["name"]}
-                templates.append(original)
-        core = args.olmo_core
-        replay = (
-            dict(
-                fraction=core.prompt_replay_fraction,
-                length_drop=core.prompt_replay_length_drop,
-                window=core.prompt_replay_window,
-                max_successes=core.prompt_replay_max_successes,
-                truncation=core.prompt_replay_truncation,
-            )
-            if core.prompt_replay_enabled
-            else None
-        )
-        provider = pool_provider.PoolPromptProvider(
-            templates,
-            pools=manifest["pools"],
-            seed=args.rollout_seed,
-            shuffle=args.rollout_shuffle,
-            identity=hashlib.sha256(raw).hexdigest(),
-            replay=replay,
-            sampling=manifest.get("sampling", {}),
-        )
-        return provider, SourceDatasets([source["dataset"] for source in sources])
     if "pools" in manifest:
         raise ValueError("Pool manifest requires the pools provider")
     provider = MixturePromptProvider(

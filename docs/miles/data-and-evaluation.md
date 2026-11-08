@@ -1011,3 +1011,24 @@ before claiming sustained sampler throughput. Checkpoint storage was tmpfs, whos
 pages also count against the container limit. The corrected path has not been
 qualified at 64 GiB; 96 GiB is the tested ceiling, not a measured minimum or a
 full-trainer memory budget. Actual-payload replay and GPU execution remain pending.
+
+### Pool storage and prefetch
+
+Prepared pools keep prompt text, labels, and verifier targets in their JSONL files.
+The runtime holds compact row IDs and memory-mapped byte offsets, rather than a
+Python object for every prompt. CPU preparation writes hash-bound index sidecars;
+older bundles build these derived indexes on first use. Loading verifies both the
+source and index hashes, so startup still reads the source bytes once. These
+sidecars do not change the preparation identity or selected prompt sequence.
+
+Two reader threads prefetch up to 64 upcoming rows per pool into a shared cache.
+The cache holds at most ten rollout batches of rows (minimum 64) and 256 MiB of
+raw JSON, whichever limit is reached first. Outstanding read requests have the
+same row limit. Only selected rows become prompt/verifier objects; generation
+receives independent copies. Prefetch completion order does not affect selection,
+rollback, or checkpoint restore. `rollout/prompt_storage/*` metrics report cache
+bytes, rows, pending reads, disk reads, and cache hits.
+
+Replay-enabled pools still scan identities at startup and retain identity-to-row
+maps, but retrieve replay prompt payloads from disk too. This is additional
+identity bookkeeping, not a second copy of the prompt population.

@@ -6,7 +6,7 @@ import random
 from collections import Counter
 
 from open_instruct.miles.datasets import replay_evidence
-from open_instruct.miles.rollout import pool_metrics, pool_sampling, replay_provider
+from open_instruct.miles.rollout import indexed_samples, pool_metrics, pool_sampling, replay_provider
 
 SELECTION_ID = "pool_selection_id"
 POOL = "sampling_pool"
@@ -29,10 +29,12 @@ class FinitePrompts:
     requires_feedback = False
 
     def __init__(self, samples, *, seed, shuffle):
-        self.samples = list(samples)
-        if shuffle:
+        self.samples = samples.ordered(seed, shuffle) if isinstance(samples, indexed_samples.View) else list(samples)
+        if shuffle and not isinstance(samples, indexed_samples.View):
             random.Random(seed).shuffle(self.samples)
         self.offset = 0
+        if isinstance(self.samples, indexed_samples.View):
+            self.samples.prefetch(0)
 
     def available(self):
         return self.offset < len(self.samples)
@@ -42,6 +44,8 @@ class FinitePrompts:
             raise StopIteration("Fresh pool exhausted")
         result = self.samples[self.offset : self.offset + n]
         self.offset += n
+        if isinstance(self.samples, indexed_samples.View):
+            self.samples.prefetch(self.offset)
         return result
 
     def state_dict(self):
@@ -52,6 +56,8 @@ class FinitePrompts:
         if type(offset) is not int or not 0 <= offset <= len(self.samples):
             raise ValueError("Invalid finite pool cursor")
         self.offset = offset
+        if isinstance(self.samples, indexed_samples.View):
+            self.samples.prefetch(self.offset)
 
 
 class PoolPromptProvider:
@@ -73,21 +79,26 @@ class PoolPromptProvider:
         self.rng = random.Random(seed)
         # A single permutation fixes fresh global order independently of outcomes.
         # Replays can be inserted before a fresh draw without advancing this order.
-        samples = list(samples)
-        if self.sampling["policy"] == "shuffle" and shuffle:
-            random.Random(seed).shuffle(samples)
-        self.fresh_order = [s.metadata[POOL] for s in samples] if self.sampling["policy"] == "shuffle" else []
+        self.catalog = samples if isinstance(samples, indexed_samples.Catalog) else None
+        if self.catalog is not None:
+            self.fresh_order, pool_members = self.catalog.split(self.sampling["policy"], shuffle, seed)
+        else:
+            samples = list(samples)
+            if self.sampling["policy"] == "shuffle" and shuffle:
+                random.Random(seed).shuffle(samples)
+            self.fresh_order = [s.metadata[POOL] for s in samples] if self.sampling["policy"] == "shuffle" else []
+            if any(s.metadata[POOL] not in pools for s in samples):
+                raise ValueError("Unknown runtime pool")
+            pool_members = {name: [s for s in samples if s.metadata[POOL] == name] for name in pools}
         self.providers = {}
         for name in pools:
-            members = [s for s in samples if s.metadata[POOL] == name]
+            members = pool_members[name]
             base = FinitePrompts(
                 members, seed=f"{seed}:{name}", shuffle=shuffle and self.sampling["policy"] != "shuffle"
             )
             self.providers[name] = (
                 replay_provider.ReplayPromptProvider(base, members, **replay) if replay and members else base
             )
-        if any(s.metadata[POOL] not in pools for s in samples):
-            raise ValueError("Unknown runtime pool")
         self.draws = 0
         self.pending = {}
         self.trained = Counter()
@@ -98,6 +109,10 @@ class PoolPromptProvider:
         self.observations = Counter()
         self.tokens = Counter()
         self.committed_update = -1
+
+    def close(self):
+        if self.catalog is not None:
+            self.catalog.close()
 
     def active(self):
         return [name for name, provider in self.providers.items() if provider.available()]
@@ -342,4 +357,6 @@ class PoolPromptProvider:
                         for key, value in provider.metrics().items()
                     }
                 )
+        if self.catalog is not None:
+            result.update({f"rollout/prompt_storage/{key}": value for key, value in self.catalog.metrics().items()})
         return result

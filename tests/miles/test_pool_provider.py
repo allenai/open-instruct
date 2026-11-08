@@ -289,8 +289,8 @@ def test_collection_file_preserves_origins_and_release_in_receipts(args, tmp_pat
     buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, lambda g: source.discard_groups([g])))
     recorder = buffer._delegate._records
     try:
-        templates = source.dataset.datasets[0].origin_samples
-        assert source.provider.providers["math"].base.samples[0] is templates[0]
+        templates = [source.dataset.sample(i) for i in range(first["rows"])]
+        assert source.provider.providers["math"].base.samples[0] == templates[0]
         for update in range(2):
             group = source.get_samples(1)[0]
             group[0].metadata["generated_only"] = True

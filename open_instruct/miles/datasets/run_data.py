@@ -20,7 +20,7 @@ from pathlib import Path
 
 from open_instruct import ifeval_constraints
 from open_instruct.miles.configuration import validation
-from open_instruct.miles.datasets import mixture, pools, synlogic
+from open_instruct.miles.datasets import indexed_rows, mixture, pools, synlogic
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import judging, task_verifiers
 from open_instruct.miles.rollout import pool_sampling
@@ -762,6 +762,14 @@ def prepare_data(
                 }
                 for source, split in zip(data["sources"], training, strict=True)
             ]
+            if resolved_pools:
+                for source in sources:
+                    # Build compact derived indexes during CPU preparation, before
+                    # allocating training GPUs. Existing bundles can build lazily.
+                    index, _ = indexed_rows.open_index(
+                        staging / source["path"], source["sha256"], source["rows"], max_prompt_length
+                    )
+                    del index
             raw = _encoded(
                 {
                     "schema_version": 1,

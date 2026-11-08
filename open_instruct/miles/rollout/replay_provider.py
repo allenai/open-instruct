@@ -83,16 +83,19 @@ class ReplayPromptProvider:
             truncation=truncation,
         )
         self.fraction = Fraction(str(fraction))
-        self.samples = {}
-        self.sources = {}
-        self.tasks = {}
-        for sample in samples:
-            key, source, task = identity(sample)
-            self.samples.setdefault(key, sample)
-            self.sources[key], self.tasks[key] = source, task
+        if hasattr(samples, "replay_catalog"):
+            self.samples, self.sources, self.tasks, self.catalog = samples.replay_catalog(identity)
+        else:
+            self.samples = {}
+            self.sources = {}
+            self.tasks = {}
+            for sample in samples:
+                key, source, task = identity(sample)
+                self.samples.setdefault(key, sample)
+                self.sources[key], self.tasks[key] = source, task
+            self.catalog = hashlib.sha256(json.dumps(sorted(self.samples)).encode()).hexdigest()
         if not self.samples:
             raise ValueError("Prompt replay requires a nonempty prepared prompt dataset")
-        self.catalog = hashlib.sha256(json.dumps(sorted(self.samples)).encode()).hexdigest()
         self.draws = 0
         self.pending = {}
         self.inflight = set()

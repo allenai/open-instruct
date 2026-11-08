@@ -19,8 +19,15 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
     """
 
     def __init__(self, args, *, provider: prompt_provider.PromptProvider | None = None):
-        super().__init__(args)
         core = getattr(args, "olmo_core", None)
+        if provider is None and getattr(core, "prompt_provider", "shuffle") == "pools":
+            # Initialize upstream buffering without eagerly loading the first source.
+            loader_args = copy.copy(args)
+            loader_args.rollout_global_dataset = False
+            super().__init__(loader_args)
+            self.args = args
+        else:
+            super().__init__(args)
         if provider is not None:
             self.provider = provider
         elif getattr(core, "prompt_provider", "shuffle") in ("mixture", "pools"):
@@ -61,6 +68,10 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
                 dataset_guard=lambda: self.dataset is prepared_dataset,
             )
         self._sync_legacy_cursor()
+
+    def close(self):
+        if close := getattr(self.provider, "close", None):
+            close()
 
     def _sync_legacy_cursor(self):
         # These compatibility fields describe fresh-data traversal, not reviews.
