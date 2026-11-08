@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
-- Reduce Python overhead in GRPO sequence packing while preserving packed tensors and padding behavior (PR link pending).
+- Reduce Python overhead in GRPO sequence packing while preserving packed tensors and padding behavior (https://github.com/allenai/open-instruct/pull/2214).
 - Expose internal symbolic-math timeouts through verifier diagnostics, parent-process warnings, and MILES W&B metrics without changing rewards or fallback comparisons (https://github.com/allenai/open-instruct/pull/2210).
 - Exclude ungraded responses from their MILES prompt group instead of omitting the group: a failed verifier or judge grade now gets zero advantage and a zeroed loss mask and leaves the group baseline (`core.exclude_ungraded`, default true), with `rollout/verification/ungraded_samples` metrics. Reject fully masked groups even when variance filtering is disabled, pin native REINFORCE++ support for masked responses, and preserve raw rewards for REINFORCE++/PPO in truncation exclusion. Managed exclusion now requires its paired group filter (https://github.com/allenai/open-instruct/pull/2209).
 - Update the complete-code client with jittered retries, cancellation of later batches/retries, and queue-inclusive deadlines (https://github.com/allenai/open-instruct/pull/2203).
