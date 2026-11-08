@@ -20,6 +20,7 @@ from open_instruct.ground_truth_utils import (
     LMJudgeVerifier,
     LMJudgeVerifierConfig,
     PuzzleMatcherVerifier,
+    ReSearchVerifierF1,
     RewardConfig,
     cleanup_all_llm_judge_clients,
 )
@@ -157,6 +158,40 @@ class TestF1Verifier(unittest.TestCase):
             places=5,
             msg=f"Failed for {name}: prediction='{prediction}', labels={labels}",
         )
+
+
+class TestReSearchVerifierF1(unittest.TestCase):
+    """ReSearchVerifierF1 needs both finish tags before it gives F1 or the 0.1 format credit."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.verifier = ReSearchVerifierF1()
+
+    @parameterized.expand(
+        [
+            ("both_tags_exact", "<think>hmm</think><finish>Paris</finish>", "Paris", 1.0),
+            ("both_tags_partial", "<finish>Paris France</finish>", "Paris", 2 / 3),
+            ("both_tags_wrong_answer", "<finish>London</finish>", "Paris", 0.1),
+            ("both_tags_list_label", "<finish>Paris</finish>", '["Lyon", "Paris"]', 1.0),
+            ("no_tags", "The answer is Paris.", "Paris", 0.0),
+            ("empty_answer", "<finish></finish>", "Paris", 0.0),
+        ]
+    )
+    def test_well_formed_or_untagged(self, name, prediction, label, expected_score):
+        result = self.verifier([], prediction, label)
+        self.assertAlmostEqual(result.score, expected_score, places=5, msg=name)
+
+    @parameterized.expand(
+        [
+            ("open_tag_only", "<think>hmm</think><finish>Paris", "Paris", 0.0),
+            ("open_tag_only_wrong_answer", "<finish>London", "Paris", 0.0),
+            ("close_tag_only", "I think the answer is Paris</finish>", "Paris", 0.0),
+            ("close_tag_only_wrong_answer", "No idea</finish>", "Paris", 0.0),
+        ]
+    )
+    def test_one_tag_only_scores_zero(self, name, prediction, label, expected_score):
+        result = self.verifier([], prediction, label)
+        self.assertAlmostEqual(result.score, expected_score, places=5, msg=name)
 
 
 class TestGSM8KVerifier(unittest.TestCase):
