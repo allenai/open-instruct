@@ -229,18 +229,6 @@ class PackedSequences(Generic[T]):
     """packed rewards (batch_size, pack_length)"""
 
 
-def reset_position_ids(attention_mask):
-    position_ids = torch.zeros_like(attention_mask, dtype=torch.long)
-    for i in range(attention_mask.size(0)):
-        mask = attention_mask[i]
-        seq_num = mask.max().item()
-        for index in range(1, seq_num + 1):
-            sample_mask = mask == index
-            sample_length = sample_mask.sum().item()
-            position_ids[i, sample_mask] = torch.arange(sample_length, device=mask.device)
-    return position_ids
-
-
 def pack_sequences(
     queries: list[list[int]],
     responses: list[list[int]],
@@ -268,12 +256,8 @@ def pack_sequences(
     """
     assert not any(pad_token_id in query for query in queries)
 
-    # Calculate total tokens to determine effective pack_length
-    total_tokens = 0
-    for query, response in zip(queries, responses):
-        query_len = len(query)
-        response_len = sum(1 for t in response if t != pad_token_id)
-        total_tokens += query_len + response_len
+    response_lengths = [len(response) - response.count(pad_token_id) for response in responses]
+    total_tokens = sum(len(query) + response_length for query, response_length in zip(queries, response_lengths))
 
     # Reduce pack_length if needed to ensure min_num_batches
     # Note: sequences longer than effective_pack_length will naturally get their own pack(s)
@@ -295,6 +279,7 @@ def pack_sequences(
     num_actions = []
     packed_seq_lens = []
     packed_vllm_logprobs = []
+    position_ids = []
     cur_data = []
     cur_response_mask = []
     cur_num_actions = []
@@ -302,47 +287,45 @@ def pack_sequences(
     cur_attention_mask = []
     cur_dones = []
     cur_vllm_logprobs = []
+    cur_position_ids = []
     offset = 0
     for i in range(len(queries)):
         query = queries[i]
-        response = responses[i]
+        original_response = responses[i]
         mask = masks[i]
-        # remove padding (but using vllm so this should not be needed, but just in case)
-        query = [t for t in query if t != pad_token_id]
 
         # Filter out padding tokens from response, mask, and logprobs together
         response_logprobs_unfiltered = vllm_logprobs[i]
 
-        assert len(response_logprobs_unfiltered) == len(response), (
-            f"Response {i}: logprobs length ({len(response_logprobs_unfiltered)}) != response length ({len(response)})"
+        assert len(response_logprobs_unfiltered) == len(original_response), (
+            f"Response {i}: logprobs length ({len(response_logprobs_unfiltered)}) "
+            f"!= response length ({len(original_response)})"
         )
 
-        filtered_response = []
-        filtered_mask = []
-        filtered_logprobs = []
-        for j, (token, mask_val) in enumerate(zip(response, mask)):
-            if token != pad_token_id:
-                filtered_response.append(token)
-                filtered_mask.append(mask_val)
-                filtered_logprobs.append(response_logprobs_unfiltered[j])
-
-        response = filtered_response
-        response_tool_mask = filtered_mask
-        response_logprobs = filtered_logprobs
-
-        query_response = query + response
+        if response_lengths[i] == len(original_response) and len(mask) == len(original_response):
+            response = original_response
+            response_tool_mask = mask
+            response_logprobs = response_logprobs_unfiltered
+        else:
+            response = []
+            response_tool_mask = []
+            response_logprobs = []
+            for j, (token, mask_val) in enumerate(zip(original_response, mask)):
+                if token != pad_token_id:
+                    response.append(token)
+                    response_tool_mask.append(mask_val)
+                    response_logprobs.append(response_logprobs_unfiltered[j])
 
         # Process vLLM logprobs
         # For query tokens, we set logprobs to NaN, for response tokens we use vLLM logprobs
-        query_logprobs = [float("nan")] * len(query)
         assert len(response_logprobs) == len(response), (
             f"Response {i}: logprobs length {len(response_logprobs)} != response length {len(response)}. "
             f"Original lengths before filtering: response={len(responses[i])}, logprobs={len(vllm_logprobs[i])}. "
             f"This can happen if vLLM returns N-1 logprobs for N tokens (missing first token logprob)."
         )
-        combined_logprobs = query_logprobs + response_logprobs
+        sequence_length = len(query) + len(response)
         # only flush if we have data and we exceed the pack length.
-        if len(query_response) + len(cur_data) > effective_pack_length and len(cur_data) > 0:
+        if sequence_length + len(cur_data) > effective_pack_length and len(cur_data) > 0:
             query_responses.append(cur_data)
             response_masks.append(cur_response_mask)
             attention_masks.append(cur_attention_mask)
@@ -350,6 +333,7 @@ def pack_sequences(
             packed_seq_lens.append(cur_packed_seq_lens)
             dones.append(cur_dones)
             packed_vllm_logprobs.append(cur_vllm_logprobs)
+            position_ids.append(cur_position_ids)
             cur_data = []
             cur_response_mask = []
             cur_attention_mask = []
@@ -357,17 +341,22 @@ def pack_sequences(
             cur_packed_seq_lens = []
             cur_dones = []
             cur_vllm_logprobs = []
+            cur_position_ids = []
             offset = i
-        cur_data.extend(query_response)
-        cur_vllm_logprobs.extend(combined_logprobs)
+        cur_data.extend(query)
+        cur_data.extend(response)
+        cur_vllm_logprobs.extend([float("nan")] * len(query))
+        cur_vllm_logprobs.extend(response_logprobs)
         cur_num_actions.append(len(response))
-        cur_packed_seq_lens.append(len(query_response))
+        cur_packed_seq_lens.append(sequence_length)
 
-        query_mask = [0] * len(query)
         response_mask = [i + 1 if m else 0 for m in response_tool_mask] if mask_tool_use else [i + 1] * len(response)
-        cur_response_mask.extend(query_mask + response_mask)
-        cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
-        cur_dones.extend([0 for _ in range(len(query) + len(response) - 1)] + [i + 1])
+        cur_response_mask.extend([0] * len(query))
+        cur_response_mask.extend(response_mask)
+        cur_attention_mask.extend([i + 1 - offset] * sequence_length)
+        cur_dones.extend([0] * (sequence_length - 1))
+        cur_dones.append(i + 1)
+        cur_position_ids.extend(range(sequence_length))
 
     # Handle leftover data
     if len(cur_data) > 0:
@@ -378,18 +367,23 @@ def pack_sequences(
         packed_seq_lens.append(cur_packed_seq_lens)
         dones.append(cur_dones)
         packed_vllm_logprobs.append(cur_vllm_logprobs)
-    attention_masks_list = [torch.tensor(t) for t in attention_masks]
+        position_ids.append(cur_position_ids)
+    attention_masks_list = _lists_to_tensors(attention_masks, np.int64)
     return PackedSequences(
-        query_responses=[torch.tensor(t) for t in query_responses],
+        query_responses=_lists_to_tensors(query_responses, np.int64),
         attention_masks=attention_masks_list,
-        position_ids=[reset_position_ids(t.unsqueeze(0)).squeeze(0) for t in attention_masks_list],
-        response_masks=[torch.tensor(t, dtype=torch.long) for t in response_masks],
+        position_ids=_lists_to_tensors(position_ids, np.int64),
+        response_masks=_lists_to_tensors(response_masks, np.int64),
         original_responses=responses,
-        num_actions=[torch.tensor(t) for t in num_actions],
-        packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
-        dones=[torch.tensor(t) for t in dones],
-        vllm_logprobs=[torch.tensor(t, dtype=torch.float) for t in packed_vllm_logprobs],
+        num_actions=_lists_to_tensors(num_actions, np.int64),
+        packed_seq_lens=_lists_to_tensors(packed_seq_lens, np.int64),
+        dones=_lists_to_tensors(dones, np.int64),
+        vllm_logprobs=_lists_to_tensors(packed_vllm_logprobs, np.float32),
     )
+
+
+def _lists_to_tensors(values, dtype):
+    return [torch.from_numpy(np.asarray(value, dtype=dtype)) for value in values]
 
 
 def print_diff(actual: torch.Tensor, expected: torch.Tensor):

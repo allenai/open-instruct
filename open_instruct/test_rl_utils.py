@@ -157,6 +157,37 @@ class TestRLUtils(unittest.TestCase):
         torch.testing.assert_close(packed.response_masks[0].bool(), torch.tensor(expected_mask_0, dtype=torch.bool))
         torch.testing.assert_close(packed.response_masks[1].bool(), torch.tensor(expected_mask_1, dtype=torch.bool))
 
+    def test_pack_sequences_filters_padding_without_changing_aligned_fields(self):
+        responses = [[4, 0, 5], [0, 6]]
+        packed = rl_utils.pack_sequences(
+            queries=[[1, 2], [3]],
+            responses=responses,
+            masks=[[1, 0, 1], [0, 1]],
+            pack_length=10,
+            pad_token_id=0,
+            vllm_logprobs=[[0.1, 0.2, 0.3], [0.4, 0.5]],
+            mask_tool_use=True,
+        )
+
+        self.assertEqual(packed.original_responses, responses)
+        assert packed.position_ids is not None
+        assert packed.num_actions is not None
+        assert packed.packed_seq_lens is not None
+        assert packed.dones is not None
+        assert packed.vllm_logprobs is not None
+        torch.testing.assert_close(packed.query_responses[0], torch.tensor([1, 2, 4, 5, 3, 6]))
+        torch.testing.assert_close(packed.attention_masks[0], torch.tensor([1, 1, 1, 1, 2, 2]))
+        torch.testing.assert_close(packed.position_ids[0], torch.tensor([0, 1, 2, 3, 0, 1]))
+        torch.testing.assert_close(packed.response_masks[0], torch.tensor([0, 0, 1, 1, 0, 2]))
+        torch.testing.assert_close(packed.num_actions[0], torch.tensor([2, 1]))
+        torch.testing.assert_close(packed.packed_seq_lens[0], torch.tensor([4, 2]))
+        torch.testing.assert_close(packed.dones[0], torch.tensor([0, 0, 0, 1, 0, 2]))
+        torch.testing.assert_close(
+            packed.vllm_logprobs[0],
+            torch.tensor([float("nan"), float("nan"), 0.1, 0.3, float("nan"), 0.5]),
+            equal_nan=True,
+        )
+
     def test_calculate_advantages_packed(self):
         """Test that calculate_advantages_packed produces same results as unpacked version."""
         _, _, pad_token_id = get_test_data()
