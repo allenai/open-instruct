@@ -14,6 +14,8 @@
 #   sct    ledger H196 (s-c): b1r on B2 tmax (step22320), two passes over the union (--num_epochs 2), seed 34521;
 #   scn    the same on B2 noag (step21159). S_R=<steps> from H196 R4'; permanent checkpoint at the end of epoch 1.
 #   scb    the same on B1 (step20000, b1r's base and HF reference): S-C on B1, the owner's 2026-11-06 order.
+#   c14f   ledger H202 (c14f-b1): b1r with the fixed C14 add-on cache as a second extra dir, before the replay
+#          (C14F_ADDONS, the cache c14f_tok.sh wrote, then H202's 10% replay dir); S_R=<steps> from H202 R4'.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -76,6 +78,12 @@ case "$ARM" in
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h182-gpu; DESC="ledger H182 b1-c12r-gpu"
          STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14 ;;
+    c14f) MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
+         HF_REF=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed
+         C=/weka/olmo-3p5-post-checkpoints/abhishekr/c14f
+         LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs ${C14F_ADDONS:-$C/cache/numpy_sft/7ea1dfa878-6068a350-rowaligned} $C/replay"
+         OUT_ROOT=$C; DESC="ledger H202 c14f-b1"
+         STEPS="${S_R:?S_R=<steps from H202 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=18 ;;
     sct|scn|scb) B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
          if [[ "$ARM" == scb ]]; then
              MODEL=$B/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
@@ -101,13 +109,14 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == sct ]] && RUN_NAME="s-c-tmax-s${SEED}"
 [[ "$ARM" == scn ]] && RUN_NAME="s-c-noag-s${SEED}"
 [[ "$ARM" == scb ]] && RUN_NAME="s-c-b1-s${SEED}"
+[[ "$ARM" == c14f ]] && RUN_NAME="c14f-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
     resume) STEPS=30; CKPT=1000000; SAVE_EVERY=10; HOLD_AT=19; HOURS=2; RUN_NAME="${RUN_NAME}-resume"
            MIN_RUNTIME="${MIN_RUNTIME:-5m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-1}"
            MAX_RETRIES="${MAX_RETRIES:-1}" ;;
-    train) MIN_RUNTIME="${MIN_RUNTIME:-1h}"; ENTRY=open_instruct/olmo_core_finetune.py; AUTO_RESUME="${AUTO_RESUME:-1}" ;;
+    train) MIN_RUNTIME="${MIN_RUNTIME:-$([[ "$ARM" == c14f ]] && echo 45m || echo 1h)}"; ENTRY=open_instruct/olmo_core_finetune.py; AUTO_RESUME="${AUTO_RESUME:-1}" ;;
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
 esac
 TIMEOUT="${TIMEOUT:-${HOURS}h}"
