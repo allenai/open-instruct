@@ -121,21 +121,39 @@ def test_no_failures_match_native_rewards_exactly(runtime, estimator, normalize,
         assert not any(value.remove_sample for value in actual_samples)
 
 
+@pytest.fixture(params=["exception", "service_error", "judge_error", "nonfinite"])
+def failed_grading(monkeypatch, request):
+    async def verify(tokens, response, target, **kwargs):
+        if response != "unavailable":
+            return SimpleNamespace(score=float(response), cost=0.0)
+        if request.param == "exception":
+            raise RuntimeError("injected verifier outage")
+        if request.param == "nonfinite":
+            return SimpleNamespace(score=float("nan"), cost=0.0)
+        return SimpleNamespace(score=0.0, cost=0.0, diagnostics={"status": "service_error"})
+
+    async def judge(args, value, *, name, target, prediction):
+        failed = prediction == "unavailable"
+        value.metadata.setdefault("verifier_diagnostics", {})[name] = {
+            "kind": "general_judge",
+            "status": "judge_error" if failed else "completed",
+        }
+        return 0.0 if failed else float(prediction)
+
+    monkeypatch.setattr(rewards, "_registry", lambda path: {"test": SimpleNamespace(async_call=verify)})
+    monkeypatch.setattr(rewards.judge_registry, "bound", lambda name: request.param == "judge_error")
+    monkeypatch.setattr(rewards.general_judge, "general_judge_score", judge)
+
+
 @pytest.mark.parametrize("estimator", ESTIMATORS)
 @pytest.mark.parametrize("normalize", [False, True])
 @pytest.mark.parametrize("variance_filter", [False, True])
 @pytest.mark.parametrize("all_zero", [False, True])
 def test_failed_grades_through_filter_returns_and_backward(
-    training_runtime, monkeypatch, estimator, normalize, variance_filter, all_zero
+    training_runtime, failed_grading, estimator, normalize, variance_filter, all_zero
 ):
     runtime = training_runtime
 
-    async def verify(tokens, response, target, **kwargs):
-        if response == "unavailable":
-            raise RuntimeError("injected verifier outage")
-        return SimpleNamespace(score=float(response), cost=0.0)
-
-    monkeypatch.setattr(rewards, "_registry", lambda path: {"test": SimpleNamespace(async_call=verify)})
     args = arguments(estimator, normalize, True)
     args.olmo_core = CoreConfig(reward_config="unused", filter_zero_std_groups=variance_filter)
     args.custom_reward_post_process_path = EXCLUDE_UNGRADED
