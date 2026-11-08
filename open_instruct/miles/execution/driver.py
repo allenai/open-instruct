@@ -344,7 +344,10 @@ async def train(args, *, export_hf=None):
         # Otherwise the first process creates the final directory and the resumed
         # process cannot export its newer weights there (the exporter is exclusive).
         reached_end = (completed[-1] + 1 if completed else args.start_rollout_id) == args.num_rollout
-        if export_hf is not None and (reached_end or final_stop):
+        # Finite exhaustion is successful even before the first update, but there
+        # are no trained weights to export in that case. A resumed run has them.
+        untrained_exhaustion = exhausted and not completed and args.start_rollout_id == 0
+        if export_hf is not None and (reached_end or final_stop) and not untrained_exhaustion:
             if args.fully_async:
                 await manager.core_publication_boundary(True)
             with stage(args, "final_hf_export"):

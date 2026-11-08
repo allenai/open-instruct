@@ -70,6 +70,8 @@ class FeedbackRecorder(inference_records.Recorder):
             raise RuntimeError("Could not construct prompt feedback record")
 
     def record_disposition(self, samples, *, accepted, staleness):
+        # The discard callback may report this again; feedback is intentionally
+        # idempotent so recorder and buffer terminal paths can both be observed.
         source = self._source()
         if source is not None and hasattr(source.provider, "commit") and not accepted:
             source.feedback(

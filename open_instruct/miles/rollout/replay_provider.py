@@ -37,7 +37,18 @@ def identity(sample):
         default=str,
     )
     task = hashlib.sha256(raw.encode()).hexdigest()
-    return f"{source}:{task}", source, task
+    # Native task identity omits weights and other verifier configuration. Replay
+    # must distinguish those rows or its catalog can substitute another reward.
+    # Hash only the remaining fields here to avoid serializing large targets twice.
+    reward_config = [
+        {key: value for key, value in verifier.items() if key not in ("name", "target")}
+        for verifier in metadata.get("verifiers", [])
+    ]
+    row_identity = {key: metadata[key] for key in ("prepared_sample_id", "record_id") if key in metadata}
+    replay_key = hashlib.sha256(
+        json.dumps([task, reward_config, row_identity], sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+    return f"{source}:{replay_key}", source, task
 
 
 class ReplayPromptProvider:

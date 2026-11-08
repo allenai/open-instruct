@@ -151,6 +151,52 @@ def test_source_local_window_does_not_respond_to_shorter_other_source():
     assert not p._eligible()
 
 
+@pytest.mark.parametrize("field", ["weight", "prepared_sample_id", "record_id"])
+def test_replay_preserves_reward_and_row_identity_for_otherwise_identical_rows_on_resume(field):
+    samples = [
+        SimpleNamespace(
+            prompt=prompt,
+            metadata={"origin_id": "math", "verifiers": [{"name": "math", "target": "42", "weight": weight}]},
+        )
+        for prompt, weight in [("same", 1), ("same", 1), ("shorter", 1)]
+    ]
+    if field == "weight":
+        samples[1].metadata["verifiers"][0][field] = 0.5
+    else:
+        samples[0].metadata[field], samples[1].metadata[field] = "first", "second"
+
+    def make(rows):
+        return replay_provider.ReplayPromptProvider(
+            Base(rows), rows, fraction=1, window=1, length_drop=0.2, max_successes=0, truncation="none"
+        )
+
+    p = make(samples)
+    assert len(p.samples) == 3
+    # Native task identity stays comparable to inference records, while replay
+    # identity additionally binds the full verifier configuration.
+    assert replay_provider.identity(samples[0])[2] == replay_provider.identity(samples[1])[2]
+    p.feedback([record(p.next_samples(1)[0], rewards=(0, 1))])
+    failed = p.next_samples(1)[0]
+    p.feedback([record(failed)])
+    p.feedback([record(p.next_samples(1)[0], rewards=(0, 1), tokens=70)])
+    state = p.state_dict()
+    restored = make(samples)
+    restored.load_state_dict(state)
+    for current in (p, restored):
+        replay = current.next_samples(1)[0]
+        assert replay.metadata[replay_evidence.REPLAY]
+        assert replay.metadata[replay_evidence.KEY] == failed.metadata[replay_evidence.KEY]
+        assert replay.metadata["verifiers"] == failed.metadata["verifiers"]
+        if field == "weight":
+            assert replay.metadata["verifiers"][0]["weight"] == 0.5
+        else:
+            assert replay.metadata[field] == "second"
+    changed = copy.deepcopy(samples)
+    changed[1].metadata["verifiers"][0]["weight"] = 0.75
+    with pytest.raises(RuntimeError, match="checkpoint mismatch for catalog"):
+        make(changed).load_state_dict(state)
+
+
 def test_duplicate_abort_acknowledgement_and_failed_replay_cooldown():
     p = provider(length_drop=0, window=1)
     first = p.next_samples(1)[0]

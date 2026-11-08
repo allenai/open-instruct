@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Bind MILES prompt replay identity to the full verifier configuration so retries preserve verifier weights; earlier replay catalogs require a new run (https://github.com/allenai/open-instruct/pull/2187).
 - MILES standalone/training scoring drift between the configured tolerance and ten times that tolerance now warns and continues instead of stopping (defaults 0.001/0.01); this affects every run using the scoring-check path, including explicit tolerances (https://github.com/allenai/open-instruct/pull/2187).
 
 ### Added

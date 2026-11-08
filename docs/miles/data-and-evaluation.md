@@ -881,9 +881,9 @@ unchanged by the sampler; an eight-response recipe remains eight-response.
 | Exposure controller only | Delivery estimate `(trained + 1)/(terminal + 2)`, floored at 0.05; target deficit corrected over a 64-group horizon. Proposal weights are bounded to `[0.25, 5]`, limiting draw ratios to 20:1. |
 | Exposure target only | Each trained group's unit target is divided over the pools active when it was drawn. Inactive pools accrue no new target from later draws. Exact equality is not promised after pools empty or for sources with effectively zero delivery. |
 | Replay | Within the selected pool, eligible retries may replace a fresh draw. The replay fraction caps that pool's proposed draws. In global shuffle, a retry does not advance the fresh permutation; after it drains, immediately budget-eligible replays are selected uniformly across available pools. Draw counters do not advance for inactive pools, so replay stops at the first non-replay slot after fresh exhaustion; unused earlier slots are not accumulated. |
-| Replay trigger | Existing PR 2187 history, with fresh-response length windows scoped to source within pool. Invalid verifier results are separate from valid zeros. |
+| Replay trigger | The low-success history described above, with fresh-response length windows scoped to source within pool. Invalid verifier results are separate from valid zeros. |
 | Exhaustion | A pool without fresh rows or a budget-eligible replay is inactive. Once all pools and outstanding generation drain, an incomplete final collection is not trained; the last completed checkpoint is saved when configured. |
-| Stale work | Pool mode defaults to `async_unused_samples_handler="drop"`; explicit retry is rejected. Drops release reservations. |
+| Stale work | Pool mode defaults to `async_unused_samples_handler="drop"`; explicit retry is rejected. Drops release reservations; dropped fresh rows are not redrawn, so complete traversal does not imply complete observed or trained coverage. |
 | Recovery | Manifest and selection-policy identity, cursors, RNG, targets, delivery counters, reservations, and replay histories are checkpointed with pending prompts. |
 
 The first implementation supports fully asynchronous disaggregated serving,
@@ -945,6 +945,10 @@ Replay uses that field first, then `source_dataset`, then the configured physica
 `mixture_source`. Thus multiple original datasets can share a file and pool without
 sharing response-length windows or prompt histories. Pool membership and all four
 sampling policies remain independent of these identities.
+Replay keys additionally bind prepared/record IDs and the full verifier configuration, including weights,
+so identical rendered tasks with different reward settings cannot substitute for
+one another. The native inference-record task key stays unchanged. Earlier replay
+catalog checkpoints reject restore under this stronger identity.
 
 Producers may supply immutable `release_id`, `record_id`, and `labeling_version`
 in row metadata, alongside original `source_dataset`/`source_row` provenance and
@@ -956,7 +960,9 @@ new run. The consumer does not infer cleaning or labeling rules from these field
 Pending selection checkpoints retain only accounting identities, not verifier targets.
 
 Finite exhaustion marks the workflow complete, so automatic resume cannot restart
-it or repeat its final export. Inline evaluation still follows its configured
+it or repeat its final export. A fresh run exhausted before its first optimizer
+update completes without exporting an untrained final model. A resumed run can
+still export its previously trained weights. Inline evaluation follows its configured
 periodic cadence; exhaustion does not add an off-cadence inline evaluation.
 Background final evaluation follows the existing final-export path.
 
