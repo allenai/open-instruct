@@ -104,6 +104,9 @@ def engine(model, cached, tiny=False, native=False):
         skip_tokenizer_init=True,
         trust_remote_code=True,
         dtype="bfloat16",
+        attention_backend="torch_native" if tiny else "triton",
+        sampling_backend="pytorch",
+        page_size=1,
         disable_radix_cache=not cached,
         mamba_radix_cache_strategy="extra_buffer",
         weight_version="0",
@@ -119,8 +122,6 @@ def engine(model, cached, tiny=False, native=False):
         chunked_prefill_size=256 if tiny else 4096,
         mem_fraction_static=0.15 if tiny else 0.65,
     )
-    if tiny:
-        args["attention_backend"] = "torch_native"
     if cached and not native:
         args["radix_cache_backend"] = "olmo_policy_versioned_v1"
     return sgl.Engine(**args)
