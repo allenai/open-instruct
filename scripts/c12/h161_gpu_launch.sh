@@ -14,7 +14,8 @@
 #   a4b    descriptive A4B run: b1r's recipe and S_R on the Olmo 3.5 Small hero 4T decay endpoint (registry
 #          olmo35-4b-active-4t-decay159k-causal), peak LR 7.3e-5 (2e-4 x 4.04e-4 / 1.1e-3), its own model config
 #          (scripts/c12/a4b_sft_config.json: EMO off, sync_1d EP, recompute on, attention flash_2 because the image's FA4 rejects
-#          head_dim 256 on SM100) at --expert_parallel_degree 8. The smoke
+#          head_dim 256 on SM100) at --expert_parallel_degree 8, with --loss_implementation fused_linear (the default CE
+#          materialised 24.5 GiB of logits and OOMed at 235 GiB allocated per B300 in smoke 01M6XRDCCY49SEAJ5NPNCDEHFW). The smoke
 #          runs 100 steps and seeds the promoted rows of the unseeded HF export in memory for the reference CE, under
 #          transformers 5.15.1 (the export's remote code).
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
@@ -89,7 +90,7 @@ case "$ARM" in
          CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=100; SMOKE_HOURS=2; REF_TRANSFORMERS=5.15.1
          # <think> and </think> promoted into slots 100256 and 100266, seeded from their dolma2 pieces.
          SEED_ROWS='[[100256, [14023, 771, 29]], [100266, [524, 27963, 29]]]'
-         LR=7.3e-5; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8"
+         LR=7.3e-5; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8 --loss_implementation fused_linear"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-gpu; DESC="ledger A4B half-epoch C12r (descriptive)"
          STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=72 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
