@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Added
+- Update the complete-code client with jittered retries, cancellation of later batches/retries, and queue-inclusive deadlines (https://github.com/allenai/open-instruct/pull/2203).
 - Fix R1 format scoring with optional final-answer verifier dispatch while preserving existing math, code, and raw-response behavior (https://github.com/allenai/open-instruct/pull/2188).
 - Let MILES scoring callers explicitly raise or zero reported service/judge failures; preserve zero fallback for distillation and ordinary evaluation, strict offline qualification, and training group omission (https://github.com/allenai/open-instruct/pull/2178).
 - Fix reasoning-panel GPQA/context budgets, normalize SciCode disabled top-k, and retain independent evaluation progress after task failures (https://github.com/allenai/open-instruct/pull/2136).
