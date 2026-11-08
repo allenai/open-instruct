@@ -61,7 +61,8 @@ It is not a sum of independently balanced response losses.
 
 ## Router replay and parallelism
 
-Enable both `use_rollout_routing_replay=true` and `use_miles_router=true`. The
+Enable `use_rollout_routing_replay=true`. Core uses the standard Rust router by
+default; the pinned router preserves expert IDs and policy-version spans. The
 captured IDs travel with each sample through DP distribution and packing. The
 adapter aligns replay by document/token/layer and retains it across backward
 recomputation. Each sample's final unscored token has an explicit synthetic tail;
@@ -72,6 +73,13 @@ A replay match verifies supplied assignments; it does not measure what the train
 would have selected without replay.
 
 ## Checkpoints and publication
+
+Refresh publication pauses and resumes inference at the engines without waiting
+for producer admission acknowledgments. The driver still waits for publication
+and the rollout executor's weight-version update before consuming the next batch.
+On a failed refresh run, cleanup cancels outstanding producer work instead of
+draining requests that may be waiting on paused engines. Shared-engine evaluation
+and successful shutdown retain their separate generation-drain boundaries.
 
 SGLang starts from HF config/tokenizer/weights. Core imports those weights into
 its native training representation. Updated policies are streamed directly as
@@ -132,7 +140,7 @@ The async producer remains paused until the check completes.
 The interval defaults to zero, leaving these periodic probes disabled. The maintained
 examples inherit that default. The dev mechanics example enables
 `check_weight_update_equal=true`: the full weight audit runs at startup, including
-resume, and does not run after ordinary training updates. The node and large
+resume, and does not run after ordinary training updates. The node and three-node
 learning examples disable this optional audit. Reserve a positive
 interval for investigating publication correctness. This interval
 also controls the extra gradient-norm and sampled-parameter-update diagnostics;
@@ -296,3 +304,36 @@ The option targets training-versus-serving probability mismatch; its effect on
 learning is not established. FP32 logits double that output tensor's storage;
 measure training memory and step cost for the chosen token/vocabulary sizes. See
 [development defaults](development-defaults.md#opt-in-features).
+
+
+## Prepared batch overlap
+
+`core.prepared_batch_overlap` defaults to `true`. It applies to fully asynchronous,
+disaggregated refresh runs with one optimizer update per collection, publication
+every update, and completed-buffer capacity of at least one collection. Other
+schedules retain sequential acquisition; set the option to `false` to disable it.
+Startup logs report the first unmet eligibility condition when overlap is disabled.
+
+While update N trains, the executor reserves and prepares one batch for the
+currently published policy version plus one. It runs the existing sample
+postprocessing, diagnostic submission, reward normalization, conversion and
+object-store handoff. GPU packing, current-policy scoring and trainer validation
+still run on the trainer. Publication must report the predicted version before
+this batch can be consumed; an unexpected version fails rather than training on
+an incorrectly selected batch.
+
+Reserved prompt groups remain in the checkpoint ledger until consumption. They
+also occupy their original completed-buffer slots, so prefetch does not increase
+the configured pipeline depth. Checkpoints regenerate prepared-but-unused prompts
+on resume. Cancellation joins collection on the producer loop, requeues pristine
+prompts and releases prepared object-store references. Shared-engine evaluation
+keeps sequential acquisition because its generation-drain boundary temporarily
+changes buffer capacity.
+
+`rollout/prepared_batch/*` reports preparation duration, executor-side consumer
+wait and how long the batch was ready before consumption. Continue using the
+driver's `generation_wait` stage for the full exposed wait: executor metrics do
+not include RPC dispatch delay. The completed-queue consumer-wait metric identifies
+waiting for eligible generations within preparation. A longer preparation time
+can therefore be harmless overlap, or genuine inference wait; inspect these
+metrics together.

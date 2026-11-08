@@ -1,36 +1,55 @@
 """Post-training panel configuration, execution boundaries and completion checks."""
 
+import base64
 import copy
 import hashlib
 import json
 import subprocess
+import threading
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation, evaluation_runner
+from open_instruct.miles.execution import workflow
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def large():
-    return RunSpec.load(ROOT / "configs/miles/examples/large.toml")
+def three_node():
+    return RunSpec.load(ROOT / "configs/miles/examples/three-node.toml")
 
 
-def test_large_panel_preserves_protocols_and_before_after_cadence(large):
-    tasks = large.evaluation["tasks"]
+def test_node_uses_periodic_native_background_evaluation():
+    node = RunSpec.load(ROOT / "configs/miles/examples/node.toml")
+    assert node.evaluation["mode"] == "background"
+    assert [p["update"] for p in node.plan()["evaluation"]["milestones"]] == [0, 50, 100, 150, 200]
+    assert {t["task"] for t in node.evaluation["tasks"]} == {"gsm8k", "gsm8k:platinum", "ifeval_ood"}
+    assert "eval_prompt_data" not in node.compile().miles
+    assert "eval_interval" not in node.compile().miles
+    assert node.launch["secrets"]["BEAKER_TOKEN"]
+
+
+def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_node):
+    tasks = three_node.evaluation["tasks"]
     assert len(tasks) == len({task["task"] for task in tasks}) == 25
-    assert all(not task["generation"] and not task["scoring"] for task in tasks)
-    milestones = large.plan()["evaluation"]["milestones"]
+    assert all(not task["scoring"] for task in tasks)
+    assert {t["task"]: t["generation"] for t in tasks if t["generation"]} == {
+        "omega_500:hillclimb": {"max_tokens": "null"},
+        "omega_500_out": {"max_tokens": "null"},
+    }
+    milestones = three_node.plan()["evaluation"]["milestones"]
     assert [point["update"] for point in milestones] == [0, 200]
     assert all(sum(map(len, point["groups"])) == 25 for point in milestones)
-    assert len(milestones[0]["groups"]) == 5
+    assert len(milestones[0]["groups"]) == 6
     # Extending the run never introduces periodic full-panel evaluations.
-    document = large.to_dict()
+    document = three_node.to_dict()
     document["training"]["num_rollouts"] = 2500
     extended = RunSpec.from_dict(document)
     assert [point["update"] for point in extended.plan()["evaluation"]["milestones"]] == [0, 2500]
@@ -39,8 +58,8 @@ def test_large_panel_preserves_protocols_and_before_after_cadence(large):
     assert sum(map(len, evaluation.groups(extended.evaluation, 2500, 2500))) == 25
 
 
-def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(large, tmp_path, monkeypatch):
-    document = large.to_dict()
+def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three_node, tmp_path, monkeypatch):
+    document = three_node.to_dict()
     document["output"]["root"] = str(tmp_path / "run")
     document["training"]["num_rollouts"] = 2500
     run = RunSpec.from_dict(document)
@@ -64,27 +83,27 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(large
     manager.dispatch(0, initial)
     manager.worker.join(5)
     assert not manager.worker.is_alive()
-    assert len(calls) == 5
+    assert len(calls) == 6
     for update in (1, 999, 1000, 2000, 2499):
         assert evaluation.training_snapshot(args, update) is None
         manager.dispatch(update, "unused-checkpoint")
-    assert len(calls) == 5
+    assert len(calls) == 6
     final = Path(evaluation.training_snapshot(args, 2500))
     final.mkdir(parents=True)
     (final / ".complete").touch()
     manager.dispatch(2500, final)
     manager.worker.join(5)
     assert not manager.worker.is_alive()
-    assert len(calls) == 10
+    assert len(calls) == 12
 
     receipts = [
         json.loads(path.read_text())
         for path in (Path(run.output["root"]) / "evaluation").glob("update-*.json")
         if not path.name.endswith(".beaker.json")
     ]
-    assert len(receipts) == 10
+    assert len(receipts) == 12
     assert {r["status"] for r in receipts} == {"submitted"}
-    assert {r["experiment_id"] for r in receipts} == {f"experiment-{i}" for i in range(1, 11)}
+    assert {r["experiment_id"] for r in receipts} == {f"experiment-{i}" for i in range(1, 13)}
     assert {r["update"] for r in receipts} == {0, 2500}
     for update, checkpoint in ((0, initial), (2500, final)):
         endpoint = [r for r in receipts if r["update"] == update]
@@ -94,8 +113,8 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(large
             run.evaluation["tasks"], key=lambda task: task["task"]
         )
         assert all(r["training"] == training and r["evaluation"]["revision"] == config["revision"] for r in endpoint)
-    for specs in (calls[:5], calls[5:]):
-        assert sorted(spec["tasks"][0]["resources"]["gpuCount"] for spec in specs) == [1, 1, 1, 2, 2]
+    for specs in (calls[:6], calls[6:]):
+        assert sorted(spec["tasks"][0]["resources"]["gpuCount"] for spec in specs) == [1, 1, 1, 1, 2, 2]
         for spec in specs:
             job = spec["tasks"][0]
             assert job["image"] == {"beaker": config["image"]}
@@ -106,17 +125,113 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(large
     resumed.dispatch(0, initial)
     resumed.dispatch(2500, final)
     assert resumed.worker is None
-    assert len(calls) == 10
+    assert len(calls) == 12
 
 
-def test_panel_groups_keep_execution_requirements_separate(large):
-    groups = evaluation.groups(large.evaluation, 0, 200)
-    assert sorted(map(len, groups)) == [1, 1, 1, 5, 17]
+def test_panel_groups_keep_execution_requirements_separate(three_node):
+    groups = evaluation.groups(three_node.evaluation, 0, 200)
+    assert sorted(map(len, groups)) == [1, 1, 1, 2, 5, 15]
     for group in groups:
         for task in group:
             assert task.get("harness", {}) == group[0].get("harness", {})
             assert task.get("harness_preset", "default") == group[0].get("harness_preset", "default")
             assert task.get("kind", "task") == group[0].get("kind", "task")
+
+
+def without_hf_token(three_node):
+    document = three_node.to_dict()
+    for section in ("launch", "evaluation"):
+        document[section]["secrets"].pop("HF_TOKEN", None)
+    return document
+
+
+def test_gated_panel_requires_job_secret_even_with_local_token(three_node, monkeypatch):
+    document = without_hf_token(three_node)
+    monkeypatch.setenv("HF_TOKEN", "local-token-is-not-forwarded")
+    with pytest.raises(InputError) as error:
+        RunSpec.from_dict(document).plan()
+    message = str(error.value)
+    for task in document["evaluation"]["tasks"]:
+        if task.get("auxiliary_gpus"):
+            assert task["task"] in message
+    assert "allenai/wildguard" in message and "google/gemma-2b" in message
+    assert "gpqa_diamond" in message and "gpqa_main:cot" in message and "Idavidrein/gpqa" in message
+    assert "evaluation.secrets.HF_TOKEN" in message and "launch.secrets.HF_TOKEN" in message
+    assert "local-token-is-not-forwarded" not in message
+
+
+@pytest.mark.parametrize("model", ["allenai/wildguard", "google/gemma-2b"])
+@pytest.mark.parametrize("field", ["model", "tokenizer"])
+def test_gated_judge_guard_uses_model_not_task_or_provider_name(three_node, model, field):
+    document = without_hf_token(three_node)
+    document["evaluation"]["tasks"] = [
+        {
+            "task": "custom-task",
+            "harness": {
+                "auxiliary_providers.custom.kind": "vllm_server",
+                f"auxiliary_providers.custom.{field}": model,
+            },
+        }
+    ]
+    with pytest.raises(InputError, match="custom-task"):
+        RunSpec.from_dict(document).plan()
+
+
+@pytest.mark.parametrize("task", ["gpqa_diamond", "gpqa_main:cot"])
+def test_gated_dataset_guard_rejects_gpqa_without_secret(three_node, task):
+    document = without_hf_token(three_node)
+    document["evaluation"]["tasks"] = [{"task": task}]
+    with pytest.raises(InputError, match="Idavidrein/gpqa"):
+        RunSpec.from_dict(document).plan()
+
+
+@pytest.mark.parametrize("source", ["launch", "evaluation", "both"])
+def test_gated_judge_secret_inheritance_and_override_reach_job(three_node, source):
+    document = without_hf_token(three_node)
+    if source in ("launch", "both"):
+        document["launch"]["secrets"]["HF_TOKEN"] = "training-hf"
+    if source in ("evaluation", "both"):
+        document["evaluation"]["secrets"]["HF_TOKEN"] = "evaluation-hf"
+    spec = RunSpec.from_dict(document)
+    planned = spec.plan()["evaluation"]
+    expected = "training-hf" if source == "launch" else "evaluation-hf"
+    assert planned["secrets"]["HF_TOKEN"] == expected
+    for group in evaluation.groups(spec.evaluation, 0, 200):
+        receipt = {
+            "evaluation": evaluation.runtime(spec, spec.compile().miles),
+            "training": {"name": spec.name},
+            "tasks": group,
+            "update": 0,
+            "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
+        }
+        job = evaluation.specification(receipt)["tasks"][0]
+        assert {"name": "HF_TOKEN", "secret": expected} in job["envVars"]
+
+
+@pytest.mark.parametrize("case", ["local", "public", "remote", "disabled", "no-judges"])
+def test_gated_judge_guard_allows_evaluations_without_gated_downloads(three_node, case):
+    document = without_hf_token(three_node)
+    config = document["evaluation"]
+    for task in config["tasks"]:
+        harness = task.get("harness", {})
+        for key in list(harness):
+            if not key.endswith(".model"):
+                continue
+            if case == "local":
+                harness[key] = "/weka/judges/downloaded-model"
+            elif case == "public":
+                harness[key] = "Qwen/Qwen3-8B"
+            elif case == "remote":
+                harness[key.removesuffix(".model") + ".base_url"] = "http://judge:8000/v1"
+    if case == "disabled":
+        config.update(initial=False, final=False, interval=0)
+        for task in config["tasks"]:
+            task["interval"] = 0
+    elif case == "no-judges":
+        config["tasks"] = [task for task in config["tasks"] if not task.get("auxiliary_gpus")]
+    if case != "disabled":
+        config["tasks"] = [task for task in config["tasks"] if not task["task"].startswith("gpqa")]
+    assert "HF_TOKEN" not in RunSpec.from_dict(document).plan()["evaluation"]["secrets"]
 
 
 @pytest.mark.parametrize(
@@ -136,26 +251,30 @@ def test_panel_groups_keep_execution_requirements_separate(large):
         ({"task": "scicode", "kind": "external", "arguments": {"split": "validation"}}, "reference data"),
     ],
 )
-def test_invalid_panel_settings_fail_before_launch(large, patch, message):
-    config = copy.deepcopy(large.evaluation)
+def test_invalid_panel_settings_fail_before_launch(three_node, patch, message):
+    config = copy.deepcopy(three_node.evaluation)
     config["tasks"] = [{"task": "ifeval", **patch}]
     with pytest.raises(InputError, match=message):
-        evaluation.parse(config, large.launch)
+        evaluation.parse(config, three_node.launch)
 
 
-def test_harness_options_precede_task_overrides(large):
-    task = next(task for task in large.evaluation["tasks"] if task["task"] == "harmbench:wg_judge_thinking")
+def test_harness_options_precede_task_overrides(three_node):
+    task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "harmbench:wg_judge_thinking")
     task = {**task, "scoring": {"limit": 2}}
-    args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": [task]}, "/results")
+    args = evaluation_runner.command(
+        {"checkpoint": "/frozen/hf", "tasks": [task], "evaluation": three_node.evaluation}, "/results"
+    )
     index = args.index("--task")
     assert "auxiliary_providers.wg_judge.model=allenai/wildguard" in args[:index]
-    assert "provider.base_url=http://127.0.0.1:30000/v1" in args[:index]
+    assert "provider.kind=sglang" in args[:index]
     assert "limit=2" in args[index:]
 
 
-def test_scicode_uses_external_cli_with_frozen_server(large):
-    task = next(task for task in large.evaluation["tasks"] if task["task"] == "scicode")
-    args = evaluation_runner.command({"checkpoint": "/frozen/hf", "tasks": [task]}, "/results")
+def test_scicode_uses_external_cli_with_frozen_server(three_node):
+    task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "scicode")
+    args = evaluation_runner.command(
+        {"checkpoint": "/frozen/hf", "tasks": [task], "evaluation": three_node.evaluation}, "/results"
+    )
     assert args[:2] == ["olmo-eval", "run-external"]
     assert args[args.index("--model") + 1] == "/frozen/hf"
     assert args[args.index("--base-url") + 1] == "http://127.0.0.1:30000/v1"
@@ -163,11 +282,11 @@ def test_scicode_uses_external_cli_with_frozen_server(large):
     assert "--task" not in args
 
 
-def test_sandbox_environment_is_only_enabled_for_code_jobs(large):
-    for group in evaluation.groups(large.evaluation, 0, 200):
+def test_sandbox_environment_is_only_enabled_for_code_jobs(three_node):
+    for group in evaluation.groups(three_node.evaluation, 0, 200):
         receipt = {
-            "evaluation": evaluation.runtime(large, large.compile().miles),
-            "training": {"name": large.name},
+            "evaluation": evaluation.runtime(three_node, three_node.compile().miles),
+            "training": {"name": three_node.name},
             "update": 0,
             "tasks": group,
             "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
@@ -244,7 +363,7 @@ def test_mixed_group_requires_predictions_for_every_task(scicode_result, tmp_pat
 
 
 @pytest.mark.parametrize("mask,policy,judge", [("3,7", "3", "7"), (None, "0", "1"), ("GPU-a,GPU-b", "GPU-a", "GPU-b")])
-def test_managed_judges_are_isolated_from_policy(monkeypatch, mask, policy, judge):
+def test_native_planner_sees_policy_and_judge_gpus(monkeypatch, mask, policy, judge):
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     monkeypatch.setenv("PYTHONPATH", "/training/sources")
     if mask is not None:
@@ -252,7 +371,7 @@ def test_managed_judges_are_isolated_from_policy(monkeypatch, mask, policy, judg
     receipt = {"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]}
     policy_env, evaluator_env = evaluation_runner.gpu_environments(receipt)
     assert policy_env["CUDA_VISIBLE_DEVICES"] == policy
-    assert evaluator_env["CUDA_VISIBLE_DEVICES"] == judge
+    assert evaluator_env["CUDA_VISIBLE_DEVICES"] == f"{policy},{judge}"
     assert "PYTHONPATH" not in evaluator_env
     assert policy_env["PYTHONPATH"] == "/training/sources"
 
@@ -263,10 +382,219 @@ def test_managed_judge_rejects_insufficient_gpus(monkeypatch):
         evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
 
 
-def test_panel_manages_safety_judges(large):
-    judges = [task for task in large.evaluation["tasks"] if task.get("auxiliary_gpus")]
+def test_panel_manages_safety_judges(three_node):
+    judges = [task for task in three_node.evaluation["tasks"] if task.get("auxiliary_gpus")]
     assert len(judges) == 6
     assert all(not any(key.endswith("base_url") for key in task["harness"]) for task in judges)
     strongreject = next(task for task in judges if task["task"].startswith("strongreject"))
     assert strongreject["harness"]["auxiliary_providers.sr_judge.model"] == "google/gemma-2b"
     assert strongreject["harness"]["auxiliary_providers.sr_judge.kwargs.enable_lora"] is True
+
+
+@pytest.mark.parametrize("mask", ["", "-1", "0,0", "0,-1", "0,"])
+def test_evaluator_rejects_hidden_duplicate_or_empty_mask_entries(monkeypatch, mask):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
+    with pytest.raises(ValueError, match="visible GPUs"):
+        evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
+
+
+def test_evaluator_keeps_uuid_support_and_trims_mask(monkeypatch):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", " MIG-a , MIG-b ")
+    policy, judge = evaluation_runner.gpu_environments({"evaluation": {"gpus": 1}, "tasks": [{"auxiliary_gpus": 1}]})
+    assert policy["CUDA_VISIBLE_DEVICES"] == "MIG-a"
+    assert judge["CUDA_VISIBLE_DEVICES"] == "MIG-a,MIG-b"
+
+
+@pytest.mark.parametrize("manual", [False, True])
+@pytest.mark.parametrize("normalize", [False, True])
+def test_external_scicode_server_uses_policy_gpus_only(three_node, tmp_path, monkeypatch, manual, normalize):
+    runner = evaluation_runner
+    task = next(task for task in three_node.evaluation["tasks"] if task["task"] == "scicode")
+    task = {**task, "arguments": {**task["arguments"], "h5py_host_path": str(tmp_path / "data.h5")}}
+    (tmp_path / "data.h5").touch()
+    checkpoint = tmp_path / "hf"
+    checkpoint.mkdir()
+    for filename in ("config.json", "tokenizer_config.json"):
+        (checkpoint / filename).write_text("{}")
+    if normalize:
+        (checkpoint / "generation_config.json").write_text(json.dumps({"top_k": 0, "top_p": 0.9}))
+    if manual:
+        three_node.evaluation["provider_kwargs"] = {"profile": "generic"}
+        three_node.evaluation["external_server_args"] = ["--disable-cuda-graph"]
+    receipt = {"tasks": [task], "checkpoint": str(checkpoint), "evaluation": three_node.evaluation}
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3,7")
+    policy, evaluator = runner.gpu_environments(receipt)
+    assert policy["CUDA_VISIBLE_DEVICES"] == "3"
+    assert evaluator["CUDA_VISIBLE_DEVICES"] == ""
+    server = Mock()
+    server.poll.return_value = None
+    start = Mock(return_value=server)
+    monkeypatch.setattr(runner.subprocess, "Popen", start)
+    monkeypatch.setattr(runner.subprocess, "check_output", lambda *a, **kw: three_node.evaluation["revision"])
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/podman")
+    monkeypatch.setattr(runner.shutil, "copytree", Mock())
+    monkeypatch.setattr(runner.request, "urlopen", lambda *a, **kw: nullcontext(Mock(status=200)))
+    monkeypatch.setattr(runner, "run_tasks", Mock())
+    monkeypatch.setattr(runner, "completed_scores", Mock(return_value={"eval/scicode/score": 1.0}))
+    monkeypatch.setattr(runner, "try_publish", Mock())
+    runner.run_evaluation_locked(receipt, tmp_path)
+    args = start.call_args.args[0]
+    if manual:
+        assert "sglang.launch_server" in args
+        model_path = args[args.index("--model-path") + 1]
+        assert args[args.index("--served-model-name") + 1] == str(checkpoint)
+        assert "--disable-cuda-graph" in args
+    else:
+        assert args[2] == "serve"
+        frozen = json.loads(Path(args[3]).read_text())
+        model_path = frozen["checkpoint"]
+        assert frozen["served_model_name"] == str(checkpoint)
+        assert frozen["evaluation"]["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 34816}
+    if normalize:
+        assert model_path != str(checkpoint)
+        assert json.loads((Path(model_path) / "generation_config.json").read_text()) == {"top_k": -1, "top_p": 0.9}
+        assert json.loads((checkpoint / "generation_config.json").read_text())["top_k"] == 0
+    else:
+        assert model_path == str(checkpoint)
+    assert start.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "3"
+    server.terminate.assert_called_once()
+
+
+@pytest.mark.parametrize("top_k", [0, -1, 1, 50, None])
+def test_scicode_checkpoint_only_translates_disabled_top_k(tmp_path, top_k):
+    source = tmp_path / "hf"
+    source.mkdir()
+    config = {"temperature": 0.7, "top_p": 0.95, "eos_token_id": [1, 2]}
+    if top_k is not None:
+        config["top_k"] = top_k
+    original = json.dumps(config).encode()
+    (source / "generation_config.json").write_bytes(original)
+    (source / "model.safetensors").write_bytes(b"weights")
+    output = tmp_path / "results"
+    checkpoint = evaluation_runner.scicode_checkpoint(str(source), output)
+    view = Path(checkpoint)
+    expected = {**config, "top_k": -1} if top_k == 0 else config
+    assert json.loads((view / "generation_config.json").read_text()) == expected
+    assert (source / "generation_config.json").read_bytes() == original
+    if top_k == 0:
+        assert view != source and (view / "model.safetensors").is_symlink()
+        assert (view / "model.safetensors").resolve() == source / "model.safetensors"
+        assert not view.is_relative_to(output)
+        report = json.loads((output / "scicode-sampling-normalization.json").read_text())
+        assert report["original_top_k"] == 0 and report["normalized_top_k"] == -1
+    else:
+        assert view == source
+    assert source.is_dir()
+
+
+def test_scicode_checkpoint_without_generation_config(tmp_path):
+    checkpoint = evaluation_runner.scicode_checkpoint(str(tmp_path), tmp_path / "results")
+    assert checkpoint == str(tmp_path)
+    assert not (tmp_path / "generation_config.json").exists()
+
+
+@pytest.mark.parametrize("level", ["result", "problem"])
+def test_scicode_reports_original_http_error_without_accepting_zero(scicode_result, level):
+    path, result = scicode_result
+    target = result if level == "result" else result["predictions"][0]
+    target["error"] = "BadRequestError: Error code: 400 - top_k must be -1 or at least 1, got 0"
+    path.write_text(json.dumps(result))
+    with pytest.raises(ValueError, match="SciCode .*failed: BadRequestError: Error code: 400"):
+        evaluation_runner.completed_scores(path.parent, [{"task": "scicode"}])
+
+
+@pytest.mark.parametrize("name,model", [("wg_judge", "allenai/wildguard"), ("sr_judge", "google/gemma-2b")])
+def test_judge_startup_defaults_preserve_explicit_overrides_and_external_servers(name, model):
+    prefix = f"auxiliary_providers.{name}"
+    harness = {f"{prefix}.kind": "vllm_server", f"{prefix}.model": model}
+    key = f"{prefix}.kwargs.startup_timeout"
+    assert evaluation_runner.judge_harness_defaults(harness) == {**harness, key: 1200}
+    assert key not in harness
+    for extra in ({key: 600}, {f"{prefix}.base_url": "http://judge/v1"}, {f"{prefix}.model": "/local/judge"}):
+        explicit = {**harness, **extra}
+        assert evaluation_runner.judge_harness_defaults(explicit) == explicit
+
+
+def test_new_panel_resolves_judge_defaults_and_embeds_fixed_runner(three_node):
+    raw_tasks = json.loads(json.dumps(three_node.to_dict()["evaluation"]["tasks"]))
+    plain = next(task for task in raw_tasks if not task.get("auxiliary_gpus") and task.get("kind", "task") == "task")
+    plain.pop("harness", None)
+    document = three_node.to_dict()
+    document["evaluation"]["tasks"] = [plain]
+    assert "harness" not in RunSpec.from_dict(document).evaluation["tasks"][0]
+    judges = [task for task in three_node.evaluation["tasks"] if task.get("auxiliary_gpus")]
+    assert len(judges) == 6
+    for task in judges:
+        name = "sr_judge" if task["task"].startswith("strongreject") else "wg_judge"
+        key = f"auxiliary_providers.{name}.kwargs.startup_timeout"
+        assert key not in task["harness"]
+        receipt = {
+            "checkpoint": "/frozen/hf",
+            "tasks": [task],
+            "evaluation": three_node.evaluation,
+            "training": {"name": "new-panel"},
+            "update": 100,
+            "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
+        }
+        receipt["evaluation"] = {**receipt["evaluation"], "mounts": []}
+        argv = evaluation_runner.command(receipt, "/output")
+        assert argv.index(f"{key}=1200") < argv.index("--task")
+        spec = evaluation.specification(receipt)
+        assert (
+            base64.b64encode(Path(evaluation_runner.__file__).read_bytes()).decode()
+            in spec["tasks"][0]["arguments"][0]
+        )
+
+
+def test_preexisting_judge_run_keeps_resume_identity_and_evaluation_claims(three_node, tmp_path):
+    legacy = three_node.to_dict()
+    legacy["output"]["root"] = str(tmp_path)
+    # Historical run-spec.json: explicit evaluator pins, without implicit judge timeouts.
+    legacy["evaluation"]["image"] = "01M632ZP67Y4WMV060J74FSC3R"
+    legacy["evaluation"]["revision"] = "3536fe751e40162cc33d5e647085e986375aadce"
+    for task in legacy["evaluation"]["tasks"]:
+        for name in ("wg_judge", "sr_judge"):
+            task.get("harness", {}).pop(f"auxiliary_providers.{name}.kwargs.startup_timeout", None)
+    (tmp_path / "run-spec.json").write_text(json.dumps(legacy))
+    previous = {"spec_sha256": workflow.fingerprint(legacy)}
+    resumed = RunSpec.from_dict(copy.deepcopy(legacy))
+    assert workflow.recovery_configuration_matches(tmp_path, previous, resumed.to_dict())
+
+    old_config = {**legacy["evaluation"], "root": str(tmp_path), "total_updates": 2500}
+    old_claims = evaluation.Coordinator(old_config, {})._receipts(2500, "/frozen/hf", busy=False)
+    assert old_claims
+    before = {path: path.read_bytes() for _, path in old_claims}
+    new_config = {**old_config, **resumed.evaluation}
+    assert evaluation.Coordinator(new_config, {})._receipts(2500, "/frozen/hf", busy=False) == []
+    assert all(path.read_bytes() == contents for path, contents in before.items())
+
+
+def test_startup_progress_relays_live_phases_and_retains_full_log(tmp_path, monkeypatch):
+    emitted = []
+    ready = threading.Event()
+
+    def capture(message, **kwargs):
+        emitted.append(message)
+        ready.set()
+
+    monkeypatch.setattr("builtins.print", capture)
+    path = tmp_path / "olmo-eval.log"
+    path.touch()
+    with evaluation_runner.startup_progress(path):
+        with path.open("ab") as log:
+            log.write(b"ordinary evaluator output\xff\n[vllm-startup] loading weights\n")
+            log.flush()
+        assert ready.wait(2), "startup phase must be visible before evaluator exit"
+        with path.open("a") as log:
+            log.write("[vllm-startup] ready")
+    assert emitted == ["[vllm-startup] loading weights", "[vllm-startup] ready"]
+    assert b"ordinary evaluator output\xff" in path.read_bytes()
+
+
+@pytest.mark.parametrize("arguments", [["--served-model-name", "other"], ["--served-model-name=other"]])
+def test_manual_scicode_cannot_override_client_model_name(three_node, arguments):
+    document = three_node.to_dict()
+    document["evaluation"]["provider_kwargs"] = {"profile": "generic"}
+    document["evaluation"]["external_server_args"] = arguments
+    with pytest.raises(InputError, match="cannot override snapshot, served model name"):
+        RunSpec.from_dict(document)

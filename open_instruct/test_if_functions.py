@@ -9,6 +9,7 @@ import unittest
 from parameterized import parameterized
 
 from open_instruct import if_functions
+from open_instruct.IFEvalG import instructions
 
 
 class TestValidateChoice(unittest.TestCase):
@@ -58,6 +59,32 @@ class TestVerifySentenceConstraint(unittest.TestCase):
     )
     def test_verify_sentence_constraint(self, _name, text, n, quantifier, expected):
         self.assertEqual(if_functions.verify_sentence_constraint(text, n, quantifier), expected)
+
+
+class TestExcludeWordHarderChecker(unittest.TestCase):
+    @parameterized.expand(
+        [
+            ("between_spaces", "I drove my car to work.", False),
+            ("before_comma", "I drove my car, then walked.", False),
+            ("start_of_text", "Car prices rose.", False),
+            ("end_of_text", "I sold the car", False),
+            ("in_brackets", "The (car) was red.", False),
+            ("before_newline", "We need a car\nfor it.", False),
+            ("upper_case", "I drove my CAR.", False),
+            ("absent", "I took the bus.", True),
+            ("inside_longer_word", "A scar and a carpet and two cars.", True),
+        ]
+    )
+    def test_check_following(self, _name, text, expected):
+        checker = instructions.ExcludeWordHarderChecker("keywords:exclude_word_harder")
+        checker.build_description(keyword="car")
+        self.assertEqual(checker.check_following(text), expected)
+
+    def test_keyword_with_punctuation(self):
+        checker = instructions.ExcludeWordHarderChecker("keywords:exclude_word_harder")
+        checker.build_description(keyword="piano.")
+        self.assertFalse(checker.check_following("She plays the piano."))
+        self.assertTrue(checker.check_following("She plays the pianos."))
 
 
 if __name__ == "__main__":

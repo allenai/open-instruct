@@ -19,10 +19,17 @@ from pathlib import Path
 
 from open_instruct import logger_utils
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.evaluation import evaluation_runner
 from open_instruct.miles.infrastructure import artifacts as state
 from open_instruct.miles.infrastructure import infra_timeouts
 
 logger = logger_utils.setup_logger(__name__)
+
+# Gated downloads used by the maintained safety panel. Keep planning offline;
+# this is a narrow guard for known models, not a claim about arbitrary HF repos.
+GATED_JUDGE_MODELS = {"allenai/wildguard", "google/gemma-2b"}
+# olmo-eval task families whose datasets are gated, keyed by the task name before "_" or ":".
+GATED_TASK_DATASETS = {"gpqa": "Idavidrein/gpqa"}
 
 
 def parse(value, launch):
@@ -42,8 +49,11 @@ def parse(value, launch):
         "secrets",
         "submit_timeout",
         "timeout",
-        "server_args",
+        "provider_kwargs",
+        "external_server_args",
     }
+    if "server_args" in value:
+        raise InputError("evaluation.server_args was replaced by provider_kwargs; use SGLang Python option names")
     if set(value) - allowed:
         raise InputError(f"Unknown evaluation fields: {sorted(set(value) - allowed)}")
     mode = value.setdefault("mode", "shared")
@@ -56,10 +66,11 @@ def parse(value, launch):
             )
         return value
     defaults = dict(
-        interval=20, initial=True, final=True, gpus=1, submit_timeout=30, timeout="3h", secrets={}, server_args=[]
+        interval=20, initial=True, final=True, gpus=1, submit_timeout=30, timeout="3h", secrets={}, provider_kwargs={}
     )
     for key, default in defaults.items():
         value.setdefault(key, default)
+    value.setdefault("external_server_args", [])
     for key in ("cluster", "workspace", "budget"):
         value.setdefault(key, launch[key])
     if type(value["interval"]) is not int or value["interval"] < 0:
@@ -86,11 +97,51 @@ def parse(value, launch):
     value["secrets"] = {
         key: secret for key, secret in launch["secrets"].items() if key in {"WANDB_API_KEY", "HF_TOKEN"}
     } | secrets
-    if not isinstance(value["server_args"], list) or any(not isinstance(arg, str) for arg in value["server_args"]):
-        raise InputError("evaluation.server_args must be a list of SGLang arguments")
-    reserved = {"--model", "--model-path", "--tokenizer-path", "--port", "--host", "--tp", "--tp-size"}
-    if any(arg.split("=")[0] in reserved for arg in value["server_args"]):
-        raise InputError("evaluation.server_args cannot override snapshot, tokenizer, port or GPU allocation")
+    kwargs = value["provider_kwargs"]
+    if not isinstance(kwargs, dict) or any(not re.fullmatch(r"[a-z][a-z0-9_]*", key) for key in kwargs):
+        raise InputError("evaluation.provider_kwargs must be a table of SGLang Python options")
+    reserved = {
+        "model",
+        "model_name",
+        "model_path",
+        "tokenizer",
+        "tokenizer_path",
+        "revision",
+        "host",
+        "port",
+        "tp_size",
+        "tensor_parallel_size",
+        "dp_size",
+        "nnodes",
+        "node_rank",
+        "base_gpu_id",
+        "gpu_id_step",
+        "model_registration",
+    }
+    if reserved.intersection(kwargs):
+        raise InputError(
+            "evaluation.provider_kwargs cannot override snapshot, tokenizer, model registration or GPU allocation"
+        )
+    # Resolve against the checkpoint and assigned GPU inside the evaluator, not
+    # the training cluster. Explicit generic remains available for unqualified models.
+    value["provider_kwargs"] = kwargs = {"profile": "auto", **kwargs}
+    server_args = value["external_server_args"]
+    if not isinstance(server_args, list) or any(not isinstance(arg, str) for arg in server_args):
+        raise InputError("evaluation.external_server_args must be a list of SGLang arguments for SciCode")
+    server_reserved = {
+        "--model",
+        "--model-path",
+        "--tokenizer-path",
+        "--port",
+        "--host",
+        "--tp",
+        "--tp-size",
+        "--served-model-name",
+    }
+    if any(arg.split("=")[0] in server_reserved for arg in server_args):
+        raise InputError(
+            "evaluation.external_server_args cannot override snapshot, served model name, tokenizer, port or GPU allocation"
+        )
     tasks = value.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise InputError("evaluation.tasks must be a nonempty list of olmo-eval tasks")
@@ -121,6 +172,16 @@ def parse(value, launch):
         if kind not in ("task", "external"):
             raise InputError("evaluation task kind must be task or external")
         if kind == "external":
+            if server_args and kwargs["profile"] != "generic":
+                raise InputError(
+                    "Profiled SciCode evaluation uses evaluation.provider_kwargs for serving settings. "
+                    "Remove external_server_args, or select profile=generic for a manually configured server."
+                )
+            if not server_args:
+                try:
+                    evaluation_runner.scicode_server_options(kwargs)
+                except ValueError as error:
+                    raise InputError(str(error)) from error
             if name != "scicode":
                 raise InputError("Only scicode external evaluation has a supported artifact validation contract")
             if any(task.get(key) for key in ("generation", "scoring", "harness", "harness_preset")):
@@ -149,11 +210,47 @@ def parse(value, launch):
             task.setdefault(key, {})
             if not isinstance(task[key], dict):
                 raise InputError(f"evaluation task {key} must be an override table")
+            if any(name == "provider" or name.startswith("provider.") for name in task[key]):
+                raise InputError("Use evaluation.provider_kwargs for provider options, not task overrides")
         # No credential values are accepted in overrides; use evaluator secrets.
         encoded = json.dumps(task).lower()
         if any(word in encoded for word in ("api_key", "password", "access_token", "api-key")):
             raise InputError("Use evaluation.secrets for credentials, not task overrides")
+    validate_judge_credentials(value)
     return value
+
+
+def validate_judge_credentials(config):
+    """Reject known gated managed-judge and dataset downloads without an evaluator secret."""
+    if config["secrets"].get("HF_TOKEN", "").strip():
+        return
+    affected = []
+    for task in config["tasks"]:
+        if task.get("kind", "task") != "task" or not (config["initial"] or config["final"] or task["interval"] > 0):
+            continue
+        dataset = GATED_TASK_DATASETS.get(re.split(r"[_:]", task["task"], maxsplit=1)[0])
+        if dataset:
+            affected.append(f"{task['task']} (dataset={dataset})")
+        harness = task.get("harness", {})
+        for key, model in harness.items():
+            if not re.fullmatch(r"auxiliary_providers\.[^.]+\.(model|tokenizer)", key):
+                continue
+            provider = key.rsplit(".", 1)[0]
+            if (
+                isinstance(model, str)
+                and model in GATED_JUDGE_MODELS
+                and harness.get(f"{provider}.kind") == "vllm_server"
+                and not harness.get(f"{provider}.base_url")
+            ):
+                affected.append(f"{task['task']} ({key}={model})")
+    if affected:
+        raise InputError(
+            "Background evaluation requires an HF_TOKEN Beaker secret reference for gated judges or datasets: "
+            + "; ".join(affected)
+            + '. Set evaluation.secrets.HF_TOKEN = "your-beaker-secret-name" or launch.secrets.HF_TOKEN '
+            "(inherited by evaluation). The token's HF account must have accepted each model's or dataset's access terms. "
+            "A token in the local environment is not forwarded to evaluator jobs."
+        )
 
 
 def groups(config, update, total):

@@ -35,7 +35,12 @@ def test_staging_copies_a_jinja_override_over_the_checkpoint_template(tmp_path, 
     override.write_text("NEW [CUTOFF_DATE]")
     spec = RunSpec.load(
         EXAMPLE,
-        overrides=[f'model.source="{source}"', f'model.hf_template="{override}"', f'output.root="{tmp_path / "run"}"'],
+        overrides=[
+            'inference.profile="generic"',
+            f'model.source="{source}"',
+            f'model.hf_template="{override}"',
+            f'output.root="{tmp_path / "run"}"',
+        ],
     )
     warnings = []
     monkeypatch.setattr(workflow.logger, "warning", lambda *args: warnings.append(args[0] % args[1:]))
@@ -68,7 +73,12 @@ def test_bad_template_overrides_fail_as_input_errors(tmp_path, template, message
         Path(template).write_text("not a template")
     spec = RunSpec.load(
         EXAMPLE,
-        overrides=[f'model.source="{source}"', f'model.hf_template="{template}"', f'output.root="{tmp_path / "run"}"'],
+        overrides=[
+            'inference.profile="generic"',
+            f'model.source="{source}"',
+            f'model.hf_template="{template}"',
+            f'output.root="{tmp_path / "run"}"',
+        ],
     )
     with pytest.raises(InputError, match=message):
         workflow.prepare_model(spec)

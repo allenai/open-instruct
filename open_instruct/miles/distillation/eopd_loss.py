@@ -4,9 +4,11 @@ Selected with ``--loss-type custom_loss --custom-loss-function-path
 open_instruct.miles.distillation.eopd_loss.policy_loss``. The PPO/OPD part is upstream ``policy_loss_function``
 unchanged (advantages already carry ``kl_coef * (teacher - student)``); the extra term is
 ``alpha * mean_t g_t FKL_t`` with the same per-sample reducer as the policy loss. The teacher's
-top-k ids and log-probs travel in each sample's ``metadata`` dict (set by ``opd_hooks``); the
-runtime patch adds ``metadata`` to the Megatron train-step batch keys. Settings come from the
-``OI_OPD_EOPD_*`` environment that ``opd_runtime`` forwards to the Ray actors.
+top-k ids and log-probs travel in ``Sample.train_metadata`` (set by ``opd_hooks``).
+Pinned MILES converts this to ``train_data["metadata"]`` in
+``miles/ray/rollout/train_data_conversion.py``; ``miles/backends/megatron_utils/model.py``
+requests that field from ``get_batch`` for the training step. No local runtime patch is needed.
+Settings come from the ``OI_OPD_EOPD_*`` environment that ``opd_runtime`` forwards to the Ray actors.
 """
 
 import torch
@@ -21,7 +23,11 @@ def forward_kl_terms(args, batch, logits, settings):
     """Per-token ``(fkl, gate, proxy_entropy, topk_mass)`` ``[sum R]`` over the micro-batch's responses."""
     metadata = batch.get("metadata")
     if metadata is None:
-        raise ValueError("EOPD needs sample metadata in the train batch; the runtime patch must request `metadata`")
+        raise ValueError(
+            "EOPD needs `metadata` in the train batch. Check that opd_hooks populates Sample.train_metadata, "
+            "miles/ray/rollout/train_data_conversion.py copies it to train_data['metadata'], and "
+            "miles/backends/megatron_utils/model.py requests it from get_batch."
+        )
     parallel_state = get_parallel_state()
     if parallel_state.cp.size != 1:
         raise ValueError("EOPD supports context-parallel size 1 only")

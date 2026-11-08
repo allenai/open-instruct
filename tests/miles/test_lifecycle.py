@@ -55,8 +55,17 @@ def install_components(monkeypatch, manager):
 @pytest.mark.parametrize("diagnostic_interval", [0, 1])
 @pytest.mark.parametrize("start_rollout", [0, 2])
 @pytest.mark.parametrize("with_eval", [False, True])
+@pytest.mark.parametrize("skip_initial_eval", [False, True])
 def test_driver_quiesces_then_retires_transport_before_engines(
-    monkeypatch, fully_async, diagnostic_interval, start_rollout, with_eval, with_export, early_stop, tmp_path
+    monkeypatch,
+    fully_async,
+    diagnostic_interval,
+    start_rollout,
+    with_eval,
+    with_export,
+    early_stop,
+    skip_initial_eval,
+    tmp_path,
 ):
     events = []
     tracking_run = Mock()
@@ -107,7 +116,7 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         update_weights_interval=1,
         debug_exit_after_rollout=1 if early_stop else None,
         eval_interval=1 if with_eval else None,
-        skip_eval_before_train=False,
+        skip_eval_before_train=skip_initial_eval,
         hf_checkpoint="/hf",
         eval_uses_snapshots=False,
         save=str(tmp_path),
@@ -133,9 +142,14 @@ def test_driver_quiesces_then_retires_transport_before_engines(
         assert not any(event.startswith("export-") for event in events)
     timings = [json.loads(line) for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
     evaluations = [row for row in timings if row["stage"] == "evaluation"]
-    assert len(evaluations) == events.count("evaluated") == (2 if with_eval else 0)
+    expected_phases = []
     if with_eval:
-        assert [row["details"]["phase"] for row in evaluations] == ["initial", "periodic"]
+        if start_rollout == 0 and not skip_initial_eval:
+            expected_phases.append("initial")
+        expected_phases.append("periodic")
+    assert len(evaluations) == events.count("evaluated") == len(expected_phases)
+    assert [row["details"]["phase"] for row in evaluations] == expected_phases
+    if with_eval:
         assert all(
             row["passed"] and row["details"]["configured_serving"]["sglang_server_concurrency"] == 64
             for row in evaluations
@@ -379,7 +393,11 @@ def test_refresh_cleanup_uses_configured_drain_budget(monkeypatch, tmp_path):
         offload_rollout=False,
         check_weight_update_equal=False,
         olmo_core=CoreConfig(
-            compiler_cache=False, publication_mode="refresh", engine_drain_timeout=900, engine_update_timeout=180
+            compiler_cache=False,
+            publication_mode="refresh",
+            prepared_batch_overlap=False,
+            engine_drain_timeout=900,
+            engine_update_timeout=180,
         ),
         eval_interval=None,
         start_rollout_id=0,
@@ -469,7 +487,7 @@ def test_refresh_checkpoint_saves_while_generation_is_unfinished(monkeypatch, tm
         fully_async=True,
         offload_rollout=False,
         check_weight_update_equal=False,
-        olmo_core=CoreConfig(compiler_cache=False, publication_mode="refresh"),
+        olmo_core=CoreConfig(compiler_cache=False, publication_mode="refresh", prepared_batch_overlap=False),
         save_trigger_sentinel=None,
         save_interval=1,
         update_weights_interval=1,

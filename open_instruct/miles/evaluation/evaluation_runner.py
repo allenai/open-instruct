@@ -16,6 +16,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -54,6 +56,20 @@ def result_directory(receipt):
     return Path(receipt["evaluation"]["root"]) / "evaluation" / "results" / f"update-{receipt['update']:08d}-{key}"
 
 
+def judge_harness_defaults(harness):
+    """Allow bounded startup time for the maintained, locally managed safety judges."""
+    harness = dict(harness)
+    for name, model in (("wg_judge", "allenai/wildguard"), ("sr_judge", "google/gemma-2b")):
+        prefix = f"auxiliary_providers.{name}"
+        if (
+            harness.get(f"{prefix}.kind") == "vllm_server"
+            and harness.get(f"{prefix}.model") == model
+            and not harness.get(f"{prefix}.base_url")
+        ):
+            harness.setdefault(f"{prefix}.kwargs.startup_timeout", 1200)
+    return harness
+
+
 def command(receipt, output):
     checkpoint = receipt["checkpoint"]
     first = receipt["tasks"][0]
@@ -83,14 +99,19 @@ def command(receipt, output):
         return args
     args = ["olmo-eval", "run", "--model", checkpoint, "--harness", first.get("harness_preset", "default")]
     for key, value in {
-        "provider.kind": "vllm_server",
-        "provider.base_url": "http://127.0.0.1:30000/v1",
+        "provider.kind": "sglang",
         "provider.tokenizer": checkpoint,
         "provider.trust_remote_code": True,
-        "provider.max_concurrency": 8,
+        "provider.kwargs.model_registration": "olmo_sglang:register",
+        "provider.kwargs.tensor_parallel_size": receipt["evaluation"]["gpus"],
+        "provider.kwargs.profile": "auto",
+        # The provider recommends a sequence budget after checking actual engine
+        # capacity. olmo-eval counts expanded samples (e.g. pass@32) against it.
+        "batching.chunk_size": "auto",
+        **{f"provider.kwargs.{key}": value for key, value in receipt["evaluation"]["provider_kwargs"].items()},
     }.items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
-    for key, value in first.get("harness", {}).items():
+    for key, value in judge_harness_defaults(first.get("harness", {})).items():
         args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
     for task in receipt["tasks"]:
         args.extend(["--task", task["task"]])
@@ -99,6 +120,83 @@ def command(receipt, output):
         for key, value in task["scoring"].items():
             args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
     return [*args, "--output-dir", str(output), "--save-predictions", "--save-requests"]
+
+
+def scicode_server_options(provider_kwargs):
+    """Translate serving aliases and reject options owned by the inline provider."""
+    options = dict(provider_kwargs)
+    unsupported = {"add_bos_token", "prompt_format", "force_download"}.intersection(options)
+    if unsupported:
+        raise ValueError(
+            "SciCode's HTTP server does not accept native-provider-only options: "
+            f"{', '.join(sorted(unsupported))}. Remove them from evaluation.provider_kwargs, "
+            "or use a separate native-only evaluation configuration."
+        )
+    for alias, key in (("max_model_len", "context_length"), ("max_concurrency", "max_running_requests")):
+        if alias in options:
+            if key in options and options[key] != options[alias]:
+                raise ValueError(f"SciCode serving options {alias} and {key} must agree")
+            options[key] = options.pop(alias)
+    return options
+
+
+def scicode_checkpoint(checkpoint, output):
+    """Normalize HF's disabled top-k sentinel for SGLang without changing the snapshot."""
+    source = Path(checkpoint).resolve()
+    config = source / "generation_config.json"
+    if not config.is_file():
+        return str(source)
+    original = json.loads(config.read_text())
+    if original.get("top_k") != 0:
+        return str(source)
+    # Keep weight symlinks outside the result tree: artifact collection copies
+    # that tree with symlink dereferencing enabled.
+    view = Path(tempfile.mkdtemp(prefix="miles-scicode-checkpoint-"))
+    for path in source.iterdir():
+        if path.name == "generation_config.json":
+            continue
+        target = view / path.name
+        if target.is_symlink() and target.resolve() == path.resolve():
+            continue
+        target.symlink_to(path.resolve(), target_is_directory=path.is_dir())
+    write_json(view / "generation_config.json", {**original, "top_k": -1})
+    write_json(
+        Path(output) / "scicode-sampling-normalization.json",
+        {
+            "checkpoint": str(source),
+            "generation_config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
+            "original_top_k": 0,
+            "normalized_top_k": -1,
+        },
+    )
+    return str(view)
+
+
+def serve(receipt, output):
+    """Give SciCode's HTTP policy server the native evaluator's GPU/model profile."""
+    options = scicode_server_options(receipt["evaluation"]["provider_kwargs"])
+    selector = options.pop("profile", "auto")
+    options.update(
+        model_path=receipt["checkpoint"],
+        served_model_name=receipt.get("served_model_name", receipt["checkpoint"]),
+        tokenizer_path=receipt["checkpoint"],
+        trust_remote_code=True,
+        tp_size=receipt["evaluation"]["gpus"],
+        host="127.0.0.1",
+        port=30000,
+    )
+    profiles = importlib.import_module("olmo_eval.inference.providers.sglang_profiles")
+    report = profiles.prepare_profile(selector, options, "olmo_sglang:register")
+    options = {**report["defaults"], **options}
+    write_json(Path(output) / "sglang-external-profile.json", {**report, "effective_options": options})
+    print(f"SciCode SGLang profile: {report}", flush=True)
+    importlib.import_module("sglang.srt.plugins").load_plugins()
+    importlib.import_module("olmo_sglang").register()
+    server_args = importlib.import_module("sglang.srt.server_args").ServerArgs(**options)
+    try:
+        importlib.import_module("sglang.launch_server").run_server(server_args)
+    finally:
+        importlib.import_module("sglang.srt.utils").kill_process_tree(os.getpid(), include_parent=False)
 
 
 def result_roots(output):
@@ -143,18 +241,21 @@ def validate_predictions(output):
 def validate_scicode(path):
     """SciCode can report success and zero scores after per-problem infrastructure errors."""
     result = json.loads(path.read_text())
+    if result.get("error"):
+        raise ValueError(f"SciCode evaluation failed: {result['error']}")
     rows = result.get("predictions")
-    if result.get("name") != "scicode" or result.get("success") is not True or result.get("error") or not rows:
+    if result.get("name") != "scicode" or result.get("success") is not True or not rows:
         raise ValueError("Incomplete SciCode evaluation results")
     ids = set()
     total = 0
     for row in rows:
         count = row.get("total")
         problem = row.get("problem_id")
+        if row.get("error"):
+            raise ValueError(f"SciCode problem {problem} failed: {row['error']}")
         if (
             not problem
             or problem in ids
-            or row.get("error")
             or type(count) is not int
             or count < 1
             or len(row.get("step_results", [])) != count
@@ -288,7 +389,10 @@ def resume_identity(receipt):
     config = receipt["evaluation"]
     return {
         **{key: receipt[key] for key in ("checkpoint", "update", "group_id", "tasks")},
-        "evaluator": {key: config.get(key) for key in ("revision", "image", "gpus", "server_args", "worker")},
+        "evaluator": {
+            key: config.get(key)
+            for key in ("revision", "image", "gpus", "provider_kwargs", "external_server_args", "worker")
+        },
     }
 
 
@@ -342,23 +446,79 @@ def saved_task(output, task):
 
 
 def gpu_environments(receipt):
-    """Keep olmo-eval's managed providers off the frozen policy's GPUs."""
+    """Expose the allocation to the native planner; isolate the external SciCode server."""
     policy_count = receipt["evaluation"]["gpus"]
     auxiliary_count = max(task.get("auxiliary_gpus", 0) for task in receipt["tasks"])
     total = policy_count + auxiliary_count
     mask = os.environ.get("CUDA_VISIBLE_DEVICES")
-    devices = mask.split(",") if mask is not None else [str(index) for index in range(total)]
-    if len(devices) < total or any(not device.strip() or device == "-1" for device in devices):
+    # This worker is copied alone into the evaluator image. Unlike the pinned
+    # MILES adapter, evaluator providers accept GPU/MIG UUID masks. Keep that
+    # capability while treating hidden/duplicate devices like the startup helper.
+    devices = (
+        [device.strip() for device in mask.split(",")] if mask is not None else [str(index) for index in range(total)]
+    )
+    if (
+        len(devices) < total
+        or len(set(devices)) != len(devices)
+        or any(not device or device == "-1" for device in devices)
+    ):
         raise ValueError(f"Evaluation needs {total} visible GPUs for policy and auxiliary providers")
     policy = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[:policy_count])}
-    evaluator = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices[policy_count:total])}
+    external = receipt["tasks"][0].get("kind") == "external"
+    visible = devices[policy_count:total] if external else devices[:total]
+    evaluator = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(visible)}
     # The independent evaluator/judge environments must not import training's source overlays.
     evaluator.pop("PYTHONPATH", None)
     return policy, evaluator
 
 
+def print_failure_log(path):
+    """Expose bounded evaluator diagnostics in Beaker without masking the failure."""
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 16384))
+            tail = "\n".join(stream.read().decode("utf-8", errors="replace").splitlines()[-80:])
+        print(f"olmo-eval failed; log tail from {path}:\n{tail}", file=sys.stderr, flush=True)
+    except OSError as error:
+        print(f"Could not read evaluator log {path}: {error}", file=sys.stderr, flush=True)
+
+
+@contextmanager
+def startup_progress(log_path):
+    """Relay evaluator lifecycle messages live while retaining the complete log."""
+    stopped = threading.Event()
+
+    def relay():
+        with log_path.open(encoding="utf-8", errors="replace") as stream:
+            pending = ""
+            while True:
+                chunk = stream.read(65536)
+                if chunk:
+                    lines = (pending + chunk).split("\n")
+                    pending = lines.pop()[-16384:]
+                    for line in lines:
+                        if "[vllm-startup]" in line:
+                            print(line, flush=True)
+                elif stopped.is_set():
+                    if "[vllm-startup]" in pending:
+                        print(pending, flush=True)
+                    return
+                else:
+                    stopped.wait(0.2)
+
+    thread = threading.Thread(target=relay, name="judge-startup-progress", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        thread.join(timeout=2)
+
+
 def run_tasks(receipt, output):
     completed = []
+    failures = []
     for task in receipt["tasks"]:
         directory, attempt = saved_task(output, task)
         if attempt is None:
@@ -368,11 +528,18 @@ def run_tasks(receipt, output):
             attempt.mkdir(parents=True)
             args = command({**receipt, "tasks": [task]}, attempt)
             write_json(attempt / "command.json", args)
-            with (attempt / "olmo-eval.log").open("w") as log:
-                subprocess.run(
-                    args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]
-                )
-            values = completed_scores(attempt, [task])
+            log_path = attempt / "olmo-eval.log"
+            try:
+                # Create/truncate the log before the relay opens its reader.
+                with log_path.open("w") as log, startup_progress(log_path):
+                    subprocess.run(
+                        args, stdout=log, stderr=subprocess.STDOUT, check=True, env=gpu_environments(receipt)[1]
+                    )
+                values = completed_scores(attempt, [task])
+            except (subprocess.CalledProcessError, ValueError) as error:
+                print_failure_log(log_path)
+                failures.append((task["task"], error))
+                continue
             write_json(
                 directory / "complete.json",
                 {"task": task, "attempt": str(attempt.relative_to(directory)), "scores": values},
@@ -381,6 +548,9 @@ def run_tasks(receipt, output):
             print(f"Reusing completed evaluation task: {task['task']}", flush=True)
         completed.append(str(attempt.relative_to(output)))
     write_json(output / "task-results.json", completed)
+    write_json(output / "task-failures.json", [{"task": task, "error": str(error)} for task, error in failures])
+    if failures:
+        raise failures[0][1]
 
 
 def run_evaluation(receipt):
@@ -422,39 +592,51 @@ def run_evaluation_locked(receipt, output):
         for name in ("config.json", "tokenizer_config.json"):
             if not (Path(checkpoint) / name).is_file():
                 raise ValueError(f"Incomplete HF snapshot: missing {name}")
-        env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
-        server_args = [
-            sys.executable,
-            "-m",
-            "sglang.launch_server",
-            "--model-path",
-            checkpoint,
-            "--trust-remote-code",
-            "--tokenizer-path",
-            checkpoint,
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "30000",
-            "--tp-size",
-            str(receipt["evaluation"]["gpus"]),
-            *receipt["evaluation"]["server_args"],
-        ]
-        with (output / "server.log").open("a") as log:
-            server = subprocess.Popen(server_args, env=env, stdout=log, stderr=subprocess.STDOUT)
-        deadline = time.monotonic() + 600
-        while True:
-            if server.poll() is not None:
-                raise RuntimeError("Evaluator SGLang server exited during startup; see server.log")
-            try:
-                with request.urlopen("http://127.0.0.1:30000/health", timeout=2) as response:
-                    if response.status == 200:
-                        break
-            except (urlerror.URLError, TimeoutError):
-                pass
-            if time.monotonic() >= deadline:
-                raise TimeoutError("Evaluator SGLang startup timeout")
-            time.sleep(1)
+        # SciCode currently requires VLLMServerProvider; all regular tasks use the inline engine.
+        if any(task.get("kind") == "external" for task in pending):
+            checkpoint = scicode_checkpoint(checkpoint, output)
+            env = {**gpu_environments(receipt)[0], "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models"}
+            if not receipt["evaluation"]["external_server_args"]:
+                server_receipt = output / "server-receipt.json"
+                write_json(
+                    server_receipt, {**receipt, "checkpoint": checkpoint, "served_model_name": receipt["checkpoint"]}
+                )
+                server_args = [sys.executable, __file__, "serve", str(server_receipt), "--results", str(output)]
+            else:
+                server_args = [
+                    sys.executable,
+                    "-m",
+                    "sglang.launch_server",
+                    "--model-path",
+                    checkpoint,
+                    "--served-model-name",
+                    receipt["checkpoint"],
+                    "--trust-remote-code",
+                    "--tokenizer-path",
+                    checkpoint,
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "30000",
+                    "--tp-size",
+                    str(receipt["evaluation"]["gpus"]),
+                    *receipt["evaluation"]["external_server_args"],
+                ]
+            with (output / "server.log").open("a") as log:
+                server = subprocess.Popen(server_args, env=env, stdout=log, stderr=subprocess.STDOUT)
+            deadline = time.monotonic() + 600
+            while True:
+                if server.poll() is not None:
+                    raise RuntimeError("Evaluator SGLang server exited during startup; see server.log")
+                try:
+                    with request.urlopen("http://127.0.0.1:30000/health", timeout=2) as response:
+                        if response.status == 200:
+                            break
+                except (urlerror.URLError, TimeoutError):
+                    pass
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Evaluator SGLang startup timeout")
+                time.sleep(1)
         run_tasks(receipt, output)
         aggregate = completed_scores(output, receipt["tasks"])
         write_json(output / "scores.json", aggregate)
@@ -477,7 +659,7 @@ def run_evaluation_locked(receipt, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("run", "publish"))
+    parser.add_argument("command", choices=("run", "publish", "serve"))
     parser.add_argument("receipt", type=Path)
     parser.add_argument("--results", type=Path)
     parser.add_argument("--wandb-run", help="entity/project/run_id, after offline training has been synced")
@@ -485,6 +667,8 @@ def main():
     receipt = json.loads(args.receipt.read_text())
     if args.command == "run":
         run_evaluation(receipt)
+    elif args.command == "serve":
+        serve(receipt, args.results or result_directory(receipt))
     elif not try_publish(receipt, args.results or result_directory(receipt), wandb_run=args.wandb_run):
         raise SystemExit(1)
 

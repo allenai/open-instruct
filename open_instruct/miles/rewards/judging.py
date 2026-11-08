@@ -58,6 +58,7 @@ def parse(document):
             service.setdefault(key, default)
             validation.integer(service[key], f"judges.{name}.{key}")
         if mode == "managed":
+            validation.boolean(service.get("cuda_graphs", False), f"judges.{name}.cuda_graphs")
             if service.get("context_extension", "none") not in ("none", "qwen3-yarn-128k"):
                 raise InputError("Managed judge context_extension must be none or qwen3-yarn-128k")
             if service.get("context_extension") == "qwen3-yarn-128k" and (
@@ -89,16 +90,20 @@ def parse(document):
                 or endpoint.password
             ):
                 raise InputError("external judge requires an HTTP(S) endpoint without credentials")
-            if set(service) & {
+            managed_fields = set(service) & {
+                "backend",
+                "chat_template",
+                "context_extension",
+                "cuda_graphs",
                 "gpus",
-                "tensor_parallel_size",
                 "prepared_dir",
                 "revision",
-                "chat_template",
-                "backend",
-                "context_extension",
-            }:
-                raise InputError("external judge cannot specify managed placement fields")
+                "tensor_parallel_size",
+            }
+            if managed_fields:
+                raise InputError(
+                    f"external judge cannot specify managed fields in judges.{name}: {', '.join(sorted(managed_fields))}"
+                )
     for name, rubric in rubrics.items():
         validation.mapping(rubric, f"rubrics.{name}")
         validation.fields(rubric, f"rubrics.{name}", constraints.STRUCTURED_FIELDS["rubrics.NAME"])

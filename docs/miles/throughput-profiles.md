@@ -1,7 +1,7 @@
 # Throughput starting configurations
 
 Use the trainer size and **desired optimization batch** to choose a starting
-profile, then provision inference to keep completed-group waiting near zero.
+example, then provision inference to keep completed-group waiting near zero.
 Measure decode CUDA graphs, engine admission and trainer wait together. Faster
 training can shift the bottleneck to rollout supply.
 
@@ -11,15 +11,17 @@ guidance here as a starting point and check capacity for each new combination.
 [Development defaults](development-defaults.md) summarizes the recommended
 starting values.
 
-## Choose a profile
+## Choose an example
 
 Choose among the three [maintained starters](../../configs/miles/examples/README.md).
 Their [generated recipe tables](configuration.md#example-recipes) show GPU
 allocations and batch geometry from the current TOMLs. For the runtime image, see
 the [MILES GRPO guide](grpo.md). Do not transfer a short-context
 no-recomputation setting to long packs without checking memory; the maintained
-node and large use recomputation and engine admission 64, sized as described
-below.
+node and three-node examples use recomputation and a measured B300 engine starting admission of 512.
+Their [capacity notes](../../configs/miles/examples/README.md#capacity-and-qualification-settings)
+describe the supported model geometry, runtime requirements and qualification limits. The
+generic loader still defaults to 64; size other models and GPUs as described below.
 
 ## Size engine admission from memory
 
@@ -29,9 +31,9 @@ Engine admission is the number of requests each SGLang engine decodes at once.
 and the two memory pools below size GPU capacity. `sglang_server_concurrency`
 instead sizes end-to-end HTTP permits per engine: a request holds its permit
 while in transit and while its response is processed, even when the GPU has
-finished it. Decode throughput grows with batch size until the
-GPU saturates, so an admission set below what memory allows leaves throughput
-unused whenever training waits for batches.
+finished it. Increasing admission can improve decode throughput, but memory fit
+is only a capacity bound. Kernel efficiency, memory bandwidth, CPU scheduling,
+prefill and transport can reach diminishing returns before GPU memory fills.
 
 As a worked example, consider a hybrid MoE served on one GPU per engine whose
 weights occupy 34.5 GiB, with 4 full-attention layers × 8 KV heads × 128 dims and
@@ -52,20 +54,35 @@ To choose admission `R` for context length `C` (`inference.max_context_length`):
 1. Set `sglang_max_running_requests` and `sglang_cuda_graph_max_bs_decode` to `R`.
    For async runs, start `sglang_server_concurrency` at `2 × R`. Structured
    configs derive this when omitted. This adds transport headroom, not GPU slots.
+   The named B300 preset uses `R`: at 512 admission, additional HTTP
+   headroom mostly increased queueing. Recheck occupancy for other workloads.
 2. Set `sglang_max_total_tokens = R × C`. The KV pool then holds every running
-   request at full context, so KV capacity never forces a retraction.
+   request at full context in the nominal capacity calculation. Verify the
+   resolved token capacity and retractions after startup; this does not prevent
+   retractions requested by retract-mode weight refresh.
 3. Keep `sglang_max_mamba_cache_size` at least `R` with radix caching off. The
-   pinned Olmo hybrid backend requires this mode; see [model limits](moe-model-support.md#current-limits).
+   pinned Olmo hybrid backend also supports the qualified cached path; see
+   [model limits](moe-model-support.md#current-limits).
    For compatible KDA backends with radix caching enabled, the capacity validator
    requires more than `5 × R` slots. Passing capacity validation does not establish
    that a model's kernel supports prefix-cache snapshots.
 4. Check that weights + `R × C × (KV bytes per token)` + slots × (state bytes per
-   slot) fits within `sglang_mem_fraction_static` × visible GPU memory.
-5. Omit `async.async_max_concurrent_samples`. The producer then sizes itself to
+   slot) fits within `sglang_mem_fraction_static` × visible GPU memory, leaving
+   room for decode graphs, activation/workspace peaks and runtime overhead. The
+   sum is a lower bound on the footprint, not a complete memory-fit guarantee.
+   With explicit pool sizes, changing the memory fraction alone does not resize
+   those requested pools; inspect the actual allocations after graph capture.
+5. When `async.async_max_concurrent_samples` is omitted, the producer sizes itself to
    `max(collection, 2 × engines × R)` samples when HTTP capacity is at least `R`.
    Both producer and HTTP capacity need headroom: raising only one leaves the
    other as a bottleneck. Two waves are a starting point, not a measured guarantee
    of full occupancy; monitor response latency, host memory and stale work.
+   The examples explicitly limit unfinished samples to 1,024 for node and 3,840
+   for three-node. These bounded starting points do not guarantee full engine
+   occupancy or steady throughput. Explicit budgets win.
+   Larger fleets can produce much more work than the
+   trainer can consume within the lag limit; inspect policy-age warnings and
+   measure useful consumption before using the capacity-based budget in a long run.
 
 For the example model at `C = 34,816` with 1,024 state slots (32 GiB):
 
@@ -77,9 +94,10 @@ For the example model at `C = 34,816` with 1,024 state slots (32 GiB):
 | 128 | 68 GiB | 135 GiB |
 
 On a large-memory GPU, memory may stop binding well before other limits such as
-router and transport capacity. Keep `R ≤ 64` as the starting point (see
-[development defaults](development-defaults.md)) and raise it only while the
-router and engines stay healthy. On a smaller GPU, run the same arithmetic before
+router and transport capacity. The generic starting admission remains 64 (see
+[development defaults](development-defaults.md)); the named B300 preset changes it
+for the measured smaller-state Olmo 3.5 architecture. Their 512 setting does not
+follow from the larger-model arithmetic above. On a smaller GPU, run the same arithmetic before
 lowering anything: an 80 GiB GPU at static fraction 0.7 leaves about 21 GiB after
 the example weights, so reduce `R` or the state-slot count to fit that.
 
@@ -89,8 +107,194 @@ After launch, confirm the setting from the engine metrics:
 - `token usage` should stay below 1, with few retractions.
 - Per-engine generation throughput should rise over a lower-admission baseline.
 
-If requests run at the cap with KV usage far below one half while training waits,
-admission is too low.
+If requests run at the cap while training waits, compare a higher admission at
+the same workload. Low KV usage suggests memory headroom; it does not establish
+a throughput gain. Keep the smaller setting when marginal throughput gains are
+small or queueing, response age and memory costs rise. The measured B300 model
+showed diminishing returns above roughly 512 despite additional memory room.
+
+For a new GPU, use model geometry to narrow the search before launching: compare
+two plausible admissions, repeat the lower control, and add one capacity probe
+only if useful. Repeat the selected setting at representative prompt and response
+lengths. Full-context KV sizing is conservative; a smaller pool can support more
+short requests, but long responses may trigger retractions. Label that tradeoff
+and measure it rather than treating the larger admission as guaranteed capacity.
+
+Retain the resolved config, runtime revisions, hardware identity, raw engine and
+client logs, memory/occupancy samples, response-length distribution, retractions
+and warmup/measurement boundaries for every case, including failed attempts.
+Report repeated-control drift and cache-hit rates with throughput. Small repeated
+prompt sets can make cached prefill unusually cheap; include uncached prefill
+when generalizing to new workloads. Test cache choices on a frozen stream from
+the intended prompt mixture, retaining normal sibling counts and natural
+duplicates while avoiding dataset cycling during measurement. Preserve source
+IDs and prompt order so each window's task mix and actual prompt/response lengths
+can be audited. Record filtering or truncation explicitly. Fixed-weight cache
+results also need validation across production weight refreshes, which can change
+cache reuse and prefill work.
+
+## Whole presets and explicit settings
+
+**A named profile applies a measured preset whole. To change any of its settings,
+use `generic` and write them explicitly.** There are two behaviors:
+
+- **Omitted profile or `profile = "generic"`:** existing generic defaults fill
+  unset values; your explicit settings are retained. If model, hardware and
+  topology match a measured preset, the plan prints a boxed tip naming it.
+  The tip changes no settings and never requires adopting the preset.
+- **A named profile:** apply that preset verbatim. Every explicit preset-owned
+  key conflicts, even if its value equals the preset. Native aliases and `--set`
+  values count too. Incompatible model, hardware or topology is an error, never
+  a fallback to different settings. `auto` is not a supported selector.
+
+The learning examples pin `profile = "olmo35-b300-12.5@0.8"` on Holmes. It is the
+current recommended B300 starting point based on our experiments. We keep one
+recommendation per GPU. The suffix is **total@active parameters in billions**:
+approximately 12.5B total and 0.8B active per token, including embeddings and the
+output head. B300 v1 remains available for reproducing older cached configurations;
+`olmo35-h100-v1` remains a compatibility alias for the H100 preset. Neither old
+name is suggested by the advisor.
+To use Jupiter,
+change both the cluster and the profile to `olmo35-h100-12.5@0.8`. A wrong cluster error
+names the matching hardware's preset. The planner checks known hardware,
+dedicated TP1 placement, context/response caps and cached-KDA prerequisites
+without needing model metadata.
+
+The model guard reads the checkpoint's `config.json` and requires the studied
+geometry and BF16 weights; the model-family name alone is insufficient. It runs
+during planning when the actual checkpoint is local, otherwise after preparation.
+A named preset applies the same settings at both stages. Missing or incompatible
+metadata after preparation stops training. An OLMo-core conversion template is
+not treated as evidence of the source checkpoint's geometry.
+
+| Preset | Cache | Admission / HTTP / graph batch | KV tokens | Recurrent slots | Memory fraction |
+|---|---|---:|---:|---:|---:|
+| `olmo35-b300-v1` (historical) | On, `extra_buffer` | 512 | 17,825,792 | 3,072 | 0.7 |
+| `olmo35-b300-12.5@0.8` (recommended) | Off | 512 | 17,825,792 | 3,072 | 0.7 |
+| `olmo35-h100-12.5@0.8` | Off | 512 | 6,684,672 | 512 | 0.9 |
+
+The recommended B300 profile preserves 3,072 recurrent slots to match the
+retained-state qualification. Explicit pool sizes are still allocated with radix
+off; its inherited `extra_buffer` strategy is inactive. The earlier 1,024-slot
+cache-off serving alternative is an explicit generic-mode experiment, not the
+qualified retained-state learning default. Pool reduction remains a follow-up.
+
+All use prefill chunks of 8,192, full decode graphs and disabled prefill graphs.
+The preset owns those fields, cache enablement/strategy, admission, HTTP concurrency,
+graph ceiling, KV-token pool, recurrent pool and memory fraction. Settings outside
+that set, such as topology, context/response caps, metrics, producer budget,
+trainer batch and policy lag, remain separate controls. Existing compatibility
+checks still apply. Presets do not interpolate, resize pools, estimate memory fit,
+or change the runtime image. Cached hybrid serving requires the pinned FP32
+snapshot implementation described in [model limits](moe-model-support.md#current-limits).
+
+### Deliberately departing from a preset
+
+A conflicting setting stops planning with the offending normalized keys and a
+complete preset block as TOML. The error offers two paths:
+
+1. Remove the explicit preset-owned settings, including their native aliases,
+   and retain the named profile.
+2. Select `generic`, paste the displayed block into the existing `[inference]`
+   section, and edit the settings yourself. Merge the block; do not create a
+   duplicate TOML section.
+
+For example, this is an editable B300 preset with admission deliberately reduced:
+
+```toml
+[inference]
+profile = "generic"
+sglang_disable_radix_cache = true
+sglang_mamba_radix_cache_strategy = "extra_buffer"
+sglang_max_running_requests = 256
+sglang_server_concurrency = 512
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 512
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_chunked_prefill_size = 8192
+sglang_max_total_tokens = 17825792
+sglang_max_mamba_cache_size = 3072
+sglang_mem_fraction_static = 0.7
+```
+
+Only admission changed here. The other pools and limits remain explicit; nothing
+is resized implicitly. This is an experiment, not another measured preset. Generic
+mode does not reject a cluster change merely because the block came from B300.
+On H100, the availability tip names the matching H100 preset, but you own the
+explicit memory configuration. Qualify any copied block on its target device.
+The separately measured cache-off B300 and cached-320 H100 alternatives in the
+[example notes](../../configs/miles/examples/README.md#capacity-and-qualification-settings)
+must also be configured explicitly in generic mode.
+
+### Planning evidence and fleet capacity
+
+Configuration advice is read-only. Actionable suggestions appear in
+`runtime.inference_profile.tips` and a single **Configuration tips** box at the
+end of stderr. Routine evidence notes remain in `inference_profile.warnings`;
+capacity and throughput warnings stay in their own sections and print as plain
+lines. `plan`, `validate` and `run` print the same advice; plan JSON stays on stdout.
+Preparation checks again and records values and provenance in `resolved-plan.json`
+and `inference-profile.json`.
+
+| Code | Meaning |
+|---|---|
+| `inference_profile_available` | Tip: the model, hardware and topology are compatible with a measured preset. Names the setting to add; changes nothing. For a cache-off preset in retract mode, explicitly notes that prefix reuse is disabled; compatibility does not establish a speedup. |
+| `inference_pool_hardware_mismatch` | Tip: explicit KV and recurrent pools equal a preset for a different GPU. Review before running; this is a heuristic, not a memory-fit check. |
+| `inference_metadata_unavailable` | The model metadata for this generic run is unavailable here; recommendations wait for preparation. Settings stay unchanged. |
+| `inference_model_guard_deferred` | A named preset is selected; its model guard must pass after preparation before training. |
+| `inference_fleet_extrapolation` | A named preset configures individual engines. Reminder to validate fleet routing, producer capacity and weight-publication latency for the intended topology. |
+
+For a new model or topology, start with generic settings, inspect the plan, and
+run bounded measurements rather than interpolating these pools. Unknown shapes
+receive no preset recommendation. Users and agents can inspect the structured
+codes above without parsing the rendered tips box.
+
+The compatibility tip can also appear when `generic` was selected explicitly.
+It describes the model, hardware and topology, not agreement between your serving
+settings and the preset. Keeping your explicit configuration is a supported choice.
+
+Fleet advisories remain visible for any named preset with more than one engine.
+Per-engine measurements do not establish fully async refresh or useful throughput
+for a different fleet.
+Managed replicas collect GPU inventories at startup. After preparation, the
+topology-sized rollout slices are checked against an applied preset; direct
+single-node training uses the same slicing convention. This assumes homogeneous
+devices within each Ray pool: Ray assigns trainer and rollout GPUs, so the slice
+does not identify the actual actor placements. Managed judges are outside that
+pool. Mixed-device Ray pools are not qualified by this check. A named multi-node
+preset requires managed per-replica inventories. Checks run outside generation.
+
+A producer budget equal to one wave of engine slots gets producer-backfill advice,
+regardless of HTTP headroom or profile selection. HTTP capacity below admission
+and a producer budget below requested capacity have separate advisories. A smaller
+budget can intentionally leave serving capacity unused when inference already
+supplies the trainer fast enough; the advisory alone is not a reason to raise it.
+
+Omitted producer budgets still use two waves of resolved capacity, rounded to
+whole groups (or one collection, whichever is larger). The examples explicitly
+use 1,024 unfinished samples for node and 3,840 for three-node. Without those
+limits their presets would resolve to 6,144 and 15,360 respectively.
+Generic configurations with omitted budgets give 1,024/1,920 for those topologies.
+Explicit budgets win. Both learning examples use 128 prompts × 8 responses,
+batch 1,024 and lag 12. One full wave across six
+512-slot engines represents three batches, but keeping those slots occupied is a
+different objective from keeping the trainer supplied. Neither batch-equivalents
+nor a static lag limit predicts drain time or actual policy age.
+Measure useful consumption, queue age/discards and publication latency in the
+fully async workload; explicitly reduce the producer budget or fleet when needed.
+
+For a deliberate departure, retain the resolved plan, checkpoint/runtime versions,
+full logs and response results. Begin with a bounded run on the intended shape;
+check memory, sustained useful throughput, occupancy and mid-generation refresh.
+There is no profile memory estimator or automatic pool adjustment in generic mode.
+
+## Qualification limits
+
+The presets are starting points for the studied BF16 Olmo 3.5 geometry and workload,
+not established optima for other models, context distributions, prompt reuse or fleets.
+Short correctness and per-engine throughput checks do not establish sustained
+fully async fleet throughput, learning equivalence or save/resume reliability;
+validate the intended workload and placement before a long run.
 
 ## Other serving and training settings
 
@@ -189,6 +393,41 @@ compilation can occur.
 
 ## How the limits interact
 
+Core refresh routing replay is decoded in distributed HTTP workers before Ray
+returns the numeric arrays to the producer. The same workers also turn the
+engine's per-token logprob records, one small list per generated token, into
+two flat arrays, so Ray moves buffers into the producer instead of rebuilding
+several Python objects per token there. Python's garbage collector schedules
+full collections by counting container allocations, and each full collection
+walks every live container the producer holds, so bursts of nested per-token
+records were the main trigger for producer event-loop pauses. Worker logs
+separate replay decode and record compaction wall time, thread CPU time, and
+sizes from JSON parsing. The producer still validates replay shape and policy
+metadata. Decoding remains synchronous within each HTTP actor; it does not
+remove batch preparation from the coordinator, and converted samples still
+hold their token, mask and logprob lists. The earlier transport runs used a completed
+buffer of eight optimizer batches (512 groups / 4,096 samples) with a
+policy-lag limit of six. The current three-node template uses the same group
+capacity, now four batches of 1,024 samples, with lag 12. Capacity alone does
+not guarantee all queued work stays usable.
+
+The three-node template gives the trainer a full node (8 GPUs, EP8) and runs
+15 engines plus one judge on the other two. This candidate split was validated
+together with compact token/logprob transport. The
+[preceding EP4 run](https://beaker.org/ex/01M68BB0VMHXJE0SZXK6FYMGF1) and
+[combined EP8 run](https://beaker.org/ex/01M68M0GR6GJXYNEMYG6BSQZ2T) both completed
+32 updates. HTTP-worker-to-producer delivery fell from 41.34 s mean / 164.60 s
+p95 to 0.152 s / 0.218 s with similar response sizes. Across updates 22–32,
+accepted response throughput rose from 26,327 to 33,109 tokens/s; counting all
+32 updates, including early compilation, the gain was about 4%.
+
+The runs changed both transport and placement, and accepted response lengths
+differed. Late-run optimizer time per million model tokens was nearly unchanged
+(16.89 s with EP4 versus 16.64 s with EP8), so this comparison does not establish
+an independent training-efficiency benefit from EP8 or an optimal GPU split.
+Watch trainer wait and stale-group discards after changing the split; the
+producer budget is 256 unfinished samples per engine.
+
 | Control | What it limits | External constraint and tuning signal |
 |---|---|---|
 | Trainer GPUs / EP | Model and optimizer distribution, training time | Expert divisibility, model memory, collective bandwidth; compare training time at the same optimization batch. |
@@ -219,7 +458,7 @@ separate run identities and private cache locations, not delete shared caches.
 
 ## Plan, validate, and launch
 
-Copy a profile, replace the model and output paths, and inspect the resolved
+Copy an example, replace the model and output paths, and inspect the resolved
 allocation and advisories before launching:
 
 ```bash
@@ -243,3 +482,122 @@ and explicit GPU allocation. Minimum runtimes vary by tier; see
 separate CPU scheduling policy. Multi-node auto-resume covers the ordinary
 restart path; forced preemption, and restarts of runs carrying a managed judge,
 are not yet supported paths.
+
+
+## Monitoring lag and batch-size trials
+
+Refresh-mode PPO clipping and PPO ESS compare against the trainer's pre-update
+policy. When that anchor comes from the same training forward, they are not
+behavior-policy drift measurements. Use the separate `train/behavior/*` metrics:
+
+| Metric family | Meaning |
+|---|---|
+| `train/behavior/{all,age/*,length/*}/*` | Globally token-weighted trainer-versus-generating-policy log ratios, absolute-error tails, TIS clipping fractions and unclamped behavior-ratio ESS. Age-zero values include numerical serving/training mismatch. |
+| `train/behavior/length/*/{historical_prefix,latest_forward}/*` | The same diagnostics separately for prefixes generated before the final replay version and the final-version suffix, within each response-length bucket. |
+| `train/collection_score/length_*/mean_abs` | Existing score-difference length buckets, now published to tracking as well as JSON. |
+| `rollout/fully_async/completed_queue/*` | Delivered/dropped samples and tokens, with discard fractions by response length and oldest group age. |
+| `rollout/fully_async/*staleness*`, `*generation_version_span*` | Oldest/newest version ages, token-weighted lag and generation version spans. These are policy-update ages, not wall-clock durations. |
+| `train/allocator/rank_*/*` | Allocated, reserved, peak-reserved and inactive-split bytes, plus allocation-retry and OOM counter deltas for each update. Global maxima and counter sums are also logged. |
+| `train/run_consumed_response_tokens` | Cumulative active response tokens, persisted with native checkpoints and restored on resume. Legacy checkpoints without this count warn and omit the metric because their prior total is unknown. Use alongside wall time when comparing batch sizes. |
+
+Behavior ESS measures dispersion of token weights, not independent trajectory
+count. Empty buckets report zero tokens; do not interpret their zero-valued
+summaries as drift. Absolute-error quantiles are histogram upper bounds, with
+an explicit overflow flag. TIS clamps weights rather than dropping clipped
+tokens. None of these diagnostics modifies the loss or admission rules.
+
+For online trial dashboards, set `tracking.wandb_mode = "online"` and bind
+`launch.secrets.WANDB_API_KEY` to your existing workspace secret. Confirm the
+run URL and uploaded metrics after startup; offline mode only stores local data.
+For the allocator trial, use
+`miles.train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }`.
+This is applied to trainer workers before CUDA initialization, rather than to
+all engines through `launch.env`.
+
+A trial combining lag 12, batch 1,024 (128 prompts × 8 responses), four completed
+batches and the existing 3,840 unfinished-sample budget tests length survival
+and drift jointly. Four batches retain the previous 4,096-response capacity.
+Capacity divided by batch size is planning headroom, not a hard bound on age:
+sample backfill can retain additional finished siblings and generation latency
+varies. Budget compilation separately and inspect steady-state length survival;
+this combined trial cannot attribute a change to batch size versus lag alone.
+## Ready-batch and trainer profiling validation
+
+`core.layer_profile_interval = 4` samples every fourth optimizer update, starting
+with update 1; `0` disables it. The Core trainer records block forward/backward
+CUDA-event intervals, host durations and the slowest rank/layer in
+`training_contract_rank*.jsonl`, and publishes per-layer rank maxima to W&B under
+`train/profile/`. Inclusive device intervals include stream waits and CPU enqueue
+gaps; checkpoint recomputation can overlap the forward/backward categories.
+Do not sum these intervals as an exclusive decomposition of trainer time.
+
+Profiled replay updates also record actual per-pack expert-destination skew,
+even with expert-balanced packing disabled. Update-wide router histograms remain
+available on every step. Use both measurements: an overloaded expert is not
+necessarily the slowest layer, and update averages can conceal per-pack skew.
+The current expert-aware scheduler requires multiple EP replicas; an EP8 trainer
+on eight GPUs cannot enable it. EP4 with two replicas is a separate configuration
+candidate once timing identifies a plausible benefit.
+
+Core ready queues drain through the usual per-group staleness and disposition
+checks without scheduling one task per ready group. They yield after an 8 ms
+draining budget. Empty queues retain the worker-failure/cancellation-aware wait.
+Sampled training diagnostics use one bounded writer process: copying happens
+before conversion, writes run asynchronously, and completion/errors are checked
+at the next submission and at shutdown. W&B distinguishes snapshot cost, writer
+backpressure, metric computation, conversion and object-store handoff. Rollout
+metric computation remains synchronous and is measured separately.
+
+Trainer preparation builds token packs once, then binds newly computed scores,
+advantages and returns to those packs. `batch_preparation` records separate
+fetch, packing and validation durations. Existing allocator, staleness, length
+survival and behavior-logprob metrics remain required for validation.
+
+Keep activation recomputation enabled until a representative longest pack has
+been checked on the target GPU. Low PyTorch reserved memory from a checkpointed
+run alone does not establish the peak without checkpointing or account for all
+communication-library allocations.
+
+
+## Retained-state weight publication
+
+The one-node and three-node learning examples use `miles.pause_generation_mode =
+"in_place"`. At publication, Core pauses active generation, transfers and finalizes
+weights, publishes the new version, and resumes the same requests without flushing
+their attention KV or hybrid recurrent state. Original token log-probabilities and
+version spans remain the behavior-policy record used for importance sampling.
+This state intentionally contains computations under older weights.
+
+Cross-request radix caching must be disabled, so a new prompt cannot reuse an
+old-weight prefix. The named B300 retained-state preset enforces that setting while
+preserving the original preset's pools, graphs and model/hardware guards. Core and
+the CPU planner reject in-place mode with prefix reuse or colocated serving.
+The single-GPU `dev.toml` remains a colocated retract-mode mechanics check.
+Standalone evaluation and judge servers do not receive these live weight updates;
+their profiles are unchanged.
+
+To restore the previous behavior, set `miles.pause_generation_mode = "retract"`.
+On B300, select `inference.profile = "olmo35-b300-v1"` as well to restore the
+previous prefix-cache configuration. H100's `olmo35-h100-12.5@0.8` already disables
+prefix caching, but the retained-state performance and learning measurements below
+were collected on B300, not H100.
+
+| Qualification | Evidence |
+|---|---|
+| Tiny hybrid live-update mechanics | [One GPU](https://beaker.org/ex/01M6G1ERM883BMPMGJDHT7446K): unchanged-weight updates preserved tokens/log-probs exactly; changed weights continued with valid provenance; fresh requests reused no cached prefix. |
+| One-node learning | [10 updates](https://beaker.org/ex/01M6G2BZV92DG7G32Q6BMHGP6T): short-run divergence qualification, not a demonstrated throughput gain. |
+| Three-node learning | [50 updates](https://beaker.org/ex/01M6GA8H3EM4B8AG0A725KHZHW), admission 3,840: 115.1K consumed response tokens/s versus 82.5K for the [retract baseline](https://beaker.org/ex/01M6EHWDE8R8FQB5D7M6QNEDC0), measured from completion of update 25 to completion of update 50, including intervening checkpoint overhead. |
+
+Mean trainer-versus-rollout KL over updates 25–50 was 0.000178 versus 0.000887
+in the baseline. Token-weighted KL on historical prefixes in responses longer
+than 16K was 0.000143 across 72 million active tokens, with no TIS clipping.
+The retained run had zero stale discards, allocator retries and OOMs. Its runtime
+patch was tested at MILES `1dbe38b3fe3ffa1eb4b7549b581da00ff1be80e1`, before
+rebasing onto newer main. These are short-run stability results, not proof of
+long-run learning equivalence or a universal 40% speedup. Admission is unchanged
+in the examples; raising it remains a separate experiment.
+
+Monitor `train/train_rollout_kl`, `train/train_rollout_logprob_abs_diff`, and the
+`train/behavior/*` token-weighted KL, saturation, TIS clipping and ESS metrics,
+especially by token age, response length and historical prefix. Refresh-mode
+PPO KL and PPO ESS are fixed by construction and do not measure behavior mismatch.

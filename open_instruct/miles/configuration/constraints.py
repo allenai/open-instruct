@@ -113,9 +113,6 @@ NATIVE_CONSTRAINTS = {
         "Async Core training requires resident disaggregated rollout engines; set miles.colocate=false and miles.offload_rollout=false.",
         Category.NOT_IMPLEMENTED,
     ),
-    "use_rollout_routing_replay": Constraint(
-        "The pinned SGLang router strips expert-ID requests; rollout replay requires use_miles_router"
-    ),
 }
 
 # Structured migration errors are distinct from native backend restrictions.
@@ -295,7 +292,17 @@ def native_values(args, supplied_flags):
 
 # Closed structured schemas, also consumed by documentation coverage checks.
 STRUCTURED_FIELDS = {
-    "data": {"eval_prompt_data", "prompt_data", "recipe", "reward_config", "rl_manifest", "seed", "shuffle", "tasks"},
+    "data": {
+        "eval_prompt_data",
+        "prompt_data",
+        "recipe",
+        "reward_config",
+        "rl_manifest",
+        "seed",
+        "shuffle",
+        "tasks",
+        "sources",
+    },
     "launch": {
         "auto_resume",
         "budget",
@@ -304,6 +311,7 @@ STRUCTURED_FIELDS = {
         "env",
         "gpus_per_replica",
         "max_retries",
+        "memory",
         "min_runtime",
         "priority",
         "secrets",
@@ -317,6 +325,7 @@ STRUCTURED_FIELDS = {
     "conversion": {"hf_output"},
     "compiler_cache": {
         "diagnostics",
+        "tilelang",
         "enabled",
         "max_storage_bytes",
         "publish_interval_seconds",
@@ -330,6 +339,7 @@ STRUCTURED_FIELDS = {
         "backend",
         "chat_template",
         "context_extension",
+        "cuda_graphs",
         "endpoint",
         "gpus",
         "max_concurrent_calls",
@@ -348,6 +358,7 @@ STRUCTURED_FIELDS = {
 # Map special run-file controls to their compiler branch. Ordinary aliases use
 # FIELD_MAP; these need transformations or deferred multi-field resolution.
 SPECIAL_CONTROLS = {
+    "profile": "inference_profile",
     "gpus": "gpus",
     "placement_mode": "deferred",
     "max_context_length": "deferred",

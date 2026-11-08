@@ -20,6 +20,7 @@ from open_instruct.ground_truth_utils import (
     LMJudgeVerifier,
     LMJudgeVerifierConfig,
     PuzzleMatcherVerifier,
+    RewardConfig,
     cleanup_all_llm_judge_clients,
 )
 from open_instruct.IFEvalG import instructions_registry
@@ -260,6 +261,61 @@ class TestIFEvalVerifierEmptyInstructions(unittest.TestCase):
         self.assertEqual(result.score, 0.0)
 
 
+class TestRewardConfigNonAdditiveFormatGate(unittest.TestCase):
+    """The non-additive R1 format gate keys off `r1_style_format_reward`, not a literal 1.0."""
+
+    MATCHING = "reasoning</think><answer>42</answer>"
+    NON_MATCHING = "42"
+
+    def _scores(self, format_reward, responses):
+        reward_fn = RewardConfig(
+            apply_r1_style_format_reward=True, r1_style_format_reward=format_reward, additive_format_reward=False
+        ).build()
+        n = len(responses)
+        infos = SimpleNamespace(
+            timeouts=[False] * n,
+            tool_errors=[False] * n,
+            tool_outputs=[[] for _ in range(n)],
+            tool_calleds=[False] * n,
+            rollout_states=None,
+        )
+        verifier_mock = AsyncMock(return_value=([10.0] * n, [{} for _ in range(n)]))
+        with patch.object(ground_truth_utils, "apply_verifiable_reward", new=verifier_mock):
+            scores, _ = asyncio.run(
+                reward_fn(
+                    responses=[[] for _ in range(n)],
+                    decoded_responses=responses,
+                    ground_truths=[None] * n,
+                    datasets=["dataset"] * n,
+                    finish_reasons=["stop"] * n,
+                    infos=infos,
+                )
+            )
+        return scores
+
+    @parameterized.expand(
+        [
+            ("default_reward_matching", 1.0, MATCHING, 10.0),
+            ("default_reward_non_matching", 1.0, NON_MATCHING, 0.0),
+            ("half_reward_matching", 0.5, MATCHING, 10.0),
+            ("half_reward_non_matching", 0.5, NON_MATCHING, 0.0),
+            ("double_reward_matching", 2.0, MATCHING, 10.0),
+            ("zero_reward_matching", 0.0, MATCHING, 10.0),
+            ("zero_reward_non_matching", 0.0, NON_MATCHING, 0.0),
+        ]
+    )
+    def test_format_gate(self, _name, format_reward, response, expected_score):
+        self.assertEqual(self._scores(format_reward, [response]), [expected_score])
+
+    def test_mixed_batch(self):
+        scores = self._scores(0.5, [self.MATCHING, self.NON_MATCHING, self.MATCHING])
+        self.assertEqual(scores, [10.0, 0.0, 10.0])
+
+    def test_mixed_batch_zero_scale(self):
+        scores = self._scores(0.0, [self.MATCHING, self.NON_MATCHING, self.MATCHING])
+        self.assertEqual(scores, [10.0, 0.0, 10.0])
+
+
 class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
     """Regression test: detectable_format:json_format called json.loads on the response and caught only ValueError,
     so a degenerate, deeply nested response raised RecursionError out of the verifier and stopped an RL run."""
@@ -281,6 +337,53 @@ class TestIFEvalGJsonFormatDeepNesting(unittest.TestCase):
         self.assertEqual(verifier([], response, {"func_name": "validate_json_format"}).score, 0.0)
         self.assertEqual(verifier([], '{"a": [1, 2]}', {"func_name": "validate_json_format"}).score, 1.0)
         self.assertEqual(verifier([], "not JSON", {"func_name": "validate_json_format"}).score, 0.0)
+
+
+class TestIFEvalGDegenerateConstraints(unittest.TestCase):
+    """Regression tests for constraints that rewarded degenerate answers (marin-community/marin#10320).
+
+    count:lowercase_counting capped the total number of lowercase words at N (2-3), so only an empty, all-caps
+    or non-Latin answer passed; letters:letter_counting counted only ASCII letters, so a non-Latin answer met
+    "less than N letters"; length_constraints:nth_paragraph_first_word redrew an out-of-range paragraph index
+    at random on every check."""
+
+    @staticmethod
+    def _checker(key, **kwargs):
+        checker = instructions_registry.INSTRUCTION_DICT[key](key)
+        checker.build_description(**kwargs)
+        return checker
+
+    def test_lowercase_counting_caps_each_word(self):
+        checker = self._checker("count:lowercase_counting", N=2)
+        self.assertTrue(checker.check_following("The cat sat on a mat, then the dog sat."))
+        self.assertFalse(checker.check_following("the cat and the dog and the bird"))
+        self.assertTrue(checker.check_following(""))
+
+    def test_letter_counting_counts_every_script(self):
+        less = self._checker("letters:letter_counting", N=3, relation="less than")
+        self.assertTrue(less.check_following("42"))
+        self.assertFalse(less.check_following("答案是四十二"))
+        self.assertFalse(less.check_following("Forty-two"))
+        at_least = self._checker("letters:letter_counting", N=3, relation="at least")
+        self.assertTrue(at_least.check_following("答案是四十二"))
+
+    def test_out_of_range_paragraph_is_kept_and_fails(self):
+        key = "length_constraints:nth_paragraph_first_word"
+        response = "\n\n".join(["guest one"] * 7)
+        for _ in range(50):
+            checker = self._checker(key, num_paragraphs=7, nth_paragraph=8, first_word="guest")
+            self.assertEqual(checker.get_instruction_args()["nth_paragraph"], 8)
+            self.assertFalse(checker.check_following(response))
+        self.assertTrue(
+            self._checker(key, num_paragraphs=7, nth_paragraph=7, first_word="guest").check_following(response)
+        )
+
+    def test_random_paragraph_index_is_in_range(self):
+        for _ in range(200):
+            args = self._checker(
+                "length_constraints:nth_paragraph_first_word", num_paragraphs=3
+            ).get_instruction_args()
+            self.assertLessEqual(args["nth_paragraph"], 3)
 
 
 class TestIFEvalGWordCounting(unittest.TestCase):

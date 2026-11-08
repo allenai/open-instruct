@@ -9,10 +9,12 @@ import os
 import time
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 
 import ray
 import wandb
 from miles.backends.core_utils.publication.rolling_publication import RollingPublication
+from miles.backends.core_utils.rollout import prepared_batch
 from miles.ray import placement_group, wiring
 from miles.ray.rollout.eval_dispatch import EvalDispatcher
 from miles.utils import object_store
@@ -25,7 +27,7 @@ from miles.utils.tracking_utils.tracking import define_step_key_metric_group, fi
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
-from open_instruct.miles.execution import serving
+from open_instruct.miles.execution import serving, startup
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
 
@@ -37,7 +39,11 @@ async def train(args, *, export_hf=None):
         raise ValueError("Core currently requires the Ray cluster backend")
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
-    stopped_for_time = False
+    # A time stop saves and leaves the run open, like a debug exit: no final export
+    # or final evaluation at the stopped update. max_run_final, or no save path,
+    # makes it final.
+    resumable = not getattr(args.olmo_core, "max_run_final", False) and bool(getattr(args, "save", None))
+    stopped_for_time = final_stop = False
     for warning in throughput.report(vars(args), args.olmo_core)["warnings"]:
         logger.warning("Throughput [%s]: %s", warning["code"], warning["message"])
     with stage(args, "startup_cache_prepare"):
@@ -46,14 +52,24 @@ async def train(args, *, export_hf=None):
     manager = None
     inference = None
     learner = None
+    rollouts_per_epoch = None
     failure = None
     completed = []
     rolling = None
     refresh = args.olmo_core.publication_mode == "refresh"
+    overlap = prepared_batch.enabled(args)
+    prefetched = False
+    logger.info(
+        "Prepared-batch overlap enabled: %s; %s",
+        overlap,
+        "eligible" if overlap else prepared_batch.disabled_reason(args),
+    )
     try:
         # Start local Ray before W&B creates WANDB_SERVICE. Otherwise raylet
         # inherits the driver's service connection, and offline worker writers
         # collide with the primary run. Preserve an already connected cluster.
+        with stage(args, "ray_readiness_wait"):
+            await startup.wait_ready("ray")
         if not ray.is_initialized():
             ray.init(address=os.environ.get("RAY_ADDRESS") or "local")
         # Tracking assigns the run ID before Miles serializes args into worker
@@ -63,14 +79,54 @@ async def train(args, *, export_hf=None):
         with stage(args, "placement"):
             worker_manager = wiring.launch_worker_manager(args, transform_specs=partial(serving.configure_specs, args))
         object_store.init_instance(args, contribute_segment=False)
-        with stage(args, "serving_startup"):
-            inference, manager, rollouts_per_epoch = await placement_group.create_rollout_components(args)
-        with stage(args, "trainer_startup"):
-            learner, _ = await placement_group.create_training_models(args, manager)
+        # Colocated/offloaded models share memory; epoch-derived schedules need the
+        # rollout dataset length before trainer initialization. Keep those sequential.
+        parallel = not getattr(args, "colocate", True) and not args.offload_rollout and args.num_rollout is not None
+        logger.info("Parallel trainer/inference startup enabled: %s", parallel)
+        initialized = SimpleNamespace(inference=None, manager=None, rollouts_per_epoch=None, models=None)
+
+        async def start_serving():
+            with stage(args, "serving_startup"):
+                (
+                    initialized.inference,
+                    initialized.manager,
+                    initialized.rollouts_per_epoch,
+                ) = await placement_group.create_rollout_components(args)
+
+        async def start_trainer():
+            with stage(args, "trainer_startup"):
+                initialized.models = await placement_group.initialize_training_models(args)
+
+        try:
+            if parallel:
+                await startup.join(start_serving(), start_trainer())
+            else:
+                await start_serving()
+        finally:
+            # Retain completed handles even if the sibling failed. The worker
+            # manager owns actors whose initialization did not return a handle.
+            inference, manager, rollouts_per_epoch = (
+                initialized.inference,
+                initialized.manager,
+                initialized.rollouts_per_epoch,
+            )
+            models = initialized.models
+            if models is not None:
+                learner = models.actor.handle
+
+        if parallel:
+            with stage(args, "trainer_rollout_connection"):
+                await placement_group.connect_training_models(args, models, manager)
+        else:
+            with stage(args, "trainer_startup"):
+                learner, _ = await placement_group.create_training_models(args, manager)
 
         async def publish(rollout_id=None):
-            if args.fully_async:
-                await manager.core_publication_boundary(True, **({"refresh": True} if refresh else {}))
+            # Refresh safety belongs to the engine pause/update/resume boundary.
+            # Producer admission acknowledgments can queue behind response work;
+            # existing requests already cross publication without this group gate.
+            if args.fully_async and not refresh:
+                await manager.core_publication_boundary(True)
             if args.offload_rollout:
                 await inference.onload_weights()
             await infra_timeouts.wait_for(
@@ -106,11 +162,15 @@ async def train(args, *, export_hf=None):
                 )
             if args.offload_rollout:
                 await inference.onload_kv()
-            if args.fully_async:
-                await manager.core_publication_boundary(False, **({"refresh": True} if refresh else {}))
+            if args.fully_async and not refresh:
+                await manager.core_publication_boundary(False)
 
         with stage(args, "initial_publication"):
             await publish()
+        # No generation/evaluation may use a judge until its canaries pass. GPU
+        # initialization and initial publication can finish while qualification runs.
+        with stage(args, "judge_readiness_wait"):
+            await startup.wait_ready("judges")
         if args.olmo_core.publication_mode == "engine_drain":
             rolling = RollingPublication(args, learner, manager, inference)
             with stage(args, "engine_drain_startup"):
@@ -144,21 +204,41 @@ async def train(args, *, export_hf=None):
             )
             if args.start_rollout_id == 0 and background["initial"]:
                 coordinator.dispatch(0, args.hf_checkpoint)
-        if evaluation is not None and args.eval_interval is not None and not args.skip_eval_before_train:
+        if (
+            evaluation is not None
+            and args.eval_interval is not None
+            and not args.skip_eval_before_train
+            and args.start_rollout_id == 0
+        ):
             with evaluation_stage(args, args.start_rollout_id, initial=True):
-                await evaluation.dispatch(
-                    args.start_rollout_id, hf_dir=args.hf_checkpoint if args.start_rollout_id == 0 else None
-                )
+                await evaluation.dispatch(args.start_rollout_id, hf_dir=args.hf_checkpoint)
         for rollout_id in range(args.start_rollout_id, args.num_rollout):
-            # In async mode the managed producer fills the bounded queue while
-            # learning runs; dequeue happens only after the preceding publication.
+            # A prefetched batch was filtered for this publication's version.
+            # Its prompts remain outstanding until the executor accepts consumption.
             with stage(args, "generation_wait", rollout_id):
                 if rolling is None:
                     await inference.prepare_rollout(rollout_id)
-                batch = await manager.get(rollout_id)
+                if prefetched:
+                    batch = await manager.core_get_prepared(rollout_id)
+                    prefetched = False
+                else:
+                    batch = await manager.get(rollout_id)
             if args.offload_rollout:
                 await inference.offload()
             try:
+                has_next = rollout_id + 1 < args.num_rollout
+                debug_stop = args.debug_exit_after_rollout
+                has_next = has_next and (debug_stop is None or rollout_id - args.start_rollout_id + 1 < debug_stop)
+                # Shared-engine evaluation temporarily changes buffer capacity
+                # while it drains generation. Keep that boundary sequential.
+                inline_eval_due = evaluation is not None and should_run_periodic_action(
+                    rollout_id, args.eval_interval, rollouts_per_epoch, args.num_rollout
+                )
+                if overlap and has_next and not inline_eval_due:
+                    # Starts one owned executor task and returns immediately. The
+                    # reservation occupies existing completed-buffer capacity.
+                    await manager.core_prefetch(rollout_id + 1)
+                    prefetched = True
                 with stage(args, "training", rollout_id):
                     await learner.train(rollout_id, batch)
                 completed.append(rollout_id)
@@ -210,7 +290,8 @@ async def train(args, *, export_hf=None):
                     await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
             if stopped_for_time:
                 logger.info("Graceful wall-clock stop after completed rollout %s (budget=%ss)", rollout_id, budget)
-            if coordinator is not None and background is not None and not (stopped_for_time and background["final"]):
+            final_stop = stopped_for_time and not resumable
+            if coordinator is not None and background is not None and not (final_stop and background["final"]):
                 coordinator.dispatch_batch(collection_snapshots)
                 collection_snapshots = []
             if stopped_for_time:
@@ -220,18 +301,21 @@ async def train(args, *, export_hf=None):
                 and rollout_id - args.start_rollout_id + 1 >= args.debug_exit_after_rollout
             ):
                 break
+        if prefetched:
+            await manager.core_cancel_prepared()
+            prefetched = False
         if evaluation is not None:
             await evaluation.drain()
         # A deliberate debug stop leaves a resumable workflow, not a final export.
         # Otherwise the first process creates the final directory and the resumed
         # process cannot export its newer weights there (the exporter is exclusive).
         reached_end = (completed[-1] + 1 if completed else args.start_rollout_id) == args.num_rollout
-        if export_hf is not None and (reached_end or stopped_for_time):
+        if export_hf is not None and (reached_end or final_stop):
             if args.fully_async:
                 await manager.core_publication_boundary(True)
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
-        if stopped_for_time and coordinator is not None and background is not None and background["final"]:
+        if final_stop and coordinator is not None and background is not None and background["final"]:
             last = completed[-1]
             update = (last + 1) * args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
             target = export_hf or str(background_eval.snapshot(background["root"], update))
@@ -257,11 +341,18 @@ async def train(args, *, export_hf=None):
                 cleanup_error = error
                 logger.exception("Engine drain cleanup failed")
         for component, operation, timeout, cleanup_stage in (
+            # Join collection before stopping its producer; prepared-but-unused
+            # prompts are still in the checkpoint ledger and regenerate on resume.
+            (manager if overlap else None, lambda: manager.core_cancel_prepared(), 60, "prepared_batch_dispose"),
             # Async generation must stop, but the servers must remain alive while
             # both sides collectively destroy the weight-update NCCL group.
             (
                 manager if args.fully_async else None,
-                lambda: manager.core_publication_boundary(True),
+                # A failed refresh can leave engines paused or partly updated.
+                # Cancel owned work instead of waiting for it to generate more.
+                lambda: manager.core_publication_boundary(
+                    True, **({"abort": True} if refresh and failure is not None else {})
+                ),
                 (
                     args.olmo_core.engine_drain_timeout + args.olmo_core.engine_update_timeout
                     if rolling or refresh
@@ -303,4 +394,5 @@ async def train(args, *, export_hf=None):
         "start_rollout_id": args.start_rollout_id,
         "export_hf": export_hf,
         "stopped_for_time": stopped_for_time,
+        "time_stop_resumable": stopped_for_time and resumable,
     }

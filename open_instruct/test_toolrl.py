@@ -1,0 +1,523 @@
+"""Offline call grading, split isolation, and MILES adoption without model loading."""
+
+import asyncio
+import copy
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from scripts.data.rlvr import toolrl
+from transformers.utils import chat_template_utils
+
+from open_instruct import toolrl_utils
+from open_instruct.miles.datasets import run_data, source_preparation
+from open_instruct.miles.rewards import rewards, tool_call_parsing
+from open_instruct.miles.rewards import toolrl as toolrl_verifier
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "giveaways",
+            "description": "games",
+            "parameters": {"type": "object", "properties": {"platform": {"type": "string"}}},
+        },
+    }
+]
+TEMPLATE = (Path(__file__).parent / "test_data/olmo35_chat_template.jinja").read_text()
+
+
+def completion(calls=None, *, reasoning="plan", response="answer", retain_terminal=False):
+    message = {"role": "assistant", "content": response if calls is None else "", "reasoning_content": reasoning}
+    if calls is not None:
+        message["tool_calls"] = [{"function": {"name": c["name"], "arguments": c["parameters"]}} for c in calls]
+    rendered = chat_template_utils._compile_jinja_template(TEMPLATE).render(
+        messages=[message], tools=[], eos_token="<|endoftext|>", add_generation_prompt=False
+    )
+    response = rendered.split("<|im_start|>assistant\n")[1]
+    return response if retain_terminal else response.removesuffix("<|im_end|>\n").removesuffix("<|endoftext|>")
+
+
+def target(calls=None, tools=None):
+    return {"format": "olmo-toolrl-v1", "calls": calls or [], "tools": tools or TOOLS}
+
+
+def source_completion(calls):
+    return "<think>plan</think>\n<tool_call>\n" + "\n".join(json.dumps(c) for c in calls) + "\n</tool_call>"
+
+
+def call(platform):
+    return {"name": "giveaways", "parameters": {"platform": platform}}
+
+
+def test_parallel_call_rewards_and_order():
+    expected = target([call("xbox"), call("android")])
+    correct = toolrl_utils.score_response(completion([call("android"), call("xbox")]), expected)
+    missing = toolrl_utils.score_response(completion([call("xbox")]), expected)
+    duplicated = toolrl_utils.score_response(completion([call("xbox"), call("xbox")]), expected)
+    wrong = toolrl_utils.score_response(completion([{"name": "chess", "parameters": {}}]), expected)
+    assert correct.score == 4
+    assert wrong.score < missing.score < correct.score
+    assert duplicated.correctness_score < correct.correctness_score
+    assert missing.correctness_score == pytest.approx(0)
+
+
+def test_no_call_targets_only_check_format_not_answer_facts():
+    expected = target()
+    result = toolrl_utils.score_response(completion(response="a different answer"), expected)
+    assert result.score == result.format_score == 1
+    assert result.correctness_score == 0
+    assert toolrl_utils.score_response(completion([call("xbox")]), expected).score == 0
+
+
+@pytest.mark.parametrize("forced_prefix", [False, True])
+def test_binary_reward_requires_complete_calls_and_format(forced_prefix):
+    reference = target([call("xbox"), call("android")])
+    verifier = toolrl_verifier.ToolRLVerifier(
+        toolrl_verifier.ToolRLConfig(think_prefix_in_prompt=forced_prefix, all_calls_required=True)
+    )
+    cases = [
+        (completion([call("android"), call("xbox")]), 4),
+        (completion([call("xbox")]), -3),
+        (completion([call("xbox"), call("xbox")]), -3),
+        (completion([call("xbox"), call("android"), call("extra")]), -3),
+        (completion([call("xbox"), call("wrong")]), -3),
+        (completion([call("android"), call("xbox")]).replace("</think>", ""), -3),
+        ("malformed", -3),
+    ]
+    for response, expected in cases:
+        prediction = response.removeprefix("<think>") if forced_prefix else response
+        result = asyncio.run(verifier.async_call([], prediction, reference))
+        assert result.score == expected
+        assert result.diagnostics["full_success"] == (expected == 4)
+        assert result.diagnostics["binary_score"] == expected
+        assert result.diagnostics["required_calls"] == 2
+
+
+def test_binary_mode_preserves_no_call_grading():
+    reference = target()
+    for response in [completion(response="answer"), completion([call("xbox")]), "malformed"]:
+        partial = toolrl_verifier.ToolRLVerifier()
+        binary = toolrl_verifier.ToolRLVerifier(toolrl_verifier.ToolRLConfig(all_calls_required=True))
+        left = asyncio.run(partial.async_call([], response, reference))
+        right = asyncio.run(binary.async_call([], response, reference))
+        assert left.score == right.score
+        assert right.diagnostics["full_success"] is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "not json",
+        '{"name":"giveaways","parameters":{"platform":"xbox","platform":"android"}}',
+        '{"name":"giveaways","parameters":{"platform":NaN}}',
+        '{"name":"giveaways","parameters":[]}',
+        '{"name":"giveaways","parameters":{},"extra":true}',
+        "",
+    ],
+)
+def test_malformed_calls_cannot_earn_correctness(payload):
+    prediction = "<think>plan</think>\n<tool_call>\n" + payload + "\n</tool_call>"
+    result = toolrl_utils.score_response(prediction, target([call("xbox")]))
+    assert result.correctness_score == -3
+
+
+def test_reasoning_only_and_malformed_tail_do_not_supply_actions():
+    reference = target([call("xbox")])
+    correct = completion([call("xbox")])
+    quoted = correct.split("</think>")[1]
+    for prediction in (completion(reasoning=quoted), "<think>" + quoted, correct + "\n<tool_call>"):
+        assert toolrl_utils.score_response(prediction, reference).correctness_score == -3
+
+
+def test_forced_think_prefix_is_explicit():
+    reference = target([call("xbox")])
+    correct = completion([call("xbox")])
+    suffix = correct.removeprefix("<think>")
+    assert toolrl_utils.score_response(suffix, reference).format_score == 0
+    assert toolrl_utils.score_response(suffix, reference, think_prefix_in_prompt=True).score == 4
+    assert toolrl_utils.score_response(correct, reference, think_prefix_in_prompt=True).format_score == 0
+
+
+@pytest.mark.parametrize("forced_prefix", [False, True])
+@pytest.mark.parametrize("calls", [None, [call("xbox")], [call("xbox"), call("android")]])
+def test_native_template_terminal_tokens_through_grader(calls, forced_prefix):
+    prediction = completion(calls, retain_terminal=True)
+    if forced_prefix:
+        prediction = prediction.removeprefix("<think>")
+    result = toolrl_utils.score_response(prediction, target(calls), think_prefix_in_prompt=forced_prefix)
+    assert result.score == (4 if calls else 1)
+
+
+@pytest.mark.parametrize("terminal", ["<|im_end|>", "<|endoftext|>"])
+def test_terminal_normalization_preserves_arguments_and_rejects_bad_call_tails(terminal):
+    calls = [call("literal " + terminal)]
+    prediction = completion(calls)
+    reference = target(calls)
+    assert toolrl_utils.score_response(prediction + terminal + "\n", reference).score == 4
+    for tail in (terminal + terminal, terminal + "garbage", "garbage" + terminal, "<tool_call>" + terminal):
+        assert toolrl_utils.score_response(prediction + tail, reference).score == -3
+    assert toolrl_utils.score_response("<think></think>" + terminal, target()).score == 0
+
+
+def test_bad_target_raises_instead_of_punishing_model():
+    with pytest.raises(ValueError, match="reference"):
+        toolrl_utils.score_response("anything", "malformed reference")
+
+
+def source_rows():
+    instruction = '**Available Tools**\n1. Name: giveaways\nDescription: games\nParameters: {"platform": {"type": "string"}}\n**Steps for Each Turn**'
+    rows = [
+        {
+            "instruction": instruction,
+            "input": f"**Dialogue Records History**\n<user>question {index}</user>",
+            "output": source_completion([call(str(index))]),
+        }
+        for index in range(12)
+    ]
+    duplicate = copy.deepcopy(rows[0])
+    duplicate["instruction"] = instruction.replace("Description: games", "Description: other description")
+    rows.append(duplicate)
+    return rows
+
+
+def test_preparation_preserves_source_and_keeps_targets_out_of_prompt():
+    source = source_rows()
+    before = copy.deepcopy(source)
+    partitions, summary = toolrl.convert_rows(source, eval_count=3)
+    assert source == before
+    assert sum(map(len, partitions.values())) == len(source)
+    train = {row["messages"][0]["content"] for row in partitions["train"]}
+    evaluation = {row["messages"][0]["content"] for row in partitions["eval"]}
+    assert not train & evaluation
+    assert summary["unique_dialogues"] == 12
+    assert toolrl.convert_rows(source, eval_count=3) == (partitions, summary)
+    for rows in partitions.values():
+        for row in rows:
+            index = row["metadata"]["source_row"]
+            assert row["messages"] == [{"role": "user", "content": f"question {index if index < 12 else 0}"}]
+            assert row["ground_truth"] == row["metadata"]["verifiers"][0]["target"]
+            assert row["ground_truth"]["format"] == "olmo-toolrl-v1"
+
+
+def test_source_digest_checked_before_writing(tmp_path):
+    with pytest.raises(ValueError, match="SHA256"):
+        toolrl.prepare(b"[]", tmp_path / "output")
+    assert not (tmp_path / "output").exists()
+
+
+def test_invalid_reference_is_recorded_without_renumbering_source_rows():
+    source = source_rows()
+    source[2]["output"] = source_completion([{"name": "", "parameters": {}}])
+    partitions, summary = toolrl.convert_rows(source, eval_count=3)
+    indices = {row["metadata"]["source_row"] for rows in partitions.values() for row in rows}
+    assert indices == set(range(len(source))) - {2}
+    assert summary["retained_rows"] == len(source) - 1
+    assert summary["rejected_rows"][0]["source_row"] == 2
+
+
+@pytest.mark.parametrize("kind", [["string", "null"], "Union[str, null]"])
+def test_string_union_reference_survives_preparation_and_native_reward(kind):
+    source = source_rows()
+    source[0]["instruction"] = source[0]["instruction"].replace('{"type": "string"}', json.dumps({"type": kind}))
+    source[0]["output"] = source_completion([call("Paris")])
+    partitions, summary = toolrl.convert_rows(source, eval_count=3)
+    assert summary["rejected_rows"] == []
+    prepared = next(row for rows in partitions.values() for row in rows if row["metadata"]["source_row"] == 0)
+    assert prepared["ground_truth"]["calls"] == [call("Paris")]
+    result = asyncio.run(
+        toolrl_verifier.ToolRLVerifier().async_call([], completion([call("Paris")]), prepared["ground_truth"])
+    )
+    assert result.score == 4
+
+
+@pytest.mark.parametrize(
+    "value,expected", [("Paris", "Paris"), ('"Paris"', "Paris"), ("null", None), ("12345", "12345"), ("true", "true")]
+)
+def test_string_union_native_parameter(value, expected):
+    assert tool_call_parsing.parameter_value(value, {"type": ["string", "null"]}) == expected
+
+
+@pytest.mark.parametrize("value", ["5", "true", "false", "null", '"Paris"'])
+@pytest.mark.parametrize("kind", [["string", "integer"], ["string", "null"]])
+def test_canonical_string_union_keeps_source_string_type_and_pythonic_reward(value, kind):
+    tools = copy.deepcopy(TOOLS)
+    tools[0]["function"]["parameters"]["properties"]["platform"]["type"] = kind
+    calls = toolrl.canonical_calls([call(value)], tools)
+    assert calls == [call(value)]
+    label = {**target(calls, tools), "tool_format": "olmo_pythonic_v1"}
+    prediction = f"<think>plan</think>\n<function_calls>giveaways(platform={value!r})</function_calls>"
+    assert asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], prediction, label)).score == 4
+
+
+def test_union_keeps_typed_nonstring_source_and_explicit_string_disambiguation():
+    tools = copy.deepcopy(TOOLS)
+    tools[0]["function"]["parameters"]["properties"]["platform"]["type"] = ["string", "integer", "null"]
+    assert toolrl.canonical_calls([call(5), call(None)], tools) == [call(5), call(None)]
+    schema = {"type": ["string", "integer", "null"]}
+    assert tool_call_parsing.parameter_value("5", schema) == 5
+    assert tool_call_parsing.parameter_value('"5"', schema) == "5"
+    assert tool_call_parsing.parameter_value('"null"', schema) == "null"
+
+
+@pytest.mark.parametrize("value", ["NaN", "1e999", '{"x":1,"x":2}'])
+def test_union_does_not_hide_invalid_json_values(value):
+    with pytest.raises(ValueError):
+        tool_call_parsing.parameter_value(value, {"type": ["string", "number", "object"]})
+
+
+@pytest.mark.parametrize("value", [True, 1.5, [1, 2], {"x": 1}, None])
+def test_source_union_rejects_nonstring_values_outside_declared_types(value):
+    tools = copy.deepcopy(TOOLS)
+    tools[0]["function"]["parameters"]["properties"]["platform"]["type"] = ["string", "integer"]
+    with pytest.raises(ValueError, match="declared type"):
+        toolrl.canonical_calls([call(value)], tools)
+
+
+@pytest.mark.parametrize("value", ["5", "null", '"Paris"'])
+def test_native_xml_union_explicit_quoting_preserves_string_reference(value):
+    tools = copy.deepcopy(TOOLS)
+    tools[0]["function"]["parameters"]["properties"]["platform"]["type"] = ["string", "integer", "null"]
+    calls = toolrl.canonical_calls([call(value)], tools)
+    label = target(calls, tools)
+    prediction = completion([call(json.dumps(value))])
+    assert asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], prediction, label)).score == 4
+
+
+def test_nonstring_union_still_rejects_bare_text():
+    with pytest.raises(ValueError):
+        tool_call_parsing.parameter_value("Paris", {"type": ["integer", "null"]})
+
+
+class Tokenizer:
+    def __init__(self, prefix):
+        self.chat_template = TEMPLATE
+        self.prefix = prefix
+
+    def apply_chat_template(self, messages, **kwargs):
+        rendered = chat_template_utils._compile_jinja_template(self.chat_template).render(
+            messages=messages,
+            tools=kwargs.get("tools", []),
+            eos_token="<|endoftext|>",
+            add_generation_prompt=kwargs.get("add_generation_prompt", False),
+        )
+        if kwargs.get("add_generation_prompt"):
+            rendered = rendered.removesuffix("<think>") + self.prefix
+        return rendered
+
+    def encode(self, text, **kwargs):
+        return list(text.encode())
+
+
+@pytest.mark.parametrize("prefix", ["", "<think>"])
+def test_manifest_to_miles_to_reward_and_resume(tmp_path, monkeypatch, prefix):
+    partitions, _ = toolrl.convert_rows(source_rows(), eval_count=3)
+    source = tmp_path / "train.jsonl"
+    source.write_text("".join(json.dumps(row) + "\n" for row in partitions["train"]))
+    receipt = tmp_path / "hygiene.json"
+    receipt.write_text('{"test_fixture":true}')
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "sources": {
+                    "toolrl": {
+                        "adapter": "toolrl_v1",
+                        "options": {"tool_format": "olmo_xml_v1"},
+                        "inputs": [
+                            {
+                                "path": str(source),
+                                "sha256": source_preparation.file_hash(source),
+                                "revision": "test",
+                                "split": "train",
+                            }
+                        ],
+                        "hygiene_receipt": {"path": str(receipt), "sha256": source_preparation.file_hash(receipt)},
+                    }
+                },
+            }
+        )
+    )
+    tokenizer = Tokenizer(prefix)
+    output = tmp_path / "prepared"
+    catalog = source_preparation.prepare(plan, output, tokenizer)
+    assert catalog["sources"]["toolrl"]["counts"]["prepared_rows"] == len(partitions["train"])
+    entry = catalog["sources"]["toolrl"]
+    hf = tmp_path / "hf"
+    hf.mkdir()
+    monkeypatch.setattr(run_data, "_tokenizer", lambda path: tokenizer)
+    data = {
+        "sources": [
+            {
+                "name": "toolrl",
+                "fraction": 1.0,
+                **{key: str(output / entry[key]["path"]) for key in ("prompt_data", "reward_config")},
+            }
+        ]
+    }
+    result = run_data.prepare_data(data, hf, tmp_path / "loaded", max_prompt_length=5000, seed=17)
+    assert run_data.prepare_data(data, hf, tmp_path / "loaded", max_prompt_length=5000, seed=17) == result
+    row = json.loads(Path(result["prompt_data"]).read_text().splitlines()[0])
+    args = SimpleNamespace(
+        olmo_core=SimpleNamespace(
+            reward_config=result["reward_config"], reward_zero_truncated=True, reward_final_answer_only=False
+        )
+    )
+    sample = SimpleNamespace(
+        prompt=row["input"],
+        response=completion(row["label"]["calls"], retain_terminal=True).removeprefix(prefix)
+        if prefix
+        else completion(row["label"]["calls"], retain_terminal=True),
+        metadata=row["metadata"],
+        tokens=[],
+        response_length=0,
+        status="completed",
+    )
+    assert asyncio.run(rewards.registered_reward(args, sample)) == 4
+    tokenizer.prefix = "<think>\n"
+    with pytest.raises(source_preparation.PlanError, match="whitespace"):
+        source_preparation.prepare(plan, tmp_path / "whitespace-prefix", tokenizer)
+    tokenizer.chat_template = "{{ messages[-1]['content'] }}"
+    with pytest.raises(source_preparation.PlanError, match="Tool target format"):
+        source_preparation.prepare(plan, tmp_path / "wrong-template", tokenizer)
+
+
+def test_structured_history_has_tool_turn_and_native_rendering():
+    history = (
+        "**Dialogue Records History**\n<user>games?</user>\n"
+        + source_completion([call("xbox")])
+        + '\n<obs>[{"results": ["a"]}]</obs>'
+    )
+    messages = toolrl.source_messages(history, TOOLS)
+    assert [m["role"] for m in messages] == ["user", "assistant", "tool"]
+    rendered = Tokenizer("<think>").apply_chat_template(messages, tools=TOOLS, add_generation_prompt=True)
+    assert "<function=giveaways>" in rendered
+    assert "<|im_start|>environment\n<tool_response>" in rendered
+    assert "<obs>" not in rendered
+    assert rendered.endswith("<think>")
+
+
+def test_typed_parameters_and_duplicate_rejection():
+    schemas = {
+        "n": {"type": "integer"},
+        "values": {"type": "array"},
+        "enabled": {"type": "boolean"},
+        "text": {"type": "string"},
+    }
+    tools = [{"function": {"name": "f", "parameters": {"properties": schemas}}}]
+    calls = [
+        {"name": "f", "parameters": {"n": 3, "values": [1, "x"], "enabled": True, "text": "a & b < c\nnext line"}}
+    ]
+    prediction = completion(calls)
+    assert toolrl_utils.score_response(prediction, target(calls, tools)).score == 4
+    duplicate = prediction.replace("</function>", "<parameter=n>4</parameter></function>")
+    assert toolrl_utils.score_response(duplicate, target(calls, tools)).correctness_score == -3
+    assert (
+        toolrl_utils.score_response(
+            prediction.replace("<parameter=n>\n3", "<parameter=n>\nNaN"), target(calls, tools)
+        ).correctness_score
+        == -3
+    )
+
+
+def test_old_target_and_old_response_format_are_rejected():
+    with pytest.raises(ValueError, match="regenerate"):
+        toolrl_utils.score_response(completion([call("xbox")]), source_completion([call("xbox")]))
+    assert toolrl_utils.score_response(source_completion([call("xbox")]), target([call("xbox")])).score == -3
+    assert toolrl_utils.score_response("<think>plan</think><response>answer</response>", target()).score == 0
+
+
+def test_invalid_source_calls_are_audited():
+    rows = source_rows()
+    rows[0]["output"] = source_completion([{"name": "absent", "parameters": {}}])
+    rows[1]["output"] = source_completion([{"name": "giveaways", "parameters": {"absent": 1}}])
+    _, summary = toolrl.convert_rows(rows, eval_count=3)
+    assert [r["source_row"] for r in summary["rejected_rows"]] == [0, 1]
+
+
+def test_schema_translation_and_canonical_numeric_target():
+    assert toolrl.parameter_schema({"type": "List[List[int]]"}) == {
+        "type": "array",
+        "items": {"type": "array", "items": {"type": "integer"}},
+    }
+    assert toolrl.parameter_schema({"type": "str, optional"}) == {"type": "string"}
+    tools = [{"function": {"name": "f", "parameters": {"properties": {"n": {"type": "integer"}}}}}]
+    assert toolrl.canonical_calls([{"name": "f", "parameters": {"n": "3"}}], tools) == [
+        {"name": "f", "parameters": {"n": 3}}
+    ]
+    with pytest.raises(ValueError):
+        toolrl.canonical_calls([{"name": "f", "parameters": {"n": "3 * 4"}}], tools)
+
+
+@pytest.mark.parametrize("payload", ["giveaways(platform='xbox')", 'giveaways(**{"platform": "xbox"})'])
+def test_pythonic_toolrl_preserves_reward_and_rejects_expressions(payload):
+    reference = {**target([call("xbox")]), "tool_format": "olmo_pythonic_v1"}
+    prediction = "<think>plan</think><function_calls>" + payload + "</function_calls>"
+    assert toolrl_utils.score_response(prediction, reference).score == 4
+    for bad in ["giveaways(platform=str('xbox'))", "giveaways(platform='xbox'); print(1)", ""]:
+        response = "<think>plan</think><function_calls>" + bad + "</function_calls>"
+        assert toolrl_utils.score_response(response, reference).score < 4
+    assert toolrl_utils.score_response(prediction + "trailing prose", reference).score == -3
+    assert toolrl_utils.score_response(prediction, {**reference, "calls": []}).score == 0
+
+
+def test_nested_schema_defect_is_quarantined_and_next_row_survives(tmp_path):
+    partitions, _ = toolrl.convert_rows(source_rows(), eval_count=3)
+    good = partitions["train"][0]
+    bad = copy.deepcopy(good)
+    bad["ground_truth"]["calls"][0]["parameters"]["platform"] = [123]
+    source = tmp_path / "rows.jsonl"
+    source.write_text(json.dumps(bad) + "\n" + json.dumps(good) + "\n")
+    receipt = tmp_path / "hygiene.json"
+    receipt.write_text("{}")
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "sources": {
+                    "toolrl": {
+                        "adapter": "toolrl_v1",
+                        "options": {"tool_format": "olmo_xml_v1"},
+                        "inputs": [
+                            {
+                                "path": str(source),
+                                "sha256": source_preparation.file_hash(source),
+                                "revision": "test",
+                                "split": "train",
+                            }
+                        ],
+                        "hygiene_receipt": {"path": str(receipt), "sha256": source_preparation.file_hash(receipt)},
+                    }
+                },
+            }
+        )
+    )
+    output = tmp_path / "prepared"
+    catalog = source_preparation.prepare(plan, output, Tokenizer("<think>"))
+    assert catalog["sources"]["toolrl"]["counts"]["omitted_rows"] == 1
+    assert catalog["sources"]["toolrl"]["counts"]["prepared_rows"] == 1
+    assert "violates its schema" in (output / "toolrl/dispositions.jsonl").read_text()
+
+
+@pytest.mark.parametrize(
+    "name,key", [("Get Supported Locations", "7key"), ("Forecast (Nowcast)", "w__N4.Ed"), ("75eNHlmc94uLL", "class")]
+)
+def test_template_literal_names_are_not_renamed(name, key):
+    calls = [{"name": name, "parameters": {key: ["quoted ) , = text", {"nested": True}]}}]
+    tools = [{"function": {"name": name, "parameters": {"properties": {key: {"type": "array"}}}}}]
+    reference = {**target(calls, tools), "tool_format": "olmo_pythonic_v1"}
+    response = (
+        "<think>plan</think><function_calls>"
+        + name
+        + "("
+        + key
+        + "="
+        + json.dumps(calls[0]["parameters"][key])
+        + ")</function_calls>"
+    )
+    result = asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], response, reference))
+    assert result.score == 4
+    assert result.diagnostics["correctness_score"] == 3

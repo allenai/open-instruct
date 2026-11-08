@@ -77,8 +77,10 @@ Adam betas 0.9/0.95 and epsilon 1e-8, weight decay zero, gradient clip 1, PPO cl
 0.2/0.28, no GRPO standard-deviation normalization, KL/entropy coefficients zero.
 Online constant-reward group filtering defaults to true through
 `training.filter_zero_std_groups` (also `core.filter_zero_std_groups`). It uses the
-native MILES dynamic filter and replenishes accepted groups to fill the training
-batch. This is independent of GRPO standard-deviation normalization and offline
+built-in dynamic filter paired with the reward post-process (by default the
+graded-response filter of `core.exclude_ungraded`, see
+[ungraded responses](grpo.md#ungraded-responses)) and replenishes accepted groups
+to fill the training batch. This is independent of GRPO standard-deviation normalization and offline
 dataset preprocessing. Set it to false for a tiny mechanics check that cannot yet
 produce mixed rewards. See [online filtering](data-and-evaluation.md#online-group-filtering).
 Do not confuse PPO clipping with TIS clipping or reward normalization.
@@ -100,7 +102,7 @@ derives the omitted producer budget from engine count and request capacity; see
 [async queues and discard metrics](async-pipeline.md). It uses buffer factor 1,
 retry, sample submissions, and requires a positive policy lag. Structured async
 defaults `async.max_weight_staleness` to six optimizer updates (compiled to
-`core.max_policy_lag`), which the node and large examples inherit;
+`core.max_policy_lag`), which the node and three-node examples inherit;
 low-level async files must set `core.max_policy_lag` themselves. See
 [development defaults](development-defaults.md). KL > 0 enables the
 reference pass with the prepared starting model unless ref_load is supplied.
@@ -126,9 +128,13 @@ score-reuse audits (`core.scoring_check_interval=0`); the raw Core default is 50
 Their optional weight-equality audit is disabled, while the dev mechanics example
 enables it. These are recipe choices, not universal runtime defaults.
 
-Replay is independent:
-use_rollout_routing_replay requires use_miles_router; structured compilation supplies
-the latter when omitted. The Megatron use_routing_replay option is not the Core switch.
+Replay is independent: `use_rollout_routing_replay=true` works with the default
+Rust router. Core disables router retries, health recovery, and circuit breakers;
+the controller owns weight-ready membership and the producer owns whole-group
+retries. `use_miles_router=true` remains an explicit Python-router override. Existing replay configs
+that omitted `use_miles_router` now select Rust instead of the former implicit
+Python router. Set `miles.use_miles_router=true` to preserve the previous choice.
+The Megatron `use_routing_replay` option is not the Core switch.
 
 For conditional constraints see [run controls](run-controls.md), [packing](sequence-packing.md),
 [topology](topology.md), and [managed judges](managed-judges.md). For all native

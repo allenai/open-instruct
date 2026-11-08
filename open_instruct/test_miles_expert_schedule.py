@@ -61,14 +61,19 @@ def test_core_guards(changes, match):
 )
 def test_miles_guards(changes, match):
     config = configuration()
+    # Exercise expert-packing restrictions independently of the truncation guard.
+    core = dataclasses.replace(config.core, reward_zero_truncated=False)
     with pytest.raises(ValueError, match=match):
-        RunConfig(config.core, {**config.miles, **changes}).validate()
+        RunConfig(core, {**config.miles, **changes}).validate()
 
 
 def test_enabled_hook_and_disabled_native_arguments():
     config = configuration()
     argv = config.arguments()
     assert argv[argv.index("--rollout-sample-filter-path") + 1] == EXPERT_SCHEDULE
+    # Expert-balanced packing supports no reward post-process, so the default
+    # ungraded-response exclusion is not injected; failed grades omit the group.
+    assert "--custom-reward-post-process-path" not in argv
     disabled = RunConfig(dataclasses.replace(config.core, expert_balanced_packing=False), config.miles)
     argv = disabled.arguments()
     assert "--rollout-sample-filter-path" not in argv

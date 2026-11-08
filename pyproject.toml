@@ -71,7 +71,7 @@ flash-attn-3 = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 
 # pytorch related setups
 [tool.uv.sources]
-ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "fa6c5014c9f6e9ee789da2d9c20d5126fee8df0d" }
+ai2-olmo-core = { git = "https://github.com/allenai/OLMo-core.git", rev = "6ac500d8d5653400e5dd7e83ebe877109ae072b2" }
 flash-attn = [
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda12" },
   { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl", group = "cuda13" },
@@ -169,7 +169,7 @@ cuda13 = [
     "flash-attn-3 @ https://github.com/windreamer/flash-attention3-wheels/releases/download/2026.03.19-850211f/flash_attn_3-3.0.0%2B20260318.cu130torch2100cxx11abitrue.8afc61-cp39-abi3-linux_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 dev = [
-    "beaker-py>=2.5.7",
+    "beaker-py>=2.6.0",
     "mkdocs-material>=9.6.8",
     "pytest>=8.3.4",
     "ruff>=0.11.13",

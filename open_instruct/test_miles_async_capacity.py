@@ -50,7 +50,7 @@ def test_http_headroom_tracks_engine_limit_without_growing_gpu_batches(tmp_path,
 
 
 @pytest.mark.parametrize(
-    "http,producer,warn", [(64, 768, True), (64, 1536, True), (128, 768, True), (128, 1536, False)]
+    "http,producer,warn", [(32, 768, True), (64, 768, True), (64, 1536, False), (128, 768, True), (128, 1536, False)]
 )
 def test_one_wave_warning_covers_both_end_to_end_limits(tmp_path, http, producer, warn):
     config = configured(
@@ -61,7 +61,9 @@ def test_one_wave_warning_covers_both_end_to_end_limits(tmp_path, http, producer
     report = config.plan()["async_capacity"]
     assert report["global_http_slots"] == 12 * http
     assert report["producer_sample_budget"] == producer
-    assert any("End-to-end request capacity equals" in w for w in report["warnings"]) is warn
+    one_wave = [w for w in report["warnings"] if "Producer budget equals one wave" in w]
+    assert bool(one_wave) is warn
+    assert all("sglang_server_concurrency" not in w for w in one_wave)
 
 
 def test_defaults_respect_http_limit_and_round_up_groups(tmp_path):

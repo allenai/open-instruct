@@ -62,6 +62,8 @@ def measurements(root, *, warmup=6):
             / cycle_seconds
             / inference_gpus,
         }
+        if cycle.get("collection_seconds") is not None:
+            values["pipeline/collection_work_seconds"] = cycle["collection_seconds"]
         for key in ("completed_queue_get_seconds", "other_collection_seconds"):
             if cycle[key] is not None:
                 values["pipeline/" + key] = cycle[key]

@@ -12,41 +12,19 @@ Once you have modified `pyproject.toml` to point to the specific commit, run `uv
 
 ## External contributors
 
-### CI (Fork PRs)
+### CI and GPU validation
 
-When you submit a pull request from a fork, some CI checks behave differently due to GitHub's security restrictions on secrets:
-
-#### GPU Tests
-
-GPU tests require access to Beaker (our internal compute platform) and are **automatically skipped** for fork PRs. You'll see a message like:
-
-```
-Skipping GPU tests for fork PR
-This PR is from a fork, and secrets are not available.
-GPU tests will run automatically when this PR enters the merge queue.
-```
-
-This is expected behavior. A maintainer will manually run the GPU tests.
+Automated CI runs on GitHub-hosted runners and does not require Beaker credentials or cluster capacity. GPU tests and training integration runs are manual for both fork and internal PRs. When a change needs GPU validation, an Ai2 maintainer can run it on Beaker, or a contributor can run the relevant tests on an available GPU.
 
 ## Internal Contributors
 
 Please name your branch `username/branch-description`. E.g. `finbarr/update-vllm-version`.
 
-### GPU_TESTS Override (Internal PRs Only)
+### Recording manual GPU tests
 
-For internal PRs, you can skip running GPU tests by providing a link to an existing successful Beaker experiment in your PR description. This is useful when you've already run the tests locally or want to reuse results from a previous run. The format is `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)`.
+Launch the GPU suite with `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`. Record a successful run as `GPU_TESTS=[EXPERIMENT_ID](https://beaker.org/ex/EXPERIMENT_ID)` in the PR body so reviewers can inspect the result and tested revision. For local GPU runs, record the command, revision, hardware, and result instead.
 
-You can launch the GPU tests manually with `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
-
-### GPU_TESTS Bypass (Internal PRs Only)
-
-For changes that don't affect GPU functionality (e.g., documentation, CI config, minor refactors), you can bypass GPU tests entirely by adding to your PR description:
-
-```
-GPU_TESTS=bypass
-```
-
-**Warning**: Use this sparingly. Only bypass GPU tests when you are confident the changes cannot affect GPU-related code paths. When in doubt, let the tests run.
+`GPU_TESTS` is a reviewer-facing record, not a CI override. CI does not parse or verify it, and `GPU_TESTS=bypass` has no effect. Training smoke runs should be recorded separately from the GPU pytest suite.
 
 ## Git LFS
 
@@ -66,28 +44,38 @@ Track new large or binary test data files with `git lfs track "path/to/file"` an
 
 ## Running Tests
 
-**Unit tests**: `uv run pytest` runs the tests in `tests/` (test_environments.py, test_generic_sandbox.py, test_merge_models.py).
+**Unit tests**: `uv run pytest` discovers CPU tests in `open_instruct/`, `tests/`, and the repository root. CUDA-only files under `open_instruct/` are excluded when CUDA is unavailable.
+
+Data-loader sampling/resume/accounting (`test_hf_data_loader.py`), Beaker callbacks (`test_olmo_core_callbacks.py`), and DPO collation/forward/gradient checks (`test_dpo_forward.py`) run in ordinary unit-test CI without depending on Beaker. The DPO tests initialize tiny HF and OLMo-core models locally and use a local tokenizer, without model downloads. To run this coverage on CPU:
+
+```bash
+CUDA_VISIBLE_DEVICES="" HF_HUB_OFFLINE=1 uv run pytest \
+    open_instruct/test_hf_data_loader.py \
+    open_instruct/test_olmo_core_callbacks.py \
+    open_instruct/test_dpo_forward.py
+```
+
+These checks do not replace CUDA/BF16 kernels, FlashAttention packing, optimizer offload, real vLLM generation, or distributed weight-transfer validation.
 
 **Linting and formatting**: `make style` formats code with ruff, `make quality` runs ruff lint, compileall, and the `ty` type checker. Both target `open_instruct/` and `*mason.py`.
 
-**GPU tests**: The GPU test files live at `open_instruct/test_*_gpu.py` (5 files: data loader, DPO utils, GRPO fast, streaming data loader, OLMo-core callbacks). These require a GPU and are run via `uv run pytest open_instruct/test_*_gpu.py -xvs`. To run them on Beaker: `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
+**GPU tests**: The GPU test files live at `open_instruct/test_*_gpu.py` (5 files: DPO utils, GRPO CPUAdam offload, GRPO generation/packing, streaming data loader, and vLLM weight transfer). These require a GPU and are run via `uv run pytest open_instruct/test_*_gpu.py -xvs`. To run them on Beaker: `./scripts/train/build_image_and_launch.sh scripts/test/run_gpu_pytest.sh`.
 
 ## CI Workflows
 
-Four GitHub Actions workflows run on PRs:
+Automated checks run on GitHub-hosted runners:
 
-1. **PR Checks** (`pr_checks.yml`): Runs `make style-check` and `make quality-check`. Also verifies that `CHANGELOG.md` was updated for changes to `open_instruct/` (bypass with `CHANGELOG=` in PR body).
+| Workflow | Checks |
+|---|---|
+| `pr_checks.yml` | Formatting, lint, types, and the PR changelog entry. |
+| `tests.yml` | CPU unit tests on PRs and merge groups, with a 20-minute timeout. |
+| `miles.yml` | CPU MILES contracts, runtime/integration style, types, and generated references for relevant PRs. |
+| `docs.yml` | Documentation validation and deployment. |
+| `codex-review.yml`, `claude-review.yml` | Automated code reviews. |
 
-2. **Unit Tests** (`tests.yml` → `unit-tests` job): Runs `uv run pytest` on an Ubuntu runner. 20-minute timeout.
+No workflow launches, waits for, or verifies Beaker experiments. GPU pytest and the training smoke scripts remain available for manual validation; they are not merge-queue jobs.
 
-3. **GPU Tests** (`tests.yml` → `gpu-tests` job): Builds a Docker image, uploads it to Beaker, and runs `open_instruct/test_*_gpu.py` on a single GPU. 45-minute timeout. Auto-skipped for fork PRs (no Beaker secrets). Can be overridden with `GPU_TESTS=[EXPERIMENT_ID]` or bypassed with `GPU_TESTS=bypass` in the PR body.
-
-4. **Integration Tests** (`beaker-experiment.yml`): Runs in the merge queue (not on every PR push). Launches up to 3 Beaker experiments:
-   - GRPO integration test (always runs)
-   - DPO integration test (runs if DPO-related files changed)
-   - SFT integration test (runs if `finetune.py` changed)
-
-   Sends a Slack notification on failure.
+CI also no longer publishes `open_instruct_auto`, `open_instruct_auto_cuda12`, or `open_instruct_auto_cuda13`. Existing images are not refreshed automatically. Build an image from the intended code revision with `scripts/train/build_image_and_launch.sh` when launching training or GPU tests.
 
 ## Launching Experiments on Beaker
 

@@ -13,8 +13,8 @@ from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import judging
 
 
-def plan(spec):
-    miles = spec.compile().miles
+def plan(spec, compiled=None):
+    miles = (compiled if compiled is not None else spec.compile()).miles
     capacity = spec.launch.get("gpus_per_replica", miles["num_gpus_per_node"])
     trainer_nodes, trainer_per_node = miles["actor_num_nodes"], miles["actor_num_gpus_per_node"]
     trainer = trainer_nodes * trainer_per_node

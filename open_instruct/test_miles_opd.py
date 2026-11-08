@@ -226,10 +226,28 @@ def test_registered_verifiers_score_held_out_samples(tmp_path):
     assert asyncio.run(run()) == [1.0, 1.0, 0.0]
 
 
-def test_opd_honors_shared_memory_setting():
-    spec = specs.load(CONFIG, ['launch.shared_memory="48 GiB"'])
+def test_opd_honors_host_and_shared_memory_settings():
+    spec = specs.load(CONFIG, ['launch.memory="128 GiB"', 'launch.shared_memory="48 GiB"'])
     task = launch.specification("test-image", spec)["tasks"][0]
     assert task["resources"]["sharedMemory"] == "48 GiB"
+    assert task["resources"]["memory"] == "128 GiB"
+
+
+def test_opd_verifier_zeroes_truncated_correct_answers(tmp_path):
+    registry = tmp_path / "verifiers.json"
+    registry.write_text(json.dumps({"gsm8k": {"factory": "open_instruct.ground_truth_utils.GSM8KVerifier"}}))
+    sample = SimpleNamespace(
+        tokens=[1, 2, 3],
+        response_length=2,
+        response="The answer is 7. #### 7",
+        prompt="q",
+        status="truncated",
+        loss_mask=[1, 1],
+        metadata={"verifiers": [{"name": "gsm8k", "target": "7", "weight": 1.0}], "query": "q"},
+    )
+    assert asyncio.run(rewards.score(sample, str(registry))) == 0.0
+    assert sample.metadata["reward_gate"] == "truncated"
+    assert sample.loss_mask == [1, 1]
 
 
 def _child_pid(path):

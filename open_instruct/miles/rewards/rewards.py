@@ -38,6 +38,7 @@ _MATH_FACTORIES = {
 }
 _POOLS = weakref.WeakKeyDictionary()
 _CHILDREN = set()
+_FAILURE_CAPTURED = set()
 _RESPONSE_PREFIX = b"MILES_VERIFIER_RESULT "
 
 
@@ -223,15 +224,10 @@ class _IsolatedVerifier:
         self.spec = spec
 
     async def async_call(self, *args, **kwargs):
-        policy = os.environ.get("OI_MILES_MATH_TIMEOUT_POLICY", "zero")
-        if policy not in ("zero", "raise"):
-            raise ValueError("OI_MILES_MATH_TIMEOUT_POLICY must be zero or raise")
         start = time.monotonic()
         try:
             result = await isolated_verifier_call(self.spec, *args, **kwargs)
         except MathVerifierTimeout as error:
-            if policy == "raise":
-                raise
             logger.warning("Math verifier timeout; assigning zero reward: %s", error)
             return SimpleNamespace(
                 score=0.0,
@@ -240,7 +236,7 @@ class _IsolatedVerifier:
                     "kind": "math",
                     "status": "timeout",
                     "error": str(error),
-                    "failure_policy": policy,
+                    "failure_policy": "zero",
                     "elapsed_seconds": time.monotonic() - start,
                 },
             )
@@ -250,6 +246,14 @@ class _IsolatedVerifier:
             "status": "ok",
             "elapsed_seconds": time.monotonic() - start,
         }
+        if symbolic_timeouts := result.diagnostics.get("symbolic_timeouts", 0):
+            result.diagnostics["symbolic_timeout_rewarded"] = result.score > 0
+            # Worker stderr is suppressed; surface the completed result here.
+            logger.warning(
+                "Math verifier completed with %d symbolic comparison timeout(s); final score=%s",
+                symbolic_timeouts,
+                result.score,
+            )
         return result
 
 
@@ -301,11 +305,77 @@ def _registry(path):
     return {name: _resolve_verifier(spec, isolate_symbolic=True) for name, spec in document.items()}
 
 
-async def _score(args, sample):
+@functools.lru_cache(maxsize=8)
+def _masks_ungraded_path(path):
+    module, _, symbol = path.rpartition(".")
+    return bool(getattr(getattr(importlib.import_module(module), symbol), "masks_ungraded", False))
+
+
+def masks_ungraded(args) -> bool:
+    """Whether the configured reward post-process excludes ungraded responses itself.
+
+    ``open_instruct.miles.rewards.exclusion`` hooks declare ``masks_ungraded``. For
+    them an ungraded training response keeps reward 0 plus its ``reward_omission``
+    marker, and the post-process masks it. Without such a hook the response has no
+    reward and the pinned MILES collector drops its whole prompt group.
+    """
+    if getattr(args, "custom_convert_samples_to_train_data_path", None):
+        return False  # Native conversion bypasses the reward post-process.
+    path = getattr(args, "custom_reward_post_process_path", None)
+    return bool(path) and _masks_ungraded_path(path)
+
+
+def ungraded_count(samples) -> int:
+    """Count consumed responses whose reward is a placeholder for a failed grade."""
+    return sum(
+        1
+        for sample in samples
+        if isinstance(getattr(sample, "metadata", None), dict) and "reward_omission" in sample.metadata
+    )
+
+
+def _capture_verifier_failure(args, sample, spec, response, error, *, capture_kind="exception"):
+    """Capture one raised exception and one returned timeout per run/process.
+
+    Normal rollout dumps contain already-scored batches and cannot diagnose a
+    verifier that raises. Preserve the full text/target here without converting
+    that error to a model reward or masking it if storage is unavailable. A returned
+    timeout uses a separate slot so it cannot hide a later raised exception.
+    """
+    save = getattr(args, "save", None)
+    key = (save, capture_kind)
+    if not save or key in _FAILURE_CAPTURED:
+        return
+    # Bound capture attempts even if storage is failing during a burst of errors.
+    _FAILURE_CAPTURED.add(key)
+    try:
+        root = Path(save) / "verifier_failures"
+        root.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema_version": 1,
+            "capture_kind": capture_kind,
+            "error": f"{type(error).__name__}: {error}",
+            "verifier": spec,
+            "prompt": sample.prompt,
+            "response": sample.response,
+            "scored_response": response,
+            "group_index": getattr(sample, "group_index", None),
+            "sample_index": getattr(sample, "index", None),
+        }
+        path = root / f"{os.getpid()}-{time.time_ns()}.json"
+        with path.open("x") as stream:
+            json.dump(record, stream, ensure_ascii=False, default=str)
+        logger.error("Saved failed verifier input to %s", path)
+    except Exception:
+        logger.exception("Could not save failed verifier input; preserving original verifier exception")
+
+
+async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
     registry = _registry(args.olmo_core.reward_config)
     metadata = sample.metadata
     if not isinstance(metadata, dict) or not isinstance(metadata.get("verifiers"), list) or not metadata["verifiers"]:
         raise ValueError("Each sample requires nonempty metadata.verifiers")
+    metadata.pop("reward_omission", None)
     weighted_specs = []
     for spec in metadata["verifiers"]:
         if spec["name"] not in registry:
@@ -338,29 +408,73 @@ async def _score(args, sample):
             # Text math verifiers do not use token IDs. Never pass the hidden
             # reasoning's tokens alongside an extracted final-answer string.
             tokens = []
-        if judge_registry.bound(name):
-            if args.olmo_core.reward_final_answer_only:
-                raise ValueError("Final-answer-only grading currently supports text verifiers, not managed judges")
-            score = await general_judge.general_judge_score(
-                args, sample, name=name, target=copy.deepcopy(spec["target"])
+        try:
+            if judge_registry.bound(name):
+                score = await general_judge.general_judge_score(
+                    args, sample, name=name, target=copy.deepcopy(spec["target"]), prediction=response
+                )
+                diagnostics = metadata.get("verifier_diagnostics", {}).get(name, {})
+                cost = 0.0
+            else:
+                # Verifiers may opt into final-answer handling; existing math/code
+                # verifiers continue to grade the suffix through their normal method.
+                verifier = registry[name]
+                score_response = verifier.async_call
+                if args.olmo_core.reward_final_answer_only:
+                    score_response = getattr(verifier, "async_call_final_answer", score_response)
+                result = await score_response(
+                    tokens,
+                    response,
+                    # Verifiers may consume dictionary labels; preserve the original targets.
+                    copy.deepcopy(spec["target"]),
+                    query=metadata.get("query", sample.prompt),
+                    rollout_state=metadata.get("rollout_state"),
+                )
+                diagnostics = getattr(result, "diagnostics", None)
+                if isinstance(diagnostics, dict) and diagnostics.get("status") == "timeout":
+                    error = TimeoutError(diagnostics.get("error") or "Verifier timed out without an error message")
+                    _capture_verifier_failure(args, sample, spec, response, error, capture_kind="timeout")
+                score, cost = result.score, result.cost
+            if isinstance(diagnostics, dict) and diagnostics.get("status") in {"judge_error", "service_error"}:
+                diagnostics = {**diagnostics, "scoring_failure_policy": failure_policy}
+                metadata.setdefault("verifier_diagnostics", {})[name] = diagnostics
+                if omit_failures or failure_policy == "raise":
+                    raise RuntimeError("Verifier failed to grade the response; see verifier diagnostics")
+                logger.warning(
+                    "Verifier %s failed to grade the response; caller requested zero: %s", name, diagnostics
+                )
+                score = 0.0
+            score = _finite(score, "verifier score")
+            total = _finite(total + weight * score, "combined reward")
+        except Exception as error:
+            _capture_verifier_failure(args, sample, spec, response, error)
+            if not omit_failures:
+                raise
+            metadata["reward_omission"] = {"verifier": name, "error": f"{type(error).__name__}: {error}"}
+            metadata.pop("reward_components", None)
+            if masks_ungraded(args):
+                # The configured post-process gives this response zero advantage and
+                # a zeroed loss mask and leaves it out of its group's baseline, so
+                # the stored zero never acts as a grade. Its graded siblings train.
+                logger.warning(
+                    "Excluding ungraded response from prompt group %s after verifier %s failed: %s",
+                    sample.group_index,
+                    name,
+                    metadata["reward_omission"]["error"],
+                )
+                return 0.0
+            logger.warning(
+                "Omitting prompt group %s after verifier %s failed: %s",
+                sample.group_index,
+                name,
+                metadata["reward_omission"]["error"],
             )
-            total += weight * score
-            components.append({"name": name, "score": score, "weight": weight, "cost": 0.0})
-            continue
-        result = await registry[name].async_call(
-            tokens,
-            response,
-            # Verifiers may consume dictionary labels; preserve the original targets.
-            copy.deepcopy(spec["target"]),
-            query=metadata.get("query", sample.prompt),
-            rollout_state=metadata.get("rollout_state"),
-        )
-        score = _finite(result.score, "verifier score")
-        total += weight * score
-        components.append({"name": name, "score": score, "weight": weight, "cost": result.cost})
+            # Missing rewards are rejected before variance filtering and training
+            # by the pinned MILES synchronous and async collection paths.
+            return None
+        components.append({"name": name, "score": score, "weight": weight, "cost": cost})
         # Verifiers without their own diagnostics still returned normally; record that
         # adapter-level fact so a missing status can mean only "unknown".
-        diagnostics = getattr(result, "diagnostics", None)
         if not isinstance(diagnostics, dict):
             diagnostics = {"kind": "adapter", "status": "completed"}
         metadata.setdefault("verifier_diagnostics", {})[name] = diagnostics
@@ -369,12 +483,41 @@ async def _score(args, sample):
     return total
 
 
-async def registered_reward(args, samples, **kwargs):
+async def registered_reward(args, samples, *, failure_policy="raise", **kwargs):
+    """Score with explicit handling of reported service/judge failures.
+
+    The zero policy zeroes the failed verifier component and preserves diagnostics.
+    Exceptions (including invalid targets/configuration) still propagate.
+    """
+    if failure_policy not in {"raise", "zero"}:
+        raise ValueError("Reward failure_policy must be 'raise' or 'zero'")
     if not args.olmo_core.reward_config:
         raise ValueError("Set core.reward_config for the open-instruct verifier adapter")
     if isinstance(samples, list):
-        return list(await asyncio.gather(*(_score(args, sample) for sample in samples)))
-    return await _score(args, samples)
+        return list(await asyncio.gather(*(_score(args, sample, failure_policy=failure_policy) for sample in samples)))
+    return await _score(args, samples, failure_policy=failure_policy)
+
+
+async def rollout_reward(args, samples, **kwargs):
+    """Exclude ungraded training responses, or omit their groups without a masking hook.
+
+    Reported failures receive zero in evaluation.
+
+    MILES assigns group_index when drawing training prompts. Evaluation samples
+    have no group_index and are not passed through the replacement/filter loop.
+    Evaluation explicitly requests zero for reported service/judge failures.
+    Registry, routing and unexpected evaluation exceptions remain fatal.
+    """
+    if not args.olmo_core.reward_config:
+        raise ValueError("Set core.reward_config for the open-instruct verifier adapter")
+
+    async def score(sample):
+        training = getattr(sample, "group_index", None) is not None
+        return await _score(args, sample, omit_failures=training, failure_policy="raise" if training else "zero")
+
+    if isinstance(samples, list):
+        return list(await asyncio.gather(*(score(sample) for sample in samples)))
+    return await score(samples)
 
 
 if __name__ == "__main__":
