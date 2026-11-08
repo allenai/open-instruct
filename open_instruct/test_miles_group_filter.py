@@ -112,10 +112,22 @@ def test_ungraded_exclusion_opt_out_and_runtime_limits():
     # The exclusion hooks support single-segment rollouts only; partial rollouts
     # keep the group-omission behaviour instead of an injected default.
     assert "custom_reward_post_process_path" not in configured(partial_rollout=True).plan()["miles"]
+    assert (
+        "custom_reward_post_process_path"
+        not in configured(custom_convert_samples_to_train_data_path="custom.convert").plan()["miles"]
+    )
     custom = configured(enabled=False, custom_reward_post_process_path="custom.fn")
     custom = RunConfig(dataclasses.replace(custom.core, reward_zero_truncated=False), custom.miles)
     assert custom.plan()["miles"]["custom_reward_post_process_path"] == "custom.fn"
     assert "dynamic_sampling_filter_path" not in custom.plan()["miles"]
+
+
+@pytest.mark.parametrize("hook", [EXCLUDE_UNGRADED, EXCLUDE_TRUNCATED])
+def test_custom_converter_rejects_explicit_exclusion(hook):
+    with pytest.raises(ValueError, match="bypassed by custom_convert"):
+        configured(
+            custom_convert_samples_to_train_data_path="custom.convert", custom_reward_post_process_path=hook
+        ).plan()
 
 
 def test_zero_truncation_rewards_allow_ungraded_but_not_truncation_exclusion():

@@ -411,7 +411,7 @@ rewards, average-score filtering and zero-variance filtering are different tests
 
 Advanced custom native filters require `core.filter_zero_std_groups=false` and
 opting out of the managed exclusion post-process to avoid bypassing its safety guard. They remain unsupported with
-refresh or engine-drain publication; those modes allow only the built-in filter.
+refresh or engine-drain publication; those modes allow only the built-in reward-group filters.
 
 ## Held-out evaluation and comparison
 

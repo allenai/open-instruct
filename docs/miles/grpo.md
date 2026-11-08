@@ -121,7 +121,8 @@ when checking reward variation (groups with fewer than two graded responses are
 dropped). The failed response keeps `metadata.reward_omission` with the verifier
 name and error, and W&B reports `rollout/verification/ungraded_samples` and
 `ungraded_fraction` per collection. With response-averaged loss, excluded responses
-still count in the batch denominator. Groups with no trainable responses are
+still count in the batch denominator, so a high failure fraction reduces the
+policy-gradient signal per step. Groups with no trainable responses are
 always rejected, even with `filter_zero_std_groups=false`; that setting keeps
 valid all-zero grades, not empty groups. The collector requests replacement groups.
 A run where every group is rejected makes no optimizer progress.
@@ -130,7 +131,10 @@ Set `core.exclude_ungraded = false` to return to omitting the whole prompt group
 (`rollout/verification/omitted_records`). The compiler also leaves the hook out
 under `core.expert_balanced_packing`, which supports no reward post-process, and
 under `miles.partial_rollout`, since the hook supports single-segment rollouts
-only. Math verifier timeouts and code-service rejections (4xx, or a 500 that
+only. Custom multi-segment generators must explicitly opt out as well. A custom
+`miles.custom_convert_samples_to_train_data_path` bypasses reward postprocessing:
+it retains group omission, and explicitly combining it with a managed exclusion
+hook is rejected. Math verifier timeouts and code-service rejections (4xx, or a 500 that
 persists through its retries) are not ungraded: they keep their zero reward, as
 documented under [reward-service failure policies](data-and-evaluation.md#reward-service-failure-policies).
 

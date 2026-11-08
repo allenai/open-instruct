@@ -328,8 +328,11 @@ class RunConfig:
             # hooks support single-segment rollouts only.
             and not self.core.expert_balanced_packing
             and not options.get("partial_rollout")
+            and not options.get("custom_convert_samples_to_train_data_path")
         ):
             post_process = options["custom_reward_post_process_path"] = EXCLUDE_UNGRADED
+        if post_process in EXCLUSION_FILTERS and options.get("custom_convert_samples_to_train_data_path"):
+            raise constraints.error("Reward exclusion is bypassed by custom_convert_samples_to_train_data_path")
         path = options.get("dynamic_sampling_filter_path")
         builtin_filter = EXCLUSION_FILTERS.get(post_process, ZERO_STD_FILTER)
         if self.core.filter_zero_std_groups:
@@ -352,7 +355,8 @@ class RunConfig:
             if path not in (None, empty_filter):
                 raise constraints.error(
                     "Reward exclusion requires its paired group filter to reject fully masked groups; "
-                    "disable core.exclude_ungraded before selecting a custom filter"
+                    "remove the custom filter or select a compatible custom reward post-process. "
+                    "Disable core.exclude_ungraded to remove the automatically selected post-process."
                 )
             options["dynamic_sampling_filter_path"] = empty_filter
         hook = options.get("rollout_sample_filter_path")
@@ -645,8 +649,7 @@ class RunConfig:
             *EXCLUSION_EMPTY_FILTERS.values(),
         ):
             raise constraints.error(
-                "engine_drain supports only the built-in zero-std dynamic sampling filter",
-                constraints.Category.NOT_IMPLEMENTED,
+                "engine_drain supports only the built-in reward-group filters", constraints.Category.NOT_IMPLEMENTED
             )
         for name in (
             "custom_generate_function_path",

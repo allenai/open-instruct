@@ -302,6 +302,12 @@ def test_without_a_masking_hook_training_failures_still_omit_the_group(scoring):
     assert asyncio.run(rewards.rollout_reward(scoring, scored_sample("failure"))) is None
 
 
+def test_custom_converter_cannot_turn_a_failed_grade_into_zero(scoring):
+    scoring.custom_convert_samples_to_train_data_path = "custom.convert"
+    assert rewards.masks_ungraded(scoring) is False
+    assert asyncio.run(rewards.rollout_reward(scoring, scored_sample("failure"))) is None
+
+
 @pytest.mark.parametrize("estimator", ["reinforce_plus_plus", "ppo"])
 @pytest.mark.parametrize("hook", ["exclude_ungraded", "exclude_truncated"])
 def test_raw_reward_estimators_keep_their_signal(exclusion, make_sample, estimator, hook):

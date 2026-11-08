@@ -311,6 +311,8 @@ def masks_ungraded(args) -> bool:
     marker, and the post-process masks it. Without such a hook the response has no
     reward and the pinned MILES collector drops its whole prompt group.
     """
+    if getattr(args, "custom_convert_samples_to_train_data_path", None):
+        return False  # Native conversion bypasses the reward post-process.
     path = getattr(args, "custom_reward_post_process_path", None)
     return bool(path) and _masks_ungraded_path(path)
 
@@ -489,7 +491,9 @@ async def registered_reward(args, samples, *, failure_policy="raise", **kwargs):
 
 
 async def rollout_reward(args, samples, **kwargs):
-    """Omit ungraded training groups; zero reported failures in evaluation.
+    """Exclude ungraded training responses, or omit their groups without a masking hook.
+
+    Reported failures receive zero in evaluation.
 
     MILES assigns group_index when drawing training prompts. Evaluation samples
     have no group_index and are not passed through the replacement/filter loop.

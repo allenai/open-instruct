@@ -9,8 +9,9 @@ ungraded response out:
 - it gets zero advantage and ``remove_sample``, which zeroes its loss mask;
 - each group's baseline (mean, and standard deviation when enabled) uses only the
   responses that were graded, and finished when truncation exclusion is selected;
-- the matching dynamic filter checks reward variation over the same responses and
-  drops a group with fewer than two of them.
+- the matching dynamic filter rejects groups with no trainable responses and,
+  when variance filtering is enabled, requires at least two graded responses
+  with different rewards.
 
 The reward adapter marks an ungraded response with ``metadata["reward_omission"]``
 and returns reward 0 when the configured post-process declares ``masks_ungraded``;
@@ -132,5 +133,6 @@ def filter_finished_responses(args, samples, **kwargs):
 # The reward adapter reads this marker to decide between returning reward 0 for an
 # ungraded response (this post-process masks it) and returning no reward (MILES
 # drops the group).
+# Assign through __dict__ because functions do not declare this attribute to the type checker.
 exclude_ungraded.__dict__["masks_ungraded"] = True
 exclude_truncated.__dict__["masks_ungraded"] = True
