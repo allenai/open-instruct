@@ -447,8 +447,14 @@ class RunConfig:
         if options.get("pause_generation_mode") == "in_place":
             if options.get("colocate"):
                 raise constraints.error("Core in_place publication requires non-colocated serving")
-            if not options.get("sglang_disable_radix_cache"):
-                raise constraints.error("Core in_place publication requires sglang_disable_radix_cache=true")
+            if (
+                not options.get("sglang_disable_radix_cache")
+                and options.get("sglang_radix_cache_backend") != validation.POLICY_CACHE_BACKEND
+            ):
+                raise constraints.error(
+                    "Core in_place publication requires sglang_disable_radix_cache=true or "
+                    f"sglang_radix_cache_backend={validation.POLICY_CACHE_BACKEND}"
+                )
         if self.core.records_root is not None and not options.get("fully_async", False):
             # The completed buffer that records groups exists only in fully async runs.
             raise constraints.error(
