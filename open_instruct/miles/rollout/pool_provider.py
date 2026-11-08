@@ -267,13 +267,14 @@ class PoolPromptProvider:
         self.committed_update, self.last_commit = state["committed_update"], state["last_commit"]
 
     def selection_state_dict(self):
-        # Selection rollback is serialized against feedback; omit large replay histories.
+        # The caller holds the selection/feedback lock through delivery. Selection
+        # only appends pending IDs >= draws; existing entries cannot change here.
+        # Save cursors, not outstanding prompts (which can contain large test suites).
         state = {p: getattr(v, "selection_state_dict", v.state_dict)() for p, v in self.providers.items()}
         return {
             "providers": state,
             "rng": self.rng.getstate(),
             "draws": self.draws,
-            "pending": copy.deepcopy(self.pending),
             "proposed": dict(self.proposed),
             "replay_proposed": dict(self.replay_proposed),
         }
@@ -282,7 +283,10 @@ class PoolPromptProvider:
         for p, v in self.providers.items():
             getattr(v, "load_selection_state_dict", v.load_state_dict)(state["providers"][p])
         self.rng.setstate(state["rng"])
-        self.draws, self.pending = state["draws"], copy.deepcopy(state["pending"])
+        for selection in list(self.pending):
+            if selection >= state["draws"]:
+                del self.pending[selection]
+        self.draws = state["draws"]
         self.proposed = Counter(state["proposed"])
         self.replay_proposed = Counter(state["replay_proposed"])
 

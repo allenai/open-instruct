@@ -93,6 +93,26 @@ def test_policy_identity_and_atomic_selection_rollback(policy):
 
 
 @pytest.mark.parametrize("policy", POLICIES)
+def test_selection_rollback_does_not_copy_or_replace_outstanding_metadata(policy):
+    class DoNotCopy:
+        def __deepcopy__(self, memo):
+            raise AssertionError("Selection traversed outstanding prompt metadata")
+
+    p = make(policy)
+    p.next_samples(5)
+    existing = dict(p.pending)
+    for entry in existing.values():
+        entry["metadata"]["large_target"] = DoNotCopy()
+    # The bridge itself deep-copies the snapshot before attempting delivery.
+    snapshot = copy.deepcopy(p.selection_state_dict())
+    expected = p.next_samples(10)
+    p.load_selection_state_dict(snapshot)
+    assert p.pending.keys() == existing.keys()
+    assert all(p.pending[key] is value for key, value in existing.items())
+    assert p.next_samples(10) == expected
+
+
+@pytest.mark.parametrize("policy", POLICIES)
 def test_replay_is_optional_and_preserves_fresh_inventory(policy):
     replay = dict(fraction=0.5, window=1, max_successes=0, truncation="any", length_drop=0.1)
     p = make(policy, (12, 12), replay)

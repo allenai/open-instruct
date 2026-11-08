@@ -1,6 +1,7 @@
 """Exercise named pools through the actual loader, filter, recorder and checkpoint ledger."""
 
 import asyncio
+import copy
 import dataclasses
 import hashlib
 import json
@@ -22,6 +23,34 @@ from open_instruct.miles.datasets import run_data
 from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 
 args = test_prompt_provider.args
+
+
+@pytest.mark.parametrize("policy", ["shuffle", "uniform", "weighted", "exposure"])
+def test_failed_pool_delivery_restores_cursors_and_preserves_prior_reservations(args, tmp_path, monkeypatch, policy):
+    setup(args, tmp_path, policy)
+    source = DashboardDrainingRolloutDataSource(args)
+    try:
+        source.get_samples(1)
+        before = copy.deepcopy(source.provider.state_dict())
+        existing = dict(source.provider.pending)
+        select = source.provider.next_samples
+
+        def fail_after_selection(n):
+            select(n)
+            raise RuntimeError("delivery failed after selection")
+
+        monkeypatch.setattr(source.provider, "next_samples", fail_after_selection)
+        with pytest.raises(RuntimeError, match="delivery failed"):
+            source.get_samples(2)
+        assert source.provider.state_dict() == before
+        assert all(source.provider.pending[key] is entry for key, entry in existing.items())
+        monkeypatch.setattr(source.provider, "next_samples", select)
+        expected = [group[0].prompt for group in source.get_samples(2)]
+        source.provider.load_state_dict(before)
+        # Compare prompt selection; response-group counters are owned by the bridge.
+        assert [s.prompt for s in source.provider.next_samples(2)] == expected
+    finally:
+        source.close()
 
 
 @pytest.mark.parametrize("policy", ["shuffle", "uniform", "weighted", "exposure"])
