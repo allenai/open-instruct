@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import statistics
 import subprocess
 import sys
@@ -19,6 +20,12 @@ def write(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
 
 
+def logged_run(command, log, *, timeout, env=None):
+    print("CACHE_PANEL_PHASE", str(log), flush=True)
+    pipeline = shlex.join(command) + " 2>&1 | tee " + shlex.quote(str(log))
+    subprocess.run(["bash", "-o", "pipefail", "-c", pipeline], env=env, check=True, timeout=timeout)
+
+
 def parity(a, b):
     same = a["tokens"] == b["tokens"]
     error = max((abs(x - y) for x, y in zip(a["logprobs"], b["logprobs"], strict=True)), default=0) if same else None
@@ -33,15 +40,7 @@ def serving(root, mode, arm, model, data):
     if mode == "benchmark":
         command += ["--model", model, "--data", data]
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / "console.log").open("w") as stream:
-        subprocess.run(
-            command,
-            env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"},
-            stdout=stream,
-            stderr=subprocess.STDOUT,
-            check=True,
-            timeout=1800,
-        )
+    logged_run(command, directory / "console.log", env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"}, timeout=1800)
     return read(directory / "report.json")
 
 
@@ -129,14 +128,11 @@ def main():
             subprocess.run(["ray", "stop", "--force"], check=False, timeout=90)
             directory = Path(read(specs / (arm + ".json"))["output"]["root"])
             try:
-                with (root / ("training-" + arm + ".log")).open("w") as stream:
-                    subprocess.run(
-                        [sys.executable, "-m", "open_instruct.miles", "train", str(specs / (arm + ".json"))],
-                        stdout=stream,
-                        stderr=subprocess.STDOUT,
-                        check=True,
-                        timeout=4500,
-                    )
+                logged_run(
+                    [sys.executable, "-m", "open_instruct.miles", "train", str(specs / (arm + ".json"))],
+                    root / ("training-" + arm + ".log"),
+                    timeout=4500,
+                )
             finally:
                 launch.collect_results(str(directory), str(root / ("training-" + arm)))
             state["training"][arm] = training_summary(directory)
