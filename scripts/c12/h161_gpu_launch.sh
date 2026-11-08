@@ -11,6 +11,11 @@
 #   ctrl   H149's c12-b2 length S = 16,303 steps (phi = 0.5803 of one pass), --num_epochs 1.
 #   b1r    ledger H182 (b1-c12r-gpu): base B1 (step20000), peak LR 2e-4, plus the 10% LC replay dir as
 #          --extra_numpy_dirs; S_R=<steps> is required (H182 R4', per seed, from the offline loader replay).
+#   a4b    descriptive A4B run: b1r's recipe and S_R on the Olmo 3.5 Small hero 4T decay endpoint (registry
+#          olmo35-4b-active-4t-decay159k-causal), peak LR 7.3e-5 (2e-4 x 4.04e-4 / 1.1e-3), its own model config
+#          (scripts/c12/a4b_sft_config.json: EMO off, sync_1d EP, recompute on) at --expert_parallel_degree 8. The smoke
+#          runs 100 steps and seeds the promoted rows of the unseeded HF export in memory for the reference CE, under
+#          transformers 5.15.1 (the export's remote code).
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -66,6 +71,11 @@ OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h161-gpu
 
 LR=5e-5
 EXTRA_ARGS=""
+CONFIG=scripts/train/debug/kda_hero_small_sft.json
+SMOKE_STEPS=30
+SMOKE_HOURS=1
+REF_TRANSFORMERS=4.57.6
+SEED_ROWS=""
 DESC="ledger H161 GPU companion (draft)"
 case "$ARM" in
     b1r) MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
@@ -73,6 +83,14 @@ case "$ARM" in
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h182-gpu; DESC="ledger H182 b1-c12r-gpu"
          STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14 ;;
+    a4b) MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-4t-decay159k-causal/step162974/model_and_optim
+         HF_REF=/weka/oe-training-default/tanushy/checkpoints/olmo35-small-hero-decay159k-causal-162974/hf
+         CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=100; SMOKE_HOURS=2; REF_TRANSFORMERS=5.15.1
+         # <think> and </think> promoted into slots 100256 and 100266, seeded from their dolma2 pieces.
+         SEED_ROWS='[[100256, [27, 27963, 29]], [100266, [524, 27963, 29]]]'
+         LR=7.3e-5; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8"
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-gpu; DESC="ledger A4B half-epoch C12r (descriptive)"
+         STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=72 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
@@ -80,8 +98,9 @@ esac
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == b1r ]] && RUN_NAME="h182gpu-s${SEED}"
+[[ "$ARM" == a4b ]] && RUN_NAME="a4bgpu-s${SEED}"
 case "$MODE" in
-    smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
+    smoke) STEPS=$SMOKE_STEPS; CKPT=1000000; SAVE_EVERY=1024; HOURS=$SMOKE_HOURS; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
     resume) STEPS=30; CKPT=1000000; SAVE_EVERY=10; HOLD_AT=19; HOURS=2; RUN_NAME="${RUN_NAME}-resume"
            MIN_RUNTIME="${MIN_RUNTIME:-5m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-1}"
@@ -93,7 +112,7 @@ TIMEOUT="${TIMEOUT:-${HOURS}h}"
 OUTPUT_DIR="$OUT_ROOT/$RUN_NAME"
 DUMP_DIR="$OUTPUT_DIR/step1"
 
-ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
+ARGS="--model_name_or_path $MODEL --config_name $CONFIG \
 --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
 --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
 --row_aligned_parts --document_boundaries_from_metadata --max_seq_length 65536 \
@@ -153,7 +172,7 @@ if [ \"\$BEAKER_REPLICA_RANK\" = 0 ]; then
       if [ -z \"\$PX\" ]; then uv venv -q --python 3.12 /tmp/nvcc13 && uv pip install -q --python /tmp/nvcc13/bin/python 'nvidia-cuda-nvcc==13.0.*'; PX=\$(find /tmp/nvcc13 -name ptxas -type f | head -1); chmod +x \"\$PX\"; fi
       echo PTXAS \$PX; export TRITON_PTXAS_PATH=\$PX
     fi
-    cd /tmp && CUDA_VISIBLE_DEVICES=0 uv run --no-project --python 3.12 --index \$IDX --index-strategy unsafe-best-match --with torch==2.9.1 --with transformers==4.57.6 --with numpy --with accelerate --with flash-linear-attention python /tmp/h161_refce.py $DUMP_DIR $HF_REF $DUMP_DIR/refce.json
+    cd /tmp && CUDA_VISIBLE_DEVICES=0 uv run --no-project --python 3.12 --index \$IDX --index-strategy unsafe-best-match --with torch==2.9.1 --with transformers==$REF_TRANSFORMERS --with numpy --with accelerate --with flash-linear-attention python /tmp/h161_refce.py $DUMP_DIR $HF_REF $DUMP_DIR/refce.json ${SEED_ROWS:+'$SEED_ROWS'}
     RR=\$?; echo H161-REFCE-EXIT \$RR
     [ \"\$RC\" = 0 ] && [ \"\$RR\" != 0 ] && RC=4
   else

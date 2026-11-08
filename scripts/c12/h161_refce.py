@@ -2,7 +2,11 @@
 rule, by H134 P2's method (refce_h134.py): olmo3moe remote code, bf16 weights, each document of a packed row forwarded
 as its own sequence, fp32 logits and CE, token-weighted over the loss tokens of all rows.
 
-  python h161_refce.py <dir of rankNN.npz from h161_smoke_wrap.py> <hf dir> <out.json>
+  python h161_refce.py <dir of rankNN.npz from h161_smoke_wrap.py> <hf dir> <out.json> [<seed rows json>]
+
+The optional seed rows, e.g. '[[100256, [27, 27963, 29]], [100266, [524, 27963, 29]]]', seed each promoted slot's
+embedding and head rows from the mean of its piece rows in memory, as olmo_core_finetune does at load, for an HF
+export that was not written with seeded rows (A4B). Without it the export must already hold them (H149's c12seed).
 
 Labels as OLMo-core builds them: the target of position i is input_ids[i+1] where label_mask[i+1], else ignored.
 Documents come from doc_lens (the metadata boundaries the trainer used). A loss token whose target is the first token
@@ -21,6 +25,7 @@ import torch
 from transformers import AutoModelForCausalLM
 
 D, HF, OUT = sys.argv[1:4]
+SEED_ROWS = json.loads(sys.argv[4]) if len(sys.argv) > 4 else []
 paths = sorted(glob.glob(os.path.join(D, "rank*.npz")))
 rows = []
 for p in paths:
@@ -39,6 +44,12 @@ for r in rows:
 print("LOSS-TOKENS", ntok, "CROSS-BOUNDARY", cross, flush=True)
 m = AutoModelForCausalLM.from_pretrained(HF, dtype=torch.bfloat16, trust_remote_code=True).cuda().eval()
 W = m.lm_head.weight
+with torch.no_grad():
+    for M in {id(t): t for t in (m.get_input_embeddings().weight, W)}.values():
+        means = {t: M[s].float().mean(0) for t, s in SEED_ROWS}  # all read before any is written
+        for t, v in means.items():
+            M[t] = v.to(M.dtype)
+print("SEEDED", SEED_ROWS, flush=True)
 tot, n_in, per_row, t0 = 0.0, 0, [], time.time()
 with torch.no_grad():
     for ri, r in enumerate(rows):
@@ -62,6 +73,6 @@ with torch.no_grad():
         per_row.append({"row": ri, "src": r["src"], "docs": len(r["doc_lens"]), "loss_tokens": rn, "ce": rs / max(rn, 1)})
         print("ROW", ri, r["src"], rn, round(rs / max(rn, 1), 6), f"{time.time() - t0:.0f}s", flush=True)
 assert n_in + cross == ntok, (n_in, cross, ntok)
-res = {"loss_tokens": n_in, "cross_boundary_tokens": cross, "ce": tot / n_in, "rows": per_row, "hf": HF, "batch": D}
+res = {"seed_rows": SEED_ROWS, "loss_tokens": n_in, "cross_boundary_tokens": cross, "ce": tot / n_in, "rows": per_row, "hf": HF, "batch": D}
 json.dump(res, open(OUT, "w"), indent=1)
 print("REFCE", json.dumps({"loss_tokens": n_in, "cross_boundary_tokens": cross, "ce": round(tot / n_in, 6)}), flush=True)

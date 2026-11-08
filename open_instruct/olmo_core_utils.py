@@ -36,6 +36,7 @@ from olmo_core.train.train_module.transformer.config import (
     OLMoDDPTrainModuleConfig,
     TransformerContextParallelConfig,
     TransformerDataParallelConfig,
+    TransformerExpertParallelConfig,
 )
 from torch.distributed.tensor import DTensor
 
@@ -164,6 +165,9 @@ class TrainingConfig:
     """Context parallelism degree. When set, enables context parallelism."""
     cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
     """Context parallelism strategy."""
+    expert_parallel_degree: int | None = None
+    """Expert parallelism degree for OLMoDDPModel (MoE v2) models: routed experts are split across this many
+    ranks. The EP path (all-to-all kind, capacity) comes from the model config's `block.ep`."""
 
 
 def build_ac_config(
@@ -542,6 +546,7 @@ def build_ddp_train_module_config(
     max_grad_norm: float | None,
     compile_model: bool,
     ac_config: Any,
+    expert_parallel_degree: int | None = None,
 ) -> OLMoDDPTrainModuleConfig:
     """Build the nn.ddp train-module config for OLMoDDPModel (MoE v2) models.
 
@@ -549,7 +554,9 @@ def build_ddp_train_module_config(
     train through the branch's own DDP train module instead. The optimizer and
     dp_config come verbatim from the checkpoint's train_module section (the
     combination that pretrained the model), with only the SFT-specific knobs
-    overridden: lr, weight decay, scheduler, batch geometry and grad clipping.
+    overridden: lr, weight decay, scheduler, batch geometry and grad clipping,
+    plus expert parallelism when the unsharded expert weights and their fp32
+    grads do not fit on one GPU.
     """
     with open(config_path) as config_file:
         payload = json.load(config_file)
@@ -564,6 +571,7 @@ def build_ddp_train_module_config(
         max_sequence_length=max_sequence_length,
         optim=optim_config,
         dp_config=TransformerDataParallelConfig.from_dict(checkpoint_train_module["dp_config"]),
+        ep_config=TransformerExpertParallelConfig(degree=expert_parallel_degree) if expert_parallel_degree else None,
         scheduler=scheduler,
         compile_model=compile_model,
         ac_config=ac_config,

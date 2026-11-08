@@ -616,8 +616,10 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             max_grad_norm=max_grad_norm,
             compile_model=args.training.compile_model,
             ac_config=ac_config,
+            expert_parallel_degree=args.training.expert_parallel_degree,
         )
     else:
+        assert args.training.expert_parallel_degree is None, "--expert_parallel_degree is wired only for OLMoDDPModel"
         train_module_config = train_module_lib.TransformerTrainModuleConfig(
             rank_microbatch_size=rank_microbatch_size,
             max_sequence_length=args.training.max_seq_length,

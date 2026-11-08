@@ -398,6 +398,33 @@ class IsHfCheckpointTest(unittest.TestCase):
         self.assertTrue(olmo_core_utils.is_hf_checkpoint("gs://ai2-llm/checkpoints/olmo3-hf/step100"))
 
 
+class BuildDdpTrainModuleConfigTest(unittest.TestCase):
+    CONFIG = os.path.join(os.path.dirname(__file__), "..", "scripts", "c12", "a4b_sft_config.json")
+
+    def _build(self, **kwargs):
+        return olmo_core_utils.build_ddp_train_module_config(
+            config_path=self.CONFIG,
+            rank_microbatch_size=65536,
+            max_sequence_length=65536,
+            learning_rate=7.3e-5,
+            weight_decay=0.0,
+            scheduler=None,
+            max_grad_norm=1.0,
+            compile_model=False,
+            ac_config=None,
+            **kwargs,
+        )
+
+    def test_no_expert_parallelism_by_default(self) -> None:
+        config = self._build()
+        self.assertIsNone(config.ep_config)
+        self.assertEqual(config.optim.lr, 7.3e-5)
+        self.assertEqual(config.dp_config.name, "ddp")
+
+    def test_expert_parallel_degree(self) -> None:
+        self.assertEqual(self._build(expert_parallel_degree=8).ep_config.degree, 8)
+
+
 class TestCheckpointerDefaults(unittest.TestCase):
     def test_default_intervals_build_a_checkpointer(self) -> None:
         """The two defaults must not collide: olmo-core requires ephemeral < save_interval."""
