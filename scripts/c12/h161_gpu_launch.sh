@@ -137,7 +137,17 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
 
 BASE_RECEIPT="$(dirname "$MODEL")/RECEIPT.json"
-WAIT="for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
+PATCH=""
+if [[ "$ARM" == c14f ]]; then
+    # H202's add-on parts 0005 and 0007 end with a row that has no trailing EOS (a final tool call). With
+    # --document_boundaries_from_metadata the packer takes rows from the csv.gz, so the image's final-EOS guard only
+    # matters to the EOS scan: skip it under metadata boundaries, in the container (exit 6 if the line moved).
+    PATCH="sed -i 's/^        if int(tokens\[-1\]) != tokenizer.eos_token_id:/        if not require_metadata and int(tokens[-1]) != tokenizer.eos_token_id:/' open_instruct/olmo_core_finetune.py
+grep -c 'if not require_metadata and int(tokens' open_instruct/olmo_core_finetune.py || exit 6
+sha256sum open_instruct/olmo_core_finetune.py"
+fi
+WAIT="$PATCH
+for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
 [ -f $BASE_RECEIPT ] || { echo H161-NO-BASE $BASE_RECEIPT; exit 3; }
 sha256sum $BASE_RECEIPT"
 TORCHRUN="torchrun --nnodes=2 --node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
