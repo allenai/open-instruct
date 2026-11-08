@@ -264,7 +264,8 @@ def _check_extra_numpy_dir(
                     f"{token_path} has token id {max_id:,} >= vocab size {tokenizer.vocab_size:,}; "
                     f"was it written as {dtype_name}?"
                 )
-        if int(tokens[-1]) != tokenizer.eos_token_id:
+        # Only the EOS scan drops a file's tail; metadata boundaries keep rows that end without EOS.
+        if not require_metadata and int(tokens[-1]) != tokenizer.eos_token_id:
             raise ValueError(
                 f"{token_path} does not end with EOS ({tokenizer.eos_token_id}); OLMo-core's EOS scan "
                 "drops the tokens after a file's last EOS."

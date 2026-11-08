@@ -425,6 +425,16 @@ class ExtraNumpyDirsTest(unittest.TestCase):
             (by_metadata.num_docs, by_metadata.num_docs_over_length, by_metadata.num_tokens_truncated), (1, 1, 4)
         )
 
+    def test_trailing_eos_required_only_by_the_eos_scan(self) -> None:
+        # A last row without EOS (e.g. a tool-call turn ending in <|im_end|>): the EOS scan would drop it.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, 50_003], True)]])
+        with self.assertRaisesRegex(ValueError, "does not end with EOS"):
+            self._check([self.extra_a])
+        by_metadata = olmo_core_finetune._check_extra_numpy_dirs(
+            [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+        )[self.extra_a]
+        self.assertEqual((by_metadata.num_docs, by_metadata.num_tokens), (2, 5))
+
     def test_metadata_required_with_metadata_boundaries(self) -> None:
         os.remove(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"))
         self._check([self.extra_a])
