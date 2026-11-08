@@ -59,7 +59,9 @@ class Catalog:
 
     def _finished(self, row, future):
         with self.lock:
-            self.pending.pop(row, None)
+            if self.pending.get(row) is not future:
+                return  # A demand read already consumed this future.
+            self.pending.pop(row)
             if future.cancelled() or future.exception() is not None:
                 return  # Demand reads propagate failures; speculative reads never select rows.
             raw = future.result()
@@ -88,11 +90,11 @@ class Catalog:
     def sample(self, row):
         row = int(row)
         with self.lock:
-            raw = self.cache.get(row)
-            future = self.pending.get(row)
+            raw = self.cache.pop(row, None)
+            future = self.pending.pop(row, None)
             if raw is not None:
                 self.hits += 1
-                self.cache.move_to_end(row)
+                self.bytes -= len(raw)
         if raw is None:
             raw = future.result() if future is not None else self._read(row)
         data = json.loads(raw)
@@ -160,7 +162,8 @@ class View(Sequence):
 
     def prefetch(self, offset):
         # Per-pool lookahead shares one byte/row-bounded cache across all pools.
-        self.catalog.prefetch(self.rows[offset : offset + 64])
+        lookahead = min(64, max(1, self.catalog.cache_rows // len(self.catalog.pool_names)))
+        self.catalog.prefetch(self.rows[offset : offset + lookahead])
 
     def replay_catalog(self, identity):
         entries, sources, tasks = {}, {}, {}

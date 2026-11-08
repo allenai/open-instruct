@@ -107,7 +107,7 @@ def test_prefetch_can_finish_out_of_order_without_selecting(tmp_path):
         assert [catalog.sample(i).prompt for i in range(48)] == [s.prompt for s in samples]
         catalog.executor.shutdown(wait=True)
         assert catalog.sample(0).prompt == samples[0].prompt
-        assert catalog.metrics()["cache_hits"] > 0
+        assert catalog.metrics()["disk_reads"] <= 96
     finally:
         catalog.close()
 
@@ -132,3 +132,30 @@ def test_oversized_rows_bypass_cache_without_changing_delivery(tmp_path):
         assert catalog.metrics()["cache_rows"] == 0
     finally:
         catalog.close()
+
+
+def test_many_pools_do_not_churn_prefetch_cache(tmp_path):
+    pools = {str(i): {} for i in range(21)}
+    path = tmp_path / "many.jsonl"
+    rows = [{"input": str(i), "metadata": {"sampling_pool": str(i % 21), "run_prompt_tokens": 1}} for i in range(4200)]
+    raw = b"".join(json.dumps(row).encode() + b"\n" for row in rows)
+    path.write_bytes(raw)
+    catalog = indexed_samples.Catalog(
+        tmp_path,
+        [{"name": "many", "path": path.name, "sha256": hashlib.sha256(raw).hexdigest(), "rows": len(rows)}],
+        pools,
+        sample_type=SimpleNamespace,
+        cache_rows=210,
+    )
+    provider = pool_provider.PoolPromptProvider(
+        catalog, pools=pools, seed=17, shuffle=True, identity="many", sampling={"policy": "uniform"}
+    )
+    try:
+        for i in range(2100):
+            sample = provider.next_samples(1)[0]
+            provider.commit(i, [sample.metadata["pool_selection_id"]])
+        catalog.executor.shutdown(wait=True)
+        # One read per drawn or speculative row, not a whole window per draw.
+        assert catalog.reads <= 2100 + catalog.cache_rows
+    finally:
+        provider.close()

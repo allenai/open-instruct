@@ -1021,7 +1021,9 @@ older bundles build these derived indexes on first use. Loading verifies both th
 source and index hashes, so startup still reads the source bytes once. These
 sidecars do not change the preparation identity or selected prompt sequence.
 
-Two reader threads prefetch up to 64 upcoming rows per pool into a shared cache.
+Two reader threads prefetch up to 64 upcoming rows per pool into a shared cache,
+reducing each window when necessary to fit all pools within the shared row budget.
+Demand reads consume cached rows, leaving room for future candidates.
 The cache holds at most ten rollout batches of rows (minimum 64) and 256 MiB of
 raw JSON, whichever limit is reached first. Outstanding read requests have the
 same row limit. Only selected rows become prompt/verifier objects; generation
