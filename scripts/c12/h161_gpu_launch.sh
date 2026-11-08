@@ -13,7 +13,8 @@
 #          --extra_numpy_dirs; S_R=<steps> is required (H182 R4', per seed, from the offline loader replay).
 #   a4b    descriptive A4B run: b1r's recipe and S_R on the Olmo 3.5 Small hero 4T decay endpoint (registry
 #          olmo35-4b-active-4t-decay159k-causal), peak LR 7.3e-5 (2e-4 x 4.04e-4 / 1.1e-3), its own model config
-#          (scripts/c12/a4b_sft_config.json: EMO off, sync_1d EP, recompute on) at --expert_parallel_degree 8. The smoke
+#          (scripts/c12/a4b_sft_config.json: EMO off, sync_1d EP, recompute on, attention flash_2 because the image's FA4 rejects
+#          head_dim 256 on SM100) at --expert_parallel_degree 8. The smoke
 #          runs 100 steps and seeds the promoted rows of the unseeded HF export in memory for the reference CE, under
 #          transformers 5.15.1 (the export's remote code).
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).

@@ -374,7 +374,7 @@
             "dtype": "float32",
             "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
           },
-          "backend": "flash_4",
+          "backend": "flash_2",
           "dtype": "float32",
           "use_head_qk_norm": true,
           "scalable_softmax": true,
@@ -514,7 +514,7 @@
             "dtype": "float32",
             "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
           },
-          "backend": "flash_4",
+          "backend": "flash_2",
           "dtype": "float32",
           "use_head_qk_norm": true,
           "scalable_softmax": true,
@@ -654,7 +654,7 @@
             "dtype": "float32",
             "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
           },
-          "backend": "flash_4",
+          "backend": "flash_2",
           "dtype": "float32",
           "use_head_qk_norm": true,
           "scalable_softmax": true,
@@ -794,7 +794,7 @@
             "dtype": "float32",
             "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
           },
-          "backend": "flash_4",
+          "backend": "flash_2",
           "dtype": "float32",
           "use_head_qk_norm": true,
           "scalable_softmax": true,
@@ -934,7 +934,7 @@
             "dtype": "float32",
             "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
           },
-          "backend": "flash_4",
+          "backend": "flash_2",
           "dtype": "float32",
           "use_head_qk_norm": true,
           "scalable_softmax": true,
