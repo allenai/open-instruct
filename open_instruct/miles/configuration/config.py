@@ -26,6 +26,9 @@ EXCLUDE_UNGRADED = "open_instruct.miles.rewards.exclusion.exclude_ungraded"
 # Reward post-processes that leave ungraded responses out of their group baseline,
 # paired with the group filter that ignores the same responses.
 EXCLUSION_FILTERS = {EXCLUDE_TRUNCATED: FINISHED_STD_FILTER, EXCLUDE_UNGRADED: GRADED_STD_FILTER}
+GRADED_FILTER = "open_instruct.miles.rewards.exclusion.filter_graded_responses"
+FINISHED_FILTER = "open_instruct.miles.rewards.exclusion.filter_finished_responses"
+EXCLUSION_EMPTY_FILTERS = {EXCLUDE_TRUNCATED: FINISHED_FILTER, EXCLUDE_UNGRADED: GRADED_FILTER}
 EXPERT_SCHEDULE = "miles.backends.core_utils.expert_schedule.reorder_samples"
 RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
@@ -344,6 +347,14 @@ class RunConfig:
             raise constraints.error(
                 "core.filter_zero_std_groups=false conflicts with the explicit zero-std filter path"
             )
+        elif post_process in EXCLUSION_EMPTY_FILTERS:
+            empty_filter = EXCLUSION_EMPTY_FILTERS[post_process]
+            if path not in (None, empty_filter):
+                raise constraints.error(
+                    "Reward exclusion requires its paired group filter to reject fully masked groups; "
+                    "disable core.exclude_ungraded before selecting a custom filter"
+                )
+            options["dynamic_sampling_filter_path"] = empty_filter
         hook = options.get("rollout_sample_filter_path")
         if self.core.expert_balanced_packing:
             if hook not in (None, EXPERT_SCHEDULE):
@@ -627,7 +638,12 @@ class RunConfig:
                 "engine_drain currently supports blocking shared-engine evaluation only",
                 constraints.Category.NOT_IMPLEMENTED,
             )
-        if options.get("dynamic_sampling_filter_path") not in (None, ZERO_STD_FILTER, *EXCLUSION_FILTERS.values()):
+        if options.get("dynamic_sampling_filter_path") not in (
+            None,
+            ZERO_STD_FILTER,
+            *EXCLUSION_FILTERS.values(),
+            *EXCLUSION_EMPTY_FILTERS.values(),
+        ):
             raise constraints.error(
                 "engine_drain supports only the built-in zero-std dynamic sampling filter",
                 constraints.Category.NOT_IMPLEMENTED,

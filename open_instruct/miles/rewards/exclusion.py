@@ -45,8 +45,18 @@ def _excluded(sample, *, truncated: bool) -> bool:
     return ungraded(sample) or (truncated and sample.status == Sample.Status.TRUNCATED)
 
 
-def _filter_reward_variance(args, samples, *, truncated: bool, **kwargs):
+def _filter_responses(args, samples, *, truncated: bool, variance: bool, **kwargs):
     included = [sample for sample in base_types.iter_samples(samples) if not _excluded(sample, truncated=truncated)]
+    # Empty groups cannot train even when constant-reward groups are allowed.
+    if not any(
+        not getattr(sample, "remove_sample", False)
+        and sample.response_length > 0
+        and (getattr(sample, "loss_mask", None) is None or any(sample.loss_mask))
+        for sample in included
+    ):
+        return base_types.FilterOutput(keep=False, reason="no_trainable_responses")
+    if not variance:
+        return base_types.FilterOutput(keep=True)
     if len(included) < 2:
         reason = "insufficient_finished_responses" if truncated else "insufficient_graded_responses"
         return base_types.FilterOutput(keep=False, reason=reason)
@@ -101,12 +111,22 @@ def exclude_truncated(args, samples: list[Sample]) -> tuple[list[float], list[fl
 
 def filter_graded_reward_variance(args, samples, **kwargs):
     """Drop groups with no reward variation among graded responses."""
-    return _filter_reward_variance(args, samples, truncated=False, **kwargs)
+    return _filter_responses(args, samples, truncated=False, variance=True, **kwargs)
 
 
 def filter_finished_reward_variance(args, samples, **kwargs):
     """Drop groups with no reward variation among graded, finished responses."""
-    return _filter_reward_variance(args, samples, truncated=True, **kwargs)
+    return _filter_responses(args, samples, truncated=True, variance=True, **kwargs)
+
+
+def filter_graded_responses(args, samples, **kwargs):
+    """Reject groups with no trainable graded response; retain constant rewards."""
+    return _filter_responses(args, samples, truncated=False, variance=False, **kwargs)
+
+
+def filter_finished_responses(args, samples, **kwargs):
+    """Reject groups with no trainable finished, graded response."""
+    return _filter_responses(args, samples, truncated=True, variance=False, **kwargs)
 
 
 # The reward adapter reads this marker to decide between returning reward 0 for an

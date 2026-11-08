@@ -119,7 +119,12 @@ def exclusion(monkeypatch):
 def make_sample(exclusion):
     def make(reward, *, group_index, index, truncated=False, ungraded=False, rollout_id=None):
         sample = exclusion.Sample(
-            prompt="Question", response="answer", tokens=[], response_length=0, group_index=group_index, metadata={}
+            prompt="Question",
+            response="answer",
+            tokens=[1, 2, 3],
+            response_length=2,
+            group_index=group_index,
+            metadata={},
         )
         sample.index = index
         sample.rollout_id = rollout_id
@@ -307,3 +312,22 @@ def test_raw_reward_estimators_keep_their_signal(exclusion, make_sample, estimat
     raw, processed = getattr(exclusion, hook)(args(advantage_estimator=estimator), samples)
     assert processed == raw == [1.0, 0.0, 0.75, 0.0]
     assert [sample.remove_sample for sample in samples] == [False, False, False, True]
+
+
+@pytest.mark.parametrize("truncated", [False, True])
+def test_empty_group_guard_is_independent_of_reward_variance(exclusion, make_sample, truncated):
+    hook = exclusion.filter_finished_responses if truncated else exclusion.filter_graded_responses
+    failed = [make_sample(0.0, group_index=0, index=i, ungraded=True) for i in range(3)]
+    assert (hook(args(), failed).keep, hook(args(), failed).reason) == (False, "no_trainable_responses")
+    # An incorrect answer is still a valid grade, including a singleton.
+    graded = make_sample(0.0, group_index=0, index=3)
+    assert hook(args(), failed + [graded]).keep is True
+    graded.response_length = 0
+    assert hook(args(), failed + [graded]).keep is False
+    graded.response_length = 2
+    graded.loss_mask = [0, 0]
+    assert hook(args(), failed + [graded]).keep is False
+    graded.loss_mask = [1, 0]
+    assert hook(args(), failed + [graded]).keep is True
+    overlong = [make_sample(0.0, group_index=0, index=0, truncated=True)]
+    assert hook(args(), overlong).keep is (not truncated)

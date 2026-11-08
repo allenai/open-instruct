@@ -8,7 +8,9 @@ import pytest
 from open_instruct.miles.configuration.config import (
     EXCLUDE_TRUNCATED,
     EXCLUDE_UNGRADED,
+    FINISHED_FILTER,
     FINISHED_STD_FILTER,
+    GRADED_FILTER,
     GRADED_STD_FILTER,
     ZERO_STD_FILTER,
     CoreConfig,
@@ -50,8 +52,8 @@ def test_native_arguments_and_plan_agree(mode, enabled):
         assert argv[argv.index("--dynamic-sampling-filter-path") + 1] == GRADED_STD_FILTER
         assert plan["miles"]["dynamic_sampling_filter_path"] == GRADED_STD_FILTER
     else:
-        assert "--dynamic-sampling-filter-path" not in argv
-        assert "dynamic_sampling_filter_path" not in plan["miles"]
+        assert argv[argv.index("--dynamic-sampling-filter-path") + 1] == GRADED_FILTER
+        assert plan["miles"]["dynamic_sampling_filter_path"] == GRADED_FILTER
     # Resolution must not mutate the caller's options or interfere with an opt-out.
     assert "dynamic_sampling_filter_path" not in config.miles
 
@@ -77,7 +79,7 @@ def test_raw_and_structured_defaults_and_researcher_override(tmp_path):
     disabled = RunSpec.from_dict(
         payload | {"training": {"filter_zero_std_groups": False}}, config_path=tmp_path / "run.toml"
     )
-    assert "--dynamic-sampling-filter-path" not in disabled.compile().arguments()
+    assert disabled.compile().plan()["miles"]["dynamic_sampling_filter_path"] == GRADED_FILTER
     with pytest.raises(ValueError, match="[Cc]onflict"):
         RunSpec.from_dict(
             payload | {"training": {"filter_zero_std_groups": False}, "core": {"filter_zero_std_groups": True}},
@@ -97,7 +99,7 @@ def test_truncation_exclusion_selects_matching_group_filter(mode, enabled):
     config = configured(mode, enabled, custom_reward_post_process_path=EXCLUDE_TRUNCATED)
     config = dataclasses.replace(config, core=dataclasses.replace(config.core, reward_zero_truncated=False))
     plan = config.plan()
-    assert plan["miles"].get("dynamic_sampling_filter_path") == (FINISHED_STD_FILTER if enabled else None)
+    assert plan["miles"].get("dynamic_sampling_filter_path") == (FINISHED_STD_FILTER if enabled else FINISHED_FILTER)
     if enabled:
         argv = config.arguments()
         assert argv[argv.index("--dynamic-sampling-filter-path") + 1] == FINISHED_STD_FILTER
@@ -133,10 +135,14 @@ def test_native_filter_conflicts_are_not_silently_overridden():
         configured(enabled=False, dynamic_sampling_filter_path=ZERO_STD_FILTER).validate()
     with pytest.raises(ValueError, match="custom filter"):
         configured(dynamic_sampling_filter_path="custom.filter").validate()
-    configured(enabled=False, dynamic_sampling_filter_path="custom.filter").validate()
+    with pytest.raises(ValueError, match="paired group filter"):
+        configured(enabled=False, dynamic_sampling_filter_path="custom.filter").validate()
+    custom = configured(enabled=False, dynamic_sampling_filter_path="custom.filter")
+    RunConfig(dataclasses.replace(custom.core, exclude_ungraded=False), custom.miles).validate()
     for mode in ("refresh", "engine_drain"):
+        custom = configured(mode, enabled=False, dynamic_sampling_filter_path="custom.filter")
         with pytest.raises(ValueError, match="only the built-in"):
-            configured(mode, enabled=False, dynamic_sampling_filter_path="custom.filter").validate()
+            RunConfig(dataclasses.replace(custom.core, exclude_ungraded=False), custom.miles).validate()
 
 
 @pytest.mark.parametrize("value", ["true", 1, None])
@@ -151,4 +157,6 @@ def test_maintained_examples_explain_their_filtering_choice(name):
     run = RunSpec.load(path)
     enabled = name in ("node", "three-node")
     assert run.compile().core.filter_zero_std_groups is enabled
-    assert ("--dynamic-sampling-filter-path" in run.compile().arguments()) is enabled
+    assert run.compile().plan()["miles"]["dynamic_sampling_filter_path"] == (
+        GRADED_STD_FILTER if enabled else GRADED_FILTER
+    )

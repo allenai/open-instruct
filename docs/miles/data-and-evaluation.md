@@ -346,10 +346,9 @@ MILES/Core training defaults to online reward-group filtering:
 filter_zero_std_groups = true
 ```
 
-The low-level equivalent is `core.filter_zero_std_groups`. By default the compiler resolves
-this to `miles.dynamic_sampling_filter_path =
-"miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"`;
-`plan` records the effective native path. The native filter keeps a complete prompt
+The low-level equivalent is `core.filter_zero_std_groups`. The compiler selects
+the native reward-variance filter or the matching exclusion-aware filter described
+below; `plan` records the effective `miles.dynamic_sampling_filter_path`. The filter keeps a complete prompt
 group only when the standard deviation of its selected reward scores exceeds
 `1e-8`. All-0, all-1 and other constant-reward groups are discarded before trainer
 packing/scoring. Mixed groups retain every response, including zero-reward ones.
@@ -361,7 +360,14 @@ By default the compiler installs the ungraded-response exclusion
 pairs it with `open_instruct.miles.rewards.exclusion.filter_graded_reward_variance`,
 which ignores responses whose grade failed and drops groups with fewer than two
 graded responses. A placeholder zero from a failed grade cannot keep an otherwise
-constant-reward group in the training batch.
+constant-reward group in the training batch. With variance filtering disabled,
+the compiler selects `filter_graded_responses` instead: it retains constant rewards
+and single graded survivors but rejects groups with no trainable responses. The
+corresponding truncation-exclusion guard is `filter_finished_responses`. These
+safety guards run before batch admission and replacement, independently of the
+variance criterion. Custom dynamic filters require opting out of the managed
+exclusion hook (`core.exclude_ungraded=false`) or providing a custom post-process
+and filter that enforce the same invariant.
 
 With `custom_reward_post_process_path="open_instruct.miles.rewards.truncation.exclude_truncated"`,
 the compiler instead selects the built-in finished-response filter. It ignores
@@ -381,7 +387,8 @@ Filtering saves trainer work but still pays generation and verification costs.
 A low acceptance rate increases collection time; if every group is rejected,
 collection waits for useful data and cannot advance the policy. The tiny `dev`
 mechanics example therefore explicitly sets this switch to false.
-Monitor `rollout/dynamic_filter/drop_zero_std_0.0`,
+Monitor `rollout/dynamic_filter/drop_no_trainable_responses` for fully masked or
+empty groups. Monitor `rollout/dynamic_filter/drop_zero_std_0.0`,
 `rollout/dynamic_filter/drop_zero_std_1.0` and the corresponding counters for other
 constant rewards, together with trainer wait time and accepted task proportions.
 These are per-report drop counts, not accuracy estimates. Use unfiltered held-out
@@ -402,8 +409,8 @@ an earlier policy, so newly sampled groups can still have constant rewards after
 preprocessing. Online filtering continues to check the current groups. For graded
 rewards, average-score filtering and zero-variance filtering are different tests.
 
-Advanced custom native filters require `core.filter_zero_std_groups=false` to
-avoid conflicting with the built-in selection. They remain unsupported with
+Advanced custom native filters require `core.filter_zero_std_groups=false` and
+opting out of the managed exclusion post-process to avoid bypassing its safety guard. They remain unsupported with
 refresh or engine-drain publication; those modes allow only the built-in filter.
 
 ## Held-out evaluation and comparison

@@ -121,7 +121,10 @@ when checking reward variation (groups with fewer than two graded responses are
 dropped). The failed response keeps `metadata.reward_omission` with the verifier
 name and error, and W&B reports `rollout/verification/ungraded_samples` and
 `ungraded_fraction` per collection. With response-averaged loss, excluded responses
-still count in the batch denominator.
+still count in the batch denominator. Groups with no trainable responses are
+always rejected, even with `filter_zero_std_groups=false`; that setting keeps
+valid all-zero grades, not empty groups. The collector requests replacement groups.
+A run where every group is rejected makes no optimizer progress.
 
 Set `core.exclude_ungraded = false` to return to omitting the whole prompt group
 (`rollout/verification/omitted_records`). The compiler also leaves the hook out
