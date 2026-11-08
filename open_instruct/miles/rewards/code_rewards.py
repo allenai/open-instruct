@@ -133,8 +133,9 @@ def _score_response(result: Any, *, config: CodeVerifierConfig) -> float:
     runtimes = result.get("runtimes")
     if not isinstance(runtimes, list) or len(runtimes) != len(passes):
         raise RuntimeError("performance-penalized code rewards require aligned runtimes")
+    # A passing test can report a runtime beyond the timeout; never give it negative credit.
     penalized = [
-        float(passed) * (config.max_execution_time - float(runtime)) / config.max_execution_time
+        float(passed) * max(0.0, (config.max_execution_time - float(runtime)) / config.max_execution_time)
         for passed, runtime in zip(passes, runtimes, strict=True)
     ]
     return sum(penalized) / len(penalized) if penalized else 0.0

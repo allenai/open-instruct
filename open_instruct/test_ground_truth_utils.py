@@ -388,6 +388,8 @@ class TestIFEvalGWordCounting(unittest.TestCase):
             tokenized_prediction=[1, 2, 3], prediction="Alpha beta gamma. Delta epsilon zeta.", label=label
         )
         self.assertEqual(result.score, 1.0)
+
+
 class TestCodeVerifierPerfPenalty(unittest.TestCase):
     """The perf-penalty multiplier must not drive the reward below zero."""
 
