@@ -10,17 +10,17 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from olmo_core.nn.hf.config import _register_olmo3moe_auto_classes
-from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
-from torch import distributed as dist
-from transformers import AutoModelForCausalLM, Olmo3Config, Qwen3Config
-
 from miles.backends.core_utils import actor, checkpoint, data, models, scheduler
 from miles.backends.core_utils.publication.state import PolicyClock
 from miles.backends.fsdp_utils import lr_scheduler
 from miles.backends.training_utils import parallel
 from miles.utils import arguments
 from miles.utils.ft_utils.process_group_utils import GroupInfo
+from olmo_core.nn.hf.config import _register_olmo3moe_auto_classes
+from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
+from torch import distributed as dist
+from transformers import AutoModelForCausalLM, Olmo3Config, Qwen3Config
+
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 
 

@@ -105,7 +105,8 @@ class Catalog:
     def split(self, policy, shuffle, seed):
         order = np.arange(len(self), dtype=np.uint64)
         if policy == "shuffle" and shuffle:
-            random.Random(seed).shuffle(order)
+            # A 1-D scalar array supports shuffle's swaps; preserve the list-provider RNG order.
+            random.Random(seed).shuffle(order)  # ty: ignore[invalid-argument-type]
         codes = self.pool_codes[order]
         members = {name: View(self, order[codes == code]) for code, name in enumerate(self.pool_names)}
         return PoolOrder(self.pool_names, codes) if policy == "shuffle" else [], members
