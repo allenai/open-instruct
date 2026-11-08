@@ -69,10 +69,19 @@ def math_verifier_metrics(samples) -> dict[str, float]:
     if not records:
         return {}
     timeouts = sum(record.get("status") == "timeout" for record in records)
+    symbolic_timeouts = sum(record.get("symbolic_timeouts", 0) for record in records)
+    symbolic_timeout_samples = sum(record.get("symbolic_timeouts", 0) > 0 for record in records)
     return {
         "rollout/math_verifier/samples": len(records),
         "rollout/math_verifier/timeouts": timeouts,
         "rollout/math_verifier/timeout_fraction": timeouts / len(records),
+        "rollout/math_verifier/symbolic_timeouts": symbolic_timeouts,
+        "rollout/math_verifier/symbolic_timeout_samples": symbolic_timeout_samples,
+        "rollout/math_verifier/symbolic_timeout_fraction": symbolic_timeout_samples / len(records),
+        "rollout/math_verifier/symbolic_timeout_rewarded_samples": sum(
+            record.get("symbolic_timeouts", 0) > 0 and record.get("symbolic_timeout_rewarded", False)
+            for record in records
+        ),
     }
 
 
