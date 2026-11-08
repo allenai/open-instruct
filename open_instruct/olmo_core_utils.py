@@ -24,7 +24,7 @@ from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
-from olmo_core.optim.moe_optimizer import OLMoDDPOptimizerConfig, assign_full_tensor_to_dtensor
+from olmo_core.optim.moe_optimizer import OLMoDDPOptimizer, OLMoDDPOptimizerConfig, assign_full_tensor_to_dtensor
 from olmo_core.train import callbacks as train_callbacks
 from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -44,6 +44,25 @@ from open_instruct import logger_utils, model_utils, olmo_core_callbacks, olmo_c
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
 logger = logger_utils.setup_logger(__name__)
+
+
+@torch.no_grad()
+def _copy_model_params_to_main_params(self: OLMoDDPOptimizer) -> None:
+    """Refresh the fp32 main copies from the model params after a model-only checkpoint load.
+
+    The pinned OLMo-core's `OLMoDDPTrainModule.load_state_dict_direct` calls this on that path
+    (a base with `model.*` weights and no optimizer state, e.g. A4B), but its OLMoDDPOptimizer
+    only inlines the copy in `__init__`. This is that copy, as OLMo-core main defines it.
+    """
+    if not self.should_maintain_fp32_main_param:
+        return
+    for param_group in self.param_groups:
+        for name, param in param_group["named_params"].items():
+            assign_full_tensor_to_dtensor(dst=self.states[f"{name}.main"], src=param.data.float().reshape(-1))
+
+
+if not hasattr(OLMoDDPOptimizer, "_copy_model_params_to_main_params"):
+    OLMoDDPOptimizer._copy_model_params_to_main_params = _copy_model_params_to_main_params
 
 
 @dataclass

@@ -213,6 +213,21 @@ class TestOptimizerMainParamSync(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "1 of 2 seeded matrices"):
             olmo_core_utils.initialize_promoted_token_embeddings(train_module, _StubTokenizer(self.ROWS))
 
+    def test_model_only_load_refreshes_the_mains(self):
+        # The pinned OLMo-core calls this after loading a base with no optimizer state (H203's
+        # smoke, 01M6X5Y1GES7EWASD87VQXSQPS, died on the missing method).
+        weight = torch.nn.Parameter(reference_matrix().to(torch.bfloat16))
+        optim = object.__new__(olmo_core_utils.OLMoDDPOptimizer)
+        optim.should_maintain_fp32_main_param = True
+        optim.param_groups = [{"named_params": {"embeddings.weight": weight}}]
+        optim.states = {
+            "embeddings.weight.main": distribute_tensor(torch.zeros(VOCAB * HIDDEN), self.mesh, [Replicate()])
+        }
+        optim._copy_model_params_to_main_params()
+        torch.testing.assert_close(
+            optim.states["embeddings.weight.main"].full_tensor(), weight.data.float().reshape(-1)
+        )
+
 
 class TestPromotedRowStepCheck(unittest.TestCase):
     ROWS = [(3, (0, 1))]
