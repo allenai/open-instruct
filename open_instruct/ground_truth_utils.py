@@ -562,7 +562,7 @@ class ReSearchVerifierF1(VerifierFunction):
         except json.JSONDecodeError:
             label = label.strip()
         # extract answer
-        if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
+        if self.answer_start_tag not in prediction or self.answer_end_tag not in prediction:
             return VerificationResult(score=0.0)
         answer_string = prediction.split(self.answer_start_tag)[-1].split(self.answer_end_tag)[0]
         # check answer non-empty
