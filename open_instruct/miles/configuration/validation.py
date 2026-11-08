@@ -227,6 +227,7 @@ def runtime_values(values):
 # branch-capable ``extra_buffer`` radix strategy (overlap allowance at chunk
 # boundaries and branches); the pool must leave room for retained prefixes.
 KDA_RADIX_STATE_SLOTS_PER_RUNNING_REQUEST = 5
+POLICY_CACHE_BACKEND = "olmo_policy_versioned_v1"
 
 
 def inference_capacity(values):
@@ -235,6 +236,16 @@ def inference_capacity(values):
     Only explicit values are checked; the pinned runtime supplies its own defaults
     for anything absent.
     """
+    if values.get("sglang_radix_cache_backend") == POLICY_CACHE_BACKEND:
+        if values.get("sglang_disable_radix_cache", False):
+            raise InputError("Policy cache backend requires inference.radix_cache=true")
+        if any(
+            values.get(key, 1) != 1
+            for key in ("rollout_num_gpus_per_engine", "sglang_tp_size", "sglang_pp_size", "sglang_dp_size")
+        ):
+            raise InputError("Policy cache backend currently requires TP1 inference engines")
+        if values.get("sglang_speculative_algorithm"):
+            raise InputError("Policy cache backend does not support speculative decoding")
     running = values.get("sglang_max_running_requests")
     slots = values.get("sglang_max_mamba_cache_size")
     if values.get("sglang_disable_radix_cache", False):

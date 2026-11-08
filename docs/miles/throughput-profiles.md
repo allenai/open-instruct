@@ -601,3 +601,5 @@ Monitor `train/train_rollout_kl`, `train/train_rollout_logprob_abs_diff`, and th
 `train/behavior/*` token-weighted KL, saturation, TIS clipping and ESS metrics,
 especially by token age, response length and historical prefix. Refresh-mode
 PPO KL and PPO ESS are fixed by construction and do not measure behavior mismatch.
+
+For the opt-in candidate integration, see [policy-scoped prefix caching](policy-prefix-cache.md). It is not a measured profile and requires companion plugin/MILES branches.
