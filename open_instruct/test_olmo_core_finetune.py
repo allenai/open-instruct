@@ -802,7 +802,7 @@ class TransformerConfigFromJsonTest(unittest.TestCase):
 
 
 class BuildDdpTrainModuleConfigTest(unittest.TestCase):
-    def _build(self, max_grad_norm: float | None):
+    def _build(self, max_grad_norm: float | None, **kwargs):
         scheduler = optim.CosWithWarmup(warmup=3)
         with tempfile.TemporaryDirectory() as tmp:
             path = _write_checkpoint_config(
@@ -818,6 +818,7 @@ class BuildDdpTrainModuleConfigTest(unittest.TestCase):
                 max_grad_norm=max_grad_norm,
                 compile_model=False,
                 ac_config=None,
+                **kwargs,
             )
         return config, scheduler
 
@@ -854,6 +855,14 @@ class BuildDdpTrainModuleConfigTest(unittest.TestCase):
                     compile_model=False,
                     ac_config=None,
                 )
+
+    def test_no_expert_parallelism_by_default(self) -> None:
+        config, _ = self._build(max_grad_norm=1.0)
+        self.assertIsNone(config.ep_config)
+
+    def test_expert_parallel_degree(self) -> None:
+        config, _ = self._build(max_grad_norm=1.0, expert_parallel_degree=8)
+        self.assertEqual(config.ep_config.degree, 8)
 
     def test_no_clipping_becomes_an_infinite_threshold(self) -> None:
         # The OLMoDDP optimizer always clips, at coefficient min(1, threshold / norm).

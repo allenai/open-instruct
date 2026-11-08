@@ -38,6 +38,7 @@ from olmo_core.train.train_module.transformer.config import (
     OLMoDDPTrainModuleConfig,
     TransformerContextParallelConfig,
     TransformerDataParallelConfig,
+    TransformerExpertParallelConfig,
 )
 
 from open_instruct import logger_utils, model_utils, olmo_core_callbacks, olmo_core_hybrid, utils
@@ -165,6 +166,9 @@ class TrainingConfig:
     """Context parallelism degree. When set, enables context parallelism."""
     cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
     """Context parallelism strategy."""
+    expert_parallel_degree: int | None = None
+    """Expert parallelism degree for OLMoDDPModel (MoE v2) models: routed experts are split across this many
+    ranks. The EP path (all-to-all kind, capacity) comes from the model config's `block.ep`."""
 
 
 def build_ac_config(
@@ -601,13 +605,15 @@ def build_ddp_train_module_config(
     max_grad_norm: float | None,
     compile_model: bool,
     ac_config: TransformerActivationCheckpointingConfig | None,
+    expert_parallel_degree: int | None = None,
 ) -> OLMoDDPTrainModuleConfig:
     """Build the DDP train-module config for an OLMoDDPModel (MoE v2) model.
 
     These models refuse FSDP and train through OLMo-core's DDP train module. The optimizer and
     dp_config come from the checkpoint config's `train_module` section, the combination that
     pretrained the model, with only the SFT knobs overridden: lr, weight decay, scheduler, batch
-    geometry, grad clipping and compilation. Per-group overrides are kept as they are, and logged.
+    geometry, grad clipping and compilation, plus expert parallelism for models whose unsharded
+    experts and fp32 grads do not fit on one GPU (DDP shards neither). Per-group overrides are kept as they are, and logged.
     The z-loss multiplier is the checkpoint's, as on the GPU SFT line whose runs this path reproduces
     (the FSDP path turns z-loss off).
     """
@@ -626,6 +632,7 @@ def build_ddp_train_module_config(
         max_sequence_length=max_sequence_length,
         optim=optim_config,
         dp_config=TransformerDataParallelConfig.from_dict(checkpoint_train_module["dp_config"]),
+        ep_config=TransformerExpertParallelConfig(degree=expert_parallel_degree) if expert_parallel_degree else None,
         scheduler=scheduler,
         compile_model=compile_model,
         ac_config=ac_config,
