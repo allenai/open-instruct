@@ -87,7 +87,7 @@ case "$ARM" in
          HF_REF=/weka/oe-training-default/tanushy/checkpoints/olmo35-small-hero-decay159k-causal-162974/hf
          CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=100; SMOKE_HOURS=2; REF_TRANSFORMERS=5.15.1
          # <think> and </think> promoted into slots 100256 and 100266, seeded from their dolma2 pieces.
-         SEED_ROWS='[[100256, [27, 27963, 29]], [100266, [524, 27963, 29]]]'
+         SEED_ROWS='[[100256, [14023, 771, 29]], [100266, [524, 27963, 29]]]'
          LR=7.3e-5; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-gpu; DESC="ledger A4B half-epoch C12r (descriptive)"
          STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=72 ;;
