@@ -21,7 +21,9 @@ excludes length-truncated responses (overlong filtering) and requires
 ``core.reward_zero_truncated=false``. Raw rewards are returned unchanged so reward
 metrics stay comparable across runs; an excluded response contributes its stored
 reward (0 for ungraded responses) to raw metrics and still counts in
-response-averaged loss denominators.
+response-averaged loss denominators. Native estimator semantics are preserved:
+only GRPO, GSPO and REINFORCE++ with baseline use group centering; other estimators
+keep the graded responses' raw rewards.
 """
 
 from collections import defaultdict
@@ -66,7 +68,13 @@ def _exclude(args, samples: list[Sample], *, truncated: bool) -> tuple[list[floa
         rollouts = [samples[i].rollout_id if samples[i].rollout_id is not None else samples[i].index for i in indices]
         if len(set(rollouts)) != len(rollouts):
             raise NotImplementedError("reward exclusion supports single-segment rollouts only")
-        if not args.rewards_normalization:
+        # Match native MILES: REINFORCE++ (without baseline) and PPO consume
+        # raw rewards even when rewards_normalization is enabled.
+        if not args.rewards_normalization or args.advantage_estimator not in (
+            "grpo",
+            "gspo",
+            "reinforce_plus_plus_baseline",
+        ):
             for i in indices:
                 normalized[i] = raw[i]
             continue
@@ -104,5 +112,5 @@ def filter_finished_reward_variance(args, samples, **kwargs):
 # The reward adapter reads this marker to decide between returning reward 0 for an
 # ungraded response (this post-process masks it) and returning no reward (MILES
 # drops the group).
-exclude_ungraded.masks_ungraded = True
-exclude_truncated.masks_ungraded = True
+exclude_ungraded.__dict__["masks_ungraded"] = True
+exclude_truncated.__dict__["masks_ungraded"] = True

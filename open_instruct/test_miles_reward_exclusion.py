@@ -4,8 +4,10 @@ import asyncio
 import dataclasses
 import enum
 import importlib
+import importlib.util
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -32,7 +34,7 @@ def plain_hook(args, samples):
 masking_hook.masks_ungraded = True
 
 
-def _install_miles_stubs():
+def _install_miles_stubs(monkeypatch):
     """Prefer the installed MILES package; otherwise stub the three symbols the hooks import."""
     try:
         importlib.import_module("miles.rollout.filter_hub.common_filters")
@@ -92,26 +94,42 @@ def _install_miles_stubs():
         "miles.rollout.filter_hub.common_filters"
     ].apply_reward_nonzero_std_filter = apply_reward_nonzero_std_filter
     modules["miles.utils.types"].Sample = Sample
-    sys.modules.update(modules)
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
 
 
-_install_miles_stubs()
-exclusion = importlib.import_module("open_instruct.miles.rewards.exclusion")
-truncation = importlib.import_module("open_instruct.miles.rewards.truncation")
-Sample = importlib.import_module("miles.utils.types").Sample
+def _load_hook(monkeypatch, name):
+    # Load a fresh hook with scoped dependencies; neither sys.modules nor the
+    # parent package retains stub-backed modules after the test.
+    path = Path(__file__).parent / "miles" / "rewards" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"open_instruct.miles.rewards.{name}", path)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
 
 
-def make_sample(reward, *, group_index, index, truncated=False, ungraded=False, rollout_id=None):
-    sample = Sample(
-        prompt="Question", response="answer", tokens=[], response_length=0, group_index=group_index, metadata={}
-    )
-    sample.index = index
-    sample.rollout_id = rollout_id
-    sample.reward = reward
-    sample.status = Sample.Status.TRUNCATED if truncated else Sample.Status.COMPLETED
-    if ungraded:
-        sample.metadata["reward_omission"] = {"verifier": "test", "error": "RuntimeError: unavailable"}
-    return sample
+@pytest.fixture
+def exclusion(monkeypatch):
+    _install_miles_stubs(monkeypatch)
+    return _load_hook(monkeypatch, "exclusion")
+
+
+@pytest.fixture
+def make_sample(exclusion):
+    def make(reward, *, group_index, index, truncated=False, ungraded=False, rollout_id=None):
+        sample = exclusion.Sample(
+            prompt="Question", response="answer", tokens=[], response_length=0, group_index=group_index, metadata={}
+        )
+        sample.index = index
+        sample.rollout_id = rollout_id
+        sample.reward = reward
+        sample.status = exclusion.Sample.Status.TRUNCATED if truncated else exclusion.Sample.Status.COMPLETED
+        if ungraded:
+            sample.metadata["reward_omission"] = {"verifier": "test", "error": "RuntimeError: unavailable"}
+        return sample
+
+    return make
 
 
 def args(**overrides):
@@ -121,7 +139,12 @@ def args(**overrides):
     return SimpleNamespace(**(values | overrides))
 
 
-def batch():
+@pytest.fixture
+def batch(make_sample):
+    return lambda: _batch(make_sample)
+
+
+def _batch(make_sample):
     # Group 0 has one ungraded response; group 1 has one truncated response.
     return [
         make_sample(1.0, group_index=0, index=0),
@@ -134,7 +157,7 @@ def batch():
     ]
 
 
-def test_exclude_ungraded_masks_only_the_ungraded_response():
+def test_exclude_ungraded_masks_only_the_ungraded_response(exclusion, batch):
     samples = batch()
     raw, normalized = exclusion.exclude_ungraded(args(), samples)
     assert raw == [1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0]
@@ -144,14 +167,14 @@ def test_exclude_ungraded_masks_only_the_ungraded_response():
     assert [sample.remove_sample for sample in samples] == [False, False, False, True, False, False, False]
 
 
-def test_exclude_truncated_masks_ungraded_and_truncated_responses():
+def test_exclude_truncated_masks_ungraded_and_truncated_responses(exclusion, batch):
     samples = batch()
     _, normalized = exclusion.exclude_truncated(args(), samples)
     assert normalized == pytest.approx([1 / 3, -2 / 3, 1 / 3, 0.0, 0.5, 0.0, -0.5])
     assert [sample.remove_sample for sample in samples] == [False, False, False, True, False, True, False]
 
 
-def test_std_normalization_and_raw_passthrough_use_graded_responses_only():
+def test_std_normalization_and_raw_passthrough_use_graded_responses_only(exclusion, batch):
     samples = batch()[:4]
     _, normalized = exclusion.exclude_ungraded(args(grpo_std_normalization=True), samples)
     values = torch.tensor([1.0, 0.0, 1.0])
@@ -161,7 +184,7 @@ def test_std_normalization_and_raw_passthrough_use_graded_responses_only():
     assert unnormalized == [1.0, 0.0, 1.0, 0.0]
 
 
-def test_exclusion_requires_group_index_and_single_segment_rollouts():
+def test_exclusion_requires_group_index_and_single_segment_rollouts(exclusion, make_sample):
     with pytest.raises(ValueError, match="group index"):
         exclusion.exclude_ungraded(args(), [make_sample(1.0, group_index=None, index=0)])
     segments = [make_sample(1.0, group_index=0, index=i, rollout_id=7) for i in range(2)]
@@ -169,7 +192,7 @@ def test_exclusion_requires_group_index_and_single_segment_rollouts():
         exclusion.exclude_ungraded(args(), segments)
 
 
-def test_graded_variance_filter_ignores_ungraded_placeholders():
+def test_graded_variance_filter_ignores_ungraded_placeholders(exclusion, make_sample, batch):
     graded_constant = [make_sample(1.0, group_index=0, index=i) for i in range(2)]
     graded_constant.append(make_sample(0.0, group_index=0, index=2, ungraded=True))
     # The placeholder zero must not keep an all-correct group in the batch.
@@ -183,14 +206,15 @@ def test_graded_variance_filter_ignores_ungraded_placeholders():
     assert bool(exclusion.filter_graded_reward_variance(args(), batch()[4:]).keep) is True
 
 
-def test_finished_variance_filter_also_ignores_truncated_responses():
+def test_finished_variance_filter_also_ignores_truncated_responses(exclusion, batch):
     group = batch()[4:]
     group.pop()  # one finished graded response and one truncated response remain
     result = exclusion.filter_finished_reward_variance(args(), group)
     assert (result.keep, result.reason) == (False, "insufficient_finished_responses")
 
 
-def test_configured_paths_resolve_to_masking_hooks_and_keep_compatibility():
+def test_configured_paths_resolve_to_masking_hooks_and_keep_compatibility(exclusion, monkeypatch):
+    truncation = _load_hook(monkeypatch, "truncation")
     for path in (EXCLUDE_UNGRADED, EXCLUDE_TRUNCATED):
         assert rewards.masks_ungraded(SimpleNamespace(custom_reward_post_process_path=path)) is True
     assert truncation.exclude_truncated is exclusion.exclude_truncated
@@ -271,3 +295,15 @@ def test_recovery_clears_the_marker_and_evaluation_stays_strict(scoring):
 def test_without_a_masking_hook_training_failures_still_omit_the_group(scoring):
     scoring.custom_reward_post_process_path = f"{__name__}.plain_hook"
     assert asyncio.run(rewards.rollout_reward(scoring, scored_sample("failure"))) is None
+
+
+@pytest.mark.parametrize("estimator", ["reinforce_plus_plus", "ppo"])
+@pytest.mark.parametrize("hook", ["exclude_ungraded", "exclude_truncated"])
+def test_raw_reward_estimators_keep_their_signal(exclusion, make_sample, estimator, hook):
+    # One response per prompt is valid when variance filtering is disabled.
+    # Centering these rewards would erase the whole task signal.
+    samples = [make_sample(value, group_index=i, index=i) for i, value in enumerate([1.0, 0.0, 0.75])]
+    samples.append(make_sample(0.0, group_index=2, index=3, ungraded=True))
+    raw, processed = getattr(exclusion, hook)(args(advantage_estimator=estimator), samples)
+    assert processed == raw == [1.0, 0.0, 0.75, 0.0]
+    assert [sample.remove_sample for sample in samples] == [False, False, False, True]
