@@ -190,6 +190,9 @@ $TORCHRUN"
     EXTRA_ENV=""
 fi
 
+# A4B takes its pretraining recipe's allocator setting: smoke 01M6XSN6K34KCM946JH8429T8X OOMed in the dry-run
+# backward needing 7.79 GiB with 7.57 GiB free and 31 GiB reserved but unallocated.
+[[ "$ARM" == a4b ]] && EXTRA_ENV="$EXTRA_ENV {\"name\": \"PYTORCH_CUDA_ALLOC_CONF\", \"value\": \"expandable_segments:True\"},"
 SPEC=$(mktemp -t h161spec.XXXXXX)
 CMD="$CMD" python3 - "$SPEC" <<EOF
 import json, os, sys
