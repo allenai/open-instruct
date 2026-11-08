@@ -99,6 +99,7 @@ class VerificationResult:
     score: float
     cost: float = 0.0
     reasoning: str | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 @dataclasses.dataclass
@@ -286,10 +287,11 @@ class MathVerifier(VerifierFunction):
             all_answers.append(prediction)
 
         # Compare each candidate answer to the ground truth.
+        diagnostics = {"symbolic_timeouts": 0}
         for answer in all_answers:
-            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
-                return VerificationResult(score=1.0)
-        return VerificationResult(score=0.0)
+            if is_equiv(answer, label, diagnostics=diagnostics) or hendrycks_is_equiv(answer, label):
+                return VerificationResult(score=1.0, diagnostics=diagnostics)
+        return VerificationResult(score=0.0, diagnostics=diagnostics)
 
 
 class StrictMathVerifier(VerifierFunction):
@@ -315,10 +317,11 @@ class StrictMathVerifier(VerifierFunction):
             all_answers.append(minerva_answer)
         if not all_answers:
             all_answers.append(normalize_final_answer(prediction))
+        diagnostics = {"symbolic_timeouts": 0}
         for answer in all_answers:
-            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
-                return VerificationResult(score=1.0)
-        return VerificationResult(score=0.0)
+            if is_equiv(answer, label, diagnostics=diagnostics) or hendrycks_is_equiv(answer, label):
+                return VerificationResult(score=1.0, diagnostics=diagnostics)
+        return VerificationResult(score=0.0, diagnostics=diagnostics)
 
 
 class IFEvalVerifier(VerifierFunction):

@@ -491,11 +491,31 @@ training; the fallback applies to grading requests.
 
 ### Symbolic math timeouts
 
+Each symbolic comparison has an internal five-second limit. When it expires,
+the verifier still tries its existing text-normalization fallback and any later
+answer candidates, so the final reward can be either zero or one. Completed
+results retain `status=ok` and carry a `symbolic_timeouts` count; a timeout also
+produces a warning in the parent process. This does not change rewards or masks.
+
+W&B logs the following per-collection metrics under `rollout/math_verifier/`:
+
+| Metric | Meaning |
+| --- | --- |
+| `symbolic_timeouts` | Total timed-out symbolic comparisons reported by workers; one result can contain several. |
+| `symbolic_timeout_samples` | Math verifier results with at least one symbolic timeout. |
+| `symbolic_timeout_fraction` | Affected results divided by all math verifier results in the collection. |
+| `symbolic_timeout_rewarded_samples` | Affected results whose final verifier score was positive. |
+
+Like the existing verifier metrics, these describe consumed samples, not all
+generated attempts or groups discarded by filtering. Counts survive worker IPC
+in sample diagnostics, but internal timeouts preceding a killed worker are not
+recoverable from that worker's unfinished result.
+
 Symbolic math runs in a bounded subprocess pool. An individual request exceeding
 45 seconds kills and replaces that worker and returns reward zero. The sample
 retains `verifier_diagnostics` with `kind=math`, `status=timeout` and elapsed time;
 `rollout/math_verifier/timeouts` and `timeout_fraction` count these separately from
-ordinary incorrect answers. Validation timeouts always return zero with diagnostics;
+ordinary incorrect answers. Worker timeouts always return zero with diagnostics;
 there is no timeout policy setting. Configuration errors, unexpected worker
 failures and cancellation still propagate. A timeout-zero is an ungraded sample, not proof of a wrong
 mathematical answer; include the timeout rate when interpreting benchmark scores.
