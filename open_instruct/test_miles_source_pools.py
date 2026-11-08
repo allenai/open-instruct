@@ -141,3 +141,31 @@ def test_generated_task_source_uses_same_assignment(environment):
     rows = [json.loads(line) for line in Path(result["prompt_data"]).read_text().splitlines()]
     assert len(rows) == 3
     assert all(row["pool_id"] == row["metadata"]["sampling_pool"] == "math" for row in rows)
+
+
+@pytest.mark.parametrize("field", ["origin_id", "record_id", "release_id", "labeling_version"])
+def test_population_identity_changes_reject_preparation_resume(environment, tmp_path, field):
+    prompt = tmp_path / "collection.jsonl"
+    row = {
+        "input": "question",
+        "label": "42",
+        "pool_id": "math",
+        "metadata": {"verifiers": [{"name": "gsm8k", "target": "42"}], field: "v1"},
+    }
+    prompt.write_text(json.dumps(row) + "\n")
+    rewards = tmp_path / "rewards.json"
+    rewards.write_text(json.dumps({"gsm8k": {"factory": "open_instruct.miles.rewards.verifiers.GSM8KVerifier"}}))
+    data = {
+        "sources": [{"name": "collection", "prompt_data": str(prompt), "reward_config": str(rewards)}],
+        "pools": {"math": {"label": "math"}},
+    }
+    test_miles_run_data.prepare(environment, data)
+    row["metadata"][field] = "v2"
+    prompt.write_text(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match="changed"):
+        test_miles_run_data.prepare(environment, data)
+
+
+def test_source_pool_name_collision_identifies_configured_owner():
+    with pytest.raises(ValueError, match="collides.*topic"):
+        pools.resolve({"pools": {"topic": {"label": "math"}}, "sources": [{"pool": "math"}]})

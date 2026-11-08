@@ -37,7 +37,11 @@ def resolve(data):
             name = source["pool"]
             if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9_-]+", name):
                 raise InputError("Source pool must be a nonempty safe pool name")
-            result.setdefault(name, {"label": name})
+            if name not in result:
+                owner = next((pool for pool, spec in result.items() if spec["label"] == name), None)
+                if owner is not None:
+                    raise InputError(f"Source pool {name!r} collides with the label of configured pool {owner!r}")
+                result[name] = {"label": name}
         if (
             result
             and "pools" not in data
@@ -49,8 +53,9 @@ def resolve(data):
     return result
 
 
-def annotate(row, pools, *, source_pool=None):
-    labels = {spec["label"]: name for name, spec in pools.items()}
+def annotate(row, pools, *, source_pool=None, labels=None):
+    if labels is None:
+        labels = {spec["label"]: name for name, spec in pools.items()}
     # Explicit source assignment wins over row labels in the prepared artifact.
     # This permits dataset-based experiments on the same topic-labeled inputs.
     label = pools[source_pool]["label"] if source_pool is not None else row.get("pool_id")

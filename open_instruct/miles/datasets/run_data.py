@@ -129,8 +129,8 @@ class _JsonlRows:
                 if index in self.annotations:
                     row["metadata"].update(self.annotations[index])
                 if self.pool_assignment is not None:
-                    config, source_pool = self.pool_assignment
-                    pools.annotate(row, config, source_pool=source_pool)
+                    config, source_pool, labels = self.pool_assignment
+                    pools.annotate(row, config, source_pool=source_pool, labels=labels)
                 yield row
 
     def remember_validation(self, index, row):
@@ -688,13 +688,14 @@ def prepare_data(
     if not all(partitions.get(split) for split in training):
         raise InputError("Preparation requires nonempty training data")
     source_pools = {f"source-{source['name']}": source.get("pool") for source in data.get("sources", [])}
+    pool_labels = {spec["label"]: name for name, spec in resolved_pools.items()}
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
     for split, rows in partitions.items():
         if isinstance(rows, _JsonlRows) and resolved_pools and split in training:
             # Streaming rows are recreated for validation and output. Apply the
             # same pool assignment on every pass, keeping held-out rows unchanged.
-            rows.pool_assignment = (resolved_pools, source_pools.get(split))
+            rows.pool_assignment = (resolved_pools, source_pools.get(split), pool_labels)
         for index, row in enumerate(rows, 1):
             try:
                 if registry_overrides is not None:
@@ -705,7 +706,7 @@ def prepare_data(
                             if isinstance(verifier, dict) and isinstance(name := verifier.get("name"), str):
                                 judging.require_binding(name, registry_overrides, known.get(name))
                 if resolved_pools and split in training and not isinstance(rows, _JsonlRows):
-                    pools.annotate(row, resolved_pools, source_pool=source_pools.get(split))
+                    pools.annotate(row, resolved_pools, source_pool=source_pools.get(split), labels=pool_labels)
                 _verify_row(row, tokenizer, max_prompt_length, known)
                 if split in training:
                     _verify_if_training_row(row, if_verifiers)

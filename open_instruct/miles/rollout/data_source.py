@@ -36,7 +36,7 @@ from miles.utils.types import Sample
 
 from open_instruct import logger_utils
 from open_instruct.miles.datasets import record_selection, recording, replay_evidence
-from open_instruct.miles.rollout import prompt_provider, provider_source
+from open_instruct.miles.rollout import pool_provider, prompt_provider, provider_source
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -111,6 +111,14 @@ class DashboardDrainingRolloutDataSource:
                                 "sampling_pool",
                                 "mixture_source",
                                 "mixture_source_epoch",
+                                "origin_id",
+                                "source_dataset",
+                                "source_row",
+                                "release_id",
+                                "record_id",
+                                "labeling_version",
+                                "prepared_sample_id",
+                                "sample_id",
                             )
                             if key in metadata
                         }
@@ -127,13 +135,13 @@ class DashboardDrainingRolloutDataSource:
     def pool_exhausted(self):
         with self._cursor_lock:
             return (
-                getattr(self._delegate.args.olmo_core, "prompt_provider", "") in ("pools", "pool_exposure")
+                getattr(getattr(self._delegate.args, "olmo_core", None), "prompt_provider", "") == "pools"
                 and not self._delegate.buffer
                 and not self._delegate.provider.available()
             )
 
     def stage_training_batch(self, rollout_id, samples):
-        if self._delegate.args.olmo_core.prompt_provider not in ("pools", "pool_exposure"):
+        if getattr(getattr(self._delegate.args, "olmo_core", None), "prompt_provider", "") != "pools":
             return
         with self._cursor_lock:
             counts = {}
@@ -155,6 +163,17 @@ class DashboardDrainingRolloutDataSource:
                 return self._delegate.provider.metrics()
             if batch is None or batch[0] != rollout_id:
                 raise RuntimeError("Missing or mismatched exposure batch")
+            selections = [
+                {
+                    "selection_id": selection,
+                    **{
+                        key: value
+                        for key, value in self._delegate.provider.pending[selection]["metadata"].items()
+                        if key in pool_provider.RECEIPT_FIELDS
+                    },
+                }
+                for selection in batch[1]
+            ]
             self._delegate.provider.commit(rollout_id, batch[1])
             self._exposure_batch = None
             metrics = self._delegate.provider.metrics()
@@ -163,6 +182,8 @@ class DashboardDrainingRolloutDataSource:
             receipt = {
                 "update": rollout_id + 1,
                 "selection_ids": batch[1],
+                "selections": selections,
+                "population_identity": self._delegate.provider.identity["manifest"],
                 "metrics": metrics,
                 "attempt": self._exposure_attempt,
                 "resume_from_update": self._delegate.args.start_rollout_id,
@@ -246,6 +267,17 @@ class DashboardDrainingRolloutDataSource:
                 self._delegate.buffer = groups + self._delegate.buffer
             self._recovery_groups = None
             return len(groups)
+
+    def discard_groups(self, groups: Any) -> None:
+        """Release selections explicitly dropped by the asynchronous producer."""
+        with self._cursor_lock:
+            self.feedback(
+                [
+                    {"kind": "disposition", "disposition": "discarded", "group_index": group[0].group_index}
+                    for group in groups
+                ]
+            )
+            self.acknowledge_groups(groups)
 
     def acknowledge_groups(self, groups: Any) -> None:
         """Retire consumed or intentionally dropped prompts from the restart ledger."""

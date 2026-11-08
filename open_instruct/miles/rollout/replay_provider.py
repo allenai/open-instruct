@@ -26,7 +26,7 @@ class ReplayConfig(TypedDict):
 
 def identity(sample):
     metadata = sample.metadata or {}
-    source = metadata.get("mixture_source") or metadata.get("source_dataset") or "dataset"
+    source = metadata.get("origin_id") or metadata.get("source_dataset") or metadata.get("mixture_source") or "dataset"
     verifiers = [{"name": v.get("name"), "target": v.get("target")} for v in metadata.get("verifiers", [])]
     # Match native inference-record task identity, including every rendered turn.
     raw = json.dumps(

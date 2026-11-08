@@ -140,9 +140,7 @@ class CoreConfig:
         validation.choice(
             self.prompt_replay_truncation, "core.prompt_replay_truncation", ("none", "any", "half", "all")
         )
-        validation.choice(
-            self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture", "pools", "pool_exposure")
-        )
+        validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture", "pools"))
         validation.number(self.remind_review_fraction, "core.remind_review_fraction", maximum=1, exclusive_min=True)
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
@@ -476,23 +474,16 @@ class RunConfig:
             raise constraints.error(
                 "core.records_root (records.enabled) requires fully_async=true; synchronous runs record nothing"
             )
-        if (self.core.prompt_provider in ("mixture", "pools", "pool_exposure")) != (
-            self.core.prompt_mixture is not None
-        ):
+        if (self.core.prompt_provider in ("mixture", "pools")) != (self.core.prompt_mixture is not None):
             raise constraints.error("core.prompt_mixture is required only with prompt_provider=mixture or pools")
-        if self.core.prompt_provider in ("mixture", "pools", "pool_exposure") and not options.get(
-            "rollout_global_dataset", True
-        ):
+        if self.core.prompt_provider in ("mixture", "pools") and not options.get("rollout_global_dataset", True):
             raise constraints.error("Mixtures require rollout_global_dataset=true")
-        if (
-            self.core.prompt_provider in ("mixture", "pools", "pool_exposure")
-            and self.core.selection_table is not None
-        ):
+        if self.core.prompt_provider in ("mixture", "pools") and self.core.selection_table is not None:
             raise constraints.error(
                 "Mixtures cannot yet be combined with a frozen prompt-exclusion table; "
                 "remove [selection]. Exclusions must be applied within each source to preserve its allocation."
             )
-        if self.core.prompt_provider in ("pools", "pool_exposure"):
+        if self.core.prompt_provider == "pools":
             if not options.get("fully_async", False) or self.core.records_root is None:
                 raise constraints.error("Named pools require fully_async=true and inference records")
             if self.core.prepared_batch_overlap:

@@ -60,7 +60,12 @@ def summarize(manifests, output, *, max_version=400, ranges=None, max_successes=
                 if any(not low <= int(v) <= high for v in versions):
                     counts["outside_policy_range"] += 1
                     continue
-                source = record.get("mixture_source") or record.get("source_dataset") or "unknown"
+                source = (
+                    record.get("origin_id")
+                    or record.get("source_dataset")
+                    or record.get("mixture_source")
+                    or "unknown"
+                )
                 task = record.get("task_key")
                 if not task:
                     counts["missing_task_key"] += 1
@@ -96,7 +101,7 @@ def summarize(manifests, output, *, max_version=400, ranges=None, max_successes=
                     entry["zero_truncation_histogram"][bucket] = entry["zero_truncation_histogram"].get(bucket, 0) + 1
                     counts[f"zero_truncation_{bucket}"] += 1
                 successes = outcome["binary_successes"]
-                if category not in ("invalid", "aborted") and successes is not None and successes <= 1:
+                if category not in ("invalid", "aborted") and successes is not None and successes <= max_successes:
                     bucket = f"{int(successes)}/{outcome['group_size']}"
                     cap_bucket = f"{outcome['truncated']}/{outcome['group_size']}"
                     histogram = entry["low_success_histogram"].setdefault(bucket, {})
@@ -108,7 +113,9 @@ def summarize(manifests, output, *, max_version=400, ranges=None, max_successes=
                     entry["eligible_observations"] += 1
                     counts["eligible_observations"] += 1
                     by_source[source]["eligible_observations"] += 1
-                timestamp = record.get("recorded_unix", -1)
+                timestamp = record.get("recorded_unix")
+                if type(timestamp) not in (int, float):
+                    timestamp = -1
                 if category not in ("invalid", "aborted") and timestamp >= entry["latest_valid_unix"]:
                     entry["latest_valid_unix"] = timestamp
                     entry["latest_valid_category"] = category
@@ -161,9 +168,11 @@ def main(argv=None):
     parser.add_argument(
         "--attempt-ranges", type=Path, help="JSON map: attempt ID -> [inclusive min, inclusive max policy version]"
     )
-    parser.add_argument("--max-successes", type=int, choices=(0, 1), default=1)
+    parser.add_argument("--max-successes", type=int, default=1)
     parser.add_argument("--truncation", choices=("none", "any", "half", "all"), default="any")
     args = parser.parse_args(argv)
+    if args.max_successes < 0:
+        parser.error("--max-successes must be nonnegative")
     ranges = json.loads(args.attempt_ranges.read_text()) if args.attempt_ranges else None
     result = summarize(
         args.manifest,

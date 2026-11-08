@@ -880,7 +880,7 @@ unchanged by the sampler; an eight-response recipe remains eight-response.
 | Exposure reservations only | Outstanding draws reserve estimated delivery, reducing over-correction during asynchronous generation. |
 | Exposure controller only | Delivery estimate `(trained + 1)/(terminal + 2)`, floored at 0.05; target deficit corrected over a 64-group horizon. Proposal weights are bounded to `[0.25, 5]`, limiting draw ratios to 20:1. |
 | Exposure target only | Each trained group's unit target is divided over the pools active when it was drawn. Inactive pools accrue no new target from later draws. Exact equality is not promised after pools empty or for sources with effectively zero delivery. |
-| Replay | Within the selected pool, eligible retries may replace a fresh draw. The replay fraction caps that pool's proposed draws. In global shuffle, a retry does not advance the fresh permutation; after it drains, any remaining budget-eligible replays are selected uniformly across available pools. |
+| Replay | Within the selected pool, eligible retries may replace a fresh draw. The replay fraction caps that pool's proposed draws. In global shuffle, a retry does not advance the fresh permutation; after it drains, immediately budget-eligible replays are selected uniformly across available pools. Draw counters do not advance for inactive pools, so replay stops at the first non-replay slot after fresh exhaustion; unused earlier slots are not accumulated. |
 | Replay trigger | Existing PR 2187 history, with fresh-response length windows scoped to source within pool. Invalid verifier results are separate from valid zeros. |
 | Exhaustion | A pool without fresh rows or a budget-eligible replay is inactive. Once all pools and outstanding generation drain, an incomplete final collection is not trained; the last completed checkpoint is saved when configured. |
 | Stale work | Pool mode defaults to `async_unused_samples_handler="drop"`; explicit retry is rejected. Drops release reservations. |
@@ -936,5 +936,72 @@ can finish before the requested update count. Different pool labels do not chang
 verifiers, reward semantics, truncation policy, or the zero-variance filter.
 
 Changing the policy or weights is a new sampling experiment: checkpoint restore rejects
-a mismatched identity. Checkpoints from earlier draft pool implementations (before the version-3
-observation counters) also require a new run; missing history is not silently reset. No pool-mode production runs have been qualified yet.
+a mismatched identity. Checkpoints from earlier draft pool implementations (before the version-4
+compact selection receipts) also require a new run; missing history is not silently reset. No pool-mode production runs have been qualified yet.
+
+
+Compiled collections preserve original dataset identity in `metadata.origin_id`.
+Replay uses that field first, then `source_dataset`, then the configured physical
+`mixture_source`. Thus multiple original datasets can share a file and pool without
+sharing response-length windows or prompt histories. Pool membership and all four
+sampling policies remain independent of these identities.
+
+Producers may supply immutable `release_id`, `record_id`, and `labeling_version`
+in row metadata, alongside original `source_dataset`/`source_row` provenance and
+existing `prepared_sample_id`/`sample_id`. Group records retain those identities;
+optimizer receipts include the compact row identities and the prepared manifest
+hash. Input-file hashes bind all supplied fields, membership, and verifier payloads
+to preparation and resume; changed identities, labels, policy or weights require a
+new run. The consumer does not infer cleaning or labeling rules from these fields.
+Pending selection checkpoints retain only accounting identities, not verifier targets.
+
+Finite exhaustion marks the workflow complete, so automatic resume cannot restart
+it or repeat its final export. Inline evaluation still follows its configured
+periodic cadence; exhaustion does not add an off-cadence inline evaluation.
+Background final evaluation follows the existing final-export path.
+
+
+Online replay assumes each participating verifier uses 0 for failure and 1 for
+full credit. It does not infer a source-specific maximum reward. Enable it only
+for a population with that binary contract: a graded source can sometimes return
+0 or 1 without those values meaning binary failure/success. Nonbinary observations
+remain in records and history, with `binary_successes = null`, and are ineligible
+for replay. Valid truncation zeroes and unknown verifier failures stay distinct.
+
+
+A local CPU capacity check used 1,827,000 synthetic rows with distinct 20 KB
+verifier strings and a 32 MiB outlier, selecting 256 groups with eight responses
+each. These numbers measure eager payload retention and checkpoint copying,
+not model memory, generation, grading, or distributed execution. The test used
+four CPU cores and a 64 GiB container limit; checkpoint files were on tmpfs.
+
+| Replay state | Peak process RSS | Loader/provider startup | Select 256 groups | Save checkpoint |
+|---|---:|---:|---:|---:|
+| Disabled | 43.77 GiB | 53.9 s | 0.21 s | 0.08 s |
+| Empty history | 44.34 GiB | 114.4 s | 0.33 s | 0.08 s |
+| 1,827,000 historical observations | 48.89 GiB | 118.0 s | 3.74 s | 53.18 s |
+
+The full-history checkpoint was 566.7 MB. Replay history still grows with observed
+prompts, and checkpoint time is material at this scale. These measurements preceded
+the removal of duplicate pool template objects; pending accounting was already
+compact. They are not a bound on an arbitrary verifier payload or production
+memory use. Validate the actual release and concurrency before a long run.
+
+
+A separate actual-payload check decoded all 1,827,290 retained rows from release
+`98696203134d98acf760316cff3e5fd19802a5d0f5155d39d992e0aa630e43be`
+into prepared-shaped rows for the native runtime loader. It preserved labels and
+verifier targets, used the pinned pool assignments, and forced the largest
+930.1 MB canonical record into the first 256-group pending batch. This checks
+runtime payload capacity; it bypasses JSONL export and tokenizer preparation and
+runs no model, verifier service, or distributed worker.
+
+Before template sharing, provider RSS reached 62.86 GiB and the process was killed
+with exit 137 during checkpointing under a 64 GiB container limit. With shared
+template references, the 96 GiB bounded rerun completed: loader/provider startup
+408.2 s, provider RSS 59.26 GiB, first selection 56.02 s, checkpoint 0.51 s and
+622.8 MB, peak process RSS 60.47 GiB. The first-selection latency needs profiling
+before claiming sustained sampler throughput. Checkpoint storage was tmpfs, whose
+pages also count against the container limit. The corrected path has not been
+qualified at 64 GiB; 96 GiB is the tested ceiling, not a measured minimum or a
+full-trainer memory budget. Actual-payload replay and GPU execution remain pending.

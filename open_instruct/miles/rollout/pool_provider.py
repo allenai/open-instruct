@@ -5,10 +5,24 @@ import math
 import random
 from collections import Counter
 
+from open_instruct.miles.datasets import replay_evidence
 from open_instruct.miles.rollout import pool_metrics, pool_sampling, replay_provider
 
 SELECTION_ID = "pool_selection_id"
 POOL = "sampling_pool"
+RECEIPT_FIELDS = (
+    "origin_id",
+    "source_dataset",
+    "source_row",
+    "mixture_source",
+    "release_id",
+    "record_id",
+    "labeling_version",
+    "prepared_sample_id",
+    "sample_id",
+    "pool_id",
+    "sampling_pool",
+)
 
 
 class FinitePrompts:
@@ -47,7 +61,7 @@ class PoolPromptProvider:
         self.sampling = pool_sampling.validate({} if sampling is None else sampling, pools)
         self.identity = copy.deepcopy(
             {
-                "version": 3,
+                "version": 4,
                 "manifest": identity,
                 "pools": pools,
                 "seed": seed,
@@ -117,7 +131,13 @@ class PoolPromptProvider:
             name = self._choose_pool(active)
             sample = copy.copy(self.providers[name].next_samples(1)[0])
             sample.metadata = sample.metadata | {SELECTION_ID: self.draws}
-            self.pending[self.draws] = {"pool": name, "active": active, "metadata": dict(sample.metadata)}
+            # Pending accounting must not retain or deepcopy verifier payloads.
+            metadata = {
+                key: sample.metadata[key]
+                for key in (*RECEIPT_FIELDS, replay_evidence.SELECTION_ID, replay_evidence.REPLAY, replay_evidence.KEY)
+                if key in sample.metadata
+            }
+            self.pending[self.draws] = {"pool": name, "active": active, "metadata": metadata}
             self.draws += 1
             self.proposed[name] += 1
             self.replay_proposed[name] += bool(sample.metadata.get("prompt_replay_review", False))

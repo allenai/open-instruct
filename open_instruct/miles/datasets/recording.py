@@ -62,6 +62,8 @@ class FeedbackRecorder(inference_records.Recorder):
                 self._answer_probes.append(
                     replay_evidence.literal_answer_probe(sample.response, targets[0]) if len(targets) == 1 else None
                 )
+        # The pinned Recorder calls _enqueue synchronously once per group;
+        # probes belong to that call and must not survive into the next group.
         failures = self.counts["failed"]
         super().record_group(samples, decision=decision, reason=reason)
         if self._requires_feedback and self.counts["failed"] != failures:

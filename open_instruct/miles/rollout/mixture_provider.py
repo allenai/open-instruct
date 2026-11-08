@@ -137,15 +137,18 @@ def load(args, first_dataset):
             ):
                 raise ValueError(f"Mixture source {source['name']}: missing or excessive prepared prompt length")
         sources.append(source | {"dataset": dataset})
-    if args.olmo_core.prompt_provider in ("pools", "pool_exposure"):
+    if args.olmo_core.prompt_provider == "pools":
         if "pools" not in manifest:
             raise ValueError("Pool provider requires a prepared pools manifest")
         templates = []
         for source in sources:
             for original in source["dataset"].origin_samples:
-                sample = copy.copy(original)
-                sample.metadata = sample.metadata | {"mixture_source": source["name"]}
-                templates.append(sample)
+                # These datasets belong to this loader. Annotate their templates
+                # once and keep row references, rather than a second population
+                # of Sample objects and metadata dictionaries. Delivery copies
+                # selected rows before generation can mutate them.
+                original.metadata = original.metadata | {"mixture_source": source["name"]}
+                templates.append(original)
         core = args.olmo_core
         replay = (
             dict(
@@ -165,9 +168,7 @@ def load(args, first_dataset):
             shuffle=args.rollout_shuffle,
             identity=hashlib.sha256(raw).hexdigest(),
             replay=replay,
-            sampling=manifest.get(
-                "sampling", {"policy": "exposure"} if core.prompt_provider == "pool_exposure" else {}
-            ),
+            sampling=manifest.get("sampling", {}),
         )
         return provider, SourceDatasets([source["dataset"] for source in sources])
     if "pools" in manifest:

@@ -242,3 +242,51 @@ def test_compressed_pool_input_streams_and_pins_artifact(environment, tmp_path, 
         stream.write(json.dumps(row | {"input": "changed"}) + "\n")
     with pytest.raises(ValueError, match="source changed"):
         test_miles_run_data.prepare(environment, data)
+
+
+def test_pending_checkpoints_do_not_copy_verifier_payloads():
+    class Payload:
+        def __deepcopy__(self, memo):
+            raise AssertionError("Verifier payload entered the accounting checkpoint")
+
+    sample = SimpleNamespace(prompt="q", metadata={"sampling_pool": "p", "verifiers": [Payload()]})
+    p = pool_provider.PoolPromptProvider(
+        [sample], pools={"p": {"label": "p"}}, seed=1, shuffle=False, identity="release"
+    )
+    p.next_samples(1)
+    assert "verifiers" not in p.state_dict()["pending"][0]["metadata"]
+    p.selection_state_dict()
+
+
+def test_compiled_collection_preserves_source_local_history():
+    samples = [
+        SimpleNamespace(
+            prompt=f"q-{i}",
+            metadata={
+                "sampling_pool": "p",
+                "mixture_source": "collection",
+                "origin_id": origin,
+                "verifiers": [{"name": "math", "target": "42"}],
+            },
+        )
+        for i, origin in enumerate(("a", "b", "b", "a"))
+    ]
+    p = pool_provider.PoolPromptProvider(
+        samples,
+        pools={"p": {"label": "p"}},
+        seed=1,
+        shuffle=False,
+        identity="release",
+        replay=dict(fraction=1, window=1, truncation="none"),
+    )
+    first = p.next_samples(1)[0]
+    p.feedback([test_miles_prompt_replay.record(first, tokens=100)])
+    second = p.next_samples(1)[0]
+    p.feedback([test_miles_prompt_replay.record(second, tokens=10)])
+    replay = p.providers["p"]
+    assert not replay._eligible()  # b shortening cannot trigger a replay.
+    assert set(replay.windows) == {"a", "b"}
+    assert replay.source_counts == {"a": 1, "b": 1}
+    state = p.state_dict()
+    p.load_state_dict(state)
+    assert p.state_dict() == state

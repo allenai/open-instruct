@@ -311,3 +311,27 @@ def test_historical_export_preserves_one_success_and_both_truncation_thresholds(
     assert half["unique_ever_eligible"] == 1
     assert any_cap["counts"]["successes_1/4_truncated_3/4"] == 1
     assert len((tmp_path / "any/low-success-prompts.jsonl").read_text().splitlines()) == 3
+
+
+@pytest.mark.parametrize("rewards", [(0, 0.5), (0, 2), (0.5, 0.5)])
+def test_nonbinary_observations_are_valid_but_ineligible(rewards):
+    p = provider()
+    sample = p.next_samples(1)[0]
+    evidence = record(sample, rewards=rewards)
+    p.feedback([evidence])
+    outcome = evidence["prompt_replay"]
+    assert outcome["category"] in {"mixed", "constant_nonzero"}
+    assert outcome["binary_successes"] is None
+    assert not outcome["candidate"]
+    assert outcome["positive_responses"] == sum(r > 0 for r in rewards)
+
+
+@pytest.mark.parametrize("timestamp", [None, "unknown"])
+def test_historical_nondefault_threshold_and_missing_timestamp(tmp_path, timestamp):
+    manifest = tmp_path / "manifest-a.json"
+    manifest.write_text(json.dumps({"run": {"attempt": "a"}}))
+    rows = [record(rewards=(0, 1, 1, 0), caps=1, recorded_unix=timestamp)]
+    (tmp_path / "records-a.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    result = replay_summary.summarize([manifest], tmp_path / "out", max_successes=2)
+    assert result["unique_ever_eligible"] == 1
+    assert result["counts"]["successes_2/4_truncated_1/4"] == 1

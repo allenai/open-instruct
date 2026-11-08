@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Qualified binary/runtime baseline plus pool exposure, supported eager policy scoring, SwiGLU int64 offsets, and source-bundle record IDs; combined GPU smoke pending",
+  "status": "Qualified binary baseline plus pool exposure, explicit discard feedback, eager scoring, SwiGLU int64 offsets and source-bundle IDs; CPU lifecycle/capacity checked; full-population GPU validation pending",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "3245d3bf2830db599fbf01169b60100d78a88917"
+      "revision": "bbcb01d89249ef8af3e0834cedb937d256de84b9"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",

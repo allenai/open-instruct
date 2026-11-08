@@ -5,13 +5,16 @@ import dataclasses
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import test_mixture_provider
 import test_prompt_provider
 import test_remind_provider
+from miles.backends.core_utils.rollout import async_rollout
 from miles.backends.core_utils.rollout.async_buffer import HomogeneousPolicyDataBuffer
-from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput
+from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
+from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
 from open_instruct import test_miles_run_data
 from open_instruct.miles.configuration.config import CoreConfig
@@ -158,6 +161,127 @@ def test_expired_queue_entry_releases_exposure_reservation(args, tmp_path, polic
         pool = kept[0].metadata["sampling_pool"]
         assert recorder.metrics()[f"rollout/pool/{pool}/discarded"] == 1
         assert recorder.metrics()[f"rollout/pool/{pool}/discarded_unobserved"] == 0
+    finally:
+        recorder.close()
+        source.close()
+
+
+@pytest.mark.parametrize(
+    "case", ["incomplete", "mixed", "aborted", "verifier_failure", "stale", "trained", "shutdown"]
+)
+def test_actual_buffer_reservations_reconcile_through_resume(args, tmp_path, monkeypatch, case):
+    setup(args, tmp_path, "exposure")
+    args.async_unused_samples_handler = "drop"
+    source = DashboardDrainingRolloutDataSource(args)
+
+    # Avoid engine construction; exercise the managed producer's actual callback wiring.
+    def base_init(self, input):
+        self.args, self.data_source = input.args, input.data_source
+
+    monkeypatch.setattr(async_rollout.FullyAsyncRolloutFn, "__init__", base_init)
+    monkeypatch.setattr(async_rollout.async_capacity, "report", lambda *a: {"warnings": []})
+    producer = async_rollout.ManagedFullyAsyncRolloutFn(SimpleNamespace(args=args, data_source=source))
+    buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, producer._handle_unused))
+    recorder = buffer._delegate._records
+    try:
+        group = source.get_samples(1)[0]
+        item = test_remind_provider.scored(group, [0, 1])
+        if case == "incomplete":
+            item = DataBufferInput(prompt_group=group, group=group[:1])
+        elif case == "mixed":
+            group[1].weight_versions = [WeightVersionsPerCall([WeightVersionSpan("2", 1, 2)])]
+        elif case == "aborted":
+            group[0].status = Sample.Status.ABORTED
+        elif case == "verifier_failure":
+            group[0].reward = None
+            group[0].metadata["verifier_diagnostics"] = {"math": {"status": "error"}}
+
+        async def exercise():
+            kept = await buffer.put(item)
+            if kept is False:
+                source.acknowledge_groups([group])
+            if case == "stale":
+                assert await buffer.get_ready(current_version=99) is None
+            if case == "trained":
+                assert await buffer.get_ready(current_version=1) is not None
+                source.acknowledge_groups([group])
+                assert len(source.provider.pending) == 1  # Acknowledged is not discarded.
+                source.stage_training_batch(0, group)
+                source.commit_training_batch(0)
+
+        asyncio.run(exercise())
+        if case == "shutdown":
+            # Joined unconsumed work stays explicitly outstanding and regenerates on resume.
+            source.requeue_pending_groups([group[0].group_index])
+        assert sum(source.provider.terminal.values()) + len(source.provider.pending) == source.provider.draws == 1
+        assert len(source.provider.pending) == int(case == "shutdown")
+        assert sum(source.provider.trained.values()) == int(case == "trained")
+        source.save(0)
+        saved = source.provider.state_dict()
+        recorder.close()
+        source.close()
+        args.load, args.start_rollout_id = args.save, 1
+        restored = DashboardDrainingRolloutDataSource(args)
+        try:
+            restored.load(0)
+            assert restored.provider.state_dict() == saved
+            if case == "shutdown":
+                recovered = restored.get_samples(1)
+                assert recovered[0][0].group_index == group[0].group_index
+                restored.discard_groups(recovered)
+                assert not restored.provider.pending
+        finally:
+            restored.close()
+    finally:
+        recorder.close()
+        source.close()
+
+
+def test_collection_file_preserves_origins_and_release_in_receipts(args, tmp_path):
+    setup(args, tmp_path)
+    path = Path(args.olmo_core.prompt_mixture)
+    manifest = json.loads(path.read_text())
+    first = manifest["sources"][0]
+    data = path.parent / first["path"]
+    rows = [json.loads(line) for line in data.read_text().splitlines()]
+    for i, row in enumerate(rows):
+        row["metadata"].update(
+            origin_id=f"original-{i % 2}", record_id=f"row-{i}", release_id="release-v1", labeling_version="labels-v2"
+        )
+    raw = "".join(json.dumps(row) + "\n" for row in rows).encode()
+    data.write_bytes(raw)
+    first["sha256"] = hashlib.sha256(raw).hexdigest()
+    path.write_text(json.dumps(manifest))
+    args.rollout_shuffle = False
+    manifest["shuffle"] = False
+    path.write_text(json.dumps(manifest))
+    args.olmo_core = dataclasses.replace(args.olmo_core, prompt_replay_enabled=True)
+    source = DashboardDrainingRolloutDataSource(args)
+    buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, lambda g: source.discard_groups([g])))
+    recorder = buffer._delegate._records
+    try:
+        templates = source.dataset.datasets[0].origin_samples
+        assert source.provider.providers["math"].base.samples[0] is templates[0]
+        for update in range(2):
+            group = source.get_samples(1)[0]
+            group[0].metadata["generated_only"] = True
+            assert "generated_only" not in templates[update].metadata
+            assert asyncio.run(buffer.put(test_remind_provider.scored(group, [0, 1])))
+            source.acknowledge_groups([group])
+            source.stage_training_batch(update, group)
+            source.commit_training_batch(update)
+        replay = source.provider.providers["math"]
+        assert set(replay.windows) == {"original-0", "original-1"}
+        receipts = list((tmp_path / "records").glob("pool-exposure-*.jsonl"))
+        records = [json.loads(line) for line in receipts[0].read_text().splitlines()]
+        assert records[0]["population_identity"] == hashlib.sha256(path.read_bytes()).hexdigest()
+        for i, receipt in enumerate(records):
+            identity = receipt["selections"][0]
+            assert identity["origin_id"] == f"original-{i}"
+            assert identity["mixture_source"] == first["name"]
+            assert identity["record_id"] == f"row-{i}"
+            assert identity["release_id"] == "release-v1"
+            assert identity["labeling_version"] == "labels-v2"
     finally:
         recorder.close()
         source.close()
