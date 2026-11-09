@@ -172,6 +172,19 @@ def corrected_dolci_target(raw, ms, policy):
     return target
 
 
+def resolved_adapter(raw, kind, options=None):
+    """Resolve one explicit route for both adaptation and adapter provenance."""
+    if kind != "routed_v1":
+        return kind, options
+    value = raw
+    for key in options["field"].split("."):
+        value = value[key]
+    route = options["routes"].get(value)
+    if not route or route["adapter"] == "routed_v1":
+        raise ValueError("unmapped_or_recursive_route:" + str(value))
+    return route["adapter"], route.get("options")
+
+
 def adapt(raw, kind, options=None):
     options = options or {}
     validate_keyword_option(kind, options)
@@ -189,13 +202,8 @@ def adapt(raw, kind, options=None):
     if kind == "toolrl_v1":
         return toolrl.adapt(raw, options)
     if kind == "routed_v1":
-        value = raw
-        for key in options["field"].split("."):
-            value = value[key]
-        route = options["routes"].get(value)
-        if not route or route["adapter"] == "routed_v1":
-            raise ValueError("unmapped_or_recursive_route:" + str(value))
-        return adapt(raw, route["adapter"], route.get("options"))
+        adapter, routed_options = resolved_adapter(raw, kind, options)
+        return adapt(raw, adapter, routed_options)
     if kind == "acecode_v1" and raw.get("context_messages"):
         # AceCode's context is part of the original task, not generated solutions.
         raw = copy.deepcopy(raw)
@@ -395,6 +403,7 @@ def prepare(plan_path, output, tokenizer):
                     counts["input_rows"] += 1
                     try:
                         ms, target, verifier, stratum = adapt(raw, spec["adapter"], spec.get("options"))
+                        effective_adapter, _ = resolved_adapter(raw, spec["adapter"], spec.get("options"))
                     except (ValueError, KeyError, TypeError, SchemaError) as error:
                         reason = f"{type(error).__name__}: {error}"
                         counts["omitted_rows"] += 1
@@ -450,9 +459,8 @@ def prepare(plan_path, output, tokenizer):
                             "verifiers": [{"name": verifier, "target": target}],
                         },
                     }
-                    if spec["adapter"] in long_context.ADAPTERS:
-                        row["metadata"]["pool_id"] = "long_context"
-                        row["metadata"]["adapter"] = spec["adapter"]
+                    if effective_adapter in long_context.ADAPTERS:
+                        row["metadata"]["adapter"] = effective_adapter
                     if spec["adapter"] == "dolci_if_v1":
                         original = dolci_if_target(raw)
                         changes = [

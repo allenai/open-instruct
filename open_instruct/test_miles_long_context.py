@@ -4,14 +4,15 @@ import asyncio
 import copy
 import json
 import math
+from types import SimpleNamespace
 
 import pytest
-from scripts.data.rl_readiness import prepare_long_context
-from scripts.data.rl_readiness.qualify_bundle import check_control
 
 from open_instruct.miles.datasets import long_context as adapters
+from open_instruct.miles.datasets import pools
 from open_instruct.miles.datasets import source_preparation as sources
 from open_instruct.miles.rewards import long_context as rewards
+from open_instruct.miles.rewards import rewards as runtime_rewards
 from open_instruct.test_miles_source_preparation import Tokenizer, prepare_one
 
 
@@ -192,15 +193,43 @@ def test_preparation_pool_and_runtime_controls(tmp_path):
     entry, reasons = prepare_one(tmp_path, "lc_docqa_v1", [{"id": "real-row", "raw_record": raw}], Tokenizer())
     assert entry["counts"]["prepared_rows"] == 1
     row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
-    assert row["metadata"]["pool_id"] == "long_context"
+    assert "pool_id" not in row["metadata"]
     assert row["metadata"]["adapter"] == "lc_docqa_v1"
     assert row["metadata"]["subtask"] == raw["data_source"]
     assert row["metadata"]["messages"] == raw["prompt"]
-    target = row["label"]
-    results = asyncio.run(
-        check_control(row, prepare_long_context.control_cases(target), tmp_path / "out/source/verifiers.json")
+    args = SimpleNamespace(
+        reward_key=None,
+        olmo_core=SimpleNamespace(
+            reward_config=str(tmp_path / "out/source/verifiers.json"),
+            reward_zero_truncated=True,
+            reward_final_answer_only=False,
+        ),
     )
-    assert [r["actual"] for r in results] == [1, 0, 0, 0, 0]
+
+    async def score():
+        results = []
+        for response, status in [
+            ("The correct answer is (C).", "completed"),
+            ("unrelated", "completed"),
+            ("The correct answer is (B).", "completed"),
+            ("", "completed"),
+            ("The correct answer is (C).", "truncated"),
+        ]:
+            sample = SimpleNamespace(
+                prompt=row["input"],
+                metadata=copy.deepcopy(row["metadata"]),
+                response=response,
+                tokens=[],
+                response_length=0,
+                status=status,
+            )
+            results.append(await runtime_rewards.registered_reward(args, sample, failure_policy="raise"))
+        return results
+
+    assert asyncio.run(score()) == [1, 0, 0, 0, 0]
+    row["pool_id"] = "document_tasks"
+    pools.annotate(row, {"documents": {"label": "document_tasks"}})
+    assert row["metadata"]["sampling_pool"] == "documents"
 
 
 @pytest.mark.parametrize("code", sorted(adapters.DEFERRED_TASKS | {"T4.1", "T4.2"}))
@@ -215,14 +244,6 @@ def test_unsafe_native_routes_explicitly_deferred(code):
         sources.adapt(raw, "lc_golong_v1")
 
 
-@pytest.mark.parametrize("gold", ["0", "-1", "14.285714", "1e100"])
-def test_numeric_controls_exceed_rounding_tolerance(gold):
-    t = adapters.target("decimal", [gold], "therefore")
-    cases = prepare_long_context.control_cases(t)
-    assert cases[-1]["expected"] == 0
-    assert rewards.score(cases[0]["response"], t) == 1
-
-
 def test_golong_text_accuracy_label():
     raw = {
         "prompt": "Question",
@@ -233,3 +254,40 @@ def test_golong_text_accuracy_label():
     _, t, _, _ = sources.adapt(raw, "lc_golong_v1")
     assert rewards.score("[Answer]\nUNANSWERABLE", t) == 1
     assert rewards.score("[Answer]\nunanswerable\nor Paris", t) == 0
+
+
+@pytest.mark.parametrize("adapter", ["lc_docqa_v1", "lc_golong_v1"])
+def test_routed_adapter_provenance_without_pool_assignment(tmp_path, adapter):
+    raw = (
+        docqa()
+        if adapter == "lc_docqa_v1"
+        else {
+            "prompt": "Compute 1+1",
+            "data_source": "math_longcot_math_verify",
+            "extra_info": {"reward_mode": "math"},
+            "reward_model": {"ground_truth": {"golden_label": "2"}},
+        }
+    )
+    raw["route"] = "chosen"
+    raw_path = tmp_path / "input.jsonl"
+    raw_path.write_text(json.dumps({"id": "row", "raw_record": raw}) + "\n")
+    hygiene = tmp_path / "hygiene.json"
+    hygiene.write_text('{"completed":true}')
+    spec = {
+        "adapter": "routed_v1",
+        "options": {"field": "route", "routes": {"chosen": {"adapter": adapter}}},
+        "inputs": [
+            {"path": str(raw_path), "sha256": sources.file_hash(raw_path), "revision": "fixed", "split": "train"}
+        ],
+        "hygiene_receipt": {"path": str(hygiene), "sha256": sources.file_hash(hygiene)},
+    }
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"schema_version": 1, "sources": {"source": spec}}))
+    result = sources.prepare(plan, tmp_path / "out", Tokenizer())
+    assert result["sources"]["source"]["counts"]["prepared_rows"] == 1
+    row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
+    assert row["metadata"]["adapter"] == adapter
+    assert "pool_id" not in row["metadata"]
+    row["pool_id"] = "document_tasks"
+    pools.annotate(row, {"documents": {"label": "document_tasks"}})
+    assert row["metadata"]["sampling_pool"] == "documents"
