@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Accept bold, boxed, lowercase and Chinese-punctuated long-context choice answers while retaining explicit contradiction checks (https://github.com/allenai/open-instruct/pull/2199).
 - Preserve long-context choice credit when option text or explanations contain other bracketed letters; document ambiguity and formatting limitations (https://github.com/allenai/open-instruct/pull/2199).
 - Ignore blank entries in long-context F1/NDCG, retain the first ranked guess, and parse explicit choice boundaries without treating prose initials as answers (https://github.com/allenai/open-instruct/pull/2199).
 - Use pinned Math-Verify by default for MILES general math grading, including existing prepared math registries, structured answers and wrapped references; require boxes or answer anchors, preserve Markdown-bold answers, and retain process isolation and symbolic-timeout metrics. Legacy math, GSM8K and strict-math contracts are unchanged (https://github.com/allenai/open-instruct/pull/2217).

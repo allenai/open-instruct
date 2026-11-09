@@ -72,6 +72,54 @@ def test_choice(response):
     assert rewards.score(response, adapters.target("choice", ["C"], "choice")) == 1
 
 
+@pytest.mark.parametrize(
+    "response",
+    [
+        "**C**",
+        "**(C)**",
+        "The correct answer is **(C) The option text.**",
+        "The correct answer is **C** The option text.",
+        "**The correct answer is (C)**",
+        "The correct answer is (**C**).",
+        r"\boxed{C}",
+        r"\boxed{(C)}",
+        r"$\boxed{C}$",
+        r"The correct answer is \(\boxed{C}\).",
+        r"The correct answer is \boxed{C}。",
+        r"The correct answer is \( (C) \).",
+        "(c)",
+        "The correct answer is (c).",
+        "The correct answer is (C)。",
+        "The correct answer is (C)仅对该企业采取措施。",
+        "The correct answer is (C)51.8%.",
+        "The correct answer is **（c）**",
+    ],
+)
+def test_choice_presentation_preserves_letter(response):
+    assert rewards.extract(response, "choice") == "C"
+    assert rewards.score(response, adapters.target("choice", ["C"], "choice")) == 1
+    assert rewards.score(response, adapters.target("choice", ["D"], "choice")) == 0
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "**CD**",
+        r"\boxed{CD}",
+        r"\boxed{C or D}",
+        r"\boxed{C} \boxed{D}",
+        "**C** or **D**",
+        "The correct answer is **I think (C)**",
+        "The correct answer is a possibility",
+        "**(C) Option text without an answer prefix**",
+        "The correct answer is **C**. The correct answer is (d).",
+        r"The correct answer is \boxed{C}. The correct answer is **D**.",
+    ],
+)
+def test_choice_formatting_does_not_extract_prose_or_conflicting_declarations(response):
+    assert rewards.extract(response, "choice") == ""
+
+
 @pytest.mark.parametrize("response", ["AC", "A B C D", "The correct answer is (C). The correct answer is (D)."])
 def test_choice_not_substring(response):
     assert rewards.score(response, adapters.target("choice", ["C"], "choice")) == 0

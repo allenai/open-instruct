@@ -12,7 +12,7 @@ from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import task_verifiers
 
 KIND = "long_context_v1"
-SCORER_REVISION = "long_context_v1.3"
+SCORER_REVISION = "long_context_v1.4"
 METRICS = {"exact", "docqa", "decimal", "choice", "lines_f1", "ndcg", "line_accuracy"}
 
 
@@ -44,6 +44,17 @@ def validate_target(target):
     return metric
 
 
+def choice_format(text):
+    """Normalize presentation around choice letters without searching prose for answers."""
+    text = text.translate(str.maketrans({"（": "(", "）": ")"}))
+    # A bold single letter has an explicit boundary, even before option text.
+    text = re.sub(r"(?<!\()\*\*([A-Za-z])\*\*", r"(\1)", text).replace("**", "")
+    text = re.sub(
+        r"\\boxed\{[ \t]*(?:\(([A-Za-z])\)|([A-Za-z]))[ \t]*\}", lambda match: f"({match[1] or match[2]})", text
+    )
+    return re.sub(r"\$\s*(\([A-Za-z]\))\s*\$|\\\(\s*(\([A-Za-z]\))\s*\\\)", lambda match: match[1] or match[2], text)
+
+
 def extract(text, mode):
     final = common.answer_text(text)
     # Unclosed explicit thinking is not a final answer. Olmo's opener can also
@@ -60,23 +71,24 @@ def extract(text, mode):
             final = final.rsplit(marker, 1)[1].strip()
         return final.removesuffix(".")
     if mode == "choice":
+        final = choice_format(final)
         # A letter inside prose (e.g. "I think") is not an asserted choice.
         # Parentheses delimit an explicit choice even before option text. A bare
         # letter instead needs punctuation, a line ending or the end of the answer.
-        token = r"(?:\(([A-Z])\)|([A-Z])\)?)"
+        token = r"(?:\(([A-Za-z])\)|([A-Za-z])\)?)"
         matches = [
-            left or right
+            (left or right).upper()
             for left, right in re.findall(
                 r"\bThe correct answer is\s*:?\s*"
-                r"(?:\(([A-Z])\)(?=[\s.,;:!?]|$)|([A-Z])"
-                r"(?:\)(?=[\s.,;:!?]|$)|(?=[ \t]*[.,;:!?\n]|[ \t]*$)))",
+                r"(?:\(([A-Za-z])\)|([A-Za-z])"
+                r"(?:\)(?=[\s.,;:!?。；，：！？]|$)|(?=[ \t]*[.,;:!?。；，：！？\n]|[ \t]*$)))",
                 final,
             )
         ]
         if matches:
             return matches[0] if len(set(matches)) == 1 else ""
-        match = re.fullmatch(r":?\s*" + token + r"[.,]?", final)
-        return (match[1] or match[2]) if match else ""
+        match = re.fullmatch(r"[:：]?\s*" + token + r"[.,。；，：！？]?", final)
+        return (match[1] or match[2]).upper() if match else ""
     return final
 
 

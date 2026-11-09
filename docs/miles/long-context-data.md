@@ -66,6 +66,15 @@ Choice extraction is a format heuristic, not a general ambiguity detector. After
 and explanations. It does not infer whether later references to other options
 are proposed answers or explanatory comparisons.
 
+Choice parsing normalizes Markdown bold markers, single-letter LaTeX boxes
+(`\boxed{C}` or `\boxed{(C)}`), math delimiters around those letters, lowercase
+letters and full-width parentheses. Chinese punctuation is accepted. A closed
+parenthesized letter after the explicit answer prefix can directly precede option
+text, as in `(C)仅对…`. These rules apply only to choice extraction; they do not
+relax GoLong exact-match or numeric contracts. Conflicting explicit answer
+declarations are checked after normalization, so formatting cannot hide a second
+declared answer.
+
 | Continuation after `The correct answer is (C)` | Behavior and limitation |
 |---|---|
 | `and (D)`, `or (D)`, `, (D)`, `or D.`, `or [D]`, or `and (d)` | Still extracts `C`; a hedged answer can receive credit. |
@@ -73,8 +82,9 @@ are proposed answers or explanatory comparisons.
 | `The correct answer is (D)` on the same or a later line | Receives zero because the explicit answer declarations conflict. |
 | `答案应是 (C)`, `Vitamin (D) deficiency`, or `(see paragraph (B))` | Retains `C`; repeated confirmation and explanatory references do not invalidate the extracted answer. |
 
-Standalone answers without the explicit prefix use stricter whole-answer parsing:
-`(C)` is accepted, while `(C) or (D)` is rejected. This format dependence is a
+Standalone answers without the explicit prefix use stricter whole-answer parsing
+after formatting normalization: `**C**` and `$\boxed{C}$` are accepted, while
+`(C) or (D)` is rejected. This format dependence is a
 known limitation. Credit does not certify that the response asserts only one
 answer, and unsupported formatting can still cause false negatives.
 
