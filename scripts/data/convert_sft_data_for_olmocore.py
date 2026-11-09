@@ -129,6 +129,10 @@ class ConvertSFTDataArguments:
     """Shuffle seed for reproducible dataset ordering"""
     shuffle_seed: int = field(default=42)
 
+    """Cut the 1 GiB part files only between rows, so no row spans two parts. A multi-part dir passed to
+    olmo_core_finetune.py's --extra_numpy_dirs needs this under metadata document boundaries."""
+    row_aligned_parts: bool = field(default=False)
+
 
 def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConfig) -> None:
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
@@ -162,6 +166,7 @@ def main(args: ConvertSFTDataArguments, tc: dataset_transformation.TokenizerConf
         visualize=args.visualize,
         tokenizer_config_only=args.tokenizer_config_only,
         num_examples=args.num_examples,
+        row_aligned_parts=args.row_aligned_parts,
     )
 
 

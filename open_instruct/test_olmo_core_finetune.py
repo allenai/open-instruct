@@ -450,10 +450,28 @@ class ExtraNumpyDirsTest(unittest.TestCase):
         _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
         with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
             f.write("0,3\n0,2\n")
-        with self.assertRaisesRegex(ValueError, "row 1 starts at 0"):
+        with self.assertRaisesRegex(ValueError, "row 1 is 0-2"):
             olmo_core_finetune._check_extra_numpy_dirs(
                 [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
             )
+
+    def test_metadata_rows_must_not_run_backwards(self) -> None:
+        # Each row starts where the previous one ended, but row 1 ends before it starts.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,3\n3,2\n2,5\n")
+        with self.assertRaisesRegex(ValueError, "row 1 is 3-2"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_row_aligned_multi_part_dir_passes_under_metadata(self) -> None:
+        stats = {"configuration": {"row_aligned_parts": True}, "overall_statistics": {"total_instances": 4}}
+        _write(os.path.join(self.extra_b, "dataset_statistics.json"), json.dumps(stats))
+        checked = olmo_core_finetune._check_extra_numpy_dirs(
+            [self.extra_b], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+        )[self.extra_b]
+        self.assertEqual((checked.num_parts, checked.num_docs), (2, 4))
 
     def test_multi_part_dir_needs_row_aligned_parts_under_metadata(self) -> None:
         _write_parts(self.extra_a, [[([50_000, _EXTRA_EOS], True)], [([50_001, _EXTRA_EOS], True)]])

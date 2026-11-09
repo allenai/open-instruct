@@ -115,7 +115,7 @@ def _check_row_aligned_cache(numpy_dir: str) -> None:
     stats_path = os.path.join(numpy_dir, "dataset_statistics.json")
     with open(stats_path) as f:
         stats = json.load(f)
-    if not stats["configuration"].get(numpy_dataset_conversion.ROW_ALIGNED_PARTS_KEY, False):
+    if not stats.get("configuration", {}).get(numpy_dataset_conversion.ROW_ALIGNED_PARTS_KEY, False):
         raise ValueError(f"{numpy_dir} was not written with --row_aligned_parts ({stats_path} has no marker).")
     num_lines = 0
     for path in glob.glob(os.path.join(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_METADATA_GLOB)):
@@ -296,12 +296,17 @@ def _check_extra_numpy_dir(
         ).reshape(-1, 2)
         doc_lengths = bounds[:, 1] - bounds[:, 0]
         # With no trailing-EOS check, a stale or truncated .csv.gz would silently drop tokens: the rows
-        # must tile the file, each starting where the previous one ended.
+        # must tile the file, each starting where the previous one ended and none ending before it starts.
         if require_metadata:
             expected_starts = np.concatenate([[0], bounds[:-1, 1]])
-            bad = np.flatnonzero(bounds[:, 0] != expected_starts)
+            bad = np.flatnonzero((bounds[:, 0] != expected_starts) | (doc_lengths < 0))
             if len(bad) or len(bounds) == 0 or int(bounds[-1, 1]) != num_tokens:
-                where = f"row {int(bad[0])} starts at {int(bounds[bad[0], 0]):,}" if len(bad) else "the last row"
+                if len(bounds) == 0:
+                    where = "no rows"
+                elif len(bad):
+                    where = f"row {int(bad[0])} is {int(bounds[bad[0], 0]):,}-{int(bounds[bad[0], 1]):,}"
+                else:
+                    where = f"the last row ends at {int(bounds[-1, 1]):,}"
                 raise ValueError(
                     f"{token_path}: its metadata rows do not tile its {num_tokens:,} tokens ({where}); "
                     "is the .csv.gz stale?"
@@ -465,7 +470,7 @@ class SFTConfig:
     and `labels_mask_part_XXXX.npy` (one bool per token), plus `token_ids_part_XXXX.csv.gz` (one
     `start,end` line per doc, tiling the file) unless `--no_document_boundaries_from_metadata`, in
     which case each part must end with EOS. Under metadata boundaries a dir with several parts must be
-    written with `--row_aligned_parts`. Their parts are packed the same way as the cache's, one source
+    written with `--row_aligned_parts` (as `scripts/data/convert_sft_data_for_olmocore.py` takes). Their parts are packed the same way as the cache's, one source
     file at a time, so an instance never mixes extra docs with chat rows; the loader then shuffles all
     instances together.
     Docs longer than max_seq_length are truncated. Every node needs the same dirs at the same paths.
