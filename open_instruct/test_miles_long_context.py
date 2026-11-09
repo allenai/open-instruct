@@ -250,6 +250,38 @@ def test_missing_permutation_order(order):
         adapters.transduction_reference(raw)
 
 
+@pytest.mark.parametrize(
+    "prompt,reason",
+    [
+        ("Input:\n\n1+2", "Missing source task delimiter"),
+        ("Here is the real task:\n1+2", "Missing source input delimiter"),
+    ],
+)
+def test_transduction_missing_delimiter_is_omitted_not_fatal(tmp_path, prompt, reason):
+    valid = {
+        "messages": [
+            {"role": "user", "content": "Here is the real task:\nInput:\n\n1+2"},
+            {"role": "assistant", "content": "1+2=3"},
+        ],
+        "metadata": {"task_type": "unnumbered_streaming_sum"},
+    }
+    malformed = copy.deepcopy(valid)
+    malformed["messages"][0]["content"] = prompt
+    entry, reasons = prepare_one(
+        tmp_path,
+        "lc_transduction_v1",
+        [{"id": "malformed", "raw_record": malformed}, {"id": "valid", "raw_record": valid}],
+    )
+    assert entry["counts"]["input_rows"] == 2
+    assert entry["counts"]["omitted_rows"] == 1
+    assert entry["counts"]["prepared_rows"] == 1
+    assert reasons == [f"ValueError: {reason}"]
+    disposition = json.loads((tmp_path / "out/source/dispositions.jsonl").read_text())
+    assert disposition["id"] == "malformed"
+    row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
+    assert row["metadata"]["sample_id"] == "valid"
+
+
 def docqa():
     return {
         "prompt": [{"role": "user", "content": "An intact long document. Question?"}],

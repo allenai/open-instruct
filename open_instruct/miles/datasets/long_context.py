@@ -23,6 +23,8 @@ def transduction_reference(raw):
     """Recompute all twelve released task variants from the input, not the label."""
     task = raw["metadata"]["task_type"]
     prompt = raw["messages"][0]["content"]
+    if "Here is the real " not in prompt:
+        raise ValueError("Missing source task delimiter")
     body = prompt.split("Here is the real ", 1)[1]
     if task.startswith("csv_"):
         before, table = body.split("Input:\n\n", 1)
@@ -62,6 +64,8 @@ def transduction_reference(raw):
         definitions, sequence = body.split("Expressions:\n\n", 1)
         lookup = dict(re.findall(r"(?m)^([0-9a-f]+)=(.+)$", definitions))
     else:
+        if "Input:\n\n" not in body:
+            raise ValueError("Missing source input delimiter")
         sequence = body.split("Input:\n\n", 1)[1]
         lookup = {}
     results = []
