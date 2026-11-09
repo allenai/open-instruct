@@ -8,13 +8,14 @@ from unittest import mock
 
 import pytest
 import sympy
+from math_verify import errors, grader
 
 from open_instruct import ground_truth_utils, math_utils
 from open_instruct.miles.configuration import config
 from open_instruct.miles.rewards import rewards
 
 
-@pytest.mark.parametrize("factory", [ground_truth_utils.MathVerifier, ground_truth_utils.StrictMathVerifier])
+@pytest.mark.parametrize("factory", [ground_truth_utils.StrictMathVerifier])
 @pytest.mark.parametrize("answer, score", [("4", 1.0), ("2+2", 0.0), ("5", 0.0)])
 def test_timeout_preserves_fallback_and_resets_per_call(factory, answer, score):
     verifier = factory()
@@ -28,14 +29,14 @@ def test_timeout_preserves_fallback_and_resets_per_call(factory, answer, score):
     assert healthy.diagnostics == {"symbolic_timeouts": 0}
 
 
-def test_multiple_candidates_count_each_timeout_and_still_allow_later_match():
+@pytest.mark.parametrize("answer, score", [("4", 1.0), ("2+2", 0.0), ("5", 0.0)])
+def test_math_verify_timeout_preserves_library_literal_fallback(answer, score):
     verifier = ground_truth_utils.MathVerifier()
-    with mock.patch.object(math_utils, "parse_latex", side_effect=TimeoutError):
-        failed = verifier([], r"\boxed{5} Final Answer: The final answer is 6. I hope it is correct.", "4")
-        recovered = verifier([], r"\boxed{5} Final Answer: The final answer is 4. I hope it is correct.", "4")
-    assert failed.score == 0.0
-    assert recovered.score == 1.0
-    assert failed.diagnostics == recovered.diagnostics == {"symbolic_timeouts": 2}
+    with mock.patch.object(grader, "sympy_expr_eq", side_effect=errors.TimeoutException):
+        result = verifier([], rf"\boxed{{{answer}}}", "4")
+    assert result.score == score
+    assert result.diagnostics == {"symbolic_timeouts": 1}
+    assert verifier([], r"\boxed{4}", "4").diagnostics == {"symbolic_timeouts": 0}
 
 
 def test_real_five_second_alarm_is_recorded(caplog):
@@ -67,11 +68,11 @@ def test_mismatch_and_parse_failure_are_not_timeouts():
 
 
 class TimeoutFixtureVerifier(ground_truth_utils.MathVerifier):
-    """Inject a parser timeout inside the real worker, not in its IPC result."""
+    """Inject a comparison timeout inside the real worker, not in its IPC result."""
 
     def __call__(self, tokenized_prediction, prediction, label, query=None, rollout_state=None):
         if query == "force-timeout":
-            with mock.patch.object(math_utils, "parse_latex", side_effect=TimeoutError):
+            with mock.patch.object(grader, "sympy_expr_eq", side_effect=errors.TimeoutException):
                 return super().__call__(tokenized_prediction, prediction, label, query, rollout_state)
         return super().__call__(tokenized_prediction, prediction, label, query, rollout_state)
 
@@ -101,11 +102,11 @@ def test_worker_timeout_diagnostics_reach_sample_and_tracking(tmp_path, monkeypa
     assert asyncio.run(rewards.registered_reward(args, samples)) == [1.0, 0.0, 1.0]
     assert children_before == rewards._CHILDREN
     records = [sample.metadata["verifier_diagnostics"]["math"] for sample in samples]
-    assert [record["symbolic_timeouts"] for record in records] == [1, 2, 0]
+    assert [record["symbolic_timeouts"] for record in records] == [1, 1, 0]
     assert all(record["status"] == "ok" for record in records)
     assert records[0]["symbolic_timeout_rewarded"] is True
     assert records[1]["symbolic_timeout_rewarded"] is False
-    assert "Math verifier completed with 2 symbolic comparison timeout(s); final score=0.0" in caplog.text
+    assert "Math verifier completed with 1 symbolic timeout(s); final score=0.0" in caplog.text
 
     logged = []
     monkeypatch.setattr(metrics, "compute_rollout_step", lambda args, rollout_id: rollout_id)
@@ -115,7 +116,7 @@ def test_worker_timeout_diagnostics_reach_sample_and_tracking(tmp_path, monkeypa
         "rollout/math_verifier/samples": 3,
         "rollout/math_verifier/timeouts": 0,
         "rollout/math_verifier/timeout_fraction": 0.0,
-        "rollout/math_verifier/symbolic_timeouts": 3,
+        "rollout/math_verifier/symbolic_timeouts": 2,
         "rollout/math_verifier/symbolic_timeout_samples": 2,
         "rollout/math_verifier/symbolic_timeout_fraction": 2 / 3,
         "rollout/math_verifier/symbolic_timeout_rewarded_samples": 1,

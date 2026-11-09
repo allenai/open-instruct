@@ -603,19 +603,34 @@ failures; both node and three-node select it for code-service failures. Change t
 settings to opt into strict handling. Managed judge health-check failures separately stop
 training; the fallback applies to grading requests.
 
-### Symbolic math timeouts
+### General math grading and timeouts
 
-Each symbolic comparison has an internal five-second limit. When it expires,
-the verifier still tries its existing text-normalization fallback and any later
-answer candidates, so the final reward can be either zero or one. Completed
-results retain `status=ok` and carry a `symbolic_timeouts` count; a timeout also
-produces a warning in the parent process. This does not change rewards or masks.
+The general `MathVerifier` uses pinned Hugging Face Math-Verify 0.9.0 for answer
+extraction and comparison. It supports structured mathematical answers, including
+sets, tuples and multiple boxes, and unwraps outer reference math delimiters before
+parsing. Unboxed predictions remain eligible. `GSM8KVerifier` and
+`StrictMathVerifier` retain their separate contracts. The caller's
+`reward_final_answer_only` setting still determines whether reasoning is included.
+This replacement changes rewards; compare runs using their recorded source revision.
+
+Math-Verify is not a prose or proof judge. Ambiguous comma-separated thousands,
+some function equations and references mixing prose with math can still be
+misgraded. Its extraction can also credit a matching expression inside an unfinished
+response. There is no fallback to the previous general math grader.
+
+Each general-math parse and candidate comparison has an internal five-second limit.
+A parse timeout returns no answer; a comparison timeout allows later Math-Verify
+candidates, including its literal-string fallback, to match. Strict math retains its
+existing text-normalization fallback. The final reward can therefore be zero or one.
+Completed results retain `status=ok` and carry a `symbolic_timeouts` count; a timeout
+also produces a warning in the parent process. The outer subprocess deadline and
+zero-reward timeout policy are unchanged, and these timeouts do not exclude samples.
 
 W&B logs the following per-collection metrics under `rollout/math_verifier/`:
 
 | Metric | Meaning |
 | --- | --- |
-| `symbolic_timeouts` | Total timed-out symbolic comparisons reported by workers; one result can contain several. |
+| `symbolic_timeouts` | Total timed-out parsing or comparison operations reported by workers; one result can contain several. |
 | `symbolic_timeout_samples` | Math verifier results with at least one symbolic timeout. |
 | `symbolic_timeout_fraction` | Affected results divided by all math verifier results in the collection. |
 | `symbolic_timeout_rewarded_samples` | Affected results whose final verifier score was positive. |

@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Replace the general math verifier with pinned Math-Verify extraction and comparison, including structured answers and wrapped references; retain process isolation and symbolic-timeout metrics. GSM8K and strict-math contracts are unchanged.
 - Advance the MILES runtime to merged pool support and fail initial serving startup promptly after confirmed Ray worker death instead of waiting until timeout (https://github.com/allenai/open-instruct/pull/2187).
 - Preserve main's fully masked REINFORCE++ return handling in the MILES pool runtime pin when rebasing named-pool support (https://github.com/allenai/open-instruct/pull/2187).
 - Bind MILES prompt replay identity to the full verifier configuration so retries preserve verifier weights; earlier replay catalogs require a new run (https://github.com/allenai/open-instruct/pull/2187).

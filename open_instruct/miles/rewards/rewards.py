@@ -190,9 +190,8 @@ async def isolated_verifier_call(
 ):
     """Call an explicitly trusted verifier on a subprocess main thread.
 
-    Symbolic math keeps the original open-instruct/ANTLR grading semantics and
-    SIGALRM timeout. ANTLR 4.11 can live in a child-only dependency directory,
-    preserving the rollout process's OmegaConf/ANTLR 4.9 installation.
+    Symbolic math runs with main-thread SIGALRM timeouts. ANTLR 4.11 can live
+    in a child-only dependency directory, preserving the rollout process's OmegaConf/ANTLR 4.9 installation.
     """
     loop = asyncio.get_running_loop()
     if loop not in _POOLS:
@@ -250,9 +249,7 @@ class _IsolatedVerifier:
             result.diagnostics["symbolic_timeout_rewarded"] = result.score > 0
             # Worker stderr is suppressed; surface the completed result here.
             logger.warning(
-                "Math verifier completed with %d symbolic comparison timeout(s); final score=%s",
-                symbolic_timeouts,
-                result.score,
+                "Math verifier completed with %d symbolic timeout(s); final score=%s", symbolic_timeouts, result.score
             )
         return result
 
