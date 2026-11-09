@@ -238,6 +238,15 @@ def _check_extra_numpy_dir(
             f"{numpy_dataset_conversion.TOKEN_IDS_METADATA_GLOB} file for every token part; "
             "pass --no_document_boundaries_from_metadata to scan for EOS instead."
         )
+    if require_metadata and len(token_parts) > 1:
+        # A part cut mid-row would split that row into two documents, the second without its prompt.
+        if not os.path.exists(os.path.join(numpy_dir, "dataset_statistics.json")):
+            raise ValueError(
+                f"{numpy_dir}: a multi-part dir under --document_boundaries_from_metadata must be written with "
+                "--row_aligned_parts, and it has no dataset_statistics.json to show that; pass "
+                "--no_document_boundaries_from_metadata to scan for EOS instead."
+            )
+        _check_row_aligned_cache(numpy_dir)
     dtype_name = np.dtype(token_dtype).name
     itemsize = np.dtype(token_dtype).itemsize
     stats = _NumpyDirStats(num_parts=len(token_parts), num_tokens=0, num_loss_tokens=0)
@@ -273,25 +282,30 @@ def _check_extra_numpy_dir(
             )
         # The boundaries OLMo-core's packer uses: the metadata rows with --document_boundaries_from_metadata,
         # otherwise the EOS positions in the token file.
-        doc_lengths = np.array(
-            [
-                end - start
-                for start, end in oc_data_utils.iter_document_indices(
+        bounds = np.array(
+            list(
+                oc_data_utils.iter_document_indices(
                     token_path,
                     use_array_if_local=not require_metadata,
                     eos_token_id=tokenizer.eos_token_id,
                     bos_token_id=tokenizer.bos_token_id,
                     dtype=token_dtype,
                 )
-            ],
+            ),
             dtype=np.int64,
-        )
-        # With no trailing-EOS check, a stale or truncated .csv.gz would silently drop the file's tail.
-        if require_metadata and int(doc_lengths.sum()) != num_tokens:
-            raise ValueError(
-                f"{token_path}: its metadata rows cover {int(doc_lengths.sum()):,} of its {num_tokens:,} tokens; "
-                "is the .csv.gz stale?"
-            )
+        ).reshape(-1, 2)
+        doc_lengths = bounds[:, 1] - bounds[:, 0]
+        # With no trailing-EOS check, a stale or truncated .csv.gz would silently drop tokens: the rows
+        # must tile the file, each starting where the previous one ended.
+        if require_metadata:
+            expected_starts = np.concatenate([[0], bounds[:-1, 1]])
+            bad = np.flatnonzero(bounds[:, 0] != expected_starts)
+            if len(bad) or len(bounds) == 0 or int(bounds[-1, 1]) != num_tokens:
+                where = f"row {int(bad[0])} starts at {int(bounds[bad[0], 0]):,}" if len(bad) else "the last row"
+                raise ValueError(
+                    f"{token_path}: its metadata rows do not tile its {num_tokens:,} tokens ({where}); "
+                    "is the .csv.gz stale?"
+                )
         over = doc_lengths[doc_lengths > sequence_length]
         stats.num_docs += len(doc_lengths)
         stats.num_docs_over_length += len(over)
@@ -449,9 +463,11 @@ class SFTConfig:
     """Local pretokenized numpy dirs to train on alongside the chat cache, in the converter's layout:
     `token_ids_part_XXXX.npy` (raw tokens in the dtype OLMo-core picks for the vocab, uint32 for Olmo)
     and `labels_mask_part_XXXX.npy` (one bool per token), plus `token_ids_part_XXXX.csv.gz` (one
-    `start,end` line per doc, covering every token) unless `--no_document_boundaries_from_metadata`,
-    in which case each part must end with EOS. Their parts are packed the same way as the cache's, one source file at a time, so an
-    instance never mixes extra docs with chat rows; the loader then shuffles all instances together.
+    `start,end` line per doc, tiling the file) unless `--no_document_boundaries_from_metadata`, in
+    which case each part must end with EOS. Under metadata boundaries a dir with several parts must be
+    written with `--row_aligned_parts`. Their parts are packed the same way as the cache's, one source
+    file at a time, so an instance never mixes extra docs with chat rows; the loader then shuffles all
+    instances together.
     Docs longer than max_seq_length are truncated. Every node needs the same dirs at the same paths.
     Checked at startup, which logs token and loss-token totals for the cache and the extras."""
 
