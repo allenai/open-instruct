@@ -3,10 +3,19 @@
 All notable changes to this project will be documented in this file.
 
 
+### Changed
+- Advance the MILES runtime to merged pool support and fail initial serving startup promptly after confirmed Ray worker death instead of waiting until timeout (https://github.com/allenai/open-instruct/pull/2187).
+- Preserve main's fully masked REINFORCE++ return handling in the MILES pool runtime pin when rebasing named-pool support (https://github.com/allenai/open-instruct/pull/2187).
+- Bind MILES prompt replay identity to the full verifier configuration so retries preserve verifier weights; earlier replay catalogs require a new run (https://github.com/allenai/open-instruct/pull/2187).
+- MILES retains the strict standalone/training scoring check: drift above `core.scoring_check_tolerance` (default 0.001) stops training; eager scoring uses the same activation arithmetic as training (https://github.com/allenai/open-instruct/pull/2187).
+
 ### Added
 - Expose internal symbolic-math timeouts through verifier diagnostics, parent-process warnings, and MILES W&B metrics without changing rewards or fallback comparisons (https://github.com/allenai/open-instruct/pull/2210).
 - Exclude ungraded responses from their MILES prompt group instead of omitting the group: a failed verifier or judge grade now gets zero advantage and a zeroed loss mask and leaves the group baseline (`core.exclude_ungraded`, default true), with `rollout/verification/ungraded_samples` metrics. Reject fully masked groups even when variance filtering is disabled, pin native REINFORCE++ support for masked responses, and preserve raw rewards for REINFORCE++/PPO in truncation exclusion. Managed exclusion now requires its paired group filter (https://github.com/allenai/open-instruct/pull/2209).
+- Load prepared MILES pool rows from hash-verified disk indexes with compact shuffled IDs and bounded prefetch, avoiding an in-memory population of prompt/verifier objects (https://github.com/allenai/open-instruct/pull/2187).
+- Keep MILES pool delivery rollback independent of outstanding prompt metadata size; restore selection cursors and remove only newly reserved IDs after failure (https://github.com/allenai/open-instruct/pull/2187).
 - Update the complete-code client with jittered retries, cancellation of later batches/retries, and queue-inclusive deadlines (https://github.com/allenai/open-instruct/pull/2203).
+- Add opt-in MILES named pools assigned by source pool fields or row labels, with independent finite shuffle, uniform, weighted or exposure-balanced sampling, pool-scoped length-triggered replay, per-pool W&B attempts/training/coverage/token counters, low-success/truncation history, literal math-reference diagnostics, and a streaming historical replay-pool inventory (https://github.com/allenai/open-instruct/pull/2187).
 - Fix R1 format scoring with optional final-answer verifier dispatch while preserving existing math, code, and raw-response behavior (https://github.com/allenai/open-instruct/pull/2188).
 - Let MILES scoring callers explicitly raise or zero reported service/judge failures; preserve zero fallback for distillation and ordinary evaluation, strict offline qualification, and training group omission (https://github.com/allenai/open-instruct/pull/2178).
 - Fix reasoning-panel GPQA/context budgets, normalize SciCode disabled top-k, and retain independent evaluation progress after task failures (https://github.com/allenai/open-instruct/pull/2136).
