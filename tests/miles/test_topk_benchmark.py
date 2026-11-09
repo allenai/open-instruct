@@ -90,3 +90,14 @@ def test_conversation_dataset_excludes_reference_answer(monkeypatch, tmp_path):
     prompts = bench.prepare_prompts(SimpleNamespace(model="unused", output=tmp_path, prompts=1))
     assert len(prompts) == 33
     assert prompts[0] == {"question": "What is 1+1?", "input_ids": [1, 2, 3]}
+
+
+def test_mc32_and_array_modes_leave_response_sampling_unchanged():
+    original = bench.payload([1, 2], bench.MODES[0], 17, 256)["sampling_params"]
+    for mode in bench.ARRAY_MODES:
+        request = bench.payload([1, 2], mode, 17, 256)
+        params = request["sampling_params"].copy()
+        assert params.pop("array_output_logprobs") is True
+        assert params.pop("score_centering_samples", 0) == (32 if mode[0] == "mc32" else 0)
+        assert params == original
+        assert request["return_flat_raw_top_logprobs_b64"]

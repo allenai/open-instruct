@@ -28,10 +28,12 @@ MODES = [("none", 0, False), ("selected", 0, False)] + [
     (f"{fmt}_{k}", k, fmt == "flat") for k in (32, 64, 128) for fmt in ("nested", "flat")
 ]
 
+ARRAY_MODES = [(f"array_{k}", k, True) for k in (32, 64, 128)] + [("mc32", 32, True)]
+
 
 def payload(ids, mode, seed, tokens, temperature=1.0):
     name, k, flat = mode
-    return {
+    result = {
         "input_ids": ids,
         "sampling_params": {
             "temperature": temperature,
@@ -49,6 +51,12 @@ def payload(ids, mode, seed, tokens, temperature=1.0):
         "return_flat_raw_top_logprobs_b64": flat,
         "stream": False,
     }
+
+    if name.startswith("array_") or name == "mc32":
+        result["sampling_params"]["array_output_logprobs"] = True
+    if name == "mc32":
+        result["sampling_params"]["score_centering_samples"] = 32
+    return result
 
 
 def unpack(meta, k, flat, tokens):
@@ -87,6 +95,10 @@ def request(client, ids, mode, seed, tokens, temperature=1.0, retain=False):
     data = json.loads(raw)
     parsed = time.perf_counter()
     meta = data["meta_info"]
+    if mode[0] == "mc32":
+        assert meta["output_score_mode"] == "mc32"
+    elif mode[0].startswith("array_"):
+        assert meta["output_score_mode"] == "topk"
     arrays = unpack(meta, mode[1], mode[2], tokens)
     unpacked = time.perf_counter()
     assert meta["completion_tokens"] == tokens, meta
@@ -127,7 +139,7 @@ def write_json(path, value):
 
 def summarize(rows, blocks):
     result = {}
-    for name, _, _ in MODES:
+    for name in dict.fromkeys(r["mode"] for r in rows):
         selected = [r for r in rows if r["mode"] == name]
         times = [r["total_s"] for r in selected]
         total = sum(times)
@@ -199,6 +211,7 @@ def prepare_prompts(args):
 def run(args):
     args.output.mkdir(parents=True, exist_ok=True)
     assert args.prompts % args.block_size == 0
+    modes_to_run = MODES + ARRAY_MODES if args.include_mc32 else MODES
     prompts = prepare_prompts(args)
     control_path = Path("/tmp/topk-benchmark-control")
     control_path.write_bytes(bytes(256))
@@ -259,7 +272,7 @@ def run(args):
                         write_json(args.output / "blocks.json", blocks)
                     return collected
 
-                for mode in MODES:
+                for mode in modes_to_run:
                     block(mode, list(enumerate(prompts[-32:])), f"warmup-{mode[0]}")
                 # Controlled greedy requests check that both wire formats preserve values.
                 parity = []
@@ -269,11 +282,27 @@ def run(args):
                     assert a[1] == b[1]
                     np.testing.assert_array_equal(a[2][1], b[2][1])
                     np.testing.assert_allclose(a[2][0], b[2][0], atol=1e-6, rtol=0)
+                    if args.include_mc32:
+                        c = request(client, prompts[0]["input_ids"], (f"array_{k}", k, True), 17, 32, 0, True)
+                        assert c[1] == a[1]
+                        np.testing.assert_array_equal(c[2][1], a[2][1])
+                        np.testing.assert_allclose(c[2][0], a[2][0], atol=1e-6, rtol=0)
                     parity.append({"k": k, "passed": True})
+                if args.include_mc32:
+                    # Mixed requests exercise row selection and batch merges, including
+                    # normal requests with no scores. Every result checks mode/shape.
+                    mixed = [MODES[0], MODES[-1], ARRAY_MODES[0], ARRAY_MODES[-1]] * 8
+                    futures = [
+                        executor.submit(request, client, p["input_ids"], mode, 19000 + i, 32)
+                        for i, (p, mode) in enumerate(zip(prompts[-32:], mixed))
+                    ]
+                    for future in futures:
+                        future.result()
+                    parity.append({"mixed_batch": True, "passed": True})
                 write_json(args.output / "parity.json", parity)
                 for repeat in range(args.repeats):
                     for offset in range(0, args.prompts, args.block_size):
-                        modes = list(MODES)
+                        modes = list(modes_to_run)
                         random.Random(1700 + repeat * args.prompts + offset).shuffle(modes)
                         batch = list(enumerate(prompts[offset : offset + args.block_size], start=offset))
                         for mode in modes:
@@ -300,6 +329,7 @@ def main():
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--block-size", type=int, default=256)
     parser.add_argument("--concurrency", type=int, default=32)
+    parser.add_argument("--include-mc32", action="store_true")
     parser.add_argument("--tokens", type=int, default=256)
     args = parser.parse_args()
     run(args)

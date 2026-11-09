@@ -88,6 +88,35 @@ def install():
     wrap_gpu(sampler.Sampler, "forward", "sampler_including_logprobs_stream")
     wrap_gpu(logprob, "get_top_logprobs", "topk_extraction_stream")
     wrap_gpu(results.GenerationBatchResult, "copy_to_cpu", "result_d2h_stream")
+    if hasattr(sampler, "compute_mc_scores"):
+        wrap_gpu(sampler, "compute_mc_scores", "mc32_extraction_stream")
+
+    def wrap_host(owner, name, label):
+        original = getattr(owner, name)
+        calls = 0
+
+        @functools.wraps(original)
+        def timed(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls % 32:
+                return original(*args, **kwargs)
+            block = marker()
+            start = time.perf_counter()
+            result = original(*args, **kwargs)
+            emit({"block": block, "stage": label, "host_ms": (time.perf_counter() - start) * 1000, "sample_every": 32})
+            return result
+
+        setattr(owner, name, timed)
+
+    batch_results = importlib.import_module("sglang.srt.managers.scheduler_components.batch_result_processor")
+    streamer = importlib.import_module("sglang.srt.managers.scheduler_components.output_streamer")
+    wrap_host(batch_results.SchedulerBatchResultProcessor, "move_logprobs_to_cpu", "scheduler_score_conversion")
+    wrap_host(streamer._GenerationStreamAccumulator, "accept", "scheduler_request_accumulation")
+
+    transport = importlib.import_module("sglang.srt.managers.io_struct")
+    wrap_host(transport, "msgpack_encode", "ipc_pack")
+    wrap_host(transport, "msgpack_decode", "ipc_unpack")
 
     manager = importlib.import_module("sglang.srt.managers.tokenizer_manager")
     original_pack = manager.TokenizerManager.add_logprob_to_meta_info
