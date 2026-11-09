@@ -145,11 +145,19 @@ def test_async_lag_uses_core_optimizer_steps(monkeypatch):
     )
 
 
-@pytest.mark.parametrize("enabled", [True, False])
-def test_direct_native_cli_resolves_default_group_filter(monkeypatch, enabled):
+@pytest.mark.parametrize(
+    "enabled,exclude_ungraded,expected",
+    [
+        (True, True, "open_instruct.miles.rewards.exclusion.filter_graded_reward_variance"),
+        (False, True, "open_instruct.miles.rewards.exclusion.filter_graded_responses"),
+        (True, False, "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"),
+        (False, False, None),
+    ],
+)
+def test_direct_native_cli_resolves_default_group_filter(monkeypatch, enabled, exclude_ungraded, expected):
     # Omit the compiled native filter flag to exercise direct native CLI callers.
     config = RunConfig(
-        CoreConfig(filter_zero_std_groups=enabled),
+        CoreConfig(filter_zero_std_groups=enabled, exclude_ungraded=exclude_ungraded),
         {"hf_checkpoint": "model", "rollout_batch_size": 1, "n_samples_per_prompt": 4, "global_batch_size": 4},
     )
     argv = ["test", *config.arguments()]
@@ -159,5 +167,4 @@ def test_direct_native_cli_resolves_default_group_filter(monkeypatch, enabled):
     monkeypatch.setattr(sys, "argv", argv)
     with contextlib.redirect_stderr(io.StringIO()):
         parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
-    expected = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std" if enabled else None
     assert parsed.dynamic_sampling_filter_path == expected

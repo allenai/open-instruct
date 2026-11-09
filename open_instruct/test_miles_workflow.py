@@ -132,8 +132,8 @@ def test_changed_run_spec_cannot_resume(spec):
         pytest.fail("changed spec accepted")
 
 
-@pytest.mark.parametrize("deadline", (False, True))
-def test_execute_failure_then_resume_uses_checkpoint_and_same_preparation(spec, monkeypatch, deadline):
+@pytest.mark.parametrize("completion", ("updates", "deadline", "exhausted", "empty_exhausted"))
+def test_execute_failure_then_resume_uses_checkpoint_and_same_preparation(spec, monkeypatch, completion):
     root = Path(spec.output["root"])
     preparation_calls = []
     training_calls = []
@@ -157,7 +157,12 @@ def test_execute_failure_then_resume_uses_checkpoint_and_same_preparation(spec, 
             checkpoint.mkdir()
             (checkpoint / "core-latest.json").write_text("{}")
             raise RuntimeError("interrupted after durable save")
-        return {"completed_rollout_ids": [0], "stopped_for_time": True} if deadline else {"updates": 2}
+        return {
+            "updates": {"updates": 2},
+            "deadline": {"completed_rollout_ids": [0], "stopped_for_time": True},
+            "exhausted": {"completed_rollout_ids": [0], "pools_exhausted": True},
+            "empty_exhausted": {"completed_rollout_ids": [], "start_rollout_id": 1, "pools_exhausted": True},
+        }[completion]
 
     monkeypatch.setattr(run_data, "prepare_data", prepare_data)
     monkeypatch.setattr(workflow, "train_config", train)

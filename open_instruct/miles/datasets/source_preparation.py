@@ -37,7 +37,7 @@ FACTORIES = {
     "complete_code": "open_instruct.miles.rewards.complete_code.CompleteCodeVerifier",
     "reference_judge": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
     "deterministic": "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
-    "math": "open_instruct.ground_truth_utils.MathVerifier",
+    "math": "open_instruct.miles.rewards.math_verifier.MathVerifier",
     "structured": "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
     "instruction": "open_instruct.miles.rewards.nvidia_constraints.InstructionVerifier",
     "ifeval": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",

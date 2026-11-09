@@ -16,6 +16,7 @@ from miles.ray.rollout.metrics import compute_rollout_step
 from miles.utils.tracking_utils import tracking
 
 from open_instruct import logger_utils
+from open_instruct.miles.rewards import rewards
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -68,10 +69,19 @@ def math_verifier_metrics(samples) -> dict[str, float]:
     if not records:
         return {}
     timeouts = sum(record.get("status") == "timeout" for record in records)
+    symbolic_timeouts = sum(record.get("symbolic_timeouts", 0) for record in records)
+    symbolic_timeout_samples = sum(record.get("symbolic_timeouts", 0) > 0 for record in records)
     return {
         "rollout/math_verifier/samples": len(records),
         "rollout/math_verifier/timeouts": timeouts,
         "rollout/math_verifier/timeout_fraction": timeouts / len(records),
+        "rollout/math_verifier/symbolic_timeouts": symbolic_timeouts,
+        "rollout/math_verifier/symbolic_timeout_samples": symbolic_timeout_samples,
+        "rollout/math_verifier/symbolic_timeout_fraction": symbolic_timeout_samples / len(records),
+        "rollout/math_verifier/symbolic_timeout_rewarded_samples": sum(
+            record.get("symbolic_timeouts", 0) > 0 and record.get("symbolic_timeout_rewarded", False)
+            for record in records
+        ),
     }
 
 
@@ -99,6 +109,16 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
     metrics = {"rollout/verification/omitted_records": omitted}
     if omitted:
         logger.warning("verification %d: omitted %d prompt records with missing rewards", rollout_id, omitted)
+    if samples:
+        # Ungraded responses stay in the consumed batch with a placeholder zero; the
+        # configured exclusion post-process masks them. Report how many there were.
+        ungraded = rewards.ungraded_count(samples)
+        metrics["rollout/verification/ungraded_samples"] = ungraded
+        metrics["rollout/verification/ungraded_fraction"] = ungraded / len(samples)
+        if ungraded:
+            logger.warning(
+                "verification %d: %d of %d consumed responses were ungraded", rollout_id, ungraded, len(samples)
+            )
     service_metrics = code_service_metrics(samples)
     metrics.update(service_metrics)
     if service_metrics:

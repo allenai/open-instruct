@@ -2,3 +2,7 @@
 langdetect==1.0.9
 immutabledict==1.2.0
 nltk==3.9.2
+# Installed with --no-deps; keep the parser dependency explicit. SymPy/mpmath
+# and the worker-only ANTLR 4.11 runtime are supplied by the locked base.
+math-verify==0.9.0
+latex2sympy2-extended==1.11.0

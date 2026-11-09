@@ -102,7 +102,7 @@ def test_scoring_check_reduces_active_tokens_only():
     report = contract.validate_scoring_check(sums, maximum, tolerance=1e-3)
     assert report["active_tokens"] == 5 and report["tokens_above_edge"] == 1
     assert report["mean_abs"] == pytest.approx(0.0004, rel=1e-4)
-    with pytest.raises(ValueError, match="exceeds"):
+    with pytest.raises(ValueError, match="exceeds tolerance"):
         contract.validate_scoring_check(sums, maximum, tolerance=1e-4)
 
 

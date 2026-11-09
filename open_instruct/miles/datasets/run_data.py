@@ -7,6 +7,7 @@ same data instead of silently resampling or accepting changed files.
 """
 
 import copy
+import gzip
 import hashlib
 import importlib
 import json
@@ -19,9 +20,10 @@ from pathlib import Path
 
 from open_instruct import ifeval_constraints
 from open_instruct.miles.configuration import validation
-from open_instruct.miles.datasets import mixture, synlogic
+from open_instruct.miles.datasets import mixture, pools, synlogic
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import judging, task_verifiers
+from open_instruct.miles.rollout import pool_sampling
 
 # Preserve factory paths in existing prepared datasets and reward registries.
 RewardConfig = task_verifiers.RewardConfig
@@ -45,7 +47,7 @@ TASKS = {
 FACTORIES = {
     "sudoku": "open_instruct.miles.rewards.sudoku.SudokuVerifier",
     "gsm8k": "open_instruct.miles.rewards.verifiers.GSM8KVerifier",
-    "math": "open_instruct.ground_truth_utils.MathVerifier",
+    "math": "open_instruct.miles.rewards.math_verifier.MathVerifier",
     "strict_math": "open_instruct.ground_truth_utils.StrictMathVerifier",
     "ifeval_old": "open_instruct.ground_truth_utils.IFEvalVerifierOld",
     "ifeval": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
@@ -91,25 +93,31 @@ class _JsonlRows:
     def __init__(self, path, inputs):
         self.path = Path(path).resolve()
         self.annotations = {}
+        self.pool_assignment = None
         self.count = 0
         digest = hashlib.sha256()
         try:
-            with self.path.open("rb") as stream:
+            with self._open() as stream:
                 for line in stream:
                     digest.update(line)
                     self.count += bool(line.decode().strip())
         except UnicodeError as error:
             raise InputError(f"{self.path} must be UTF-8 JSONL.") from error
-        except OSError as error:
+        except (OSError, EOFError) as error:
             raise InputError(f"Cannot read input {self.path}: {error}") from error
-        inputs[str(self.path)] = digest.hexdigest()
+        # Resume identity binds the original compressed artifact, not just its
+        # decompressed contents. Neither pass materializes the file in memory.
+        inputs[str(self.path)] = _file_sha(self.path) if self.path.suffix == ".gz" else digest.hexdigest()
+
+    def _open(self):
+        return gzip.open(self.path, "rb") if self.path.suffix == ".gz" else self.path.open("rb")
 
     def __len__(self):
         return self.count
 
     def __iter__(self):
         index = 0
-        with self.path.open("rb") as stream:
+        with self._open() as stream:
             for line_number, line in enumerate(stream, 1):
                 if not line.strip():
                     continue
@@ -120,6 +128,9 @@ class _JsonlRows:
                 index += 1
                 if index in self.annotations:
                     row["metadata"].update(self.annotations[index])
+                if self.pool_assignment is not None:
+                    config, source_pool, labels = self.pool_assignment
+                    pools.annotate(row, config, source_pool=source_pool, labels=labels)
                 yield row
 
     def remember_validation(self, index, row):
@@ -146,6 +157,8 @@ def _required_mapping(value, name, fields):
 
 
 def _rows(raw, source="Data JSONL"):
+    if str(source).endswith(".gz"):
+        raw = gzip.decompress(raw)
     try:
         # Unicode paragraph/line separators are valid inside JSON strings.
         # JSONL record boundaries are LF, optionally preceded by CR.
@@ -174,6 +187,8 @@ def validate_data(data):
         "shuffle",
         "tasks",
         "sources",
+        "pools",
+        "sampling",
         "recipe",
         "rl_manifest",
         "prompt_data",
@@ -195,8 +210,15 @@ def validate_data(data):
         raise InputError("Named data recipes are not yet ported; use tasks or an immutable rl_manifest")
     if "prompt_data" in modes and not data.get("reward_config"):
         raise InputError("Prepared prompt_data requires a trusted reward_config")
+    resolved_pools = pools.resolve(data)
+    if "sampling" in data and not resolved_pools:
+        raise InputError("data.sampling requires data.pools or source pool assignments")
+    if resolved_pools:
+        pool_sampling.validate(data.get("sampling", {}), resolved_pools)
+        if "sources" not in modes:
+            raise InputError("data.pools requires data.sources")
     if "sources" in modes:
-        mixture.validate_sources(data["sources"])
+        mixture.validate_sources(data["sources"], pooled=bool(resolved_pools))
         for source in data["sources"]:
             if set(source) & {"sources", "seed", "shuffle"}:
                 raise InputError("Mixture sources cannot nest sources or override data.seed/shuffle")
@@ -602,6 +624,7 @@ def prepare_data(
     source and output digest before returning the same paths.
     """
     validate_data(data)
+    resolved_pools = pools.resolve(data)
     if type(max_prompt_length) is not int or max_prompt_length < 1:
         raise InputError("max_prompt_length must be positive")
     output, hf_checkpoint = Path(output).resolve(), Path(hf_checkpoint).resolve()
@@ -664,9 +687,15 @@ def prepare_data(
     if_verifiers = _if_verifier_names(known)
     if not all(partitions.get(split) for split in training):
         raise InputError("Preparation requires nonempty training data")
+    source_pools = {f"source-{source['name']}": source.get("pool") for source in data.get("sources", [])}
+    pool_labels = {spec["label"]: name for name, spec in resolved_pools.items()}
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
     for split, rows in partitions.items():
+        if isinstance(rows, _JsonlRows) and resolved_pools and split in training:
+            # Streaming rows are recreated for validation and output. Apply the
+            # same pool assignment on every pass, keeping held-out rows unchanged.
+            rows.pool_assignment = (resolved_pools, source_pools.get(split), pool_labels)
         for index, row in enumerate(rows, 1):
             try:
                 if registry_overrides is not None:
@@ -676,6 +705,8 @@ def prepare_data(
                         for verifier in verifiers:
                             if isinstance(verifier, dict) and isinstance(name := verifier.get("name"), str):
                                 judging.require_binding(name, registry_overrides, known.get(name))
+                if resolved_pools and split in training and not isinstance(rows, _JsonlRows):
+                    pools.annotate(row, resolved_pools, source_pool=source_pools.get(split), labels=pool_labels)
                 _verify_row(row, tokenizer, max_prompt_length, known)
                 if split in training:
                     _verify_if_training_row(row, if_verifiers)
@@ -723,19 +754,38 @@ def prepare_data(
             sources = [
                 {
                     "name": source["name"],
-                    "fraction": source["fraction"],
+                    **({"pool": source["pool"]} if "pool" in source else {}),
+                    **({"fraction": source["fraction"]} if "fraction" in source else {}),
                     "path": f"{split}.jsonl",
                     "sha256": outputs[f"{split}.jsonl"],
                     "rows": len(partitions[split]),
                 }
                 for source, split in zip(data["sources"], training, strict=True)
             ]
+            if resolved_pools:
+                # Planning stays stdlib-only; NumPy is needed only to prepare the indexes.
+                indexed_rows = importlib.import_module("open_instruct.miles.datasets.indexed_rows")
+                for source, split in zip(sources, training, strict=True):
+                    # Build compact derived indexes during CPU preparation, before
+                    # allocating training GPUs. Existing bundles can build lazily.
+                    index, _ = indexed_rows.open_index(
+                        staging / f"{split}.jsonl", source["sha256"], source["rows"], max_prompt_length
+                    )
+                    del index
             raw = _encoded(
                 {
                     "schema_version": 1,
                     "seed": contract["seed"],
                     "shuffle": data.get("shuffle", True),
                     "sources": sources,
+                    **(
+                        {
+                            "pools": resolved_pools,
+                            "sampling": pool_sampling.validate(data.get("sampling", {}), resolved_pools),
+                        }
+                        if resolved_pools
+                        else {}
+                    ),
                 }
             )
             (staging / "mixture.json").write_bytes(raw)

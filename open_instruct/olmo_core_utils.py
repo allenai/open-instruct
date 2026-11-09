@@ -4,6 +4,7 @@ OLMo-core utility functions, shared training configurations, and model configura
 
 import datetime
 import json
+import math
 import os
 import shlex
 import sys
@@ -22,8 +23,10 @@ from olmo_core.nn.attention import AttentionBackendName
 from olmo_core.nn.hf import convert as olmo_hf_convert
 from olmo_core.nn.hf.checkpoint import load_hf_model
 from olmo_core.nn.lm_head import LMLossImplementation
+from olmo_core.nn.moe import utils as oc_moe_utils
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import Transformer, TransformerConfig
+from olmo_core.optim.moe_optimizer import OLMoDDPOptimizerConfig, assign_full_tensor_to_dtensor
 from olmo_core.train import callbacks as train_callbacks
 from olmo_core.train import prepare_training_environment
 from olmo_core.train.callbacks import CheckpointerCallback
@@ -31,7 +34,12 @@ from olmo_core.train.train_module.transformer import (
     TransformerActivationCheckpointingConfig,
     TransformerActivationCheckpointingMode,
 )
-from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
+from olmo_core.train.train_module.transformer.config import (
+    OLMoDDPTrainModuleConfig,
+    TransformerContextParallelConfig,
+    TransformerDataParallelConfig,
+    TransformerExpertParallelConfig,
+)
 
 from open_instruct import logger_utils, model_utils, olmo_core_callbacks, olmo_core_hybrid, utils
 from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
@@ -158,6 +166,11 @@ class TrainingConfig:
     """Context parallelism degree. When set, enables context parallelism."""
     cp_strategy: Literal["llama3", "zig_zag", "ulysses"] = "llama3"
     """Context parallelism strategy."""
+    expert_parallel_degree: int | None = None
+    """Expert parallelism degree for OLMoDDPModel (MoE v2) models: routed experts are split across this many
+    ranks. EP folds over the data-parallel ranks, so a group can span nodes. The degree must be above 1 and
+    divide the world size; a negative value means all ranks. The EP path (all-to-all kind, capacity) comes
+    from the model config's `block.ep`."""
 
 
 def build_ac_config(
@@ -344,9 +357,40 @@ def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
         matrices.append(model.lm_head.w_out.weight)
     for weight in matrices:
         model_utils.seed_embedding_rows(weight, rows)
+    sync_optimizer_main_params(getattr(train_module, "optim", None), matrices)
 
     logger.info(f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices: {rows}")
     return len(rows)
+
+
+def sync_optimizer_main_params(optimizer, params: list[torch.Tensor]) -> None:
+    """Make an OLMoDDPOptimizer's main copies of `params` match the params after an in-place edit.
+
+    That optimizer (MoE v2 models) owns the weights: each `step()` writes its `<name>.main` states
+    back over the model. For bf16 params those are separate fp32 copies, filled when the base
+    checkpoint loaded, so an edit to the model alone is undone on step 1; for fp32 params they are
+    views of the params and the copy is a no-op. Other optimizers read the params themselves and
+    have no `states`, so this returns without doing anything.
+
+    Afterwards each synced main must equal its param exactly, or the run dies at startup.
+    """
+    states = getattr(optimizer, "states", None)
+    if states is None:
+        return
+    targets = {id(param) for param in params}
+    synced: list[tuple[str, torch.Tensor]] = []
+    for group in optimizer.param_groups:
+        for name, param in group["named_params"].items():
+            if id(param) in targets:
+                assign_full_tensor_to_dtensor(dst=states[f"{name}.main"], src=param.data.float().reshape(-1))
+                synced.append((name, param))
+    if len(synced) != len(targets):
+        raise RuntimeError(f"Found optimizer main params for {len(synced)} of {len(targets)} seeded matrices")
+    for name, param in synced:
+        main = states[f"{name}.main"].full_tensor().reshape(-1)
+        if not torch.equal(main, param.data.float().reshape(-1)):
+            raise RuntimeError(f"{name}: optimizer main param does not match the seeded param after the sync")
+    logger.info(f"Synced {len(synced)} optimizer main param(s) with the seeded rows")
 
 
 def reload_hf_checkpoint_after_parallelization(train_module, model_name_or_path: str, work_dir: str) -> None:
@@ -473,6 +517,10 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
     Raises:
         ValueError: If model/config not found.
     """
+    # Only olmo_core_finetune.py can train the MoE v2 (OLMoDDPModel) models such a file may describe.
+    if model_name_or_config.endswith(".json") and os.path.isfile(model_name_or_config):
+        return transformer_config_from_json(model_name_or_config, vocab_size)
+
     config_name = OLMO_MODEL_CONFIG_MAP.get(model_name_or_config)
     if config_name is None:
         config_name = model_name_or_config
@@ -494,6 +542,119 @@ def get_transformer_config(model_name_or_config: str, vocab_size: int, attn_back
         )
     return getattr(TransformerConfig, config_name)(
         vocab_size=vocab_size, attn_backend=AttentionBackendName(attn_backend)
+    )
+
+
+def transformer_config_from_json(config_path: str, vocab_size: int) -> TransformerConfig:
+    """Build the architecture an olmo-core `config.json` records, rather than a preset.
+
+    Takes the file's `model` section (or the whole file, if it has none). This is how MoE v2
+    (`OLMoDDPModelConfig`) checkpoints load: they have no preset. Attention backends come from the
+    file, not `--attn_implementation`. The file's vocab size is kept so the weights still load.
+    """
+    with open(config_path) as config_file:
+        payload = json.load(config_file)
+    config = TransformerConfig.from_dict(payload.get("model", payload))
+    logger.info(
+        f"Built {type(config).__name__} from {config_path}: {config.num_params:,} params, "
+        f"{config.n_layers} layers, vocab {config.vocab_size}"
+    )
+    if vocab_size > config.vocab_size:
+        raise ValueError(
+            f"{config_path} has vocab_size {config.vocab_size}, below the tokenizer's padded vocab {vocab_size}: "
+            "token ids past the embedding would fail on the GPU. Is this the right tokenizer?"
+        )
+    if config.vocab_size != vocab_size:
+        logger.warning(
+            f"Config vocab_size {config.vocab_size} != tokenizer-derived {vocab_size}; "
+            "keeping the config's value so the weights still load."
+        )
+    return config
+
+
+def require_transformer_engine() -> None:
+    """Fail at startup when OLMo-core's MoE v2 token permutation has no kernels to call.
+
+    OLMo-core imports transformer-engine's permutation ops behind a guard and sets them to None
+    when it is missing, so without this check an MoE v2 model fails on its first forward pass.
+    """
+    if oc_moe_utils.moe_permute is None:
+        raise RuntimeError(
+            "MoE v2 (OLMoDDPModel) training needs transformer-engine: OLMo-core's MoE token permutation "
+            "calls transformer_engine.pytorch.permutation, which is not importable here. open-instruct's "
+            "images do not install it yet; run on an image with transformer-engine[pytorch] built against "
+            "this torch."
+        )
+
+
+def read_checkpoint_train_module(config_path: str) -> dict[str, Any]:
+    """The `train_module` section of an olmo-core `config.json`, which must hold `optim` and `dp_config`."""
+    with open(config_path) as config_file:
+        train_module = json.load(config_file).get("train_module")
+    missing = [key for key in ("optim", "dp_config") if key not in (train_module or {})]
+    if missing:
+        raise ValueError(f"{config_path} has no train_module {' or '.join(missing)} to build the MoE v2 trainer from.")
+    return train_module
+
+
+def build_ddp_train_module_config(
+    config_path: str,
+    rank_microbatch_size: int,
+    max_sequence_length: int,
+    learning_rate: float,
+    weight_decay: float,
+    scheduler: Any,
+    max_grad_norm: float | None,
+    compile_model: bool,
+    ac_config: TransformerActivationCheckpointingConfig | None,
+    expert_parallel_degree: int | None = None,
+) -> OLMoDDPTrainModuleConfig:
+    """Build the DDP train-module config for an OLMoDDPModel (MoE v2) model.
+
+    These models refuse FSDP and train through OLMo-core's DDP train module. The optimizer and
+    dp_config come from the checkpoint config's `train_module` section, the combination that
+    pretrained the model, with only the SFT knobs overridden: lr, weight decay, scheduler, batch
+    geometry, grad clipping and compilation, plus expert parallelism for models whose unsharded
+    experts and fp32 grads do not fit on one GPU (DDP shards neither). Per-group overrides are kept as
+    they are, and logged. The checkpoint's own ep_config is not carried over; a mismatch is logged.
+    The z-loss multiplier is the checkpoint's, as on the GPU SFT line whose runs this path reproduces
+    (the FSDP path turns z-loss off).
+    """
+    checkpoint_train_module = read_checkpoint_train_module(config_path)
+    optim_config = OLMoDDPOptimizerConfig.from_dict(checkpoint_train_module["optim"])
+    optim_config.lr = learning_rate
+    optim_config.weight_decay = weight_decay
+    # This optimizer always clips; an infinite threshold makes the clip coefficient 1, which is
+    # what `max_grad_norm=None` means on the FSDP path.
+    optim_config.max_grad_norm = max_grad_norm if max_grad_norm is not None else math.inf
+    for override in optim_config.group_overrides or []:
+        logger.info(f"Keeping the checkpoint's optimizer group override {override.params}: {override.opts}")
+    checkpoint_ep_degree = (checkpoint_train_module.get("ep_config") or {}).get("degree")
+    if checkpoint_ep_degree is not None and checkpoint_ep_degree != expert_parallel_degree:
+        this_run = (
+            f"degree {expert_parallel_degree}"
+            if expert_parallel_degree is not None
+            else "no expert parallelism; pass --expert_parallel_degree to shard the experts"
+        )
+        logger.warning(
+            f"The checkpoint was pretrained with expert parallelism degree {checkpoint_ep_degree} (negative means "
+            f"all ranks); this run uses {this_run}."
+        )
+
+    return OLMoDDPTrainModuleConfig(
+        rank_microbatch_size=rank_microbatch_size,
+        max_sequence_length=max_sequence_length,
+        optim=optim_config,
+        dp_config=TransformerDataParallelConfig.from_dict(checkpoint_train_module["dp_config"]),
+        ep_config=(
+            TransformerExpertParallelConfig(degree=expert_parallel_degree)
+            if expert_parallel_degree is not None
+            else None
+        ),
+        scheduler=scheduler,
+        compile_model=compile_model,
+        ac_config=ac_config,
+        z_loss_multiplier=checkpoint_train_module.get("z_loss_multiplier"),
     )
 
 
