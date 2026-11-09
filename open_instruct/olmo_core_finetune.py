@@ -264,7 +264,8 @@ def _check_extra_numpy_dir(
                     f"{token_path} has token id {max_id:,} >= vocab size {tokenizer.vocab_size:,}; "
                     f"was it written as {dtype_name}?"
                 )
-        # Only the EOS scan drops a file's tail; metadata boundaries keep rows that end without EOS.
+        # Only the EOS scan drops a file's tail; metadata boundaries keep rows that end without EOS
+        # (olmo35 tool-call rows end in `<|im_end|>\n`, not EOS).
         if not require_metadata and int(tokens[-1]) != tokenizer.eos_token_id:
             raise ValueError(
                 f"{token_path} does not end with EOS ({tokenizer.eos_token_id}); OLMo-core's EOS scan "
@@ -285,6 +286,12 @@ def _check_extra_numpy_dir(
             ],
             dtype=np.int64,
         )
+        # With no trailing-EOS check, a stale or truncated .csv.gz would silently drop the file's tail.
+        if require_metadata and int(doc_lengths.sum()) != num_tokens:
+            raise ValueError(
+                f"{token_path}: its metadata rows cover {int(doc_lengths.sum()):,} of its {num_tokens:,} tokens; "
+                "is the .csv.gz stale?"
+            )
         over = doc_lengths[doc_lengths > sequence_length]
         stats.num_docs += len(doc_lengths)
         stats.num_docs_over_length += len(over)
@@ -442,8 +449,8 @@ class SFTConfig:
     """Local pretokenized numpy dirs to train on alongside the chat cache, in the converter's layout:
     `token_ids_part_XXXX.npy` (raw tokens in the dtype OLMo-core picks for the vocab, uint32 for Olmo)
     and `labels_mask_part_XXXX.npy` (one bool per token), plus `token_ids_part_XXXX.csv.gz` (one
-    `start,end` line per doc) unless `--no_document_boundaries_from_metadata`. Each part must end
-    with EOS. Their parts are packed the same way as the cache's, one source file at a time, so an
+    `start,end` line per doc, covering every token) unless `--no_document_boundaries_from_metadata`,
+    in which case each part must end with EOS. Their parts are packed the same way as the cache's, one source file at a time, so an
     instance never mixes extra docs with chat rows; the loader then shuffles all instances together.
     Docs longer than max_seq_length are truncated. Every node needs the same dirs at the same paths.
     Checked at startup, which logs token and loss-token totals for the cache and the extras."""
