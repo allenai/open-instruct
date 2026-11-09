@@ -99,6 +99,7 @@ class VerificationResult:
     score: float
     cost: float = 0.0
     reasoning: str | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 @dataclasses.dataclass
@@ -286,10 +287,11 @@ class MathVerifier(VerifierFunction):
             all_answers.append(prediction)
 
         # Compare each candidate answer to the ground truth.
+        diagnostics = {"symbolic_timeouts": 0}
         for answer in all_answers:
-            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
-                return VerificationResult(score=1.0)
-        return VerificationResult(score=0.0)
+            if is_equiv(answer, label, diagnostics=diagnostics) or hendrycks_is_equiv(answer, label):
+                return VerificationResult(score=1.0, diagnostics=diagnostics)
+        return VerificationResult(score=0.0, diagnostics=diagnostics)
 
 
 class StrictMathVerifier(VerifierFunction):
@@ -315,10 +317,11 @@ class StrictMathVerifier(VerifierFunction):
             all_answers.append(minerva_answer)
         if not all_answers:
             all_answers.append(normalize_final_answer(prediction))
+        diagnostics = {"symbolic_timeouts": 0}
         for answer in all_answers:
-            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
-                return VerificationResult(score=1.0)
-        return VerificationResult(score=0.0)
+            if is_equiv(answer, label, diagnostics=diagnostics) or hendrycks_is_equiv(answer, label):
+                return VerificationResult(score=1.0, diagnostics=diagnostics)
+        return VerificationResult(score=0.0, diagnostics=diagnostics)
 
 
 class IFEvalVerifier(VerifierFunction):
@@ -1367,9 +1370,13 @@ class RewardConfig:
             scores = [0.0] * len(decoded_responses)
             metrics: dict[str, Any] = {}
             format_scores: list[float] = []
+            format_valid: list[bool] = []
 
             if self.apply_r1_style_format_reward:
                 format_scores = soft_format_reward_func(decoded_responses, self.r1_style_format_reward)
+                # Validity is kept apart from the reward magnitude, so the non-additive gate still
+                # checks the format when r1_style_format_reward is 0.0 (or any other value).
+                format_valid = [score > 0 for score in soft_format_reward_func(decoded_responses, 1.0)]
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):
@@ -1405,7 +1412,7 @@ class RewardConfig:
                         if self.apply_r1_style_format_reward and self.additive_format_reward:
                             scores[i] = raw_score + scores[i]
                         elif self.apply_r1_style_format_reward and not self.additive_format_reward:
-                            scores[i] = raw_score if format_scores[i] == 1 else 0
+                            scores[i] = raw_score if format_valid[i] else 0
                         else:
                             scores[i] = raw_score
 

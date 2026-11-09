@@ -21,6 +21,14 @@ PREFLIGHT_ATTENTION_BACKENDS = ("torch", "flash_2", "flash_3", "flash_4")
 ZERO_STD_FILTER = "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
 FINISHED_STD_FILTER = "open_instruct.miles.rewards.truncation.filter_finished_reward_variance"
 EXCLUDE_TRUNCATED = "open_instruct.miles.rewards.truncation.exclude_truncated"
+GRADED_STD_FILTER = "open_instruct.miles.rewards.exclusion.filter_graded_reward_variance"
+EXCLUDE_UNGRADED = "open_instruct.miles.rewards.exclusion.exclude_ungraded"
+# Reward post-processes that leave ungraded responses out of their group baseline,
+# paired with the group filter that ignores the same responses.
+EXCLUSION_FILTERS = {EXCLUDE_TRUNCATED: FINISHED_STD_FILTER, EXCLUDE_UNGRADED: GRADED_STD_FILTER}
+GRADED_FILTER = "open_instruct.miles.rewards.exclusion.filter_graded_responses"
+FINISHED_FILTER = "open_instruct.miles.rewards.exclusion.filter_finished_responses"
+EXCLUSION_EMPTY_FILTERS = {EXCLUDE_TRUNCATED: FINISHED_FILTER, EXCLUDE_UNGRADED: GRADED_FILTER}
 EXPERT_SCHEDULE = "miles.backends.core_utils.expert_schedule.reorder_samples"
 RECORD_RESPONSE_MODES = ("off", "all", "sample")
 
@@ -29,6 +37,7 @@ RECORD_RESPONSE_MODES = ("off", "all", "sample")
 class CoreConfig:
     reward_zero_truncated: bool = True
     reward_final_answer_only: bool = False
+    exclude_ungraded: bool = True
     max_run_seconds: float | None = None
     max_run_final: bool = False
     filter_zero_std_groups: bool = True
@@ -93,6 +102,7 @@ class CoreConfig:
     # standalone-versus-training check that guards the skipped path.
     scoring_pass_required: bool = False
     scoring_check_interval: int = 50
+    # Fail when the mean absolute standalone/training gap exceeds this tolerance.
     scoring_check_tolerance: float = 1e-3
     # Publication layout for routed experts: per-expert HF slices, or one stacked
     # tensor per layer and projection in the serving engine's fused layout.
@@ -106,12 +116,31 @@ class CoreConfig:
     prompt_mixture: str | None = None
     remind_review_fraction: float = 0.02
     remind_enqueue_probability: float = 0.25
+    # Optional history/replay layer over the ordinary shuffle or mixture provider.
+    prompt_replay_enabled: bool = False
+    prompt_replay_fraction: float = 0.1
+    prompt_replay_length_drop: float = 0.1
+    prompt_replay_window: int = 256
+    prompt_replay_max_successes: int = 1
+    prompt_replay_truncation: str = "any"
+    prompt_replay_answer_probe: bool = False
     # Frozen prompt-exclusion table from `records select`, pinned by SHA-256.
     selection_table: str | None = None
     selection_sha256: str | None = None
 
     def __post_init__(self):
-        validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture"))
+        validation.boolean(self.prompt_replay_enabled, "core.prompt_replay_enabled")
+        validation.boolean(self.prompt_replay_answer_probe, "core.prompt_replay_answer_probe")
+        validation.number(self.prompt_replay_fraction, "core.prompt_replay_fraction", maximum=1)
+        validation.number(self.prompt_replay_length_drop, "core.prompt_replay_length_drop", maximum=1)
+        if self.prompt_replay_length_drop == 1:
+            raise constraints.error("core.prompt_replay_length_drop must be below 1")
+        validation.integer(self.prompt_replay_window, "core.prompt_replay_window", minimum=1)
+        validation.integer(self.prompt_replay_max_successes, "core.prompt_replay_max_successes", minimum=0)
+        validation.choice(
+            self.prompt_replay_truncation, "core.prompt_replay_truncation", ("none", "any", "half", "all")
+        )
+        validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture", "pools"))
         validation.number(self.remind_review_fraction, "core.remind_review_fraction", maximum=1, exclusive_min=True)
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
@@ -176,6 +205,7 @@ class CoreConfig:
         for name in (
             "reward_zero_truncated",
             "reward_final_answer_only",
+            "exclude_ungraded",
             "filter_zero_std_groups",
             "compiler_cache",
             "compiler_cache_restore",
@@ -310,12 +340,21 @@ class RunConfig:
             if options.get("sglang_enable_fp32_lm_head") is False:
                 raise constraints.error("core.fp32_lm_head conflicts with miles.sglang_enable_fp32_lm_head=false")
             options["sglang_enable_fp32_lm_head"] = True
+        post_process = options.get("custom_reward_post_process_path")
+        if (
+            post_process is None
+            and self.core.exclude_ungraded
+            # Expert-balanced packing rejects every post-process, and the exclusion
+            # hooks support single-segment rollouts only.
+            and not self.core.expert_balanced_packing
+            and not options.get("partial_rollout")
+            and not options.get("custom_convert_samples_to_train_data_path")
+        ):
+            post_process = options["custom_reward_post_process_path"] = EXCLUDE_UNGRADED
+        if post_process in EXCLUSION_FILTERS and options.get("custom_convert_samples_to_train_data_path"):
+            raise constraints.error("Reward exclusion is bypassed by custom_convert_samples_to_train_data_path")
         path = options.get("dynamic_sampling_filter_path")
-        builtin_filter = (
-            FINISHED_STD_FILTER
-            if options.get("custom_reward_post_process_path") == EXCLUDE_TRUNCATED
-            else ZERO_STD_FILTER
-        )
+        builtin_filter = EXCLUSION_FILTERS.get(post_process, ZERO_STD_FILTER)
         if self.core.filter_zero_std_groups:
             if path not in (None, ZERO_STD_FILTER, builtin_filter):
                 raise constraints.error(
@@ -327,10 +366,19 @@ class RunConfig:
                     "filter_zero_std_groups requires samples_per_prompt > 1; disable it for single samples"
                 )
             options["dynamic_sampling_filter_path"] = builtin_filter
-        elif path in (ZERO_STD_FILTER, FINISHED_STD_FILTER):
+        elif path in (ZERO_STD_FILTER, *EXCLUSION_FILTERS.values()):
             raise constraints.error(
                 "core.filter_zero_std_groups=false conflicts with the explicit zero-std filter path"
             )
+        elif post_process in EXCLUSION_EMPTY_FILTERS:
+            empty_filter = EXCLUSION_EMPTY_FILTERS[post_process]
+            if path not in (None, empty_filter):
+                raise constraints.error(
+                    "Reward exclusion requires its paired group filter to reject fully masked groups; "
+                    "remove the custom filter or select a compatible custom reward post-process. "
+                    "Disable core.exclude_ungraded to remove the automatically selected post-process."
+                )
+            options["dynamic_sampling_filter_path"] = empty_filter
         hook = options.get("rollout_sample_filter_path")
         if self.core.expert_balanced_packing:
             if hook not in (None, EXPERT_SCHEDULE):
@@ -405,7 +453,10 @@ class RunConfig:
             if self.core.packing_max_tokens < self.core.max_sequence_length:
                 raise constraints.error("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = self.resolved_miles()
-        if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path"):
+        if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path") not in (
+            None,
+            EXCLUDE_UNGRADED,
+        ):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
         if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
@@ -423,15 +474,35 @@ class RunConfig:
             raise constraints.error(
                 "core.records_root (records.enabled) requires fully_async=true; synchronous runs record nothing"
             )
-        if (self.core.prompt_provider == "mixture") != (self.core.prompt_mixture is not None):
-            raise constraints.error("core.prompt_mixture is required only with prompt_provider=mixture")
-        if self.core.prompt_provider == "mixture" and not options.get("rollout_global_dataset", True):
+        if (self.core.prompt_provider in ("mixture", "pools")) != (self.core.prompt_mixture is not None):
+            raise constraints.error("core.prompt_mixture is required only with prompt_provider=mixture or pools")
+        if self.core.prompt_provider in ("mixture", "pools") and not options.get("rollout_global_dataset", True):
             raise constraints.error("Mixtures require rollout_global_dataset=true")
-        if self.core.prompt_provider == "mixture" and self.core.selection_table is not None:
+        if self.core.prompt_provider in ("mixture", "pools") and self.core.selection_table is not None:
             raise constraints.error(
                 "Mixtures cannot yet be combined with a frozen prompt-exclusion table; "
                 "remove [selection]. Exclusions must be applied within each source to preserve its allocation."
             )
+        if self.core.prompt_provider == "pools":
+            if not options.get("fully_async", False) or self.core.records_root is None:
+                raise constraints.error("Named pools require fully_async=true and inference records")
+            if self.core.prepared_batch_overlap:
+                raise constraints.error("Named pools currently require prepared_batch_overlap=false")
+            if options.get("async_unused_samples_handler", "drop") != "drop":
+                raise constraints.error("Named pools require async_unused_samples_handler=drop")
+            if options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 0) != options.get(
+                "global_batch_size"
+            ):
+                raise constraints.error("Named pools require exactly one optimizer update per collection")
+            if options.get("custom_convert_samples_to_train_data_path") or options.get("load_debug_rollout_data"):
+                raise constraints.error("Named pools require unmodified generated training batches")
+        if self.core.prompt_replay_enabled:
+            if not options.get("fully_async", False) or self.core.records_root is None:
+                raise constraints.error("Prompt replay requires fully_async=true and inference records")
+            if not options.get("rollout_global_dataset", True):
+                raise constraints.error("Prompt replay requires rollout_global_dataset=true")
+            if self.core.prompt_provider == "remind" or self.core.selection_table is not None:
+                raise constraints.error("Prompt replay supports shuffle/mixture without frozen exclusions or ReMind")
         if self.core.prompt_provider == "remind":
             if not options.get("fully_async", False) or self.core.records_root is None:
                 raise constraints.error("ReMind requires fully_async=true and inference records (core.records_root)")
@@ -611,10 +682,14 @@ class RunConfig:
                 "engine_drain currently supports blocking shared-engine evaluation only",
                 constraints.Category.NOT_IMPLEMENTED,
             )
-        if options.get("dynamic_sampling_filter_path") not in (None, ZERO_STD_FILTER, FINISHED_STD_FILTER):
+        if options.get("dynamic_sampling_filter_path") not in (
+            None,
+            ZERO_STD_FILTER,
+            *EXCLUSION_FILTERS.values(),
+            *EXCLUSION_EMPTY_FILTERS.values(),
+        ):
             raise constraints.error(
-                "engine_drain supports only the built-in zero-std dynamic sampling filter",
-                constraints.Category.NOT_IMPLEMENTED,
+                "engine_drain supports only the built-in reward-group filters", constraints.Category.NOT_IMPLEMENTED
             )
         for name in (
             "custom_generate_function_path",

@@ -246,6 +246,14 @@ class _IsolatedVerifier:
             "status": "ok",
             "elapsed_seconds": time.monotonic() - start,
         }
+        if symbolic_timeouts := result.diagnostics.get("symbolic_timeouts", 0):
+            result.diagnostics["symbolic_timeout_rewarded"] = result.score > 0
+            # Worker stderr is suppressed; surface the completed result here.
+            logger.warning(
+                "Math verifier completed with %d symbolic comparison timeout(s); final score=%s",
+                symbolic_timeouts,
+                result.score,
+            )
         return result
 
 
@@ -295,6 +303,35 @@ def _registry(path):
     if not isinstance(document, dict) or not document:
         raise ValueError("reward_config must map verifier names to factory/config objects")
     return {name: _resolve_verifier(spec, isolate_symbolic=True) for name, spec in document.items()}
+
+
+@functools.lru_cache(maxsize=8)
+def _masks_ungraded_path(path):
+    module, _, symbol = path.rpartition(".")
+    return bool(getattr(getattr(importlib.import_module(module), symbol), "masks_ungraded", False))
+
+
+def masks_ungraded(args) -> bool:
+    """Whether the configured reward post-process excludes ungraded responses itself.
+
+    ``open_instruct.miles.rewards.exclusion`` hooks declare ``masks_ungraded``. For
+    them an ungraded training response keeps reward 0 plus its ``reward_omission``
+    marker, and the post-process masks it. Without such a hook the response has no
+    reward and the pinned MILES collector drops its whole prompt group.
+    """
+    if getattr(args, "custom_convert_samples_to_train_data_path", None):
+        return False  # Native conversion bypasses the reward post-process.
+    path = getattr(args, "custom_reward_post_process_path", None)
+    return bool(path) and _masks_ungraded_path(path)
+
+
+def ungraded_count(samples) -> int:
+    """Count consumed responses whose reward is a placeholder for a failed grade."""
+    return sum(
+        1
+        for sample in samples
+        if isinstance(getattr(sample, "metadata", None), dict) and "reward_omission" in sample.metadata
+    )
 
 
 def _capture_verifier_failure(args, sample, spec, response, error, *, capture_kind="exception"):
@@ -415,6 +452,17 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                 raise
             metadata["reward_omission"] = {"verifier": name, "error": f"{type(error).__name__}: {error}"}
             metadata.pop("reward_components", None)
+            if masks_ungraded(args):
+                # The configured post-process gives this response zero advantage and
+                # a zeroed loss mask and leaves it out of its group's baseline, so
+                # the stored zero never acts as a grade. Its graded siblings train.
+                logger.warning(
+                    "Excluding ungraded response from prompt group %s after verifier %s failed: %s",
+                    sample.group_index,
+                    name,
+                    metadata["reward_omission"]["error"],
+                )
+                return 0.0
             logger.warning(
                 "Omitting prompt group %s after verifier %s failed: %s",
                 sample.group_index,
@@ -451,7 +499,9 @@ async def registered_reward(args, samples, *, failure_policy="raise", **kwargs):
 
 
 async def rollout_reward(args, samples, **kwargs):
-    """Omit ungraded training groups; zero reported failures in evaluation.
+    """Exclude ungraded training responses, or omit their groups without a masking hook.
+
+    Reported failures receive zero in evaluation.
 
     MILES assigns group_index when drawing training prompts. Evaluation samples
     have no group_index and are not passed through the replacement/filter loop.

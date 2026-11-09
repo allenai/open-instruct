@@ -252,7 +252,7 @@ _EXTRA_VOCAB = 100_352
 
 
 def _write_parts(numpy_dir: str, docs_per_part: list[list[tuple[list[int], bool]]], token_dtype=np.uint32) -> None:
-    """Write converter-layout parts: each doc is (EOS-terminated tokens, loss on every token)."""
+    """Write converter-layout parts: each doc is (tokens, loss on every token)."""
     os.makedirs(numpy_dir, exist_ok=True)
     for index, docs in enumerate(docs_per_part):
         tokens = np.array([t for doc, _ in docs for t in doc], dtype=token_dtype)
@@ -431,6 +431,72 @@ class ExtraNumpyDirsTest(unittest.TestCase):
         self.assertEqual(
             (by_metadata.num_docs, by_metadata.num_docs_over_length, by_metadata.num_tokens_truncated), (1, 1, 4)
         )
+
+    def test_trailing_eos_required_only_by_the_eos_scan(self) -> None:
+        # A last row without EOS (e.g. a tool-call turn ending in <|im_end|>): the EOS scan would drop it.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, 50_003], True)]])
+        with self.assertRaisesRegex(ValueError, "does not end with EOS"):
+            self._check([self.extra_a])
+        by_metadata = olmo_core_finetune._check_extra_numpy_dirs(
+            [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+        )[self.extra_a]
+        self.assertEqual((by_metadata.num_docs, by_metadata.num_tokens, by_metadata.num_loss_tokens), (2, 5, 5))
+
+    def test_metadata_must_cover_every_token(self) -> None:
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,3\n")
+        self._check([self.extra_a])
+        with self.assertRaisesRegex(ValueError, "do not tile its 5 tokens"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_metadata_rows_must_not_overlap(self) -> None:
+        # Lengths 3 + 2 add up to the file's 5 tokens, but the second row restarts at 0.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,3\n0,2\n")
+        with self.assertRaisesRegex(ValueError, "row 1 is 0-2"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_metadata_rows_must_not_leave_a_gap(self) -> None:
+        # Token 2 belongs to no row, as when stale metadata would drop tokens.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,2\n3,5\n")
+        with self.assertRaisesRegex(ValueError, "row 1 is 3-5"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_metadata_rows_must_not_run_backwards(self) -> None:
+        # Each row starts where the previous one ended, but row 1 ends before it starts.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,3\n3,2\n2,5\n")
+        with self.assertRaisesRegex(ValueError, "row 1 is 3-2"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_row_aligned_multi_part_dir_passes_under_metadata(self) -> None:
+        stats = {"configuration": {"row_aligned_parts": True}, "overall_statistics": {"total_instances": 4}}
+        _write(os.path.join(self.extra_b, "dataset_statistics.json"), json.dumps(stats))
+        checked = olmo_core_finetune._check_extra_numpy_dirs(
+            [self.extra_b], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+        )[self.extra_b]
+        self.assertEqual((checked.num_parts, checked.num_docs), (2, 4))
+
+    def test_multi_part_dir_needs_row_aligned_parts_under_metadata(self) -> None:
+        _write_parts(self.extra_a, [[([50_000, _EXTRA_EOS], True)], [([50_001, _EXTRA_EOS], True)]])
+        self._check([self.extra_a])
+        with self.assertRaisesRegex(ValueError, "--row_aligned_parts"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
 
     def test_metadata_required_with_metadata_boundaries(self) -> None:
         os.remove(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"))
