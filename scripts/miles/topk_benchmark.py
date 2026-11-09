@@ -182,11 +182,12 @@ def prepare_prompts(args):
     )
     prompts = []
     for item in dataset:
-        ids = tokenizer.apply_chat_template(
-            [{"role": "user", "content": item["question"]}], tokenize=True, add_generation_prompt=True
-        )
+        # The pinned dataset stores a user/assistant conversation. Exclude the answer.
+        messages = item["messages"][:1]
+        assert messages and messages[0]["role"] == "user"
+        ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=False)
         if len(ids) <= 768:
-            prompts.append({"question": item["question"], "input_ids": ids})
+            prompts.append({"question": messages[0]["content"], "input_ids": ids})
         if len(prompts) == args.prompts + 32:
             break
     assert len(prompts) == args.prompts + 32

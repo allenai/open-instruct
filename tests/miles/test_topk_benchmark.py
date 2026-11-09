@@ -1,4 +1,5 @@
 import base64
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -64,3 +65,28 @@ def test_latency_fractions_do_not_double_count_nested_timings():
     assert sum(result["flat_128"]["latency_fraction"].values()) == pytest.approx(1.0)
     assert result["flat_128"]["mean_latency_overhead_pct"] == 0
     assert result["flat_128"]["tokens_per_s"] == 25.6
+
+
+def test_conversation_dataset_excludes_reference_answer(monkeypatch, tmp_path):
+    class Dataset(list):
+        def shuffle(self, seed):
+            return self
+
+    dataset = Dataset(
+        [{"messages": [{"role": "user", "content": "What is 1+1?"}, {"role": "assistant", "content": "2"}]}] * 33
+    )
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, *, tokenize, add_generation_prompt, return_dict):
+            assert messages == [{"role": "user", "content": "What is 1+1?"}]
+            assert tokenize and add_generation_prompt and not return_dict
+            return [1, 2, 3]
+
+    modules = {
+        "transformers": SimpleNamespace(AutoTokenizer=SimpleNamespace(from_pretrained=lambda *a, **kw: Tokenizer())),
+        "datasets": SimpleNamespace(load_dataset=lambda *a, **kw: dataset),
+    }
+    monkeypatch.setattr(bench.importlib, "import_module", modules.__getitem__)
+    prompts = bench.prepare_prompts(SimpleNamespace(model="unused", output=tmp_path, prompts=1))
+    assert len(prompts) == 33
+    assert prompts[0] == {"question": "What is 1+1?", "input_ids": [1, 2, 3]}
