@@ -137,6 +137,8 @@ def test_preparation_pool_and_runtime_controls(tmp_path):
     assert entry["counts"]["prepared_rows"] == 1
     row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
     assert row["metadata"]["pool_id"] == "long_context"
+    assert row["metadata"]["adapter"] == "lc_docqa_v1"
+    assert row["metadata"]["subtask"] == raw["data_source"]
     assert row["metadata"]["messages"] == raw["prompt"]
     target = row["label"]
     results = asyncio.run(

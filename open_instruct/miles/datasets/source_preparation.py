@@ -452,6 +452,7 @@ def prepare(plan_path, output, tokenizer):
                     }
                     if spec["adapter"] in long_context.ADAPTERS:
                         row["metadata"]["pool_id"] = "long_context"
+                        row["metadata"]["adapter"] = spec["adapter"]
                     if spec["adapter"] == "dolci_if_v1":
                         original = dolci_if_target(raw)
                         changes = [
