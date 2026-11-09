@@ -12,10 +12,10 @@ from math_verify import errors, grader
 
 from open_instruct import ground_truth_utils, math_utils
 from open_instruct.miles.configuration import config
-from open_instruct.miles.rewards import rewards
+from open_instruct.miles.rewards import math_verifier, rewards
 
 
-@pytest.mark.parametrize("factory", [ground_truth_utils.StrictMathVerifier])
+@pytest.mark.parametrize("factory", [ground_truth_utils.MathVerifier, ground_truth_utils.StrictMathVerifier])
 @pytest.mark.parametrize("answer, score", [("4", 1.0), ("2+2", 0.0), ("5", 0.0)])
 def test_timeout_preserves_fallback_and_resets_per_call(factory, answer, score):
     verifier = factory()
@@ -31,7 +31,7 @@ def test_timeout_preserves_fallback_and_resets_per_call(factory, answer, score):
 
 @pytest.mark.parametrize("answer, score", [("4", 1.0), ("2+2", 0.0), ("5", 0.0)])
 def test_math_verify_timeout_preserves_library_literal_fallback(answer, score):
-    verifier = ground_truth_utils.MathVerifier()
+    verifier = math_verifier.MathVerifier()
     with mock.patch.object(grader, "sympy_expr_eq", side_effect=errors.TimeoutException):
         result = verifier([], rf"\boxed{{{answer}}}", "4")
     assert result.score == score
@@ -67,7 +67,7 @@ def test_mismatch_and_parse_failure_are_not_timeouts():
     assert math_utils.is_equiv("4", "4") is True
 
 
-class TimeoutFixtureVerifier(ground_truth_utils.MathVerifier):
+class TimeoutFixtureVerifier(math_verifier.MathVerifier):
     """Inject a comparison timeout inside the real worker, not in its IPC result."""
 
     def __call__(self, tokenized_prediction, prediction, label, query=None, rollout_state=None):
@@ -140,3 +140,13 @@ def test_outer_timeout_and_old_records_do_not_count_as_symbolic_timeouts():
     assert values["rollout/math_verifier/timeout_fraction"] == 0.5
     assert all(value == 0 for key, value in values.items() if "symbolic_" in key)
     assert metrics.math_verifier_metrics([]) == {}
+
+
+def test_multiple_candidates_count_each_timeout_and_still_allow_later_match():
+    verifier = ground_truth_utils.MathVerifier()
+    with mock.patch.object(math_utils, "parse_latex", side_effect=TimeoutError):
+        failed = verifier([], r"\boxed{5} Final Answer: The final answer is 6. I hope it is correct.", "4")
+        recovered = verifier([], r"\boxed{5} Final Answer: The final answer is 4. I hope it is correct.", "4")
+    assert failed.score == 0.0
+    assert recovered.score == 1.0
+    assert failed.diagnostics == recovered.diagnostics == {"symbolic_timeouts": 2}

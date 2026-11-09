@@ -47,7 +47,7 @@ TASKS = {
 FACTORIES = {
     "sudoku": "open_instruct.miles.rewards.sudoku.SudokuVerifier",
     "gsm8k": "open_instruct.miles.rewards.verifiers.GSM8KVerifier",
-    "math": "open_instruct.ground_truth_utils.MathVerifier",
+    "math": "open_instruct.miles.rewards.math_verifier.MathVerifier",
     "strict_math": "open_instruct.ground_truth_utils.StrictMathVerifier",
     "ifeval_old": "open_instruct.ground_truth_utils.IFEvalVerifierOld",
     "ifeval": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",

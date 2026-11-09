@@ -1,16 +1,19 @@
-"""Math-Verify adapter with observable, bounded parsing and comparison.
+"""MILES Math-Verify adapter with observable, bounded parsing and comparison.
 
 References are answer strings, so wrap them as LaTeX; predictions retain the
 library's answer extraction policy. Never fall back to the old permissive grader.
 """
 
+import dataclasses
 import threading
 from itertools import product
+from typing import Any
 
 import math_verify
 from math_verify import errors
 
-from open_instruct import logger_utils
+from open_instruct import ground_truth_utils, logger_utils
+from open_instruct.miles.rewards import rewards
 
 logger = logger_utils.setup_logger(__name__)
 _TIMEOUT_SECONDS = 5
@@ -64,3 +67,47 @@ def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
         except Exception:
             logger.debug("Math-Verify could not compare an answer pair")
     return 0.0
+
+
+class MathVerifier(ground_truth_utils.MathVerifier):
+    """MILES math grading using pinned Hugging Face Math-Verify.
+
+    Inherit the shared math configuration without adding another direct subclass
+    to the legacy build_all_verifiers registry.
+    """
+
+    def __call__(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: str,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> ground_truth_utils.VerificationResult:
+        diagnostics = {"symbolic_timeouts": 0}
+        value = score(prediction, label, diagnostics)
+        return ground_truth_utils.VerificationResult(score=value, diagnostics=diagnostics)
+
+    async def async_call(
+        self,
+        tokenized_prediction: list[int],
+        prediction: str,
+        label: Any,
+        query: str | None = None,
+        rollout_state: dict | None = None,
+    ) -> ground_truth_utils.VerificationResult:
+        # SIGALRM requires a main thread. Reuse MILES's bounded subprocess pool
+        # for direct async callers too; the worker invokes synchronous __call__.
+        spec = {
+            "factory": f"{type(self).__module__}.{type(self).__name__}",
+            "config": dataclasses.asdict(self.verifier_config) if self.verifier_config is not None else {},
+        }
+        result = await rewards._IsolatedVerifier(spec).async_call(
+            tokenized_prediction, prediction, label, query, rollout_state
+        )
+        return ground_truth_utils.VerificationResult(
+            score=result.score,
+            cost=result.cost,
+            reasoning=getattr(result, "reasoning", None),
+            diagnostics=result.diagnostics,
+        )

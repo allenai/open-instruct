@@ -38,7 +38,7 @@ RUN python -c "from open_instruct.miles.configuration.config import RunConfig"
 RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; v = GSM8KVerifier(); assert v([], 'The answer is 42', '42').score == 1; assert v([], 'The answer is 43', '42').score == 0"
 
 # Exercise the same isolated parser/ANTLR path used by rollout workers.
-RUN python -c "import asyncio; from open_instruct.ground_truth_utils import MathVerifier; v = MathVerifier(); assert asyncio.run(v.async_call([], r'\\boxed{-2}', '-2, 3')).score == 0; assert asyncio.run(v.async_call([], r'\\boxed{3, -2}', '-2, 3')).score == 1"
+RUN python -c "import asyncio; from open_instruct.miles.rewards.math_verifier import MathVerifier; v = MathVerifier(); assert asyncio.run(v.async_call([], r'\\boxed{-2}', '-2, 3')).score == 0; assert asyncio.run(v.async_call([], r'\\boxed{3, -2}', '-2, 3')).score == 1"
 
 RUN python -c "import olmo_sglang; assert olmo_sglang.__file__.startswith('/opt/core-rl/sources/olmo-sglang/src/'); from olmo_sglang.attention import PerHeadRMSNorm"
 

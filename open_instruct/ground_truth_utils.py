@@ -24,13 +24,19 @@ from typing import Any, Literal
 import numpy as np
 import requests
 
-from open_instruct import context_window_checker, logger_utils, math_verify_utils
+from open_instruct import context_window_checker, logger_utils
 from open_instruct.answer_utils import extract_final_answer
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_MILLION_TOKENS, build_messages
-from open_instruct.math_utils import get_unnormalized_answer, hendrycks_is_equiv, is_equiv, normalize_final_answer
-from open_instruct.miles.rewards import rewards as isolated_rewards
+from open_instruct.math_utils import (
+    get_unnormalized_answer,
+    hendrycks_is_equiv,
+    is_equiv,
+    last_boxed_only_string,
+    normalize_final_answer,
+    remove_boxed,
+)
 from open_instruct.rubrics.prompts import RUBRIC_SCORING_PROMPT
 from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async, run_litellm_async_raw
 
@@ -231,7 +237,12 @@ class GSM8KVerifier(VerifierFunction):
 
 
 class MathVerifier(VerifierFunction):
-    """General math extraction and comparison using pinned Hugging Face Math-Verify."""
+    """
+    Verifier for math problems.
+
+    Attempts several extraction methods (boxed answers, Minerva format,
+    last LaTeX answer) and compares the extracted answers to the ground truth.
+    """
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("math", verifier_config=verifier_config, weight=1.0)
@@ -244,33 +255,43 @@ class MathVerifier(VerifierFunction):
         query: str | None = None,
         rollout_state: dict | None = None,
     ) -> VerificationResult:
-        diagnostics = {"symbolic_timeouts": 0}
-        score = math_verify_utils.score(prediction, label, diagnostics)
-        return VerificationResult(score=score, diagnostics=diagnostics)
+        raw_answer = prediction
+        all_answers = []
 
-    async def async_call(
-        self,
-        tokenized_prediction: list[int],
-        prediction: str,
-        label: Any,
-        query: str | None = None,
-        rollout_state: dict | None = None,
-    ) -> VerificationResult:
-        # SIGALRM requires a main thread. Reuse MILES's bounded subprocess pool
-        # for legacy async callers too; the worker invokes synchronous __call__.
-        spec = {
-            "factory": f"{type(self).__module__}.{type(self).__name__}",
-            "config": dataclasses.asdict(self.verifier_config) if self.verifier_config is not None else {},
-        }
-        result = await isolated_rewards._IsolatedVerifier(spec).async_call(
-            tokenized_prediction, prediction, label, query, rollout_state
-        )
-        return VerificationResult(
-            score=result.score,
-            cost=result.cost,
-            reasoning=getattr(result, "reasoning", None),
-            diagnostics=result.diagnostics,
-        )
+        # Attempt extraction from \boxed{}.
+        boxed_answer = last_boxed_only_string(raw_answer)
+        if boxed_answer is not None:
+            try:
+                boxed_answer = remove_boxed(boxed_answer)
+            except AssertionError:
+                boxed_answer = None
+        if boxed_answer is not None:
+            all_answers.append(boxed_answer)
+
+        # Attempt extraction via Minerva format.
+        minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
+        if minerva_answer is not None and minerva_answer != "[invalidanswer]":
+            all_answers.append(minerva_answer)
+
+        # Attempt extraction from the last LaTeX-formatted answer.
+        if not all_answers:
+            dollars = [m.start() for m in re.finditer(r"\$", raw_answer)]
+            if len(dollars) > 1:
+                answer = normalize_final_answer(raw_answer[dollars[-2] + 1 : dollars[-1]])
+                all_answers.append(answer)
+
+        # Fallback to the full output.
+        if not all_answers:
+            all_answers.append(normalize_final_answer(prediction))
+            # also provide original string in case normalization fails
+            all_answers.append(prediction)
+
+        # Compare each candidate answer to the ground truth.
+        diagnostics = {"symbolic_timeouts": 0}
+        for answer in all_answers:
+            if is_equiv(answer, label, diagnostics=diagnostics) or hendrycks_is_equiv(answer, label):
+                return VerificationResult(score=1.0, diagnostics=diagnostics)
+        return VerificationResult(score=0.0, diagnostics=diagnostics)
 
 
 class StrictMathVerifier(VerifierFunction):

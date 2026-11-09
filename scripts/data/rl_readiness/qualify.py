@@ -32,6 +32,7 @@ FACTORIES = {
     "open_instruct.miles.rewards.nvidia_constraints.CalendarVerifier",
     "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
     "open_instruct.ground_truth_utils.MathVerifier",
+    "open_instruct.miles.rewards.math_verifier.MathVerifier",
     "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
     "open_instruct.miles.rewards.reasoning_gym.ReasoningGymVerifier",
     "open_instruct.miles.rewards.json_schema.JSONSchemaVerifier",

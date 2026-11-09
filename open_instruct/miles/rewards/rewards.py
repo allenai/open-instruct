@@ -32,7 +32,9 @@ from open_instruct.miles.rewards import general_judge, judge_registry
 
 logger = logger_utils.setup_logger(__name__)
 
+_MATH_FACTORY = "open_instruct.miles.rewards.math_verifier.MathVerifier"
 _MATH_FACTORIES = {
+    _MATH_FACTORY,
     "open_instruct.ground_truth_utils.MathVerifier",
     "open_instruct.ground_truth_utils.StrictMathVerifier",
 }
@@ -254,7 +256,12 @@ class _IsolatedVerifier:
         return result
 
 
-def _resolve_verifier(spec, *, isolate_symbolic=False):
+def _resolve_verifier(spec: dict, *, isolate_symbolic=False):
+    # Existing prepared MILES registries still name the shared legacy class.
+    # Resolve that exact path to the MILES default without changing legacy callers
+    # or mutating the stored registry. Do this in parent and subprocess alike.
+    if spec["factory"] == "open_instruct.ground_truth_utils.MathVerifier":
+        spec = {**spec, "factory": _MATH_FACTORY}
     module, _, symbol = spec["factory"].rpartition(".")
     factory = getattr(importlib.import_module(module), symbol)
     config = factory.get_config_class()(**spec.get("config", {}))

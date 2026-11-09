@@ -605,10 +605,14 @@ training; the fallback applies to grading requests.
 
 ### General math grading and timeouts
 
-The general `MathVerifier` uses pinned Hugging Face Math-Verify 0.9.0 for answer
+MILES general math grading uses pinned Hugging Face Math-Verify 0.9.0 for answer
 extraction and comparison. It supports structured mathematical answers, including
 sets, tuples and multiple boxes, and unwraps outer reference math delimiters before
-parsing. Unboxed predictions remain eligible. `GSM8KVerifier` and
+parsing. Unboxed predictions remain eligible. New MILES preparation writes
+`open_instruct.miles.rewards.math_verifier.MathVerifier`; the MILES reward loader
+also maps existing registries naming `open_instruct.ground_truth_utils.MathVerifier`
+to this implementation, without requiring data regeneration or an opt-in flag.
+Legacy training retains its original math implementation. `GSM8KVerifier` and
 `StrictMathVerifier` retain their separate contracts. The caller's
 `reward_final_answer_only` setting still determines whether reasoning is included.
 This replacement changes rewards; compare runs using their recorded source revision.
