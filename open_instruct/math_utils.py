@@ -158,6 +158,33 @@ def normalize_final_answer(final_answer: str) -> str:
     return final_answer
 
 
+# One math-mode delimiter pair around an entire answer, e.g. "\(2^4\)" or "$\pi$". The inner
+# text may not contain the same delimiter, so "\(a\) and \(b\)" and other multi-span or prose
+# answers are left unchanged, and an escaped dollar ("\$5") is never treated as a delimiter.
+_OUTER_MATH_DELIMITERS = (
+    re.compile(r"\\\((?P<inner>(?:(?!\\[()]).)*)\\\)", re.DOTALL),
+    re.compile(r"\\\[(?P<inner>(?:(?!\\[\[\]]).)*)\\\]", re.DOTALL),
+    re.compile(r"\$\$(?P<inner>[^$]*)\$\$", re.DOTALL),
+    re.compile(r"\$(?P<inner>[^$]*)(?<!\\)\$", re.DOTALL),
+)
+
+
+def strip_outer_math_delimiters(text: str) -> str:
+    """Remove one outer \\(...\\), \\[...\\], $$...$$ or $...$ pair enclosing the whole answer.
+
+    Returns the input unchanged when no single pair spans all of it, the content would be
+    empty, or the input is not a string.
+    """
+    if not isinstance(text, str):
+        return text
+    stripped = text.strip()
+    for pattern in _OUTER_MATH_DELIMITERS:
+        match = pattern.fullmatch(stripped)
+        if match and match.group("inner").strip():
+            return match.group("inner").strip()
+    return text
+
+
 class timeout:
     def __init__(self, seconds=1, error_message="Timeout"):
         self.seconds = seconds

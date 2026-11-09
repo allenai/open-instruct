@@ -19,8 +19,10 @@ from open_instruct.ground_truth_utils import (
     GSM8KVerifier,
     LMJudgeVerifier,
     LMJudgeVerifierConfig,
+    MathVerifier,
     PuzzleMatcherVerifier,
     RewardConfig,
+    StrictMathVerifier,
     cleanup_all_llm_judge_clients,
 )
 from open_instruct.IFEvalG import instructions_registry
@@ -191,6 +193,59 @@ class TestGSM8KVerifier(unittest.TestCase):
     def test_numeric_equivalence(self, _name, prediction, label, expected_score):
         result = self.verifier([], prediction, label)
         self.assertEqual(result.score, expected_score)
+
+
+class TestMathVerifierDelimitedReferences(unittest.TestCase):
+    """References and answers wrapped in one math-mode delimiter pair, as in NVIDIA math sources."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.verifier = MathVerifier()
+
+    @parameterized.expand(
+        [
+            # Equivalent answers that are not copies of the reference.
+            ("evaluated_vs_inline_paren", r"\boxed{16}", r"\(2^4\)"),
+            ("evaluated_vs_display_bracket", r"\boxed{16}", r"\[2^4\]"),
+            ("evaluated_vs_dollar", r"\boxed{16}", r"$2^4$"),
+            ("evaluated_vs_double_dollar", r"\boxed{16}", r"$$2^4$$"),
+            ("evaluated_vs_plain", r"\boxed{16}", "2^4"),
+            ("same_expression_unwrapped", r"\boxed{2^4}", r"\(2^4\)"),
+            ("dfrac_vs_wrapped_frac", r"\boxed{\dfrac{\pi}{2}}", r"\(\frac{\pi}{2}\)"),
+            ("padded_reference", r"\boxed{x^4}", r"\( x^4 \)"),
+            ("wrapped_answer_vs_plain", r"\boxed{\(16\)}", "16"),
+            ("wrapped_answer_vs_wrapped", r"\boxed{\(16\)}", r"\(2^4\)"),
+            ("minerva_answer_vs_wrapped", "Final Answer: The final answer is 16. I hope it is correct.", r"\(2^4\)"),
+            # Copying the reference, the only form that matched before, still matches.
+            ("verbatim_copy", r"\boxed{\(2^4\)}", r"\(2^4\)"),
+        ]
+    )
+    def test_equivalent_answers_match(self, _name, prediction, label):
+        self.assertEqual(self.verifier([], prediction, label).score, 1.0)
+
+    @parameterized.expand(
+        [
+            ("wrong_value", r"\boxed{15}", r"\(2^4\)"),
+            ("wrong_expression", r"\boxed{\frac{\pi}{3}}", r"\(\frac{\pi}{2}\)"),
+            ("wrong_wrapped_answer", r"\boxed{\(15\)}", "16"),
+            ("empty_prediction", "", r"\(2^4\)"),
+            ("empty_box", r"\boxed{}", r"\(2^4\)"),
+            # Malformed or multi-span references are not unwrapped, so they still do not match.
+            # (SymPy itself tolerates a stray opening "\(", and the string comparison drops "\$"
+            # money signs; both predate this change, so only wrong answers are asserted here.)
+            ("wrong_vs_unbalanced_reference", r"\boxed{15}", r"\(2^4"),
+            ("empty_wrapped_reference", r"\boxed{16}", r"\(\)"),
+            ("one_of_two_spans", r"\boxed{a}", r"\(a\) and \(b\)"),
+            ("wrong_vs_escaped_dollar_amount", r"\boxed{6}", r"\$5\$"),
+        ]
+    )
+    def test_non_equivalent_or_malformed_inputs_do_not_match(self, _name, prediction, label):
+        self.assertEqual(self.verifier([], prediction, label).score, 0.0)
+
+    def test_strict_verifier_reads_wrapped_reference(self):
+        prediction = "Final Answer: The final answer is 16. I hope it is correct."
+        self.assertEqual(StrictMathVerifier()([], prediction, r"\(2^4\)").score, 1.0)
+        self.assertEqual(StrictMathVerifier()([], prediction.replace("16", "15"), r"\(2^4\)").score, 0.0)
 
 
 def _make_litellm_response(content: str, prompt_tokens: int = 10, completion_tokens: int = 5):

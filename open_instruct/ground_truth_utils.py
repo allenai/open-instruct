@@ -36,6 +36,7 @@ from open_instruct.math_utils import (
     last_boxed_only_string,
     normalize_final_answer,
     remove_boxed,
+    strip_outer_math_delimiters,
 )
 from open_instruct.rubrics.prompts import RUBRIC_SCORING_PROMPT
 from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async, run_litellm_async_raw
@@ -236,6 +237,24 @@ class GSM8KVerifier(VerifierFunction):
         return VerificationResult(score=score)
 
 
+def math_answer_matches(answer: str, label: str, diagnostics: dict[str, int]) -> bool:
+    """Compare an extracted answer with a math reference, as written and then unwrapped.
+
+    References and answers sometimes carry one math-mode delimiter pair around the whole
+    answer, such as ``\\(2^4\\)``. Neither comparator reads those delimiters, so a wrapped
+    reference only matched a byte-identical answer. The as-written comparison runs first, so
+    every pair that matched before still matches; the unwrapped forms are tried only after it.
+    """
+    # Lists, not dict/set keys: non-string labels keep their previous (non-raising) handling.
+    answers = [answer] + [v for v in [strip_outer_math_delimiters(answer)] if v != answer]
+    labels = [label] + [v for v in [strip_outer_math_delimiters(label)] if v != label]
+    return any(
+        is_equiv(candidate, reference, diagnostics=diagnostics) or hendrycks_is_equiv(candidate, reference)
+        for candidate in answers
+        for reference in labels
+    )
+
+
 class MathVerifier(VerifierFunction):
     """
     Verifier for math problems.
@@ -289,7 +308,7 @@ class MathVerifier(VerifierFunction):
         # Compare each candidate answer to the ground truth.
         diagnostics = {"symbolic_timeouts": 0}
         for answer in all_answers:
-            if is_equiv(answer, label, diagnostics=diagnostics) or hendrycks_is_equiv(answer, label):
+            if math_answer_matches(answer, label, diagnostics):
                 return VerificationResult(score=1.0, diagnostics=diagnostics)
         return VerificationResult(score=0.0, diagnostics=diagnostics)
 
@@ -319,7 +338,7 @@ class StrictMathVerifier(VerifierFunction):
             all_answers.append(normalize_final_answer(prediction))
         diagnostics = {"symbolic_timeouts": 0}
         for answer in all_answers:
-            if is_equiv(answer, label, diagnostics=diagnostics) or hendrycks_is_equiv(answer, label):
+            if math_answer_matches(answer, label, diagnostics):
                 return VerificationResult(score=1.0, diagnostics=diagnostics)
         return VerificationResult(score=0.0, diagnostics=diagnostics)
 
