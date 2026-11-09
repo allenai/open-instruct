@@ -172,10 +172,12 @@ def corrected_dolci_target(raw, ms, policy):
     return target
 
 
-def resolved_adapter(raw, kind, options=None):
+def resolved_adapter(raw, kind, options: dict | None = None):
     """Resolve one explicit route for both adaptation and adapter provenance."""
     if kind != "routed_v1":
         return kind, options
+    if options is None:
+        raise ValueError("routed_v1 requires route options")
     value = raw
     for key in options["field"].split("."):
         value = value[key]

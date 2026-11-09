@@ -359,6 +359,11 @@ def test_golong_text_accuracy_label():
     assert rewards.score("[Answer]\nunanswerable\nor Paris", t) == 0
 
 
+def test_routed_adapter_requires_options():
+    with pytest.raises(ValueError, match="routed_v1 requires route options"):
+        sources.resolved_adapter({"route": "chosen"}, "routed_v1")
+
+
 @pytest.mark.parametrize("adapter", ["lc_docqa_v1", "lc_golong_v1"])
 def test_routed_adapter_provenance_without_pool_assignment(tmp_path, adapter):
     raw = (
