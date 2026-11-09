@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 
 ### Changed
+- Omit transduction rows with missing task/input delimiters instead of aborting source preparation (https://github.com/allenai/open-instruct/pull/2199).
+- Accept bold, boxed, explicitly delimited lowercase and Chinese-punctuated long-context choice answers while retaining explicit contradiction checks and rejecting bare lowercase prose (https://github.com/allenai/open-instruct/pull/2199).
+- Preserve long-context choice credit when option text or explanations contain other bracketed letters; document ambiguity and formatting limitations (https://github.com/allenai/open-instruct/pull/2199).
+- Ignore blank entries in long-context F1/NDCG, retain the first ranked guess, and parse explicit choice boundaries without treating prose initials as answers (https://github.com/allenai/open-instruct/pull/2199).
 - Use pinned Math-Verify by default for MILES general math grading, including existing prepared math registries, structured answers and wrapped references; require boxes or answer anchors, preserve Markdown-bold answers, and retain process isolation and symbolic-timeout metrics. Legacy math, GSM8K and strict-math contracts are unchanged (https://github.com/allenai/open-instruct/pull/2217).
 - Advance the MILES runtime to merged pool support and fail initial serving startup promptly after confirmed Ray worker death instead of waiting until timeout (https://github.com/allenai/open-instruct/pull/2187).
 - Preserve main's fully masked REINFORCE++ return handling in the MILES pool runtime pin when rebasing named-pool support (https://github.com/allenai/open-instruct/pull/2187).
@@ -11,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - MILES retains the strict standalone/training scoring check: drift above `core.scoring_check_tolerance` (default 0.001) stops training; eager scoring uses the same activation arithmetic as training (https://github.com/allenai/open-instruct/pull/2187).
 
 ### Added
+- Add versioned long-context dataset adapters and deterministic reward contracts, for consuming Workbench-prepared DocQA-RL and GoLongRL sources; preserve routed adapter identity and external pool assignments (https://github.com/allenai/open-instruct/pull/2199).
 - Train MoE v2 (`OLMoDDPModel`) checkpoints in `olmo_core_finetune.py`. `--config_name` may be an olmo-core `config.json`. These models train through OLMo-core's DDP train module, with the checkpoint's optimizer and data-parallel settings and the SFT overrides. Base weights load without the pretraining optimizer state, checkpoints are saved synchronously, and seeded promoted-token rows are synced into the optimizer's fp32 mains. The run fails at startup when transformer-engine, which MoE v2 token permutation needs and open-instruct's images do not yet install, is missing (https://github.com/allenai/open-instruct/pull/2206).
 - `--expert_parallel_degree` for MoE v2 (`OLMoDDPModel`) SFT: routed experts split across ranks, for models whose unsharded experts and fp32 grads do not fit on one GPU under DDP (https://github.com/allenai/open-instruct/pull/2213).
 - Expose internal symbolic-math timeouts through verifier diagnostics, parent-process warnings, and MILES W&B metrics without changing rewards or fallback comparisons (https://github.com/allenai/open-instruct/pull/2210).
