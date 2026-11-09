@@ -23,8 +23,8 @@ from open_instruct.miles.rewards import math_verifier, rewards
         ("0.5", r"\boxed{\frac{1}{2}}", 1),
         ("4", "Answer: 4", 1),
         ("4", "Final Answer: The final answer is 4. I hope it is correct.", 1),
-        ("4", "$4$", 1),
-        ("4", "4", 1),
+        ("4", "$4$", 0),
+        ("4", "4", 0),
         ("4", "", 0),
         ("", r"\boxed{}", 0),
         ("4", "No answer.", 0),
@@ -50,6 +50,32 @@ def test_math_verifier(label, prediction, expected):
     result = math_verifier.MathVerifier()([], prediction, label)
     assert result.score == expected
     assert result.diagnostics == {"symbolic_timeouts": 0}
+
+
+@pytest.mark.parametrize(
+    "label,prediction,expected",
+    [
+        ("52", "We need to compute 52 and then", 0),
+        ("1", r"We need to evaluate $P(\bar{X} \leq 1)$ and then", 0),
+        ("52", r"We have 52 remaining. \boxed{}", 0),
+        (r"\mathbb{Z}", r"A group is $\mathbb{Z}$. Final answer: \boxed{\mathbb{Z} \times \mathbb{Z}}", 0),
+        ("52", "We have 52 remaining. " * 4000, 0),
+        ("24", "**Answer:** **24**", 1),
+        ("24", "The **answer** is **24**.", 1),
+        ("24", r"**Answer:** $24$", 1),
+        ("24", r"**\boxed{24}**", 1),
+        ("52", "The answer is 52", 1),
+        ("8", "Answer: 2**3", 1),
+        ("23", "Answer: 2**3", 0),
+        ("8", "**Answer:** **2**3**", 1),
+        ("23", "**Answer:** **2**3**", 0),
+        ("12", "Answer: 2**3 + 2**2", 1),
+        # This setting requires an answer anchor, not a complete-response detector.
+        ("52", "The answer is 52, and then", 1),
+    ],
+)
+def test_prediction_requires_box_or_answer_anchor(label, prediction, expected):
+    assert math_verifier.MathVerifier()([], prediction, label).score == expected
 
 
 @pytest.mark.parametrize("label", ["4", "$4$", "$$4$$", r"\(4\)", r"\[4\]"])

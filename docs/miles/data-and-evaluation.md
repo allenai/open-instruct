@@ -608,7 +608,12 @@ training; the fallback applies to grading requests.
 MILES general math grading uses pinned Hugging Face Math-Verify 0.9.0 for answer
 extraction and comparison. It supports structured mathematical answers, including
 sets, tuples and multiple boxes, and unwraps outer reference math delimiters before
-parsing. Unboxed predictions remain eligible. New MILES preparation writes
+parsing. Predictions must have a box or a Math-Verify answer anchor such as
+`Answer:` or `the answer is`; bare numbers and unanchored LaTeX are not eligible.
+Paired Markdown bold markers are removed so `**Answer:** **24**` is recognized,
+while exponentiation such as `2**3` is preserved. The library recognizes a limited
+set of answer phrases; some multiline, escaped-currency or prose answers still
+fail extraction. New MILES preparation writes
 `open_instruct.miles.rewards.math_verifier.MathVerifier`; the MILES reward loader
 also maps existing registries naming `open_instruct.ground_truth_utils.MathVerifier`
 to this implementation, without requiring data regeneration or an opt-in flag.
@@ -619,8 +624,10 @@ This replacement changes rewards; compare runs using their recorded source revis
 
 Math-Verify is not a prose or proof judge. Ambiguous comma-separated thousands,
 some function equations and references mixing prose with math can still be
-misgraded. Its extraction can also credit a matching expression inside an unfinished
-response. There is no fallback to the previous general math grader.
+misgraded. Anchored extraction reduces incidental-number credit in unfinished
+responses, but does not guarantee completion: an unfinished response can still
+contain an explicit answer anchor or a box. There is no fallback to the previous
+general math grader.
 
 Each general-math parse and candidate comparison has an internal five-second limit.
 A parse timeout returns no answer; a comparison timeout allows later Math-Verify

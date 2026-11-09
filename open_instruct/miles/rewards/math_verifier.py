@@ -1,10 +1,12 @@
 """MILES Math-Verify adapter with observable, bounded parsing and comparison.
 
 References are answer strings, so wrap them as LaTeX; predictions retain the
-library's answer extraction policy. Never fall back to the old permissive grader.
+library's anchored answer extraction policy. Never fall back to the old
+permissive grader.
 """
 
 import dataclasses
+import re
 import threading
 from itertools import product
 from typing import Any
@@ -17,6 +19,9 @@ from open_instruct.miles.rewards import rewards
 
 logger = logger_utils.setup_logger(__name__)
 _TIMEOUT_SECONDS = 5
+# Unwrap paired Markdown bold spans without deleting Python-style powers such
+# as 2**3. Word/star boundaries also avoid matching inside longer star runs.
+_BOLD = re.compile(r"(?<![\w*])\*\*(?!\*)(?=\S)(.+?)(?<=\S)\*\*(?![\w*])", re.DOTALL)
 
 
 def _record_timeout(diagnostics: dict[str, int]) -> None:
@@ -54,7 +59,16 @@ def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
     gold = _parse(r"\boxed{" + reference + "}", (math_verify.LatexExtractionConfig(),), diagnostics)
     if not gold:
         return 0.0
-    target = _parse(prediction, (math_verify.ExprExtractionConfig(), math_verify.LatexExtractionConfig()), diagnostics)
+    # Boxes remain eligible, but incidental numbers/LaTeX in unfinished reasoning
+    # must not become answers. Strip formatting so **Answer:** still anchors.
+    target = _parse(
+        _BOLD.sub(r"\1", prediction),
+        (
+            math_verify.ExprExtractionConfig(try_extract_without_anchor=False),
+            math_verify.LatexExtractionConfig(try_extract_without_anchor=False),
+        ),
+        diagnostics,
+    )
     # Reproduce verify(list, list)'s candidate order and exception recovery, but
     # expose timeout counts. The library also supplies literal-string candidates;
     # those may still agree after a symbolic comparison times out.
