@@ -870,6 +870,7 @@ class BuildDdpTrainModuleConfigTest(unittest.TestCase):
             config, _ = self._build(max_grad_norm=1.0, train_module=train_module)
         self.assertIsNone(config.ep_config)
         self.assertIn("expert parallelism degree 8", "\n".join(logs.output))
+        self.assertIn("pass --expert_parallel_degree", "\n".join(logs.output))
 
     def test_no_clipping_becomes_an_infinite_threshold(self) -> None:
         # The OLMoDDP optimizer always clips, at coefficient min(1, threshold / norm).
@@ -925,16 +926,20 @@ class CheckExpertParallelDegreeTest(unittest.TestCase):
         [("unset_dense", None, False), ("unset_ddp", None, True), ("ddp", 8, True), ("all_ranks", -1, True)]
     )
     def test_accepted(self, _name: str, degree: int | None, is_ddp_model: bool) -> None:
-        olmo_core_finetune._check_expert_parallel_degree(degree, is_ddp_model)
+        olmo_core_finetune._check_expert_parallel_degree(degree, is_ddp_model, world_size=16)
 
     def test_dense_model_fails(self) -> None:
         with self.assertRaisesRegex(ValueError, "OLMoDDPModel"):
-            olmo_core_finetune._check_expert_parallel_degree(8, is_ddp_model=False)
+            olmo_core_finetune._check_expert_parallel_degree(8, is_ddp_model=False, world_size=16)
 
     @parameterized.expand([("zero", 0), ("one", 1)])
     def test_degree_without_parallelism_fails(self, _name: str, degree: int) -> None:
         with self.assertRaisesRegex(ValueError, "above 1"):
-            olmo_core_finetune._check_expert_parallel_degree(degree, is_ddp_model=True)
+            olmo_core_finetune._check_expert_parallel_degree(degree, is_ddp_model=True, world_size=16)
+
+    def test_degree_must_divide_world_size(self) -> None:
+        with self.assertRaisesRegex(ValueError, "divide the world size"):
+            olmo_core_finetune._check_expert_parallel_degree(3, is_ddp_model=True, world_size=16)
 
 
 class SaveAsyncTest(unittest.TestCase):

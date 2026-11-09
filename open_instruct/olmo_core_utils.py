@@ -631,9 +631,14 @@ def build_ddp_train_module_config(
         logger.info(f"Keeping the checkpoint's optimizer group override {override.params}: {override.opts}")
     checkpoint_ep_degree = (checkpoint_train_module.get("ep_config") or {}).get("degree")
     if checkpoint_ep_degree is not None and checkpoint_ep_degree != expert_parallel_degree:
+        this_run = (
+            f"degree {expert_parallel_degree}"
+            if expert_parallel_degree is not None
+            else "no expert parallelism; pass --expert_parallel_degree to shard the experts"
+        )
         logger.warning(
-            f"The checkpoint was pretrained with expert parallelism degree {checkpoint_ep_degree}; this run uses "
-            f"{expert_parallel_degree} (--expert_parallel_degree)."
+            f"The checkpoint was pretrained with expert parallelism degree {checkpoint_ep_degree} (negative means "
+            f"all ranks); this run uses {this_run}."
         )
 
     return OLMoDDPTrainModuleConfig(
