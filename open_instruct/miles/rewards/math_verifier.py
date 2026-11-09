@@ -24,6 +24,33 @@ _TIMEOUT_SECONDS = 5
 _BOLD = re.compile(r"(?<![\w*])\*\*(?!\*)(?=\S)(.+?)(?<=\S)\*\*(?![\w*])", re.DOTALL)
 
 
+# One math-mode delimiter pair around an entire answer, e.g. "\(2^4\)" or "$\pi$". The inner
+# text may not contain the same delimiter, so "\(a\) and \(b\)" and other multi-span or prose
+# answers are left unchanged, and an escaped dollar ("\$5") is never treated as a delimiter.
+_OUTER_MATH_DELIMITERS = (
+    re.compile(r"\\\((?P<inner>(?:(?!\\[()]).)*)\\\)", re.DOTALL),
+    re.compile(r"\\\[(?P<inner>(?:(?!\\[\[\]]).)*)\\\]", re.DOTALL),
+    re.compile(r"\$\$(?P<inner>[^$]*)\$\$", re.DOTALL),
+    re.compile(r"\$(?P<inner>[^$]*)(?<!\\)\$", re.DOTALL),
+)
+
+
+def strip_outer_math_delimiters(text: str) -> str:
+    """Remove one outer \\(...\\), \\[...\\], $$...$$ or $...$ pair enclosing the whole answer.
+
+    Returns the input unchanged when no single pair spans all of it, the content would be
+    empty, or the input is not a string.
+    """
+    if not isinstance(text, str):
+        return text
+    stripped = text.strip()
+    for pattern in _OUTER_MATH_DELIMITERS:
+        match = pattern.fullmatch(stripped)
+        if match and match.group("inner").strip():
+            return match.group("inner").strip()
+    return text
+
+
 def _record_timeout(diagnostics: dict[str, int]) -> None:
     diagnostics["symbolic_timeouts"] += 1
     logger.warning("Math-Verify parsing or comparison exceeded %d seconds", _TIMEOUT_SECONDS)
@@ -47,13 +74,9 @@ def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
     """Score on a process main thread; async callers must use process isolation."""
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("Math-Verify requires a main thread; use MathVerifier.async_call for async grading")
-    reference = label.strip()
-    # Dataset references often already carry math delimiters. Remove just the
-    # outer wrapper before boxing, retaining commas and internal structure.
-    for left, right in ((r"\(", r"\)"), (r"\[", r"\]"), ("$$", "$$"), ("$", "$")):
-        if reference.startswith(left) and reference.endswith(right) and len(reference) >= len(left) + len(right):
-            reference = reference[len(left) : -len(right)].strip()
-            break
+    # Strip only a single enclosing span. Multi-span references must reach the
+    # parser intact, e.g. \(x=2\) or \(x=-2\).
+    reference = strip_outer_math_delimiters(label).strip()
     if not reference or not prediction.strip():
         return 0.0
     gold = _parse(r"\boxed{" + reference + "}", (math_verify.LatexExtractionConfig(),), diagnostics)

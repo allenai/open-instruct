@@ -78,9 +78,90 @@ def test_prediction_requires_box_or_answer_anchor(label, prediction, expected):
     assert math_verifier.MathVerifier()([], prediction, label).score == expected
 
 
-@pytest.mark.parametrize("label", ["4", "$4$", "$$4$$", r"\(4\)", r"\[4\]"])
-def test_reference_math_delimiters(label):
-    assert math_verifier.MathVerifier()([], r"\boxed{4}", label).score == 1
+@pytest.mark.parametrize(
+    "_name,prediction,label",
+    [
+        # Equivalent answers that are not copies of the reference.
+        ("evaluated_vs_inline_paren", r"\boxed{16}", r"\(2^4\)"),
+        ("evaluated_vs_display_bracket", r"\boxed{16}", r"\[2^4\]"),
+        ("evaluated_vs_dollar", r"\boxed{16}", r"$2^4$"),
+        ("evaluated_vs_double_dollar", r"\boxed{16}", r"$$2^4$$"),
+        ("evaluated_vs_plain", r"\boxed{16}", "2^4"),
+        ("same_expression_unwrapped", r"\boxed{2^4}", r"\(2^4\)"),
+        ("dfrac_vs_wrapped_frac", r"\boxed{\dfrac{\pi}{2}}", r"\(\frac{\pi}{2}\)"),
+        ("padded_reference", r"\boxed{x^4}", r"\( x^4 \)"),
+        ("wrapped_answer_vs_plain", r"\boxed{\(16\)}", "16"),
+        ("wrapped_answer_vs_wrapped", r"\boxed{\(16\)}", r"\(2^4\)"),
+        ("minerva_answer_vs_wrapped", "Final Answer: The final answer is 16. I hope it is correct.", r"\(2^4\)"),
+        # Literal copies remain accepted alongside equivalent expressions.
+        ("verbatim_copy", r"\boxed{\(2^4\)}", r"\(2^4\)"),
+    ],
+)
+def test_equivalent_answers_match(_name, prediction, label):
+    assert math_verifier.MathVerifier()([], prediction, label).score == 1
+
+
+@pytest.mark.parametrize(
+    "_name,prediction,label",
+    [
+        ("wrong_value", r"\boxed{15}", r"\(2^4\)"),
+        ("wrong_expression", r"\boxed{\frac{\pi}{3}}", r"\(\frac{\pi}{2}\)"),
+        ("wrong_wrapped_answer", r"\boxed{\(15\)}", "16"),
+        ("empty_prediction", "", r"\(2^4\)"),
+        ("empty_box", r"\boxed{}", r"\(2^4\)"),
+        # Malformed references and incomplete answers must not gain credit.
+        ("wrong_vs_unbalanced_reference", r"\boxed{15}", r"\(2^4"),
+        ("empty_wrapped_reference", r"\boxed{16}", r"\(\)"),
+        ("one_of_two_spans", r"\boxed{a}", r"\(a\) and \(b\)"),
+        ("wrong_vs_escaped_dollar_amount", r"\boxed{6}", r"\$5\$"),
+    ],
+)
+def test_non_equivalent_or_malformed_inputs_do_not_match(_name, prediction, label):
+    assert math_verifier.MathVerifier()([], prediction, label).score == 0
+
+
+@pytest.mark.parametrize(
+    "_name,text,expected",
+    [
+        ("inline_paren", r"\(2^4\)", "2^4"),
+        ("inline_paren_padded", r"\( x^4 \)", "x^4"),
+        ("display_bracket", r"\[ 98 \]", "98"),
+        ("display_bracket_multiline", "\\[\n172890\n\\]", "172890"),
+        ("dollar", r"$\pi$", r"\pi"),
+        ("double_dollar", r"$$\frac{1}{2}$$", r"\frac{1}{2}"),
+        ("surrounding_whitespace", "  \\(\\frac{\\pi}{2}\\) ", r"\frac{\pi}{2}"),
+        ("only_one_pair_removed", r"\(\(2^4\)\)", r"\(\(2^4\)\)"),
+    ],
+)
+def test_removes_one_pair_around_whole_answer(_name, text, expected):
+    assert math_verifier.strip_outer_math_delimiters(text) == expected
+
+
+@pytest.mark.parametrize(
+    "_name,text",
+    [
+        ("plain", "2^4"),
+        ("two_spans", r"\(a\) and \(b\)"),
+        ("two_dollar_spans", r"$a$, $b$"),
+        ("prose_with_span", r"The set \( X \) exists."),
+        ("unbalanced_open", r"\(2^4"),
+        ("unbalanced_close", r"2^4\)"),
+        ("mismatched_pair", r"\(2^4\]"),
+        ("empty_pair", r"\(\)"),
+        ("whitespace_pair", r"$ $"),
+        ("escaped_dollar_amount", r"\$5"),
+        ("escaped_closing_dollar", r"$5\$"),
+        ("boxed_is_not_a_delimiter", r"\boxed{16}"),
+        ("left_right_parentheses", r"\left(\frac{1}{2}\right)"),
+    ],
+)
+def test_leaves_other_text_unchanged(_name, text):
+    assert math_verifier.strip_outer_math_delimiters(text) == text
+
+
+@pytest.mark.parametrize("value", [16, None])
+def test_delimiter_helper_preserves_non_string_input(value):
+    assert math_verifier.strip_outer_math_delimiters(value) == value
 
 
 @pytest.mark.parametrize(
@@ -189,3 +270,55 @@ def test_legacy_math_and_explicit_strict_contract_are_unchanged():
         rewards._resolve_verifier({"factory": "open_instruct.ground_truth_utils.StrictMathVerifier"}),
         ground_truth_utils.StrictMathVerifier,
     )
+
+
+@pytest.mark.parametrize(
+    "label,prediction,expected",
+    [
+        # C039/72954: preserve both separately delimited solution pairs.
+        (r"\(x_1=125, y_1=4\) and \(x_2=625, y_2=3\)", r"\boxed{(125,4)} \text{ and } \boxed{(625,3)}", 1),
+        (r"\(x_1=125, y_1=4\) and \(x_2=625, y_2=3\)", r"\boxed{(125,4)}", 0),
+        # C040/146620: the old startswith/endswith loop corrupted this reference.
+        (r"\(x=2\) or \(x=-2\)", r"\boxed{2} \text{ and } \boxed{-2}", 1),
+        (r"\(x=2\) or \(x=-2\)", r"\boxed{2}", 0),
+        # C039/94889: complete pair of function equations.
+        (r"\(f(x)=x\) or \(f(x)=-x\)", r"\boxed{f(x)=x} \text{ and } \boxed{f(x)=-x}", 1),
+        # C040/272435: a fragment of the damaged reference previously gave credit.
+        (
+            r"\(E[W]=-1\) and \(P(W>0)=1-(\frac{36}{37})^{35}\)",
+            r"\boxed{E[W]=-37} \text{ and } \boxed{P(W>0)=\frac{36}{37}}",
+            0,
+        ),
+    ],
+)
+def test_multi_span_reference_replay(label, prediction, expected):
+    assert math_verifier.MathVerifier()([], prediction, label).score == expected
+
+
+_TRIG_REFERENCE = (
+    r"\(\sin \beta = \frac{12}{13}\), \(\tan \beta = \frac{12}{5}\), "
+    r"\(\cot \beta = \frac{5}{12}\), \(\cos(2\beta) = \frac{-119}{169}\)"
+)
+
+
+def test_multi_span_trig_equations_with_labels_inside_boxes():
+    # C040/94572 draw 5: the whole set now matches instead of only its last value.
+    answer = (
+        r"\boxed{\sin \beta = \dfrac{12}{13}}, \boxed{\tan \beta = \dfrac{12}{5}}, "
+        r"\boxed{\cot \beta = \dfrac{5}{12}}, \boxed{\cos(2\beta) = -\dfrac{119}{169}}"
+    )
+    assert math_verifier.MathVerifier()([], answer, _TRIG_REFERENCE).score == 1
+
+
+@pytest.mark.xfail(
+    strict=True, reason="Math-Verify cannot associate separate boxed values with equation labels outside them"
+)
+def test_multi_span_trig_equations_with_labels_outside_boxes():
+    # C040/94572 draw 4: a known regression from preserving the full reference.
+    answer = (
+        "\\[\n\\sin \\beta = \\boxed{\\dfrac{12}{13}}\n\\]\n"
+        "\\[\n\\tan \\beta = \\boxed{\\dfrac{12}{5}}\n\\]\n"
+        "\\[\n\\cot \\beta = \\boxed{\\dfrac{5}{12}}\n\\]\n"
+        "\\[\n\\cos(2\\beta) = \\boxed{-\\dfrac{119}{169}}\n\\]"
+    )
+    assert math_verifier.MathVerifier()([], answer, _TRIG_REFERENCE).score == 1

@@ -607,8 +607,9 @@ training; the fallback applies to grading requests.
 
 MILES general math grading uses pinned Hugging Face Math-Verify 0.9.0 for answer
 extraction and comparison. It supports structured mathematical answers, including
-sets, tuples and multiple boxes, and unwraps outer reference math delimiters before
-parsing. Predictions must have a box or a Math-Verify answer anchor such as
+sets, tuples and multiple boxes. It removes reference math delimiters only when
+a single pair encloses the whole answer; separate spans such as `\(x=2\) or
+\(x=-2\)` reach the parser intact. Predictions must have a box or a Math-Verify answer anchor such as
 `Answer:` or `the answer is`; bare numbers and unanchored LaTeX are not eligible.
 Paired Markdown bold markers are removed so `**Answer:** **24**` is recognized,
 while exponentiation such as `2**3` is preserved. The library recognizes a limited
@@ -624,7 +625,8 @@ This replacement changes rewards; compare runs using their recorded source revis
 
 Math-Verify is not a prose or proof judge. Ambiguous comma-separated thousands,
 some function equations and references mixing prose with math can still be
-misgraded. Anchored extraction reduces incidental-number credit in unfinished
+misgraded. Multi-part equation answers can also fail when labels are outside
+separate value boxes, even when every value is correct. Anchored extraction reduces incidental-number credit in unfinished
 responses, but does not guarantee completion: an unfinished response can still
 contain an explicit answer anchor or a box. There is no fallback to the previous
 general math grader.
