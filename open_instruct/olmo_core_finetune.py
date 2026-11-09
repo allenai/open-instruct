@@ -115,7 +115,7 @@ def _check_row_aligned_cache(numpy_dir: str) -> None:
     stats_path = os.path.join(numpy_dir, "dataset_statistics.json")
     with open(stats_path) as f:
         stats = json.load(f)
-    if not stats["configuration"].get(numpy_dataset_conversion.ROW_ALIGNED_PARTS_KEY, False):
+    if not stats.get("configuration", {}).get(numpy_dataset_conversion.ROW_ALIGNED_PARTS_KEY, False):
         raise ValueError(f"{numpy_dir} was not written with --row_aligned_parts ({stats_path} has no marker).")
     num_lines = 0
     for path in glob.glob(os.path.join(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_METADATA_GLOB)):
@@ -131,7 +131,8 @@ def _check_row_aligned_cache(numpy_dir: str) -> None:
 def _olmo_core_supports_metadata_boundaries() -> bool:
     """Whether the installed OLMo-core can take packing boundaries from the metadata files.
 
-    `use_array_if_local` reached `NumpyPackedFSLDatasetConfig` in allenai/OLMo-core#843.
+    `use_array_if_local` reached `NumpyPackedFSLDatasetConfig` in allenai/OLMo-core#843, together with
+    building `doc_lens` from the loaded documents, so a row without EOS stays its own document.
     """
     return "use_array_if_local" in {field.name for field in dataclasses.fields(oc_data.NumpyPackedFSLDatasetConfig)}
 
@@ -238,6 +239,15 @@ def _check_extra_numpy_dir(
             f"{numpy_dataset_conversion.TOKEN_IDS_METADATA_GLOB} file for every token part; "
             "pass --no_document_boundaries_from_metadata to scan for EOS instead."
         )
+    if require_metadata and len(token_parts) > 1:
+        # A part cut mid-row would split that row into two documents, the second without its prompt.
+        if not os.path.exists(os.path.join(numpy_dir, "dataset_statistics.json")):
+            raise ValueError(
+                f"{numpy_dir}: a multi-part dir under --document_boundaries_from_metadata must be written with "
+                "--row_aligned_parts (scripts/data/convert_sft_data_for_olmocore.py takes it), and it has no "
+                "dataset_statistics.json to show that."
+            )
+        _check_row_aligned_cache(numpy_dir)
     dtype_name = np.dtype(token_dtype).name
     itemsize = np.dtype(token_dtype).itemsize
     stats = _NumpyDirStats(num_parts=len(token_parts), num_tokens=0, num_loss_tokens=0)
@@ -264,26 +274,44 @@ def _check_extra_numpy_dir(
                     f"{token_path} has token id {max_id:,} >= vocab size {tokenizer.vocab_size:,}; "
                     f"was it written as {dtype_name}?"
                 )
-        if int(tokens[-1]) != tokenizer.eos_token_id:
+        # Only the EOS scan drops a file's tail; metadata boundaries keep rows that end without EOS
+        # (olmo35 tool-call rows end in `<|im_end|>\n`, not EOS).
+        if not require_metadata and int(tokens[-1]) != tokenizer.eos_token_id:
             raise ValueError(
                 f"{token_path} does not end with EOS ({tokenizer.eos_token_id}); OLMo-core's EOS scan "
                 "drops the tokens after a file's last EOS."
             )
         # The boundaries OLMo-core's packer uses: the metadata rows with --document_boundaries_from_metadata,
         # otherwise the EOS positions in the token file.
-        doc_lengths = np.array(
-            [
-                end - start
-                for start, end in oc_data_utils.iter_document_indices(
+        bounds = np.array(
+            list(
+                oc_data_utils.iter_document_indices(
                     token_path,
                     use_array_if_local=not require_metadata,
                     eos_token_id=tokenizer.eos_token_id,
                     bos_token_id=tokenizer.bos_token_id,
                     dtype=token_dtype,
                 )
-            ],
+            ),
             dtype=np.int64,
-        )
+        ).reshape(-1, 2)
+        doc_lengths = bounds[:, 1] - bounds[:, 0]
+        # With no trailing-EOS check, a stale or truncated .csv.gz would silently drop tokens: the rows
+        # must tile the file, each starting where the previous one ended and none ending before it starts.
+        if require_metadata:
+            expected_starts = np.concatenate([[0], bounds[:-1, 1]])
+            bad = np.flatnonzero((bounds[:, 0] != expected_starts) | (doc_lengths < 0))
+            if len(bad) or len(bounds) == 0 or int(bounds[-1, 1]) != num_tokens:
+                if len(bounds) == 0:
+                    where = "no rows"
+                elif len(bad):
+                    where = f"row {int(bad[0])} is {int(bounds[bad[0], 0]):,}-{int(bounds[bad[0], 1]):,}"
+                else:
+                    where = f"the last row ends at {int(bounds[-1, 1]):,}"
+                raise ValueError(
+                    f"{token_path}: its metadata rows do not tile its {num_tokens:,} tokens ({where}); "
+                    "is the .csv.gz stale?"
+                )
         over = doc_lengths[doc_lengths > sequence_length]
         stats.num_docs += len(doc_lengths)
         stats.num_docs_over_length += len(over)
@@ -441,8 +469,10 @@ class SFTConfig:
     """Local pretokenized numpy dirs to train on alongside the chat cache, in the converter's layout:
     `token_ids_part_XXXX.npy` (raw tokens in the dtype OLMo-core picks for the vocab, uint32 for Olmo)
     and `labels_mask_part_XXXX.npy` (one bool per token), plus `token_ids_part_XXXX.csv.gz` (one
-    `start,end` line per doc) unless `--no_document_boundaries_from_metadata`. Each part must end
-    with EOS. Their parts are packed the same way as the cache's, one source file at a time, so an
+    `start,end` line per doc, tiling the file) unless `--no_document_boundaries_from_metadata`, in
+    which case each part must end with EOS. Under metadata boundaries a dir with several parts must be
+    written with `--row_aligned_parts` (`scripts/data/convert_sft_data_for_olmocore.py --row_aligned_parts`
+    writes one). Their parts are packed the same way as the cache's, one source file at a time, so an
     instance never mixes extra docs with chat rows; the loader then shuffles all instances together.
     Docs longer than max_seq_length are truncated. Every node needs the same dirs at the same paths.
     Checked at startup, which logs token and loss-token totals for the cache and the extras."""
