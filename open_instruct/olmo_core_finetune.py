@@ -478,6 +478,19 @@ def _check_ddp_model_args(
     olmo_core_utils.read_checkpoint_train_module(config_name)
 
 
+def _check_expert_parallel_degree(degree: int | None, is_ddp_model: bool) -> None:
+    """Raise for an --expert_parallel_degree the model cannot use, before the dataset is built."""
+    if degree is None:
+        return
+    if not is_ddp_model:
+        raise ValueError("--expert_parallel_degree is wired only for OLMoDDPModel (MoE v2) models.")
+    if degree in (0, 1):
+        raise ValueError(
+            "--expert_parallel_degree must be above 1 (or negative for all ranks); omit it to train without "
+            "expert parallelism."
+        )
+
+
 def _save_async(save_async: bool, is_ddp_model: bool) -> bool:
     """Whether to checkpoint asynchronously: never for OLMoDDPModel (MoE v2) models.
 
@@ -606,6 +619,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     # MoE v2 models refuse FSDP and train through OLMo-core's DDP train module instead.
     is_ddp_model = isinstance(model, ddp_model_lib.OLMoDDPModel)
 
+    _check_expert_parallel_degree(args.training.expert_parallel_degree, is_ddp_model)
     cp_config = olmo_core_utils.build_cp_config(args.training)
     if is_ddp_model:
         _check_ddp_model_args(args, use_hf_ckpt, cp_config)
@@ -678,8 +692,6 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             expert_parallel_degree=args.training.expert_parallel_degree,
         )
     else:
-        if args.training.expert_parallel_degree is not None:
-            raise ValueError("--expert_parallel_degree is wired only for OLMoDDPModel (MoE v2) models.")
         train_module_config = train_module_lib.TransformerTrainModuleConfig(
             rank_microbatch_size=rank_microbatch_size,
             max_sequence_length=args.training.max_seq_length,
