@@ -17,6 +17,9 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 RUN mkdir -p /src && ln -sT /opt/core-rl/sources/megatron-lm /src/Megatron-LM
 
 FROM runtime-base AS application
+# Pure-Python verifier updates must also reach builds using the pinned binary base.
+COPY runtime/miles/verifier-requirements.txt /opt/core-rl/runtime/miles/verifier-requirements.txt
+RUN uv pip install --system --no-deps -r /opt/core-rl/runtime/miles/verifier-requirements.txt
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 RUN printf '%s\n' "$SOURCE_REVISION" > /opt/core-rl/source-revision
@@ -33,6 +36,9 @@ RUN python -m compileall -q /opt/core-rl/open_instruct/miles /opt/core-rl/source
 RUN python -c "from open_instruct.miles.configuration.config import RunConfig"
 
 RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; v = GSM8KVerifier(); assert v([], 'The answer is 42', '42').score == 1; assert v([], 'The answer is 43', '42').score == 0"
+
+# Exercise the same isolated parser/ANTLR path used by rollout workers.
+RUN python -c "import asyncio; from open_instruct.miles.rewards.math_verifier import MathVerifier; v = MathVerifier(); assert asyncio.run(v.async_call([], r'\\boxed{-2}', '-2, 3')).score == 0; assert asyncio.run(v.async_call([], r'\\boxed{3, -2}', '-2, 3')).score == 1"
 
 RUN python -c "import olmo_sglang; assert olmo_sglang.__file__.startswith('/opt/core-rl/sources/olmo-sglang/src/'); from olmo_sglang.attention import PerHeadRMSNorm"
 

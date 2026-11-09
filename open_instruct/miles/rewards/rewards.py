@@ -32,7 +32,9 @@ from open_instruct.miles.rewards import general_judge, judge_registry
 
 logger = logger_utils.setup_logger(__name__)
 
+_MATH_FACTORY = "open_instruct.miles.rewards.math_verifier.MathVerifier"
 _MATH_FACTORIES = {
+    _MATH_FACTORY,
     "open_instruct.ground_truth_utils.MathVerifier",
     "open_instruct.ground_truth_utils.StrictMathVerifier",
 }
@@ -190,9 +192,8 @@ async def isolated_verifier_call(
 ):
     """Call an explicitly trusted verifier on a subprocess main thread.
 
-    Symbolic math keeps the original open-instruct/ANTLR grading semantics and
-    SIGALRM timeout. ANTLR 4.11 can live in a child-only dependency directory,
-    preserving the rollout process's OmegaConf/ANTLR 4.9 installation.
+    Symbolic math runs with main-thread SIGALRM timeouts. ANTLR 4.11 can live
+    in a child-only dependency directory, preserving the rollout process's OmegaConf/ANTLR 4.9 installation.
     """
     loop = asyncio.get_running_loop()
     if loop not in _POOLS:
@@ -250,14 +251,17 @@ class _IsolatedVerifier:
             result.diagnostics["symbolic_timeout_rewarded"] = result.score > 0
             # Worker stderr is suppressed; surface the completed result here.
             logger.warning(
-                "Math verifier completed with %d symbolic comparison timeout(s); final score=%s",
-                symbolic_timeouts,
-                result.score,
+                "Math verifier completed with %d symbolic timeout(s); final score=%s", symbolic_timeouts, result.score
             )
         return result
 
 
-def _resolve_verifier(spec, *, isolate_symbolic=False):
+def _resolve_verifier(spec: dict, *, isolate_symbolic=False):
+    # Existing prepared MILES registries still name the shared legacy class.
+    # Resolve that exact path to the MILES default without changing legacy callers
+    # or mutating the stored registry. Do this in parent and subprocess alike.
+    if spec["factory"] == "open_instruct.ground_truth_utils.MathVerifier":
+        spec = {**spec, "factory": _MATH_FACTORY}
     module, _, symbol = spec["factory"].rpartition(".")
     factory = getattr(importlib.import_module(module), symbol)
     config = factory.get_config_class()(**spec.get("config", {}))

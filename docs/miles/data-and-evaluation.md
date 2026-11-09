@@ -603,19 +603,47 @@ failures; both node and three-node select it for code-service failures. Change t
 settings to opt into strict handling. Managed judge health-check failures separately stop
 training; the fallback applies to grading requests.
 
-### Symbolic math timeouts
+### General math grading and timeouts
 
-Each symbolic comparison has an internal five-second limit. When it expires,
-the verifier still tries its existing text-normalization fallback and any later
-answer candidates, so the final reward can be either zero or one. Completed
-results retain `status=ok` and carry a `symbolic_timeouts` count; a timeout also
-produces a warning in the parent process. This does not change rewards or masks.
+MILES general math grading uses pinned Hugging Face Math-Verify 0.9.0 for answer
+extraction and comparison. It supports structured mathematical answers, including
+sets, tuples and multiple boxes. It removes reference math delimiters only when
+a single pair encloses the whole answer; separate spans such as `\(x=2\) or
+\(x=-2\)` reach the parser intact. Predictions must have a box or a Math-Verify answer anchor such as
+`Answer:` or `the answer is`; bare numbers and unanchored LaTeX are not eligible.
+Paired Markdown bold markers are removed so `**Answer:** **24**` is recognized,
+while exponentiation such as `2**3` is preserved. The library recognizes a limited
+set of answer phrases; some multiline, escaped-currency or prose answers still
+fail extraction. New MILES preparation writes
+`open_instruct.miles.rewards.math_verifier.MathVerifier`; the MILES reward loader
+also maps existing registries naming `open_instruct.ground_truth_utils.MathVerifier`
+to this implementation, without requiring data regeneration or an opt-in flag.
+Legacy training retains its original math implementation. `GSM8KVerifier` and
+`StrictMathVerifier` retain their separate contracts. The caller's
+`reward_final_answer_only` setting still determines whether reasoning is included.
+This replacement changes rewards; compare runs using their recorded source revision.
+
+Math-Verify is not a prose or proof judge. Ambiguous comma-separated thousands,
+some function equations and references mixing prose with math can still be
+misgraded. Multi-part equation answers can also fail when labels are outside
+separate value boxes, even when every value is correct. Anchored extraction reduces incidental-number credit in unfinished
+responses, but does not guarantee completion: an unfinished response can still
+contain an explicit answer anchor or a box. There is no fallback to the previous
+general math grader.
+
+Each general-math parse and candidate comparison has an internal five-second limit.
+A parse timeout returns no answer; a comparison timeout allows later Math-Verify
+candidates, including its literal-string fallback, to match. Strict math retains its
+existing text-normalization fallback. The final reward can therefore be zero or one.
+Completed results retain `status=ok` and carry a `symbolic_timeouts` count; a timeout
+also produces a warning in the parent process. The outer subprocess deadline and
+zero-reward timeout policy are unchanged, and these timeouts do not exclude samples.
 
 W&B logs the following per-collection metrics under `rollout/math_verifier/`:
 
 | Metric | Meaning |
 | --- | --- |
-| `symbolic_timeouts` | Total timed-out symbolic comparisons reported by workers; one result can contain several. |
+| `symbolic_timeouts` | Total timed-out parsing or comparison operations reported by workers; one result can contain several. |
 | `symbolic_timeout_samples` | Math verifier results with at least one symbolic timeout. |
 | `symbolic_timeout_fraction` | Affected results divided by all math verifier results in the collection. |
 | `symbolic_timeout_rewarded_samples` | Affected results whose final verifier score was positive. |
