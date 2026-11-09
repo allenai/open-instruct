@@ -1,9 +1,11 @@
+import asyncio
 import base64
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from scripts.miles import topk_benchmark as bench
+from scripts.miles import topk_instrumentation
 
 
 @pytest.mark.parametrize("k", [32, 64, 128])
@@ -101,3 +103,51 @@ def test_mc32_and_array_modes_leave_response_sampling_unchanged():
         assert params.pop("score_centering_samples", 0) == (32 if mode[0] == "mc32" else 0)
         assert params == original
         assert request["return_flat_raw_top_logprobs_b64"]
+
+
+def test_pickle_ipc_timers_cover_sync_and_async(monkeypatch):
+    zmq = pytest.importorskip("zmq")
+    za = pytest.importorskip("zmq.asyncio")
+    socket_module = pytest.importorskip("zmq.sugar.socket")
+    future_module = pytest.importorskip("zmq._future")
+    for module in (socket_module, future_module):
+        if hasattr(module, "pickle"):
+            monkeypatch.setattr(module, "pickle", module.pickle)
+    counts = {"ipc_pack": 0, "ipc_unpack": 0}
+
+    def wrap(owner, name, label):
+        original = getattr(owner, name)
+
+        def measured(*args, **kwargs):
+            counts[label] += 1
+            return original(*args, **kwargs)
+
+        setattr(owner, name, measured)
+
+    topk_instrumentation.install_pickle_timers(wrap)
+    value = np.full((4, 32), 7, dtype=np.int32)
+    ctx = zmq.Context()
+    a, b = ctx.socket(zmq.PAIR), ctx.socket(zmq.PAIR)
+    a.bind("inproc://timer-test")
+    b.connect("inproc://timer-test")
+    a.send_pyobj(value)
+    np.testing.assert_array_equal(b.recv_pyobj(), value)
+    a.close()
+    b.close()
+    ctx.term()
+
+    async def check_async():
+        ctx = za.Context()
+        a, b = ctx.socket(zmq.PAIR), ctx.socket(zmq.PAIR)
+        a.bind("inproc://timer-test")
+        b.connect("inproc://timer-test")
+        await a.send_pyobj(value)
+        received = await b.recv_pyobj()
+        assert received.dtype == np.int32
+        np.testing.assert_array_equal(received, value)
+        a.close()
+        b.close()
+        ctx.term()
+
+    asyncio.run(check_async())
+    assert counts == {"ipc_pack": 2, "ipc_unpack": 2}

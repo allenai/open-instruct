@@ -12,8 +12,22 @@ import os
 import time
 from collections import deque
 from pathlib import Path
+from types import SimpleNamespace
 
 _INSTALLED = False
+
+
+def install_pickle_timers(wrap_host):
+    # This pinned runtime defaults to pickle IPC. Time serialization itself,
+    # excluding blocking socket waits; leave global pickle functions untouched.
+    pickle = importlib.import_module("pickle")
+    timed_pickle = SimpleNamespace(**vars(pickle))
+    wrap_host(timed_pickle, "dumps", "ipc_pack")
+    wrap_host(timed_pickle, "loads", "ipc_unpack")
+    for module_name in ("zmq.sugar.socket", "zmq._future"):
+        module = importlib.import_module(module_name)
+        if hasattr(module, "pickle"):
+            module.pickle = timed_pickle
 
 
 def install():
@@ -111,12 +125,13 @@ def install():
 
     batch_results = importlib.import_module("sglang.srt.managers.scheduler_components.batch_result_processor")
     streamer = importlib.import_module("sglang.srt.managers.scheduler_components.output_streamer")
-    wrap_host(batch_results.SchedulerBatchResultProcessor, "move_logprobs_to_cpu", "scheduler_score_conversion")
+    wrap_host(batch_results, "convert_output_score_rows", "scheduler_score_conversion")
     wrap_host(streamer._GenerationStreamAccumulator, "accept", "scheduler_request_accumulation")
 
     transport = importlib.import_module("sglang.srt.managers.io_struct")
     wrap_host(transport, "msgpack_encode", "ipc_pack")
     wrap_host(transport, "msgpack_decode", "ipc_unpack")
+    install_pickle_timers(wrap_host)
 
     manager = importlib.import_module("sglang.srt.managers.tokenizer_manager")
     original_pack = manager.TokenizerManager.add_logprob_to_meta_info
