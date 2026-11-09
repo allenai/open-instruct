@@ -461,14 +461,26 @@ class RunConfig:
         validation.runtime_values(options)
         if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
             raise constraints.error("Core weight publication supports retract or in_place pause mode")
+        if options.get("sglang_radix_cache_backend") == validation.POLICY_CACHE_BACKEND and (
+            options.get("pause_generation_mode") != "in_place" or options.get("colocate")
+        ):
+            raise constraints.error(
+                'Policy cache backend currently requires non-colocated serving and miles.pause_generation_mode="in_place"'
+            )
         # This preflight checks top-level settings. Refresh/engine_drain reject
         # sglang_config below; barrier-mode server-group overrides are resolved
         # and cache-validated by Core at actor startup.
         if options.get("pause_generation_mode") == "in_place":
             if options.get("colocate"):
                 raise constraints.error("Core in_place publication requires non-colocated serving")
-            if not options.get("sglang_disable_radix_cache"):
-                raise constraints.error("Core in_place publication requires sglang_disable_radix_cache=true")
+            if (
+                not options.get("sglang_disable_radix_cache")
+                and options.get("sglang_radix_cache_backend") != validation.POLICY_CACHE_BACKEND
+            ):
+                raise constraints.error(
+                    "Core in_place publication requires inference.radix_cache=false or "
+                    f"sglang_radix_cache_backend={validation.POLICY_CACHE_BACKEND}"
+                )
         if self.core.records_root is not None and not options.get("fully_async", False):
             # The completed buffer that records groups exists only in fully async runs.
             raise constraints.error(
