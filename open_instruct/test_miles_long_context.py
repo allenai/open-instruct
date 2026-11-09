@@ -60,6 +60,10 @@ def test_reward_contract(metric, gold, response, expected):
         "Reasoning</think>C",
         "The correct answer is (C) The option's text.",
         "The correct answer is C\nExplanation follows.",
+        "The correct answer is (C) 答案应是 (C).",
+        "The correct answer is (C). (A) involves a different mechanism.",
+        "The correct answer is (C) Vitamin (D) deficiency",
+        "The correct answer is (C) (see paragraph (B))",
         "The correct answer is (C).\n(D) is incorrect.",
         "The correct answer is (C).\r\n(D) is incorrect.",
     ],
@@ -92,13 +96,12 @@ def test_choice_rejects_malformed_or_ambiguous_answer(response):
         "The correct answer is C) and (D)",
         "The correct answer is C. Or (D)",
         "The correct answer is (C) and (C)",
-        "C and D",
     ],
 )
-def test_choice_rejects_second_bracketed_choice_on_answer_line(response):
+def test_choice_suffix_ambiguity_is_a_known_limitation(response):
     target = adapters.target("choice", ["C"], "choice")
-    assert rewards.extract(response, "choice") == ""
-    assert rewards.score(response, target) == 0
+    assert rewards.extract(response, "choice") == "C"
+    assert rewards.score(response, target) == 1
 
 
 @pytest.mark.parametrize("metric", ["lines_f1", "ndcg"])

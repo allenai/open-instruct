@@ -54,7 +54,7 @@ policy; a verifier failure is unknown rather than an incorrect answer.
 |---|---|
 | DocQA numeric | Whole numeric answer with absolute tolerance 1e-6 or relative tolerance 1e-4. |
 | DocQA short answer | Case/whitespace-normalized whole-answer equality, with the published answer prefix and optional trailing period. Valid paraphrases can be false negatives. |
-| Choice | A single extracted choice; contradictory extracted choices and an additional parenthesized capital letter on the same answer line receive zero. See the parsing limitations below. |
+| Choice | A single extracted choice; contradictory explicit answer declarations receive zero. See the parsing limitations below. |
 | GoLong LongBench QA | Case/whitespace-normalized whole-answer equality with answer-marker extraction; contradictory extra lines are rejected. |
 | GoLong EM | Publisher's strict, case-sensitive whole-answer equality after thinking removal; no answer-marker extraction or punctuation normalization. |
 | GoLong math | Existing isolated math verifier. |
@@ -62,20 +62,21 @@ policy; a verifier failure is unknown rather than an incorrect answer.
 | GoLong ranked retrieval | Linear-relevance NDCG at the reference length; blank lines ignored, repeated guesses keep their first occurrence, and duplicate references are rejected. |
 
 Choice extraction is a format heuristic, not a general ambiguity detector. After
-`The correct answer is (C)`, the same-line check rejects another `(A)`–`(Z)` token
-regardless of its meaning. It permits option text and subsequent explanation
-lines, with the following limitations (assuming the reference is `C`):
+`The correct answer is (C)`, it extracts `C` while permitting trailing option text
+and explanations. It does not infer whether later references to other options
+are proposed answers or explanatory comparisons.
 
 | Continuation after `The correct answer is (C)` | Behavior and limitation |
 |---|---|
-| `or D.`, `or D)`, `or [D]`, `or option D`, or `and (d)` | Still extracts `C`; these alternative formats evade the check. |
-| A newline followed by `or (D)` | Still extracts `C`; an alternative on a later line can evade the check. A separate explicit `The correct answer is (D)` is still detected as contradictory. |
-| `Vitamin (D) deficiency` or `(see paragraph (B))` | Receives zero even when this is legitimate option text or a reference, rather than another proposed answer. |
-| A period and newline followed by `(D) is incorrect.` | Retains credit, allowing an explanation on the next line. |
+| `and (D)`, `or (D)`, `, (D)`, `or D.`, `or [D]`, or `and (d)` | Still extracts `C`; a hedged answer can receive credit. |
+| A newline followed by `or (D)` | Still extracts `C`; a hedge can also span lines. |
+| `The correct answer is (D)` on the same or a later line | Receives zero because the explicit answer declarations conflict. |
+| `答案应是 (C)`, `Vitamin (D) deficiency`, or `(see paragraph (B))` | Retains `C`; repeated confirmation and explanatory references do not invalidate the extracted answer. |
 
-The frequency of these missed hedges and false rejections has not been measured.
-Account for both when interpreting screening rewards; the check does not certify
-that every credited response asserts only one answer.
+Standalone answers without the explicit prefix use stricter whole-answer parsing:
+`(C)` is accepted, while `(C) or (D)` is rejected. This format dependence is a
+known limitation. Credit does not certify that the response asserts only one
+answer, and unsupported formatting can still cause false negatives.
 
 GoLong recall-only, partial-order, summary-proxy and table routes remain deferred.
 Unknown task identifiers fail admission rather than selecting a scorer by guess.
