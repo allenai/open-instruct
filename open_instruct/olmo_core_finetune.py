@@ -131,7 +131,8 @@ def _check_row_aligned_cache(numpy_dir: str) -> None:
 def _olmo_core_supports_metadata_boundaries() -> bool:
     """Whether the installed OLMo-core can take packing boundaries from the metadata files.
 
-    `use_array_if_local` reached `NumpyPackedFSLDatasetConfig` in allenai/OLMo-core#843.
+    `use_array_if_local` reached `NumpyPackedFSLDatasetConfig` in allenai/OLMo-core#843, together with
+    building `doc_lens` from the loaded documents, so a row without EOS stays its own document.
     """
     return "use_array_if_local" in {field.name for field in dataclasses.fields(oc_data.NumpyPackedFSLDatasetConfig)}
 
@@ -243,8 +244,8 @@ def _check_extra_numpy_dir(
         if not os.path.exists(os.path.join(numpy_dir, "dataset_statistics.json")):
             raise ValueError(
                 f"{numpy_dir}: a multi-part dir under --document_boundaries_from_metadata must be written with "
-                "--row_aligned_parts, and it has no dataset_statistics.json to show that; pass "
-                "--no_document_boundaries_from_metadata to scan for EOS instead."
+                "--row_aligned_parts (scripts/data/convert_sft_data_for_olmocore.py takes it), and it has no "
+                "dataset_statistics.json to show that."
             )
         _check_row_aligned_cache(numpy_dir)
     dtype_name = np.dtype(token_dtype).name
@@ -470,9 +471,9 @@ class SFTConfig:
     and `labels_mask_part_XXXX.npy` (one bool per token), plus `token_ids_part_XXXX.csv.gz` (one
     `start,end` line per doc, tiling the file) unless `--no_document_boundaries_from_metadata`, in
     which case each part must end with EOS. Under metadata boundaries a dir with several parts must be
-    written with `--row_aligned_parts` (as `scripts/data/convert_sft_data_for_olmocore.py` takes). Their parts are packed the same way as the cache's, one source
-    file at a time, so an instance never mixes extra docs with chat rows; the loader then shuffles all
-    instances together.
+    written with `--row_aligned_parts` (`scripts/data/convert_sft_data_for_olmocore.py --row_aligned_parts`
+    writes one). Their parts are packed the same way as the cache's, one source file at a time, so an
+    instance never mixes extra docs with chat rows; the loader then shuffles all instances together.
     Docs longer than max_seq_length are truncated. Every node needs the same dirs at the same paths.
     Checked at startup, which logs token and loss-token totals for the cache and the extras."""
 

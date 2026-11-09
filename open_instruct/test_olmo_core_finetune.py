@@ -455,6 +455,16 @@ class ExtraNumpyDirsTest(unittest.TestCase):
                 [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
             )
 
+    def test_metadata_rows_must_not_leave_a_gap(self) -> None:
+        # Token 2 belongs to no row, as when stale metadata would drop tokens.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,2\n3,5\n")
+        with self.assertRaisesRegex(ValueError, "row 1 is 3-5"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
     def test_metadata_rows_must_not_run_backwards(self) -> None:
         # Each row starts where the previous one ended, but row 1 ends before it starts.
         _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
