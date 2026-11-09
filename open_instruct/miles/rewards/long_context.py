@@ -12,7 +12,7 @@ from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import task_verifiers
 
 KIND = "long_context_v1"
-SCORER_REVISION = "long_context_v1.1"
+SCORER_REVISION = "long_context_v1.2"
 METRICS = {"exact", "docqa", "decimal", "choice", "lines_f1", "ndcg", "line_accuracy"}
 
 
@@ -64,17 +64,22 @@ def extract(text, mode):
         # Parentheses delimit an explicit choice even before option text. A bare
         # letter instead needs punctuation, a line ending or the end of the answer.
         token = r"(?:\(([A-Z])\)|([A-Z])\)?)"
-        matches = [
-            left or right
-            for left, right in re.findall(
+        matches = list(
+            re.finditer(
                 r"\bThe correct answer is\s*:?\s*"
                 r"(?:\(([A-Z])\)(?=[\s.,;:!?]|$)|([A-Z])"
                 r"(?:\)(?=[\s.,;:!?]|$)|(?=[ \t]*[.,;:!?\n]|[ \t]*$)))",
                 final,
             )
-        ]
+        )
         if matches:
-            return matches[0] if len(set(matches)) == 1 else ""
+            # Option text may follow a choice, but another bracketed choice on
+            # that answer line is ambiguous (e.g. "(C) and (D)"). Do not scan
+            # subsequent explanation lines for alternatives.
+            if any(re.match(r"[^\r\n]*\([A-Z]\)", final[match.end() :]) for match in matches):
+                return ""
+            choices = [match[1] or match[2] for match in matches]
+            return choices[0] if len(set(choices)) == 1 else ""
         match = re.fullmatch(r":?\s*" + token + r"[.,]?", final)
         return (match[1] or match[2]) if match else ""
     return final
