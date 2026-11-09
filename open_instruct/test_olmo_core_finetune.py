@@ -4,6 +4,7 @@ import gzip
 import importlib
 import importlib.util
 import json
+import math
 import os
 import re
 import shlex
@@ -14,7 +15,13 @@ import unittest
 from unittest import mock
 
 import numpy as np
+import torch
 from olmo_core import data as oc_data
+from olmo_core import optim
+from olmo_core.nn.ddp import model as ddp_model
+from olmo_core.nn.transformer import config as oc_transformer_config
+from olmo_core.train.train_module.transformer import config as train_module_config
+from olmo_core.train.train_module.transformer import ddp_train_module
 from parameterized import parameterized
 
 from open_instruct import dataset_transformation, olmo_core_finetune, olmo_core_utils, utils
@@ -758,3 +765,326 @@ class WriteProvenanceReadmeTest(unittest.TestCase):
         olmo_core_utils.write_provenance_readme(
             output_dir="/nonexistent-dir/for-sure", run_name="r", model_name_or_path="b", tracking_url=None
         )
+
+
+# The smallest MoE v2 (OLMoDDPModelConfig) architecture: two full-attention blocks, 4 experts, top-2.
+_TINY_MOE_V2_MODEL = {
+    "_CLASS_": "olmo_core.nn.transformer.config.OLMoDDPModelConfig",
+    "name": "moe_fused_v2",
+    "d_model": 16,
+    "n_layers": 2,
+    "vocab_size": 128,
+    "lm_head": {"_CLASS_": "olmo_core.nn.lm_head.LMHeadConfig", "name": "default"},
+    "block": {
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig",
+        "name": "moe_fused_v2",
+        "sequence_mixer": {"_CLASS_": "olmo_core.nn.attention.AttentionConfig", "n_heads": 2, "backend": "torch"},
+        "layer_norm": {"_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig", "name": "rms"},
+        "routed_experts": {
+            "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig",
+            "d_model": 16,
+            "hidden_size": 8,
+            "num_experts": 4,
+            "bias": False,
+            "dtype": "float32",
+        },
+        "routed_experts_router": {
+            "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2",
+            "d_model": 16,
+            "num_experts": 4,
+            "top_k": 2,
+        },
+    },
+}
+
+# A checkpoint config's train_module section, as an OLMo 3.5 MoE pretraining run writes it (trimmed).
+_CHECKPOINT_TRAIN_MODULE = {
+    "_CLASS_": "olmo_core.train.train_module.transformer.config.OLMoDDPTrainModuleConfig",
+    "rank_microbatch_size": 65536,
+    "max_sequence_length": 65536,
+    "optim": {
+        "_CLASS_": "olmo_core.optim.moe_optimizer.OLMoDDPOptimizerConfig",
+        "group_overrides": [
+            {
+                "_CLASS_": "olmo_core.optim.config.OptimGroupOverride",
+                "params": ["embeddings.weight"],
+                "opts": {"weight_decay": 0.0},
+            }
+        ],
+        "compile": True,
+        "lr": 1.1e-4,
+        "betas": [0.9, 0.95],
+        "weight_decay": 0.1,
+        "max_grad_norm": 1.0,
+    },
+    "dp_config": {
+        "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerDataParallelConfig",
+        "name": "ddp",
+        "reduce_dtype": "float32",
+        "use_reduce_scatter": True,
+    },
+    "z_loss_multiplier": 1e-5,
+}
+
+
+def _write_checkpoint_config(tmp: str, payload: dict) -> str:
+    path = os.path.join(tmp, "config.json")
+    _write(path, json.dumps(payload))
+    return path
+
+
+class TransformerConfigFromJsonTest(unittest.TestCase):
+    def test_checkpoint_config_builds_an_olmo_ddp_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL, "train_module": {}})
+            config = olmo_core_utils.get_transformer_config(path, vocab_size=128, attn_backend="torch")
+        self.assertIsInstance(config, oc_transformer_config.OLMoDDPModelConfig)
+        self.assertEqual((config.n_layers, config.d_model), (2, 16))
+        self.assertIsInstance(config.build(init_device="meta"), ddp_model.OLMoDDPModel)
+
+    def test_bare_model_section(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, _TINY_MOE_V2_MODEL)
+            config = olmo_core_utils.get_transformer_config(path, vocab_size=128, attn_backend="torch")
+        self.assertIsInstance(config, oc_transformer_config.OLMoDDPModelConfig)
+
+    def test_keeps_a_larger_config_vocab_size(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL})
+            with self.assertLogs(olmo_core_utils.logger, level="WARNING") as logs:
+                config = olmo_core_utils.get_transformer_config(path, vocab_size=64, attn_backend="torch")
+        self.assertEqual(config.vocab_size, 128)
+        self.assertIn("keeping the config's value", "\n".join(logs.output))
+
+    def test_tokenizer_vocab_beyond_the_config_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL})
+            with self.assertRaisesRegex(ValueError, "below the tokenizer's padded vocab 256"):
+                olmo_core_utils.get_transformer_config(path, vocab_size=256, attn_backend="torch")
+
+    def test_missing_json_file_is_not_a_config(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not found"):
+            olmo_core_utils.get_transformer_config("/nonexistent/config.json", vocab_size=128, attn_backend="torch")
+
+
+class BuildDdpTrainModuleConfigTest(unittest.TestCase):
+    def _build(self, max_grad_norm: float | None, train_module: dict | None = None, **kwargs):
+        scheduler = optim.CosWithWarmup(warmup=3)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(
+                tmp, {"model": _TINY_MOE_V2_MODEL, "train_module": train_module or _CHECKPOINT_TRAIN_MODULE}
+            )
+            config = olmo_core_utils.build_ddp_train_module_config(
+                path,
+                rank_microbatch_size=4096,
+                max_sequence_length=4096,
+                learning_rate=5e-5,
+                weight_decay=0.0,
+                scheduler=scheduler,
+                max_grad_norm=max_grad_norm,
+                compile_model=False,
+                ac_config=None,
+                **kwargs,
+            )
+        return config, scheduler
+
+    def test_sft_settings_override_the_checkpoint(self) -> None:
+        config, scheduler = self._build(max_grad_norm=0.5)
+        self.assertIsInstance(config, train_module_config.OLMoDDPTrainModuleConfig)
+        self.assertEqual((config.rank_microbatch_size, config.max_sequence_length), (4096, 4096))
+        self.assertEqual((config.optim.lr, config.optim.weight_decay, config.optim.max_grad_norm), (5e-5, 0.0, 0.5))
+        self.assertIs(config.scheduler, scheduler)
+        self.assertFalse(config.compile_model)
+        # The train-module-level threshold would replace the optimizer's; it is left unset.
+        self.assertIsNone(config.max_grad_norm)
+
+    def test_optim_dp_config_and_z_loss_come_from_the_checkpoint(self) -> None:
+        config, _ = self._build(max_grad_norm=1.0)
+        self.assertEqual(tuple(config.optim.betas), (0.9, 0.95))
+        self.assertTrue(config.optim.compile)
+        self.assertEqual(config.optim.group_overrides[0].params, ["embeddings.weight"])
+        self.assertEqual((config.dp_config.name, config.dp_config.use_reduce_scatter), ("ddp", True))
+        self.assertEqual(config.z_loss_multiplier, 1e-5)
+
+    def test_config_without_train_module_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL})
+            with self.assertRaisesRegex(ValueError, "no train_module optim or dp_config"):
+                olmo_core_utils.build_ddp_train_module_config(
+                    path,
+                    rank_microbatch_size=4096,
+                    max_sequence_length=4096,
+                    learning_rate=5e-5,
+                    weight_decay=0.0,
+                    scheduler=None,
+                    max_grad_norm=1.0,
+                    compile_model=False,
+                    ac_config=None,
+                )
+
+    def test_no_expert_parallelism_by_default(self) -> None:
+        config, _ = self._build(max_grad_norm=1.0)
+        self.assertIsNone(config.ep_config)
+
+    def test_expert_parallel_degree(self) -> None:
+        config, _ = self._build(max_grad_norm=1.0, expert_parallel_degree=8)
+        self.assertEqual(config.ep_config.degree, 8)
+
+    def test_checkpoint_expert_parallel_degree_mismatch_is_logged(self) -> None:
+        train_module = {**_CHECKPOINT_TRAIN_MODULE, "ep_config": {"degree": 8}}
+        with self.assertLogs(olmo_core_utils.logger, level="WARNING") as logs:
+            config, _ = self._build(max_grad_norm=1.0, train_module=train_module)
+        self.assertIsNone(config.ep_config)
+        self.assertIn("expert parallelism degree 8", "\n".join(logs.output))
+        self.assertIn("pass --expert_parallel_degree", "\n".join(logs.output))
+
+    def test_no_clipping_becomes_an_infinite_threshold(self) -> None:
+        # The OLMoDDP optimizer always clips, at coefficient min(1, threshold / norm).
+        config, _ = self._build(max_grad_norm=None)
+        self.assertEqual(config.optim.max_grad_norm, math.inf)
+
+
+class CheckDdpModelArgsTest(unittest.TestCase):
+    @staticmethod
+    def _args(config_name: str | None):
+        return types.SimpleNamespace(model=types.SimpleNamespace(config_name=config_name))
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.config_path = _write_checkpoint_config(
+            tmp.name, {"model": _TINY_MOE_V2_MODEL, "train_module": _CHECKPOINT_TRAIN_MODULE}
+        )
+
+    def test_checkpoint_config_json_passes(self) -> None:
+        olmo_core_finetune._check_ddp_model_args(self._args(self.config_path), use_hf_ckpt=False, cp_config=None)
+
+    @parameterized.expand(
+        [
+            ("no_train_module", {}, "train_module optim or dp_config"),
+            ("no_dp_config", {"train_module": {"optim": {}}}, "train_module dp_config"),
+        ]
+    )
+    def test_config_without_train_module_sections_fails(self, _name: str, extra: dict, message: str) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL, **extra})
+            with self.assertRaisesRegex(ValueError, message):
+                olmo_core_finetune._check_ddp_model_args(self._args(path), use_hf_ckpt=False, cp_config=None)
+
+    @parameterized.expand([("missing", None), ("preset", "olmo3_7B")])
+    def test_config_name_must_be_a_json_file(self, _name: str, config_name: str | None) -> None:
+        with self.assertRaisesRegex(ValueError, "config.json"):
+            olmo_core_finetune._check_ddp_model_args(self._args(config_name), use_hf_ckpt=False, cp_config=None)
+
+    def test_hf_checkpoint_fails(self) -> None:
+        with self.assertRaisesRegex(ValueError, "HuggingFace"):
+            olmo_core_finetune._check_ddp_model_args(self._args(self.config_path), use_hf_ckpt=True, cp_config=None)
+
+    def test_context_parallelism_fails(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Context parallelism"):
+            olmo_core_finetune._check_ddp_model_args(
+                self._args(self.config_path), use_hf_ckpt=False, cp_config=mock.sentinel.cp_config
+            )
+
+
+class CheckExpertParallelDegreeTest(unittest.TestCase):
+    @parameterized.expand(
+        [("unset_dense", None, False), ("unset_ddp", None, True), ("ddp", 8, True), ("all_ranks", -1, True)]
+    )
+    def test_accepted(self, _name: str, degree: int | None, is_ddp_model: bool) -> None:
+        olmo_core_finetune._check_expert_parallel_degree(degree, is_ddp_model, world_size=16)
+
+    def test_dense_model_fails(self) -> None:
+        with self.assertRaisesRegex(ValueError, "OLMoDDPModel"):
+            olmo_core_finetune._check_expert_parallel_degree(8, is_ddp_model=False, world_size=16)
+
+    @parameterized.expand([("zero", 0), ("one", 1)])
+    def test_degree_without_parallelism_fails(self, _name: str, degree: int) -> None:
+        with self.assertRaisesRegex(ValueError, "above 1"):
+            olmo_core_finetune._check_expert_parallel_degree(degree, is_ddp_model=True, world_size=16)
+
+    def test_degree_must_divide_world_size(self) -> None:
+        with self.assertRaisesRegex(ValueError, "divide the world size"):
+            olmo_core_finetune._check_expert_parallel_degree(3, is_ddp_model=True, world_size=16)
+
+
+class SaveAsyncTest(unittest.TestCase):
+    @parameterized.expand(
+        [("fsdp_async", True, False, True), ("fsdp_sync", False, False, False), ("ddp_sync", False, True, False)]
+    )
+    def test_flag_is_kept(self, _name: str, save_async: bool, is_ddp_model: bool, expected: bool) -> None:
+        self.assertIs(olmo_core_finetune._save_async(save_async, is_ddp_model), expected)
+
+    def test_ddp_model_saves_synchronously(self) -> None:
+        # OLMo-core's Checkpointer.save_async raises for train modules with save_state_dict_direct.
+        with self.assertLogs(olmo_core_finetune.logger, level="WARNING"):
+            self.assertFalse(olmo_core_finetune._save_async(True, is_ddp_model=True))
+
+    def test_olmo_ddp_train_module_saves_its_own_state(self) -> None:
+        # The reason for the override: if this attribute goes away, async saves may work again.
+        self.assertTrue(hasattr(ddp_train_module.OLMoDDPTrainModule, "save_state_dict_direct"))
+
+
+class RequireTransformerEngineTest(unittest.TestCase):
+    def test_missing_transformer_engine_fails_at_startup(self) -> None:
+        with (
+            mock.patch.object(olmo_core_utils.oc_moe_utils, "moe_permute", None),
+            self.assertRaisesRegex(RuntimeError, "transformer-engine"),
+        ):
+            olmo_core_utils.require_transformer_engine()
+
+    def test_installed_transformer_engine_passes(self) -> None:
+        with mock.patch.object(olmo_core_utils.oc_moe_utils, "moe_permute", object()):
+            olmo_core_utils.require_transformer_engine()
+
+
+class _FakeMain:
+    """Stands in for a DTensor optimizer main param: a flat fp32 tensor."""
+
+    def __init__(self, param: torch.Tensor):
+        self.value = param.detach().float().reshape(-1).clone()
+
+    def full_tensor(self) -> torch.Tensor:
+        return self.value
+
+
+def _copy_into_fake_main(dst: _FakeMain, src: torch.Tensor) -> None:
+    dst.value.copy_(src)
+
+
+class SyncOptimizerMainParamsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.embeddings = torch.zeros(4, 2, dtype=torch.bfloat16)
+        self.other = torch.zeros(3, dtype=torch.bfloat16)
+        named_params = {"embeddings.weight": self.embeddings, "blocks.0.w": self.other}
+        self.optimizer = types.SimpleNamespace(
+            param_groups=[{"named_params": named_params}],
+            states={f"{name}.main": _FakeMain(param) for name, param in named_params.items()},
+        )
+
+    def test_optimizer_without_main_params_is_a_no_op(self) -> None:
+        olmo_core_utils.sync_optimizer_main_params(types.SimpleNamespace(param_groups=[]), [self.embeddings])
+        olmo_core_utils.sync_optimizer_main_params(None, [self.embeddings])
+
+    def test_syncs_only_the_seeded_matrices(self) -> None:
+        self.embeddings[1] = 1.5
+        self.other[0] = 2.0
+        with mock.patch.object(olmo_core_utils, "assign_full_tensor_to_dtensor", _copy_into_fake_main):
+            olmo_core_utils.sync_optimizer_main_params(self.optimizer, [self.embeddings])
+        self.assertTrue(torch.equal(self.optimizer.states["embeddings.weight.main"].value[2:4], torch.full((2,), 1.5)))
+        self.assertEqual(float(self.optimizer.states["blocks.0.w.main"].value[0]), 0.0)
+
+    def test_matrix_without_a_main_param_fails(self) -> None:
+        with (
+            mock.patch.object(olmo_core_utils, "assign_full_tensor_to_dtensor", _copy_into_fake_main),
+            self.assertRaisesRegex(RuntimeError, "1 of 2"),
+        ):
+            olmo_core_utils.sync_optimizer_main_params(self.optimizer, [self.embeddings, torch.zeros(1)])
+
+    def test_main_that_does_not_match_after_the_sync_fails(self) -> None:
+        self.embeddings[0] = 3.0
+        with (
+            mock.patch.object(olmo_core_utils, "assign_full_tensor_to_dtensor", lambda dst, src: None),
+            self.assertRaisesRegex(RuntimeError, "does not match"),
+        ):
+            olmo_core_utils.sync_optimizer_main_params(self.optimizer, [self.embeddings])
