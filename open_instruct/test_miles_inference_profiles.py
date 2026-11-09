@@ -574,7 +574,7 @@ def test_retained_preset_preserves_cached_geometry_and_requires_known_hardware()
     "example,overrides,message",
     [
         ("node", ['inference.profile="olmo35-b300-v1"'], "sglang_disable_radix_cache"),
-        ("node", ['inference.profile="generic"', "inference.radix_cache=true"], "sglang_disable_radix_cache"),
+        ("node", ['inference.profile="generic"', "inference.radix_cache=true"], "inference.radix_cache=false"),
         ("dev", ['miles.pause_generation_mode="in_place"'], "non-colocated"),
         ("node", ['miles.pause_generation_mode="abort"'], "supports retract or in_place"),
     ],

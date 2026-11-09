@@ -4,11 +4,11 @@ Our long-context RL trials generate several responses per prompt. This integrati
 
 ## Repository boundaries
 
-| Repository | Branch | Responsibility |
+| Repository | PR | Responsibility |
 |---|---|---|
-| `allenai/olmo-sglang` | `codex/policy-prefix-cache` | Register `olmo_policy_versioned_v1` through the pinned engine's existing radix-cache backend API; scope sharing to the serving policy; preserve and release retained private state. |
-| `allenai/miles-olmo-core` | `codex/policy-cache-publication` | Route siblings consistently; verify backend and committed weight version before resuming generation. |
-| `allenai/open-instruct` | `codex/policy-cache-config` | Permit the explicitly selected backend, validate memory/concurrency settings, and preserve existing cache-off defaults. |
+| `allenai/olmo-sglang` | [#32](https://github.com/allenai/olmo-sglang/pull/32) | Register `olmo_policy_versioned_v1` through the pinned engine's existing radix-cache backend API; scope sharing to the serving policy; preserve and release retained private state. |
+| `allenai/miles-olmo-core` | [#33](https://github.com/allenai/miles-olmo-core/pull/33) | Route siblings consistently; verify backend and committed weight version before resuming generation. |
+| `allenai/open-instruct` | [#2215](https://github.com/allenai/open-instruct/pull/2215) | Permit the explicitly selected backend, validate memory/concurrency settings, and preserve existing cache-off defaults. |
 
 These branches form a candidate integration. This configuration PR preserves the production runtime lock: the stock image cannot run this backend. Land the companion runtime changes and advance the lock/options provenance before enabling it in a normal application build. The successful probe used a separate integration image containing the cache changes, startup-error handling and previously exercised LC scoring fixes; those unrelated scoring/verifier changes are not part of this PR. SGLang stayed pinned throughout.
 
@@ -32,7 +32,7 @@ sglang_radix_cache_backend = "olmo_policy_versioned_v1"
 sglang_schedule_policy = "lpm"
 ```
 
-The capacities are a conservative starting configuration, not a measured throughput profile. Recurrent slots must exceed five times the per-engine running-request limit; long-context KV capacity still needs separate measurement. The plugin initially restricts serving to device-only TP1/PP1/DP1 text generation without sessions, speculation, sliding-window attention, adapters or host/external offload. Existing measured profiles remain cache-off.
+The capacities are a conservative starting configuration, not a measured throughput profile. Configuration validation requires explicit running-request and recurrent-slot limits and the `extra_buffer` strategy; recurrent slots must exceed five times the per-engine running-request limit. Long-context KV capacity still needs separate measurement. The application currently accepts this backend only with non-colocated, in-place publication and single-GPU TP1/PP1/DP1/EP1 inference engines. The plugin additionally validates resolved model/engine state at startup, rejecting sessions, speculation, sliding-window attention, adapters and host/external offload. Existing measured profiles remain cache-off.
 
 ## Policy changes and cold siblings
 
@@ -44,12 +44,15 @@ Consistent-hash routing supplies a common prompt-group key to all siblings. SGLa
 
 ## Validation
 
-Focused Open Instruct configuration/cache/profile tests pass (120 tests). MILES publication, retained-state and routing tests pass (45 tests). Plugin tests against the unchanged pinned SGLang source exercise real CPU KV/KDA pools, cross-policy misses, completion/cancellation cleanup, and built-in cold-sibling scheduling (17 tests).
+The rebased application branch passes 283 focused configuration, cache, profile, run-spec, refresh and constraint tests. Coverage includes missing explicit capacities, incompatible publication/placement/parallelism, measured-preset rejection, advisor behavior and unchanged cache-off defaults. Earlier companion checks covered MILES publication, retained-state and routing (45 tests), and the plugin's real CPU KV/KDA pools, cross-policy misses, completion/cancellation cleanup and built-in cold-sibling scheduling (17 tests).
 
 The two-B300 DocQA integration probe completed four optimizer updates with exit code 0. The cache initialized, reused long prefixes (one request needed 15 new prefill tokens after 12,416 cached tokens), and published versions 0–4. Thirty-two logged responses continued across policy boundaries. Weight publications after training took 1.57–2.45 seconds. The first driver training call took 396 seconds including first-use compilation; subsequent calls took 19–26 seconds. This is a small mechanics probe, not a speedup comparison.
 
-All four consumed training batches came from policy version 0 because asynchronous prefetch ran ahead during compilation. Cross-version serving was exercised, but training on those cross-version responses was not. Remaining checks are fixed-weight cache-off/on output parity, fresh requests against a cold new-policy engine, training consumption of retained responses, repeated-update memory stability, and representative throughput. TP>1 and speculation remain unqualified.
+All four consumed training batches in that first probe came from policy version 0 because asynchronous prefetch ran ahead during compilation. A subsequent one-node comparison completed 24 optimizer updates with caching off and 24 with caching on, including training consumption of cross-version responses (50 off, 19 on). There were no retractions; the cache-on arm reused 41.2% of prompt tokens. Controlled policy-cache results matched native-cache outputs and logprobs exactly. Cached and uncached trajectories differed, so this is not a claim of bitwise equivalence to cache-off training or long-run learning equivalence.
+
+The controlled 256-output-token serving benchmark showed 1.82–3.52× speedups across 12K–40K prompts. In training, responses averaged about 4,350 tokens and the completed-group buffer was full about 98% of sampled time in both arms. Mean warm update time was 83.09 seconds off versus 85.81 seconds on: no end-to-end speedup was established in the two-trainer/six-serving-GPU layout. Keep caching opt-in; capacity allocation and longer-run learning behavior need separate evaluation. TP>1 and speculation remain unqualified.
 
 Runs:
 
 1. Four-update DocQA probe: [Beaker](https://beaker.org/ex/01M6Y5Q3BWZQVRVN1CG0M7NNHM). Image `01M6Y5NN3FMQGCVV2WX92AMJS6`; application `a2feaaef3`, MILES `0c2b405`, plugin `f0444a8`, Core `903e57d`. Immutable result dataset `01M6Y5Q3C5VM98YMG402TE8WSY` contains publication, driver-timing and training-contract records. These are the tested integration revisions, not a claim that the subsequently separated PR heads were GPU-tested.
+2. Completed cache-off/on training and serving panel: [Beaker](https://beaker.org/ex/01M6YCQWJC7Q3ESTATPQZRFKGY), result dataset `01M6YCQWJNX08T1N63Q3EBNWZR`. Application `13d47a043`, MILES `8802440b2a8ce7845f8dc07ff81bd345b3890e71`, plugin `f0444a8`. This also used the integration branches; the rebased configuration-only PR head has CPU regression coverage, not a new GPU run.
