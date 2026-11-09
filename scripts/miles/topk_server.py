@@ -32,7 +32,7 @@ def main():
         max_total_tokens=32768,
         max_mamba_cache_size=64,
         disable_radix_cache=True,
-        attention_backend="fa3",
+        attention_backend=os.environ.get("TOPK_BENCH_ATTENTION_BACKEND", "fa3"),
         sampling_backend="pytorch",
         cuda_graph_backend_decode="full",
         cuda_graph_backend_prefill="disabled",
