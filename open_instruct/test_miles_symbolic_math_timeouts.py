@@ -38,6 +38,34 @@ def test_multiple_candidates_count_each_timeout_and_still_allow_later_match():
     assert failed.diagnostics == recovered.diagnostics == {"symbolic_timeouts": 2}
 
 
+@pytest.mark.parametrize(
+    "factory, prediction, label, score, timeouts",
+    [
+        # As-written comparison times out and fails as a string; the unwrapped retry matches.
+        (ground_truth_utils.MathVerifier, r"\boxed{4}", r"\(4\)", 1.0, 2),
+        (ground_truth_utils.MathVerifier, r"\boxed{5}", r"\(4\)", 0.0, 2),
+        (ground_truth_utils.MathVerifier, r"\boxed{\(4\)}", "4", 1.0, 2),
+        # Both sides wrapped: the as-written pair matches as a string after its one timeout.
+        (ground_truth_utils.MathVerifier, r"\boxed{\(4\)}", r"\(4\)", 1.0, 1),
+        # Both sides wrapped and wrong: all four answer/reference pairs are tried and counted.
+        (ground_truth_utils.MathVerifier, r"\boxed{\(5\)}", r"\(4\)", 0.0, 4),
+        (
+            ground_truth_utils.StrictMathVerifier,
+            "Final Answer: The final answer is 4. I hope it is correct.",
+            r"\(4\)",
+            1.0,
+            2,
+        ),
+    ],
+)
+def test_timeouts_with_wrapped_references_count_each_comparison(factory, prediction, label, score, timeouts):
+    verifier = factory()
+    with mock.patch.object(math_utils, "parse_latex", side_effect=TimeoutError):
+        result = verifier([], prediction, label)
+    assert result.score == score
+    assert result.diagnostics == {"symbolic_timeouts": timeouts}
+
+
 def test_real_five_second_alarm_is_recorded(caplog):
     diagnostics = {}
     with mock.patch.object(math_utils, "parse_latex", side_effect=lambda _: time.sleep(10)):
