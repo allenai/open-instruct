@@ -674,3 +674,15 @@ def test_legacy_source_system_prompt_is_preserved():
         {"role": "system", "content": "detailed thinking off"},
         {"role": "user", "content": "Question"},
     ]
+
+
+def test_named_judge_preserves_reference_and_requires_explicit_route():
+    raw = {"prompt": "Prove the claim", "expected_answer": "Reference proof", "agent_ref": {"name": "math_with_judge"}}
+    with pytest.raises(ValueError, match="explicit_adapter"):
+        sources.adapt(raw, "nemo_v1")
+    route = {"field": "agent_ref.name", "routes": {"math_with_judge": {"adapter": "reference_judge_v1"}}}
+    messages, target, name, _ = sources.adapt(raw, "routed_v1", route)
+    assert target == "Reference proof" and name == "reference_judge"
+    assert messages == [{"role": "user", "content": "Prove the claim"}]
+    with pytest.raises(ValueError, match="unmapped"):
+        sources.adapt(raw, "routed_v1", {**route, "routes": {}})

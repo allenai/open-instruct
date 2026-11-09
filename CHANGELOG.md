@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 
+### Removed
+- Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
+
 ### Changed
 - Omit transduction rows with missing task/input delimiters instead of aborting source preparation (https://github.com/allenai/open-instruct/pull/2199).
 - Accept bold, boxed, explicitly delimited lowercase and Chinese-punctuated long-context choice answers while retaining explicit contradiction checks and rejecting bare lowercase prose (https://github.com/allenai/open-instruct/pull/2199).

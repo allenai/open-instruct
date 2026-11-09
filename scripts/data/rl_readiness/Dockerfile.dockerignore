@@ -1,8 +1,0 @@
-# This overlay only needs the readiness package; runtime code comes from BASE_IMAGE.
-**
-!scripts/
-!scripts/data/
-!scripts/data/rl_readiness/
-!scripts/data/rl_readiness/*.py
-!scripts/data/rl_readiness/requirements.txt
-!scripts/data/rl_readiness/Dockerfile

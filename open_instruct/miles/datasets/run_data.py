@@ -362,8 +362,8 @@ def _verify_if_training_row(row, names):
             identity = row["metadata"].get("prepared_sample_id", "unknown sample")
             raise InputError(
                 f"Unsafe IF training target for {identity} ({verifier['name']}): {', '.join(issues)}. "
-                "Audit/filter with scripts/data/filter_ifeval_constraints.py, then use the cleaned file "
-                "in a new run root; existing training data is never filtered in place."
+                "Remove these rows during dataset preparation, then use the cleaned file in a new run root; "
+                "existing training data is never filtered in place."
             )
 
 
