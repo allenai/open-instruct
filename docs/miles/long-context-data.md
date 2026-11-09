@@ -46,9 +46,12 @@ source qualification does not certify every example's content or all samplers.
 
 ## Use in a mix
 
-Use Workbench's `export-open-instruct` and `bind-open-instruct` commands on the
-versioned release to produce prepared JSONL, a namespaced verifier registry and
-a run-local `data.toml`. Preserve the release's `origin_id`, `record_id`,
+Tagliere v1 and its extension store canonical tasks. First render a declared
+model/context variant from the canonical collection, then regenerate its bound
+pool labels and release. Use Workbench's `export-open-instruct` and
+`bind-open-instruct` on that rendered release to produce prepared JSONL, a
+namespaced verifier registry and a run-local `data.toml`. The imported LC-only
+variant already includes rendering and is separately qualified through this path. Preserve the release's `origin_id`, `record_id`,
 `release_id`, `labeling_version` and top-level `pool_id` fields. Choose sampling
 weights in the training configuration; the dataset does not prescribe them.
 Named-pool configurations use the consumer merged in
@@ -97,8 +100,12 @@ under the publisher's declared OpenMDW 1.1 license.
 
 ## Qualification and existing evidence
 
-All 13,577 imported rows passed the actual training loader; 130
-gold/wrong/near-miss/empty/truncated controls passed across 26 strata. Both sources
+The historical 13,577 imported rows passed the actual training loader; 130
+gold/wrong/near-miss/empty/truncated controls passed across 26 strata. The new Tagliere LC-only export retains 13,576 rows after hygiene. All pass
+the current loader, immutable preparation resume and 130 controls through the
+namespaced reward bridge, including main's updated Math-Verify implementation.
+See Workbench's `validation/tagliere-long-context.json` and its reproduction script.
+Both sources
 subsequently completed fixed-policy screens and 100-update training trials at
 64K input / 16K response budgets. The earlier 16K populations and screens remain
 separate variants and should not be substituted for these results.
