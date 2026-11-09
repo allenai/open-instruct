@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Removed
-- Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/PR_NUMBER).
+- Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed
 - Use pinned Math-Verify by default for MILES general math grading, including existing prepared math registries, structured answers and wrapped references; require boxes or answer anchors, preserve Markdown-bold answers, and retain process isolation and symbolic-timeout metrics. Legacy math, GSM8K and strict-math contracts are unchanged (https://github.com/allenai/open-instruct/pull/2217).
