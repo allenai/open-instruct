@@ -79,10 +79,11 @@ policy; a verifier failure is unknown rather than an incorrect answer.
 | DocQA numeric | Whole numeric answer with absolute tolerance 1e-6 or relative tolerance 1e-4. |
 | DocQA short answer | Case/whitespace-normalized whole-answer equality, with the published answer prefix and optional trailing period. Valid paraphrases can be false negatives. |
 | Choice | A single extracted choice; contradictory extracted choices receive zero. |
-| GoLong QA / exact match | Whole-answer equality. Unlike upstream first-line-only grading, contradictory extra lines are rejected. |
+| GoLong LongBench QA | Case/whitespace-normalized whole-answer equality with answer-marker extraction; contradictory extra lines are rejected. |
+| GoLong EM | Publisher's strict, case-sensitive whole-answer equality after thinking removal; no answer-marker extraction or punctuation normalization. |
 | GoLong math | Existing isolated math verifier. |
-| GoLong document sets | Set precision/recall F1; extra guesses reduce reward. |
-| GoLong ranked retrieval | Linear-relevance NDCG at the reference length; duplicate guesses cannot earn repeated relevance, and duplicate references are rejected. |
+| GoLong document sets | Set precision/recall F1; blank lines ignored, extra guesses reduce reward. |
+| GoLong ranked retrieval | Linear-relevance NDCG at the reference length; blank lines ignored, repeated guesses keep their first occurrence, and duplicate references are rejected. |
 
 GoLong recall-only, partial-order, summary-proxy and table routes remain deferred.
 Unknown task identifiers fail admission rather than selecting a scorer by guess.
@@ -132,3 +133,14 @@ with explicit tokenizer, prompt and reference limits. Retain per-row disposition
 run the Workbench hygiene workflow, then qualify through
 `scripts.data.rl_readiness.qualify_bundle`. Pending inventory must never be
 promoted to a clean or qualified release without the corresponding checks.
+
+## Scoring review
+
+Scorer revision `long_context_v1.1` fixes blank list entries, last-occurrence
+ranking manipulation and choice parsing that could treat the pronoun in
+"The correct answer is I think ..." as a choice. Explicit parenthesized
+choices followed by option text remain valid. Native GoLong EM stays strict;
+relaxing it is a separate scoring-policy experiment. These fixes intentionally
+differ from the publisher's blank-line and duplicate-handling implementation.
+Historical trial rewards and screening tables above refer to the old revision;
+they are not retroactively evidence of training under the corrected scorer.

@@ -12,6 +12,7 @@ from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import task_verifiers
 
 KIND = "long_context_v1"
+SCORER_REVISION = "long_context_v1.1"
 METRICS = {"exact", "docqa", "decimal", "choice", "lines_f1", "ndcg", "line_accuracy"}
 
 
@@ -59,10 +60,23 @@ def extract(text, mode):
             final = final.rsplit(marker, 1)[1].strip()
         return final.removesuffix(".")
     if mode == "choice":
-        matches = re.findall(r"The correct answer is\s*\(?([A-Z])\)?(?:[.]|\s|$)", final)
+        # A letter inside prose (e.g. "I think") is not an asserted choice.
+        # Parentheses delimit an explicit choice even before option text. A bare
+        # letter instead needs punctuation, a line ending or the end of the answer.
+        token = r"(?:\(([A-Z])\)|([A-Z])\)?)"
+        matches = [
+            left or right
+            for left, right in re.findall(
+                r"\bThe correct answer is\s*:?\s*"
+                r"(?:\(([A-Z])\)(?=[\s.,;:!?]|$)|([A-Z])"
+                r"(?:\)(?=[\s.,;:!?]|$)|(?=[ \t]*[.,;:!?\n]|[ \t]*$)))",
+                final,
+            )
+        ]
         if matches:
             return matches[0] if len(set(matches)) == 1 else ""
-        return final.strip("(). ") if re.fullmatch(r"\(?[A-Z]\)?\.?", final) else ""
+        match = re.fullmatch(r":?\s*" + token + r"[.,]?", final)
+        return (match[1] or match[2]) if match else ""
     return final
 
 
@@ -93,16 +107,17 @@ def score(prediction, target):
         # Positional comparison penalizes missing, extra and reordered lines.
         # Unlike set overlap, repeated source lines are separate obligations.
         return sum(a == b for a, b in zip(expected, actual)) / max(len(expected), len(actual))
-    actual = [normalize(line) for line in final.split("\n")]
+    actual = [normalize(line) for line in final.splitlines() if line.strip()]
     expected = list(map(normalize, gold))
     if metric == "lines_f1":
         a, b = set(actual), set(expected)
         return 2 * len(a & b) / (len(a) + len(b))
-    # Linear relevance, log2 discount, as trec_eval ndcg_cut; duplicate guesses
-    # do not obtain extra relevance. Their last occurrence has the native rank.
+    # Linear relevance and log2 discount. Deduplicate in first-occurrence order:
+    # appending an earlier bad guess cannot move it out of the scored prefix.
+    # This deliberately fixes the upstream wrapper's last-occurrence behavior;
+    # trec_eval itself rejects duplicate document IDs rather than choosing one.
     relevance = {value: len(expected) - i for i, value in enumerate(expected)}
-    positions = {value: i for i, value in enumerate(actual)}
-    ranked = sorted(positions, key=positions.__getitem__)[: len(expected)]
+    ranked = list(dict.fromkeys(actual))[: len(expected)]
     dcg = sum(relevance.get(value, 0) / math.log2(i + 2) for i, value in enumerate(ranked))
     ideal = sum((len(expected) - i) / math.log2(i + 2) for i in range(len(expected)))
     return dcg / ideal
@@ -120,6 +135,7 @@ class LongContextVerifier:
             value,
             diagnostics={
                 "kind": KIND,
+                "scorer_revision": SCORER_REVISION,
                 "status": "ok",
                 "metric": label["metric"],
                 "full_reference_match": value == 1.0,

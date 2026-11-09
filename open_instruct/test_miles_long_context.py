@@ -45,7 +45,22 @@ def test_reward_contract(metric, gold, response, expected):
     assert rewards.score("<think>" + response, target) == 0
 
 
-@pytest.mark.parametrize("response", ["C", "(C)", "The correct answer is (C).", "Reasoning</think>C"])
+@pytest.mark.parametrize(
+    "response",
+    [
+        "C",
+        "(C)",
+        "(C),",
+        "C)",
+        "The correct answer is C) The option text.",
+        ": C",
+        "The correct answer is (C).",
+        "The correct answer is: C",
+        "Reasoning</think>C",
+        "The correct answer is (C) The option's text.",
+        "The correct answer is C\nExplanation follows.",
+    ],
+)
 def test_choice(response):
     assert rewards.score(response, adapters.target("choice", ["C"], "choice")) == 1
 
@@ -53,6 +68,47 @@ def test_choice(response):
 @pytest.mark.parametrize("response", ["AC", "A B C D", "The correct answer is (C). The correct answer is (D)."])
 def test_choice_not_substring(response):
     assert rewards.score(response, adapters.target("choice", ["C"], "choice")) == 0
+
+
+@pytest.mark.parametrize("response", ["The correct answer is I think (B)", "The correct answer is A possibility"])
+def test_choice_does_not_extract_prose_initial(response):
+    assert rewards.extract(response, "choice") == ""
+
+
+@pytest.mark.parametrize("response", ["(C", "(C) or (D)", ": C D", "The correct answer is C or D"])
+def test_choice_rejects_malformed_or_ambiguous_answer(response):
+    assert rewards.extract(response, "choice") == ""
+
+
+@pytest.mark.parametrize("metric", ["lines_f1", "ndcg"])
+@pytest.mark.parametrize("response", ["doc1\n\ndoc2", "\n doc1\r\n \t\r\ndoc2 \n", "doc1\rdoc2"])
+def test_list_metrics_ignore_blank_lines(metric, response):
+    target = adapters.target(metric, ["doc1", "doc2"], "answer_marker")
+    assert rewards.score("[Answer]\n" + response, target) == 1
+    assert rewards.score("[Answer]\n \t\n", target) == 0
+
+
+def test_ranked_duplicates_keep_first_occurrence():
+    target = adapters.target("ndcg", ["first", "second", "third"], "answer_marker")
+    response = "junk\nfirst\nsecond\nthird"
+    expected = (3 / math.log2(3) + 2 / math.log2(4)) / (3 + 2 / math.log2(3) + 1 / math.log2(4))
+    assert rewards.score(response, target) == pytest.approx(expected)
+    for repeated in ["junk", "first", "second", "third", " JUNK "]:
+        assert rewards.score(response + "\n" + repeated, target) == pytest.approx(expected)
+    assert expected < 1
+
+
+def test_golong_em_preserves_native_strict_contract():
+    raw = {
+        "prompt": "Return only the answer.",
+        "data_source": "EM",
+        "extra_info": {"reward_mode": "EM"},
+        "reward_model": {"ground_truth": {"golden_label": "Paris"}},
+    }
+    _, target, _, _ = sources.adapt(raw, "lc_golong_v1")
+    assert rewards.score("Paris", target) == 1
+    for response in ["paris", "Paris.", "[Answer]\nParis", "Paris\nLondon"]:
+        assert rewards.score(response, target) == 0
 
 
 def test_last_answer_region():
