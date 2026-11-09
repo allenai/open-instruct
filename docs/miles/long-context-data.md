@@ -67,8 +67,12 @@ and explanations. It does not infer whether later references to other options
 are proposed answers or explanatory comparisons.
 
 Choice parsing normalizes Markdown bold markers, single-letter LaTeX boxes
-(`\boxed{C}` or `\boxed{(C)}`), math delimiters around those letters, lowercase
-letters and full-width parentheses. Chinese punctuation is accepted. A closed
+(`\boxed{C}` or `\boxed{(C)}`), math delimiters around those letters and full-width
+parentheses. Lowercase letters require explicit parentheses or a box: `(c)`,
+`**（c）**` and `\boxed{c}` are accepted, but bare `c` and `**c**` are not, even
+as the entire answer. Bold alone only marks capital letters as choices. This
+avoids extracting articles or abbreviations from `**a** reduction` or `i.e. (B)`.
+Chinese punctuation is accepted. A closed
 parenthesized letter after the explicit answer prefix can directly precede option
 text, as in `(C)仅对…`. These rules apply only to choice extraction; they do not
 relax GoLong exact-match or numeric contracts. Conflicting explicit answer

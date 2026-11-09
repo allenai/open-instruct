@@ -12,7 +12,7 @@ from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import task_verifiers
 
 KIND = "long_context_v1"
-SCORER_REVISION = "long_context_v1.4"
+SCORER_REVISION = "long_context_v1.5"
 METRICS = {"exact", "docqa", "decimal", "choice", "lines_f1", "ndcg", "line_accuracy"}
 
 
@@ -47,8 +47,8 @@ def validate_target(target):
 def choice_format(text):
     """Normalize presentation around choice letters without searching prose for answers."""
     text = text.translate(str.maketrans({"（": "(", "）": ")"}))
-    # A bold single letter has an explicit boundary, even before option text.
-    text = re.sub(r"(?<!\()\*\*([A-Za-z])\*\*", r"(\1)", text).replace("**", "")
+    # Bold capitals can mark choices; bold lowercase can still be prose ("a").
+    text = re.sub(r"(?<!\()\*\*([A-Z])\*\*", r"(\1)", text).replace("**", "")
     text = re.sub(
         r"\\boxed\{[ \t]*(?:\(([A-Za-z])\)|([A-Za-z]))[ \t]*\}", lambda match: f"({match[1] or match[2]})", text
     )
@@ -74,13 +74,14 @@ def extract(text, mode):
         final = choice_format(final)
         # A letter inside prose (e.g. "I think") is not an asserted choice.
         # Parentheses delimit an explicit choice even before option text. A bare
-        # letter instead needs punctuation, a line ending or the end of the answer.
-        token = r"(?:\(([A-Za-z])\)|([A-Za-z])\)?)"
+        # letter must be uppercase and needs punctuation, a line ending or the
+        # end of the answer. Lowercase is accepted only in parentheses or boxes.
+        token = r"(?:\(([A-Za-z])\)|([A-Z])\)?)"
         matches = [
             (left or right).upper()
             for left, right in re.findall(
                 r"\bThe correct answer is\s*:?\s*"
-                r"(?:\(([A-Za-z])\)|([A-Za-z])"
+                r"(?:\(([A-Za-z])\)|([A-Z])"
                 r"(?:\)(?=[\s.,;:!?。；，：！？]|$)|(?=[ \t]*[.,;:!?。；，：！？\n]|[ \t]*$)))",
                 final,
             )

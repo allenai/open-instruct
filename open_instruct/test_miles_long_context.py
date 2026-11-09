@@ -83,6 +83,8 @@ def test_choice(response):
         "The correct answer is (**C**).",
         r"\boxed{C}",
         r"\boxed{(C)}",
+        r"\boxed{c}",
+        r"$\boxed{(c)}$",
         r"$\boxed{C}$",
         r"The correct answer is \(\boxed{C}\).",
         r"The correct answer is \boxed{C}。",
@@ -118,6 +120,24 @@ def test_choice_presentation_preserves_letter(response):
 )
 def test_choice_formatting_does_not_extract_prose_or_conflicting_declarations(response):
     assert rewards.extract(response, "choice") == ""
+
+
+@pytest.mark.parametrize(
+    "response,gold",
+    [
+        ("The correct answer is a.", "A"),
+        ("The correct answer is a, b and c combined.", "A"),
+        ("The correct answer is a: the reduction", "A"),
+        ("The correct answer is **a** reduction in cost", "A"),
+        ("The correct answer is i.e. (B)", "I"),
+        ("c", "C"),
+        ("**c**", "C"),
+        ("The correct answer is c)", "C"),
+    ],
+)
+def test_bare_lowercase_is_not_an_answer_label(response, gold):
+    assert rewards.extract(response, "choice") == ""
+    assert rewards.score(response, adapters.target("choice", [gold], "choice")) == 0
 
 
 @pytest.mark.parametrize("response", ["AC", "A B C D", "The correct answer is (C). The correct answer is (D)."])
