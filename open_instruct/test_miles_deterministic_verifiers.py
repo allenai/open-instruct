@@ -151,6 +151,32 @@ def test_catalog_rejects_path_escape(tmp_path):
         source_catalog.resolve(path, {"deepmath": 1.0})
 
 
+def test_catalog_receipt_binds_both_artifacts(tmp_path):
+    path, _ = catalog(tmp_path)
+    value = json.loads(path.read_text())
+    entry = value["sources"]["deepmath"]
+    artifacts = {key: entry[key]["sha256"] for key in ("prompt_data", "reward_config")}
+    receipt = tmp_path / "qualification.json"
+
+    def resolve_with(report):
+        receipt.write_text(json.dumps({"sources": {"deepmath": report}}))
+        entry["qualification"] = {"path": receipt.name, "sha256": hashlib.sha256(receipt.read_bytes()).hexdigest()}
+        path.write_text(json.dumps(value))
+        return source_catalog.resolve(path, {"deepmath": 1.0})
+
+    assert resolve_with({"status": "qualified", "artifact_sha256": artifacts})["sources"][0]["name"] == "deepmath"
+    with pytest.raises(InputError, match="lacks artifact hashes"):
+        resolve_with({"status": "qualified"})
+    with pytest.raises(InputError, match="reward_config hash mismatch"):
+        resolve_with({"status": "qualified", "artifact_sha256": {**artifacts, "reward_config": "0" * 64}})
+    with pytest.raises(InputError, match="does not qualify"):
+        resolve_with({"status": "failed", "artifact_sha256": artifacts})
+    resolve_with({"status": "qualified", "artifact_sha256": artifacts})
+    receipt.write_text("{}")
+    with pytest.raises(InputError, match="receipt hash/path mismatch"):
+        source_catalog.resolve(path, {"deepmath": 1.0})
+
+
 @pytest.mark.parametrize("text", ["B", "Answer: B", "Explanation.\n\\boxed{B}", "<think>A</think>Answer: B."])
 def test_opt_in_mcqa_final_choice_positive(text):
     assert cv.score(text, {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"]}) == 1

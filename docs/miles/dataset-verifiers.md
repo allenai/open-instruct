@@ -22,10 +22,26 @@ configuration errors or unexpected failures; a backend configured to raise still
 raises. Local validation timeouts retain their existing zero-with-diagnostics
 contract and are not service failures.
 
+## Optional verifier dependencies
+
+Install these pinned packages in the training image before using the optional
+dataset verifiers. The complete-test code client requires authenticated
+installation from the private repository:
+
+```text
+reasoning-gym==0.1.25
+rdkit==2025.9.3
+openapi-schema-validator==0.6.3
+xmltodict==0.14.2
+code-execution-service[client] @ git+https://github.com/allenai/code-execution-service.git@103ca279b35e8e81d118947f82b72c22676c6540
+```
+
+`regex` comes from the main `transformers` dependency; the schema verifier requires
+`openapi-schema-validator` explicitly rather than relying on its transitive presence.
+
 ## Structured output sources
 
-Install `scripts/data/rl_readiness/requirements.txt` in the training
-image before using optional dataset verifiers. Registry factory
+Registry factory
 `open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier` accepts
 a target with `format` (`json`, `yaml`, `toml`, `xml`, `csv`), `schema`, an explicit
 `schema_policy` (`as_declared` or `nemo_strict_v1`), and optional `coerce_types`.
@@ -133,9 +149,9 @@ deadline, with `status: timeout`, `failure_policy: zero`, `error`, and
 Other worker/configuration errors remain fatal. Diagnostics consistently identify
 `calendar_v1` or `nemo_if_v1`, with `status: completed` for ordinary scores.
 
-Before training, qualify every prepared row through
-[`scripts/data/rl_readiness/qualify.py`](https://github.com/allenai/open-instruct/blob/main/scripts/data/rl_readiness/qualify.py).
-It invokes the actual registered reward on each row's positive, negative, empty,
+Before training, qualify every prepared row with the
+[RL Data Workbench](https://github.com/allenai/rl-data-workbench) readiness tools.
+They invoke this runtime's registered reward on each row's positive, negative, empty,
 and truncated controls. Target errors defer the row, and timeout fallbacks cannot
 pass qualification. Use only the resulting qualified catalog; this guarantee
 applies to those rows, not to the entire raw dataset. The generic run-data IF

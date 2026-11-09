@@ -86,32 +86,11 @@ not change checkers, held-out data or scoring. They are not a complete quality o
 relevance check; admitting a row does not certify it. Explicit response-language
 constraints remain supported.
 
-Audit a prepared JSONL file before changing the training mixture:
-
-```bash
-python scripts/data/filter_ifeval_constraints.py \
-  --input /path/to/train.jsonl --report /path/to/if-audit.json
-```
-
-To create a cleaned copy, use fresh report/output paths:
-
-```bash
-python scripts/data/filter_ifeval_constraints.py \
-  --input /path/to/train.jsonl --output /path/to/train-clean.jsonl \
-  --report /path/to/if-filter-report.json
-```
-
-The tool supports MILES `metadata.verifiers` and legacy `dataset`/`ground_truth`
-rows, preserves each retained row's bytes and order, and records hashes, reason
-counts and dropped row identities. For custom IF registry names, supply
-`--verifier-name NAME` for each trusted IF name, including `ifeval` if both occur.
-Legacy verifier names are matched case-insensitively, as in their reward router;
-MILES names are matched exactly. The tool trusts these names without reading a
-reward registry: do not select names routed to `IFEvalVerifierOld`. Existing files
-are never overwritten; report/output filesystems must support hard links.
-Legacy Core/vLLM and DeepSpeed/vLLM data
-preparation can use the same tool before tokenization; their launchers do not
-apply this MILES admission screen automatically.
+Training never filters rows in place. Remove rejected rows during dataset
+preparation: source adapters omit them with recorded dispositions, and the
+[RL Data Workbench](https://github.com/allenai/rl-data-workbench) provides a
+standalone audit and filter for existing JSONL files. Core/vLLM and DeepSpeed/vLLM
+launchers do not apply this MILES admission screen automatically.
 
 The composition checker (`count:counting_composition`) already accepts the
 instructed `* * *` dividers and ignores punctuation-only word tokens; its rows
@@ -673,8 +652,10 @@ shared-engine evaluation; failed or skipped jobs leave gaps without blocking tra
 `python -m open_instruct.miles.datasets.source_catalog` resolves reviewed source
 names to ordinary `[[data.sources]]` blocks. It checks the prepared prompt and
 verifier-registry SHA-256 digests, rejects unqualified names, and requires the
-requested fractions to sum to one. The catalog and reward registries are trusted
-configuration, just like a run file; do not accept them from unreviewed datasets.
+requested fractions to sum to one. When a source carries a machine-readable
+qualification receipt, the receipt must also bind both artifact hashes. The
+catalog and reward registries are trusted configuration, just like a run file;
+do not accept them from unreviewed datasets.
 
 ```bash
 python -m open_instruct.miles.datasets.source_catalog /path/to/qualified/catalog.json \
@@ -684,20 +665,16 @@ python -m open_instruct.miles.datasets.source_catalog /path/to/qualified/catalog
 Use the resulting `[data]` section in a run file, or combine its named source
 blocks with existing prepared sources and set the final fractions. Moving the
 whole catalog directory preserves its relative bundle paths. This does not
-change mixture sampling or introduce another run-file data mode.
+change mixture sampling or introduce another run-file data mode. The catalog CLI
+emits seed 17 and shuffling enabled.
 
 A qualified **slice** is not a claim that every row or subtask of its parent
 Hugging Face dataset is ready. Read the catalog's row counts, strata, exclusions,
-and qualification receipts. The preparation catalog initializes `gpu_exercised`
-to false; the later GPU audit writes `source-gpu-receipts.json` under the coverage
-run directory without modifying that immutable catalog. Use those separate
-receipts for completed GPU coverage. The local qualification tools in
-`scripts/data/rl_readiness/` check positive, wrong, empty, and capped responses
-through the real reward registry. CPU qualification exercises native data
-preparation, mixture-provider source attribution, cursor restoration, and
-mixed/all-zero group filtering. Their input
-export must come from a reviewed adapter with immutable source provenance and
-existing hygiene receipts.
+and qualification receipts. Catalogs, qualification controls, GPU coverage runs
+and their receipts are produced by the
+[RL Data Workbench](https://github.com/allenai/rl-data-workbench), which runs
+these checks against a pinned Open Instruct runtime. Open Instruct only resolves
+the resulting catalog; training does not rerun qualification.
 
 The optional `deterministic_verifiers` factories cover explicit MCQA answer lines,
 formatting-only checks, Countdown arithmetic, named knight/knave assignments,
@@ -705,7 +682,8 @@ structural numeric answers, exact text, and typed JSON answers. MCQA uses a
 prepared `Answer: LETTER` contract; it must not silently replace a source's
 original extraction rules. The JSON-schema factory grades schema conformance,
 not factual content. ReasoningGym uses the pinned optional dependency listed in
-`scripts/data/rl_readiness/requirements.txt`, with explicit family coverage.
+the [verifier dependencies](dataset-verifiers.md#optional-verifier-dependencies),
+with explicit family coverage.
 No factory executes code supplied in a dataset or fetches external schema URLs.
 The schema subset rejects `pattern` and `patternProperties` because the schema
 library uses unbounded Python regex matching. This conservative recursive check
@@ -716,30 +694,6 @@ H169's explicit `mcqa_final_choice` target kind also accepts a bare choice lette
 an `Answer: LETTER` final answer or a boxed letter. Multiple explicit answers and
 trailing contradictory text score zero. Preparation must select this contract
 explicitly; existing `mcqa` targets retain their answer-line extraction.
-
-Run the readiness tools as modules from the repository root, with their optional
-dependencies installed in the pinned MILES environment:
-
-```bash
-python -m scripts.data.rl_readiness.qualify --export /path/to/export.jsonl --output /path/to/new-catalog --hf /path/to/model
-python -m scripts.data.rl_readiness.local_coverage --catalog /path/to/new-catalog --fixture /path/to/toy-model --output /path/to/coverage
-python -m scripts.data.rl_readiness.audit --catalog /path/to/new-catalog --run /path/to/coverage
-```
-
-Direct file-path invocation is not the supported entry point. To package these
-tools, build the readiness image with the **repository root** as its context.
-Set `GH_TOKEN` to a GitHub token with read access to the private code-execution
-client repository; BuildKit mounts it only during dependency installation:
-
-```bash
-docker build -f scripts/data/rl_readiness/Dockerfile \
-  --build-arg BASE_IMAGE=YOUR_MATCHING_MILES_IMAGE \
-  --secret id=github_token,env=GH_TOKEN -t rl-readiness .
-```
-
-The image copies the readiness and RLVR preparation packages under
-`/opt/core-rl/scripts/data/` and checks the readiness and source-preparation
-entry points with `--help` during the build.
 
 Formatting matching shares a one-second monotonic deadline across the response,
 with each regex call additionally capped at 100 ms or the remaining time,
@@ -762,26 +716,11 @@ even though runtime validation timeouts return zero.
 
 ReasoningGym families inheriting its default substring scorer use stripped exact
 matching instead. At the pinned version these are `base_conversion`, `leg_counting`
-and `simple_equations`; gold-containing wrong answers are qualification controls.
-Task-specific scorers retain their semantics, and multiple explicit final answers
-are rejected. A single boxed answer nested inside answer tags is one answer.
-Diagnostics identify the corrected protocol as `exact_default_v2`;
-earlier screen rewards using the default substring scorer need rescoring before
-comparison with this protocol.
-
-The catalog CLI emits seed 17 and shuffling enabled. The bounded qualification
-pass uses shuffling disabled to check source order and cursor restoration; it is
-not evidence for a particular shuffled training sequence.
-
-The local GPU coverage tool uses one actual prompt per qualified named source,
-four short completions, and a tiny model. It loads plain prompt data and verifies
-that each row's existing sample/source labels survive rollout; it does not exercise
-mixture-provider runtime attribution on GPU. That provider attribution is checked
-separately during CPU qualification. It disables zero-variance filtering
-because the random model generally earns zero; the separate controls test the
-real filter. Router auxiliary losses can produce optimizer updates even with
-zero task rewards. This is a training-machinery check, not evidence of learning,
-endpoint transfer, or a recommendation to use four samples in a real run.
+and `simple_equations`. Task-specific scorers retain their semantics, and multiple
+explicit final answers are rejected. A single boxed answer nested inside answer
+tags is one answer. Diagnostics identify the corrected protocol as
+`exact_default_v2`; earlier screen rewards using the default substring scorer
+need rescoring before comparison with this protocol.
 
 
 ## Dataset integration
@@ -789,9 +728,9 @@ endpoint transfer, or a recommendation to use four samples in a real run.
 Use [source preparation](source-preparation.md) to convert
 reviewed dataset exports into named training sources, preserving provenance and
 reporting unsupported rows. The [reward verifier guide](dataset-verifiers.md)
-describes their runtime contracts. CPU qualification checks the complete prepared
-pool and reviewed reward controls before a named source enters a MILES mixture;
-it does not require a separate inference study or establish downstream benefit.
+describes their runtime contracts. Qualification of a prepared pool against
+reviewed reward controls happens in the RL Data Workbench before a named source
+enters a MILES mixture; it does not establish downstream benefit.
 
 ## Named pools and independent sampling policies
 

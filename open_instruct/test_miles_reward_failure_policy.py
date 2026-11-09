@@ -1,11 +1,9 @@
 """Callers choose how reported infrastructure failures affect their rewards."""
 
 import asyncio
-import json
 from types import SimpleNamespace
 
 import pytest
-from scripts.data.rl_readiness import qualify_bundle
 
 from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.distillation import opd_rewards
@@ -98,14 +96,3 @@ def test_zero_does_not_hide_invalid_targets_or_unexpected_exceptions(scoring, re
 def test_invalid_policy_is_rejected_even_for_an_empty_batch(scoring):
     with pytest.raises(ValueError, match="failure_policy"):
         asyncio.run(rewards.registered_reward(scoring, [], failure_policy="ignore"))
-
-
-def test_real_qualification_path_rejects_failed_negative_control(scoring, tmp_path):
-    registry = tmp_path / "registry.json"
-    registry.write_text(json.dumps({"test": {"factory": "fixture.Verifier"}}))
-    row = {"input": "question", "metadata": sample().metadata}
-    cases = [
-        {"kind": kind, "response": kind, "expected": int(kind == "gold")} for kind in ["gold", "wrong", "near_miss"]
-    ]
-    with pytest.raises(RuntimeError, match="failed to grade"):
-        asyncio.run(qualify_bundle.check_control(row, cases, registry))
