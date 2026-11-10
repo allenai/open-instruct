@@ -319,6 +319,10 @@ def score_candidates(options):
     if mode == "mc" and (width not in (32, 64, 128) or transport != "array"):
         raise InputError("SCMC requires 32, 64 or 128 candidates and rollout_score_transport=array")
     if width and transport != "nested":
+        if not options.get("use_miles_router", False):
+            raise InputError(
+                "Packed scores require use_miles_router=true; the pinned SGLang router drops score fields"
+            )
         if options.get("rollout_top_k", -1) != -1 or options.get("rollout_top_p", 1.0) != 1.0:
             raise InputError("Packed scores require unfiltered sampling: rollout_top_k=-1, rollout_top_p=1")
         if options.get("use_session_server") or options.get("sglang_speculative_algorithm"):

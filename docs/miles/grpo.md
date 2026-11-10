@@ -246,6 +246,7 @@ loss_type = "score_centering"
 rollout_top_logprobs_num = 32
 rollout_score_mode = "topk"
 rollout_score_transport = "array"
+use_miles_router = true
 rollout_top_k = -1
 rollout_top_p = 1.0
 score_centering_is = "mis"
@@ -268,6 +269,7 @@ score_centering_is = "tis"
 rollout_top_logprobs_num = 32
 rollout_score_mode = "mc"
 rollout_score_transport = "array"
+use_miles_router = true
 rollout_top_k = -1
 rollout_top_p = 1.0
 ```
@@ -280,6 +282,10 @@ complete loss-path change as well as probe handling.
 The SCT estimator continues to reject MC arrays; the dispatcher selects the
 separate MC estimator using the explicit mode. Caller sampling seeds are preserved; missing seeds are
 assigned independently per request because the probe kernel requires a seed.
+
+Packed `flat` and `array` transport require `use_miles_router=true`. The pinned
+SGLang router (0.3.2) strips the extended sampling and packing fields when it
+re-serializes requests; MILES forwards the raw request and response bytes.
 
 Transport alternatives remain selectable:
 

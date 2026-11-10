@@ -16,7 +16,7 @@ def compile_spec(tmp_path, miles, asynchronous=False):
             "output": {"root": str(tmp_path / "run")},
             "data": {"tasks": [{"task": "gsm8k", "train_count": 32, "eval_count": 16}]},
             "async": {"fully_async": asynchronous},
-            "miles": miles,
+            "miles": {"use_miles_router": True, **miles},
         },
         config_path=tmp_path / "run.toml",
     ).compile()
@@ -77,3 +77,11 @@ def test_async_score_centering_uses_its_own_correction(tmp_path, correction):
 def test_invalid_collection_rejected_before_launch(tmp_path, requested):
     with pytest.raises(InputError):
         compile_spec(tmp_path, requested)
+
+
+@pytest.mark.parametrize("transport", ["flat", "array"])
+def test_packed_scores_require_transparent_router(tmp_path, transport):
+    with pytest.raises(InputError, match="use_miles_router"):
+        compile_spec(
+            tmp_path, {"rollout_top_logprobs_num": 32, "rollout_score_transport": transport, "use_miles_router": False}
+        )

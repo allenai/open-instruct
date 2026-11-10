@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "name": "goncalof-h066-trainer-nosync-scmc32-20261109",
+  "name": "goncalof-h066-trainer-router-scmc32-20261110",
   "model": {
     "source": "/weka/gfaria/models/Olmo-3.5-Small-RL-h066",
     "format": "hf"
   },
   "output": {
-    "root": "/weka/gfaria/open-instruct/runs/scmc32-training-nosync-20261109/scmc32",
+    "root": "/weka/gfaria/open-instruct/runs/scmc32-training-router-20261110/scmc32",
     "export_hf": false,
     "rollout_sample_rate": 1.0
   },
@@ -118,7 +118,8 @@
     "rollout_score_mode": "mc",
     "rollout_score_transport": "array",
     "rollout_top_logprobs_num": 32,
-    "score_centering_is": "tis"
+    "score_centering_is": "tis",
+    "use_miles_router": true
   },
   "compiler_cache": {
     "enabled": false

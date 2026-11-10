@@ -20,6 +20,7 @@ def test_score_options_reach_native_parser(monkeypatch, width, mode, transport):
     parser.add_argument("--olmo-core-config", required=True)
     requested = {
         "hf_checkpoint": "model",
+        "use_miles_router": True,
         "rollout_batch_size": 1,
         "n_samples_per_prompt": 4,
         "global_batch_size": 4,
