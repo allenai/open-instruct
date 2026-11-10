@@ -23,6 +23,13 @@ from open_instruct.miles.rewards import task_verifiers
 _QUOTED_PAIR_PATTERN = r'".+":\s*".+"'
 _FORMAT_SEARCH_TIMEOUT_SECONDS = 0.1
 _FORMAT_RESPONSE_TIMEOUT_SECONDS = 1.0
+# An explicit choice: a boxed letter, or "Answer: LETTER". Emphasis, parentheses
+# and \\text{} around the letter are presentation, not content. A bare letter must
+# not run into a word ("Answer: I think") or echo the prompt ("Answer: A/B/C/D").
+_CHOICE_DECLARATION = re.compile(
+    r"\\boxed\{\s*(?:\\text(?:bf)?\{\s*)?\(?([A-Z])\)?[\s}]*\}"
+    r"|(?i:answer)\s*:[\s*]*(?:\\?\(([A-Z])\\?\)|([A-Z])(?![A-Za-z0-9/]|[ \t]+[a-z]))"
+)
 logger = logger_utils.setup_logger(__name__)
 
 
@@ -100,6 +107,16 @@ def validate_target(target):
             or value not in choices
         ):
             raise ValueError("MCQA requires distinct displayed choice letters and one correct letter")
+        pattern = target.get("pattern")
+        if pattern is not None:
+            if kind != "mcqa_final_choice" or not isinstance(pattern, str) or len(pattern) > 4096:
+                raise ValueError("Invalid MCQA answer pattern")
+            try:
+                groups = regex.compile(pattern).groups
+            except (regex.error, RecursionError) as error:
+                raise ValueError(f"Invalid MCQA answer pattern: {error}") from error
+            if groups != 1:
+                raise ValueError("MCQA answer pattern must contain exactly one capture")
     elif kind == "format":
         if not isinstance(value, dict) or value.get("type") not in {"regex", "inline_prose", "string_match"}:
             raise ValueError("Unsupported formatting contract")
@@ -254,21 +271,41 @@ def _format_score(final, value):
         ) from error
 
 
+def _final_choice_score(final, target):
+    """Score one explicit final choice without searching reasoning for a letter.
+
+    Declarations are a boxed letter, "Answer: LETTER" and the row's own requested
+    format (``pattern``, one capture). They may repeat but must agree, and nothing
+    but the rest of the line may follow the last one.
+    """
+    value = target["value"]
+    declared = [(m.end(), m[1] or m[2] or m[3]) for m in _CHOICE_DECLARATION.finditer(final)]
+    if target.get("pattern"):
+        try:
+            matches = list(regex.finditer(target["pattern"], final, timeout=_FORMAT_SEARCH_TIMEOUT_SECONDS))
+        except TimeoutError as error:
+            raise FormattingVerifierTimeout("MCQA answer pattern exceeded its search budget") from error
+        # Row patterns are loose ("Response:\\s*([A-Za-z0-9])"): keep only a displayed
+        # uppercase choice that does not start a word or an HTML tag such as <b>.
+        declared += [
+            (m.end(), m[1])
+            for m in matches
+            if m[1] in target["choices"] and not final[m.end(1) : m.end(1) + 1].isalnum()
+        ]
+    if declared:
+        if {letter for _, letter in declared} != {value}:
+            return 0.0
+        # The rest of that line may gloss the choice; later lines may only close markup.
+        return float(re.fullmatch(r"[^\n]*[\s\\\])$*]*", final[max(end for end, _ in declared) :]) is not None)
+    return float(re.fullmatch(r"\**\(?" + re.escape(value) + r"\)?\**[.\s]*", final) is not None)
+
+
 def score(text, target):
     kind = validate_target(target)  # Broken targets must not become model failures.
     final = answer_text(text)
     value = target["value"]
     if kind == "mcqa_final_choice":
-        # H169's opt-in contract accepts an explicit final choice without searching
-        # hidden reasoning. Keep the existing mcqa answer-line contract separate.
-        answers = re.findall(r"\\boxed\{\s*([A-Z])\s*\}|(?i:answer)\s*:\s*([A-Z])\b", final)
-        letters = [a or b for a, b in answers]
-        if letters:
-            if len(letters) != 1:
-                return 0.0
-            tail = re.search(r"(?:\\boxed\{\s*([A-Z])\s*\}|(?i:answer)\s*:\s*([A-Z]))[.\s]*$", final)
-            return float(tail is not None and letters[0] == value)
-        return float(re.fullmatch(r"\s*" + re.escape(value) + r"[.\s]*", final) is not None)
+        return _final_choice_score(final, target)
     if kind == "mcqa":
         # Preparation appends this exact contract; never search reasoning for a letter.
         match = re.fullmatch(r"Answer:\s*([A-Z])\s*", final.split("\n")[-1])
@@ -320,7 +357,7 @@ class DeterministicVerifier:
             return Result(
                 0.0,
                 diagnostics={
-                    "kind": "format",
+                    "kind": label["kind"],
                     "status": "timeout",
                     "error": str(error),
                     "failure_policy": "zero",

@@ -690,10 +690,18 @@ library uses unbounded Python regex matching. This conservative recursive check
 also rejects those names inside property maps or instance literals. Such schemas
 must be deferred during preparation, not silently have constraints removed.
 
-H169's explicit `mcqa_final_choice` target kind also accepts a bare choice letter,
-an `Answer: LETTER` final answer or a boxed letter. Multiple explicit answers and
-trailing contradictory text score zero. Preparation must select this contract
-explicitly; existing `mcqa` targets retain their answer-line extraction.
+H169's explicit `mcqa_final_choice` target kind reads an explicit final choice: a
+bare choice letter, `Answer: LETTER`, a boxed letter, or the row's own requested
+format when the target carries `pattern` (a one-capture regex; the `mcqa_v1`
+adapter copies it from `template_metadata.output_regex`). Bold, parentheses and
+`\text{}` around the letter are ignored, the same choice may be declared more
+than once, and the rest of the final declaration's line may gloss it. Declarations
+of different letters, a declaration followed by further lines of text, lowercase
+letters and a letter named only in prose ("The answer is B") score zero. A row
+pattern match counts only for a displayed uppercase choice that does not begin a
+word. Preparation must select this contract explicitly; existing `mcqa` targets
+retain their answer-line extraction. Sources prepared before `pattern` existed
+keep scoring without it until they are prepared again.
 
 Formatting matching shares a one-second monotonic deadline across the response,
 with each regex call additionally capped at 100 ms or the remaining time,

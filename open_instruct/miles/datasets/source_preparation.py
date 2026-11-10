@@ -333,6 +333,11 @@ def adapt(raw, kind, options=None):
         }
         if target["kind"] not in {"mcqa", "mcqa_final_choice"}:
             raise ValueError("unknown_choice_contract")
+        # Rows can request their own answer format ("Selected Option -> X") and carry
+        # the matching one-capture regex; without it that format cannot be read.
+        template = raw.get("template_metadata")
+        if target["kind"] == "mcqa_final_choice" and isinstance(template, dict) and template.get("output_regex"):
+            target["pattern"] = template["output_regex"]
         local.validate_target(target)
         name, stratum = "deterministic", kind
     elif kind == "math_v1":

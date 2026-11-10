@@ -211,6 +211,20 @@ def test_malformed_mcqa_options_do_not_stop_preparation(tmp_path, adapter, bad_o
     assert row["label"] == {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"]}
 
 
+def test_mcqa_adapter_carries_the_row_answer_pattern(tmp_path):
+    pattern = r"Selected Option\s*->\s*([A-Za-z0-9])\s*"
+    record = {
+        "prompt": "Choose one.\nA. one\nB. two\nEnd with: Selected Option -> X.",
+        "expected_answer": "B",
+        "options": [{"A": "one"}, {"B": "two"}],
+        "template_metadata": {"output_regex": pattern},
+    }
+    prepare_one(tmp_path, "mcqa_v1", [record])
+    row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
+    assert row["label"] == {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"], "pattern": pattern}
+    assert sources.local.score("Selected Option -> B.", row["label"]) == 1
+
+
 def test_invalid_structured_schema_is_omitted_not_fatal(tmp_path):
     pytest.importorskip("xmltodict")
     pytest.importorskip("openapi_schema_validator")

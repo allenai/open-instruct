@@ -177,16 +177,84 @@ def test_catalog_receipt_binds_both_artifacts(tmp_path):
         source_catalog.resolve(path, {"deepmath": 1.0})
 
 
-@pytest.mark.parametrize("text", ["B", "Answer: B", "Explanation.\n\\boxed{B}", "<think>A</think>Answer: B."])
-def test_opt_in_mcqa_final_choice_positive(text):
-    assert cv.score(text, {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"]}) == 1
+MCQA_TARGET = {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B", "I"]}
 
 
 @pytest.mark.parametrize(
-    "text", ["A", "", "Answer: A\nAnswer: B", "\\boxed{A} \\boxed{B}", "B or A", "Answer: B\nActually A"]
+    "text",
+    [
+        "B",
+        "**B**",
+        "(B)",
+        "Answer: B",
+        "Explanation.\n\\boxed{B}",
+        "<think>A</think>Answer: B.",
+        # Presentation around the letter, repeats and a same-line gloss are not content.
+        "**Answer: B**",
+        "**Answer:** B",
+        "Answer: (B)",
+        "Answer: \\boxed{\\text{B}}",
+        "**Answer: \\boxed{B}**\n\nAnswer: \\boxed{B}",
+        "Answer: B. Diffusion is uniform",
+        "**Answer: B** (no net separation).",
+        "The final answer is:\n\\[\n\\boxed{B}\n\\]",
+        "Answer: A/B/I\n\nAnswer: B",
+    ],
+)
+def test_opt_in_mcqa_final_choice_positive(text):
+    assert cv.score(text, MCQA_TARGET) == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "A",
+        "",
+        "Answer: A\nAnswer: B",
+        "\\boxed{A} \\boxed{B}",
+        "B or A",
+        "Answer: B\nActually A",
+        "**Answer: A**\n\nAnswer: \\boxed{B}",
+        "Answer: B\n\nA further paragraph of discussion.",
+        "The answer is **B**.",
+        "Answer: b",
+    ],
 )
 def test_opt_in_mcqa_final_choice_rejects_conflicting_answers(text):
-    assert cv.score(text, {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"]}) == 0
+    assert cv.score(text, MCQA_TARGET) == 0
+
+
+def test_mcqa_final_choice_does_not_read_prose_as_a_choice():
+    assert cv.score("Answer: I think it is unclear", {**MCQA_TARGET, "value": "I"}) == 0
+
+
+@pytest.mark.parametrize(
+    "pattern,text,expected",
+    [
+        (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Reasoning.\n\nSelected Option -> B.", 1),
+        (r"ANSWER IS\s*([A-Za-z0-9])\s*", "ANSWER IS B. Mean", 1),
+        (r"<final_answer>\s*([A-Za-z0-9])\s*</final_answer>", "<final_answer>B</final_answer>", 1),
+        (r"Answer:\s*\*([A-Za-z0-9])\*", "Answer: *B*", 1),
+        # The generic forms stay accepted, and must agree with the requested one.
+        (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "\\boxed{B}", 1),
+        (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Answer: A\nSelected Option -> B", 0),
+        (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Selected Option -> A", 0),
+        # Loose row patterns must not read a word, an HTML tag or an undisplayed letter.
+        (r"Response:\s*([A-Za-z0-9])\s*", "Response: Because", 0),
+        (r"<\s*([A-Za-z0-9])\s*>", "<b>Explanation</b>", 0),
+        (r"<\s*([A-Za-z0-9])\s*>", "<b>Explanation</b> <B>", 1),
+    ],
+)
+def test_mcqa_final_choice_reads_the_format_requested_by_the_row(pattern, text, expected):
+    assert cv.score(text, {**MCQA_TARGET, "pattern": pattern}) == expected
+
+
+@pytest.mark.parametrize("pattern", ["(", "no capture", "(a)(b)", 3, "x" * 4097])
+def test_mcqa_final_choice_rejects_invalid_row_pattern(pattern):
+    with pytest.raises(ValueError, match="MCQA answer pattern"):
+        cv.validate_target({**MCQA_TARGET, "pattern": pattern})
+    with pytest.raises(ValueError, match="MCQA answer pattern"):
+        cv.validate_target({**MCQA_TARGET, "kind": "mcqa", "pattern": "(B)"})
 
 
 def test_mcqa_final_choice_is_opt_in_and_validates_target():
