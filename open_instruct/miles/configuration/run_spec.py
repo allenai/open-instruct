@@ -746,17 +746,28 @@ class RunSpec:
             raise InputError(
                 "off_policy_correction supports tis; other corrections require an explicitly qualified custom_tis_function_path"
             )
-        if "off_policy_correction" in controls:
+        score_centering = miles["loss_type"] == "score_centering"
+        if score_centering:
+            # Score centering owns its importance correction; ordinary TIS is a
+            # different loss path. Explicit native values remain authoritative.
+            miles.setdefault("score_centering_is", "tis" if asynchronous else "none")
+        if "off_policy_correction" in controls and score_centering:
+            put("miles.score_centering_is", "tis", controls["off_policy_correction"][1])
+        elif "off_policy_correction" in controls:
             # An explicit algorithm choice must take effect in either schedule,
             # and must agree with any native switch supplied alongside it.
             put("miles.use_tis", True, controls["off_policy_correction"][1])
-        miles.setdefault("use_tis", asynchronous and not miles["use_rollout_logprobs"])
+        miles.setdefault("use_tis", asynchronous and not miles["use_rollout_logprobs"] and not score_centering)
         if miles["use_tis"] and miles["use_rollout_logprobs"]:
             raise InputError(
                 "use_tis and use_rollout_logprobs cannot both be enabled; use use_tis=true with use_rollout_logprobs=false for trainer-scored correction."
             )
         if asynchronous:
-            if not (miles["use_tis"] or miles["use_rollout_logprobs"]):
+            if not (
+                miles["use_tis"]
+                or miles["use_rollout_logprobs"]
+                or (score_centering and miles["score_centering_is"] in ("tis", "mis"))
+            ):
                 raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
             miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
             miles.setdefault("async_data_buffer_capacity_factor", 1.0)

@@ -228,3 +228,87 @@ async recipe.
 Agents discover this workflow through AGENTS.md; no
 special prompt is needed. Follow the [documentation index](index.md) for model
 support, configuration, data, parallelism and operations.
+
+## Score-candidate collection (local development)
+
+The local score-transport branches add native `/generate` collection for SCT
+(top-k candidates) and SCMC (independent samples with replacement). These are
+extraction controls; `rollout_top_k` still controls response sampling. The
+published runtime image has not been rebuilt with these changes. Test with the
+matching MILES checkout and the array/SCMC SGLang extension before launching;
+changing TOML alone does not install them in the locked runtime image.
+
+For SCT32 with the existing score-centering loss:
+
+```toml
+[miles]
+loss_type = "score_centering"
+rollout_top_logprobs_num = 32
+rollout_score_mode = "topk"
+rollout_score_transport = "array"
+rollout_top_k = -1
+rollout_top_p = 1.0
+score_centering_is = "mis"
+score_centering_mis_low = 0.5
+score_centering_mis_high = 5.0
+```
+
+Use 64 or 128 for SCT64/SCT128. `score_centering_is` also supports `none` and
+`tis`; `score_centering_tis_clip` controls TIS. Async score-centering runs default
+to its own TIS correction, with ordinary `use_tis=false`. Explicitly selecting
+both correction paths is rejected. Set `SGLANG_RETURN_ORIGINAL_LOGPROB=0` on the
+rollout servers, as required by the native score-centering contract.
+
+For **SCMC training**, select the Monte Carlo candidate mode and MIS correction:
+
+```toml
+[miles]
+loss_type = "score_centering"
+score_centering_is = "mis"
+rollout_top_logprobs_num = 32
+rollout_score_mode = "mc"
+rollout_score_transport = "array"
+rollout_top_k = -1
+rollout_top_p = 1.0
+```
+
+SCMC supports 32, 64 and 128 draws. Its loss uses detached importance weights
+and adds a zero-valued correction surrogate, preserving the uncentered loss
+value while centering its gradient. With MIS, this matches the IcePop form.
+The SCT estimator continues to reject MC arrays; the dispatcher selects the
+separate MC estimator using the explicit mode. Caller sampling seeds are preserved; missing seeds are
+assigned independently per request because the probe kernel requires a seed.
+
+Transport alternatives remain selectable:
+
+| `rollout_score_transport` | SCT | SCMC | Server/client representation |
+|---|---|---|---|
+| `nested` (default) | Yes | No | Ordinary JSON lists, converted to NumPy by MILES |
+| `flat` | Yes | No | Server lists flattened into little-endian base64 buffers |
+| `array` | Yes | Yes | NumPy arrays retained through server IPC, then base64 buffers |
+
+Packed modes collect **generated tokens only**, without streaming. They currently
+require unfiltered sampling, non-speculative Python SGLang and the native
+`/generate` path. OpenAI/session endpoints are rejected for packed modes; their
+existing nested SCT path remains available. `array` requires the local SGLang
+extension; `flat` uses its flat/base64 response API.
+
+The decoder checks response shape `[generated_tokens, width]`, zero null prefix,
+float32 log probabilities, int32 token IDs, exact byte lengths and score mode.
+It preserves normalized behavior-policy log probabilities and repeated MC draws,
+without rescoring, deduplicating or renormalizing. The selected-token rollout
+log probabilities remain a separate field. Candidate arrays and their mode
+survive multi-turn merging, observation padding, truncation, safetensors transport,
+DP partitioning and Core sequence packing.
+
+The historical field names `Sample.rollout_topk_token_ids` and
+`Sample.rollout_topk_log_probs` carry both modes; `Sample.rollout_score_mode`
+distinguishes them and travels with training batches. A missing mode on a legacy
+sample means `topk`. SCMC payloads must explicitly identify themselves.
+
+The overhead report keeps nested, flat and array SCT transport alongside the
+SCMC count sweep. Run `python -m scripts.miles.score_overhead_report --help` for
+the renderer. It compares each completed run against its own paired baseline,
+reports HTTP packing/unpacking fractions, and separates model-forward spans
+from extraction spans. Those server benchmarks do not measure the new MILES
+parser or a training update.

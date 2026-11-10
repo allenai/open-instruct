@@ -43,6 +43,7 @@ class CoreConfig:
     filter_zero_std_groups: bool = True
     max_train_rollout_logprob_abs_diff: float | None = None
     diagnostic_interval: int = 0
+    synchronize_step_timing: bool = False
     layer_profile_interval: int = 0
     pipeline_observation_interval: float = 0.0
     replay_diagnostics: bool = False
@@ -212,6 +213,7 @@ class CoreConfig:
             "compiler_cache_diagnostics",
             "compiler_cache_tilelang",
             "replay_diagnostics",
+            "synchronize_step_timing",
             "stream_moe_export",
             "activation_checkpointing",
             "fp32_lm_head",
@@ -459,6 +461,7 @@ class RunConfig:
         ):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
+        validation.score_candidates(options)
         if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
             raise constraints.error("Core weight publication supports retract or in_place pause mode")
         if options.get("sglang_radix_cache_backend") == validation.POLICY_CACHE_BACKEND and (
