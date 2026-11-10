@@ -25,7 +25,7 @@ def open_index(path, expected_hash, expected_rows, max_prompt_length=None):
     not change prompt bytes or manifest identity. A failed build leaves no ready
     header, so readers cannot consume partial indexes.
     """
-    path = Path(path)
+    path = Path(path).resolve()
     prefix = path.with_name(f"{path.name}.{expected_hash[:16]}.index")
     header_path, index_path = Path(str(prefix) + ".json"), Path(str(prefix) + ".bin")
     with Path(str(prefix) + ".lock").open("a") as lock:
@@ -43,7 +43,7 @@ def open_index(path, expected_hash, expected_rows, max_prompt_length=None):
                             continue
                         row = json.loads(line)
                         metadata = row.get("metadata") or {}
-                        pool, tokens = metadata.get("sampling_pool"), metadata.get("run_prompt_tokens")
+                        pool, tokens = metadata.get("sampling_pool", "__source__"), metadata.get("run_prompt_tokens")
                         if not isinstance(row.get("input"), str) or not isinstance(pool, str):
                             raise ValueError("Indexed pools require prepared text and sampling_pool metadata")
                         if type(tokens) is not int or tokens < 1:

@@ -189,6 +189,7 @@ def validate_data(data):
         "sources",
         "pools",
         "sampling",
+        "preparation",
         "recipe",
         "rl_manifest",
         "prompt_data",
@@ -199,6 +200,9 @@ def validate_data(data):
         raise InputError(
             f"Unknown data fields: {sorted(unknown)}; use data.tasks, data.rl_manifest, or prepared data.prompt_data."
         )
+    if "preparation" in data:
+        cache = importlib.import_module("open_instruct.miles.datasets.preparation_cache")
+        cache.validate(data["preparation"], data)
     modes = [
         name for name in ("tasks", "sources", "recipe", "rl_manifest", "prompt_data") if data.get(name) is not None
     ]
@@ -624,6 +628,16 @@ def prepare_data(
     source and output digest before returning the same paths.
     """
     validate_data(data)
+    if "preparation" in data:
+        cache = importlib.import_module("open_instruct.miles.datasets.preparation_cache")
+        return cache.prepare(
+            data,
+            hf_checkpoint,
+            output,
+            max_prompt_length=max_prompt_length,
+            seed=seed,
+            registry_overrides=registry_overrides,
+        )
     resolved_pools = pools.resolve(data)
     if type(max_prompt_length) is not int or max_prompt_length < 1:
         raise InputError("max_prompt_length must be positive")
