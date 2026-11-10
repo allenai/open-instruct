@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Removed
+- Enable native MILES score-centering TIS/MIS in Core refresh runs, validate candidate settings before launch, and pin the complete-support precision fixes (PR_URL_PENDING).
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed

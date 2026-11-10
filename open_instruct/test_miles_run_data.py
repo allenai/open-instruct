@@ -672,3 +672,27 @@ def test_prepared_jsonl_streams_and_preserves_validation_metadata(environment, t
     source.write_text(source.read_text().replace('"42"', '"43"', 1))
     with pytest.raises(InputError, match="source changed"):
         prepare(environment, data)
+
+
+def test_qwen_math_prompt_preserves_target_and_strips_solution(environment, monkeypatch):
+    monkeypatch.setattr(
+        run_data,
+        "_source_rows",
+        lambda name: [
+            {
+                "messages": [
+                    {"role": "user", "content": "What is 6 times 7?"},
+                    {"role": "assistant", "content": "SECRET SOLUTION: 42"},
+                ],
+                "ground_truth": "42",
+            }
+        ],
+    )
+    result = prepare(environment, {"tasks": [{"task": "gsm8k", "train_count": 1, "prompt_wrapper": "qwen_math"}]})
+    row = json.loads(Path(result["prompt_data"]).read_text())
+    expected = "What is 6 times 7?\n\nPlease reason step by step, and put your final answer within \\boxed{}."
+    assert environment[2].rendered == [[{"role": "user", "content": expected}]]
+    assert row["input"] == "HF template|" + expected + "|assistant:"
+    assert row["label"] == "42"
+    assert row["metadata"]["prompt_wrapper"] == "qwen_math"
+    assert "SECRET SOLUTION" not in row["input"]

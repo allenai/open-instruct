@@ -11,7 +11,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles.configuration import async_capacity, constraints, graph_config, throughput, validation
+from open_instruct.miles.configuration import (
+    async_capacity,
+    constraints,
+    graph_config,
+    score_centering,
+    throughput,
+    validation,
+)
 from open_instruct.miles.configuration import options as cli_options
 from open_instruct.miles.errors import InputError
 
@@ -336,7 +343,7 @@ class RunConfig:
                 options[name] = True
             if not options.get("sglang_router_policy"):
                 options.setdefault("router_policy", "round_robin")
-        if self.core.fp32_lm_head:
+        if self.core.fp32_lm_head or score_centering.enabled(options):
             if options.get("sglang_enable_fp32_lm_head") is False:
                 raise constraints.error("core.fp32_lm_head conflicts with miles.sglang_enable_fp32_lm_head=false")
             options["sglang_enable_fp32_lm_head"] = True
@@ -453,6 +460,7 @@ class RunConfig:
             if self.core.packing_max_tokens < self.core.max_sequence_length:
                 raise constraints.error("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = self.resolved_miles()
+        score_centering.validate(options)
         if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path") not in (
             None,
             EXCLUDE_UNGRADED,
@@ -727,8 +735,12 @@ class RunConfig:
             self._validate_engine_drain(options, collection, samples)
         except InputError as error:
             raise InputError(str(error).replace("engine_drain", "refresh")) from error
-        if not options.get("use_tis", False) or options.get("use_rollout_logprobs", False):
-            raise constraints.error("refresh requires miles.use_tis=true and miles.use_rollout_logprobs=false")
+        if not (options.get("use_tis", False) or score_centering.weighted(options)) or options.get(
+            "use_rollout_logprobs", False
+        ):
+            raise constraints.error(
+                "refresh requires miles.use_tis=true or score_centering_is=tis/mis, and miles.use_rollout_logprobs=false"
+            )
         if options.get("advantage_estimator", "grpo") != "grpo":
             raise constraints.error(
                 "refresh currently supports the token-level grpo objective only", constraints.Category.NOT_IMPLEMENTED

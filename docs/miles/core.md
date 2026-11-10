@@ -349,3 +349,35 @@ The consistency check remains enabled on the first update after process startup
 revision in the runtime lock; older revisions fail early rather than silently
 ignoring the selection. The eager path computes all capacity rows, so its cost
 should be measured on the chosen packing and expert-parallel layout.
+
+## Score centering
+
+Select the inherited native score-centering objective through `[miles]`:
+
+```toml
+[miles]
+loss_type = "score_centering"
+rollout_top_logprobs_num = 20
+score_centering_is = "tis"
+score_centering_tis_clip = 2.0
+```
+
+Use `advantage_estimator="grpo"` and omit legacy `use_tis`; the compiler selects
+score centering's own weighting. Explicit `async.off_policy_correction="tis"`
+also selects this native TIS mode. Refresh accepts `tis` or `mis`, retaining its
+policy-lag, routing-replay and unfiltered-sampling constraints. Unweighted score
+centering is available for synchronous runs. The serving FP32 head is required
+and enabled automatically; an explicit false setting is rejected. For matched
+comparisons set `trainer.fp32_lm_head=true` in both arms so both the Core and
+serving heads use the same precision, and record the same candidates in both.
+
+The original implementation is upstream
+[#3621–#3626](https://github.com/radixark/miles/pull/3625). This runtime also
+explicitly handles empty tails under complete-support replay, addressing
+[#4204](https://github.com/radixark/miles/issues/4204); this does not relax the
+Core refresh sampling restrictions. Candidate probabilities must be recorded
+when tokens are generated. OPD, speculative generation and custom converters
+that bypass candidate validation remain unsupported. The existing PPO+TIS
+baseline and score-centering+TIS use different policy objectives; that comparison
+does not isolate centering from removal of PPO clipping. Numerical tests and
+startup checks do not establish task learning.

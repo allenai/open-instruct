@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Merged pool exposure, explicit discard feedback and terminal serving-startup failure propagation integrated with main masked REINFORCE++ returns; strict scoring tolerance restored after eager-scoring validation. SwiGLU int64 offsets and source-bundle IDs retained. Weighted-pool GPU runs qualified at application 55703fbbf/runtime bbcb01d; current runtime revision CPU-validated.",
+  "status": "Score-centering Core candidate transport and complete-support correction CPU-tested; paired Olmo 3.5 Tiny GSM8K GPU qualification pending. Other source and binary-base pins unchanged.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "6b78328406a42d41d5dce260779655f685dc4524"
+      "revision": "aa53c1c00e5b88ce01cf37f458650a1bc47daf77"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
