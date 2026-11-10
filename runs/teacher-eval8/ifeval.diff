@@ -1,0 +1,26 @@
+1,3c1,3
+< # MOPD 3-domain final eval (2026-10-31): mixrl-qwen35-9b-all3-300u/hf-299, scored by the GRPO eval-only path (copy of the pilot eval config)
+< # (training.eval_only) on the frozen v3 eval sets with the v4 verifiers: 8 samples per prompt, temperature 1.
+< # Same sampler and settings as the pilot runs' in-training evals; no training.
+---
+> # Matched 8-answer eval of the ORIGINAL frozen ifeval teacher (teacher-qwen35-9b-ifeval-v4-100u/hf-99) on its own task only
+> # (2026-11-10, Kevin: 'can we get 8 per prompt to compare properly'). Copy of all3-eval8-qwen35-9b-mixrl-hf299-cap.toml;
+> # changes only name, model.source, output roots and eval_prompt_data (one task). See runs/teacher-eval8/PREREG.md.
+5c5
+< name = "all3-eval8-qwen35-9b-mixrl-hf299-cap"
+---
+> name = "teacher-eval8-qwen35-9b-ifeval-v4-100u-hf99"
+8c8
+< source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/runs/mixrl-qwen35-9b-all3-300u/hf-299"
+---
+> source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/runs/teacher-qwen35-9b-ifeval-v4-100u/hf-99"
+62,63c62,63
+< root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/evals/all3-eval8-qwen35-9b-mixrl-hf299-cap"
+< assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/assets/all3-eval8-qwen35-9b-mixrl-hf299-cap"
+---
+> root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/evals/teacher-eval8-qwen35-9b-ifeval-v4-100u-hf99"
+> assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/assets/teacher-eval8-qwen35-9b-ifeval-v4-100u-hf99"
+69d68
+<   "eval_math", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/eval_math.jsonl",
+71d69
+<   "eval_code", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/eval_code.jsonl",
