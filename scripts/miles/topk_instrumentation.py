@@ -103,7 +103,7 @@ def install():
     wrap_gpu(logprob, "get_top_logprobs", "topk_extraction_stream")
     wrap_gpu(results.GenerationBatchResult, "copy_to_cpu", "result_d2h_stream")
     if hasattr(sampler, "compute_mc_scores"):
-        wrap_gpu(sampler, "compute_mc_scores", "mc32_extraction_stream")
+        wrap_gpu(sampler, "compute_mc_scores", "mc_extraction_stream")
 
     def wrap_host(owner, name, label):
         original = getattr(owner, name)
