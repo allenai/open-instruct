@@ -24,12 +24,14 @@ _QUOTED_PAIR_PATTERN = r'".+":\s*".+"'
 _FORMAT_SEARCH_TIMEOUT_SECONDS = 0.1
 _FORMAT_RESPONSE_TIMEOUT_SECONDS = 1.0
 # An explicit choice: a boxed letter, or "Answer: LETTER". Emphasis, parentheses
-# and \\text{} around the letter are presentation, not content. A bare letter must
-# not run into a word ("Answer: I think") or echo the prompt ("Answer: A/B/C/D").
+# and \\text{} around the letter are presentation, not content. A letter inside a
+# word or a prompt echo ("Answer: A/B/C/D") is not a declaration.
 _CHOICE_DECLARATION = re.compile(
     r"\\boxed\{\s*(?:\\text(?:bf)?\{\s*)?\(?([A-Z])\)?[\s}]*\}"
-    r"|(?i:answer)\s*:[\s*]*(?:\\?\(([A-Z])\\?\)|([A-Z])(?![A-Za-z0-9/]|[ \t]+[a-z]))"
+    r"|(?i:answer)\s*:[\s*]*(?:\\?\(([A-Z])\\?\)|([A-Z])(?![A-Za-z0-9/]))"
 )
+# Words that withdraw a choice within its own line ("Answer: B. Actually, no.").
+_CHOICE_RETRACTION = re.compile(r"\b(?:actually|wait|correction|instead|on second thought|scratch that)\b", re.I)
 logger = logger_utils.setup_logger(__name__)
 
 
@@ -275,30 +277,42 @@ def _final_choice_score(final, target):
     """Score one explicit final choice without searching reasoning for a letter.
 
     Declarations are a boxed letter, "Answer: LETTER" and the row's own requested
-    format (``pattern``, one capture). They may repeat but must agree, and nothing
-    a same-line gloss naming no other displayed letter may follow the last one.
+    format (``pattern``, one capture). They may repeat but must all agree. After
+    the last one, only a same-line explanation may follow, and it may neither name
+    another displayed letter nor withdraw the choice.
     """
     value = target["value"]
-    declared = [(m.end(), m[1] or m[2] or m[3]) for m in _CHOICE_DECLARATION.finditer(final)]
+
+    def firm(letter, after):
+        # "A" and "I" before a lowercase word may be prose ("Answer: I think"). Such
+        # a declaration still counts for conflicts but cannot earn credit itself.
+        return not (letter in ("A", "I") and re.match(r"[ \t]+[a-z]", final[after:]))
+
+    # (end offset, letter, firm)
+    declared = [
+        (m.end(), m[1] or m[2] or m[3], m[3] is None or firm(m[3], m.end()))
+        for m in _CHOICE_DECLARATION.finditer(final)
+    ]
     if target.get("pattern"):
         try:
             matches = list(regex.finditer(target["pattern"], final, timeout=_FORMAT_SEARCH_TIMEOUT_SECONDS))
         except TimeoutError as error:
             raise FormattingVerifierTimeout("MCQA answer pattern exceeded its search budget") from error
-        # Row patterns are loose ("Response:\\s*([A-Za-z0-9])"): keep only a displayed
-        # uppercase choice that does not start a word or an HTML tag such as <b>.
+        # Row patterns are loose ("Response:\\s*([A-Za-z0-9])\\s*"): keep only a displayed
+        # uppercase choice that does not start a word or an HTML tag such as <b>, and
+        # end the declaration before any whitespace (including newlines) it consumed.
         declared += [
-            (m.end(), m[1])
+            (max(m.end(1), m.start() + len(m[0].rstrip())), m[1], firm(m[1], m.end(1)))
             for m in matches
             if m[1] in target["choices"] and not final[m.end(1) : m.end(1) + 1].isalnum()
         ]
     if declared:
-        if {letter for _, letter in declared} != {value}:
+        end, _, last_is_firm = max(declared)
+        if {letter for _, letter, _ in declared} != {value} or not last_is_firm:
             return 0.0
-        # The rest of that line may gloss the choice but not name another displayed
-        # letter ("Answer: B, C, or D"); later lines may only close markup.
-        tail = re.fullmatch(r"([^\n]*)[\s\\\])$*]*", final[max(end for end, _ in declared) :])
-        if tail is None:
+        # Later lines may only close markup.
+        tail = re.fullmatch(r"([^\n]*)[\s\\\])$*]*", final[end:])
+        if tail is None or _CHOICE_RETRACTION.search(tail[1]):
             return 0.0
         named = set(re.findall(r"(?<![A-Za-z0-9])[A-Z](?![A-Za-z0-9])", tail[1]))
         return float(not named & (set(target["choices"]) - {value}))

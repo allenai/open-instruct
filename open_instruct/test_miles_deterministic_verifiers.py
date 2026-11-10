@@ -199,6 +199,10 @@ MCQA_TARGET = {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B", 
         "**Answer: B** (no net separation).",
         "The final answer is:\n\\[\n\\boxed{B}\n\\]",
         "Answer: A/B/I\n\nAnswer: B",
+        # An explanation earns the same credit whatever its capitalisation.
+        "Answer: B because diffusion is uniform",
+        "Answer: B Because diffusion is uniform",
+        "Answer: B is correct.\n\nAnswer: B",
     ],
 )
 def test_opt_in_mcqa_final_choice_positive(text):
@@ -224,6 +228,13 @@ def test_opt_in_mcqa_final_choice_positive(text):
         "Answer: B (or possibly A)",
         "\\boxed{B} or A",
         "**Answer: B** and I",
+        # ... or withdraw the choice.
+        "Answer: B. Actually, the correct answer is A.",
+        "Answer: B. Actually, that is wrong.",
+        "Answer: B. Wait, no.",
+        # A declaration followed by prose still conflicts with a later one.
+        "Answer: A is correct.\nAnswer: B",
+        "Answer: I think so.\nAnswer: B",
     ],
 )
 def test_opt_in_mcqa_final_choice_rejects_conflicting_answers(text):
@@ -231,7 +242,12 @@ def test_opt_in_mcqa_final_choice_rejects_conflicting_answers(text):
 
 
 def test_mcqa_final_choice_does_not_read_prose_as_a_choice():
-    assert cv.score("Answer: I think it is unclear", {**MCQA_TARGET, "value": "I"}) == 0
+    target = {**MCQA_TARGET, "value": "I"}
+    assert cv.score("Answer: I think it is unclear", target) == 0
+    assert cv.score("Response: I think it is unclear", {**target, "pattern": r"Response:\s*([A-Za-z0-9])\s*"}) == 0
+    # "A"/"I" before a lowercase word cannot earn credit alone, but a firm repeat can.
+    assert cv.score("Answer: I is correct.\n\nAnswer: I", target) == 1
+    assert cv.score("Answer: I. Impedance decreases", target) == 1
 
 
 @pytest.mark.parametrize(
@@ -246,6 +262,12 @@ def test_mcqa_final_choice_does_not_read_prose_as_a_choice():
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Answer: A\nSelected Option -> B", 0),
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Selected Option -> A", 0),
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Selected Option -> B, A", 0),
+        # Whitespace consumed by the row pattern must not turn later lines into a gloss.
+        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B\nActually A", 0),
+        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B\nThe third option is also plausible", 0),
+        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B\n\n", 1),
+        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B (uniform diffusion)", 1),
+        (r"<final_answer>\s*([A-Za-z0-9])\s*</final_answer>", "<final_answer>\nB\n</final_answer>", 1),
         # Loose row patterns must not read a word, an HTML tag or an undisplayed letter.
         (r"Response:\s*([A-Za-z0-9])\s*", "Response: Because", 0),
         (r"<\s*([A-Za-z0-9])\s*>", "<b>Explanation</b>", 0),
