@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "name": "goncalof-h066-trainer-baseline-20261109",
+  "model": {
+    "source": "/weka/gfaria/models/Olmo-3.5-Small-RL-h066",
+    "format": "hf"
+  },
+  "output": {
+    "root": "/weka/gfaria/open-instruct/runs/scmc32-training-20261109/baseline",
+    "export_hf": false,
+    "rollout_sample_rate": 1.0
+  },
+  "launch": {
+    "workspace": "ai2/oe-agents",
+    "budget": "ai2/oe-omai",
+    "cluster": "ai2/jupiter",
+    "priority": "normal",
+    "min_runtime": "30m",
+    "timeout": "60m",
+    "auto_resume": false,
+    "gpus_per_replica": 5,
+    "memory": "512 GiB",
+    "shared_memory": "128 GiB",
+    "weka_mounts": [
+      {
+        "weka": "oe-adapt-default",
+        "mount_path": "/weka"
+      }
+    ],
+    "coordination": {
+      "startup_timeout": 1800
+    },
+    "env": {
+      "SGLANG_RETURN_ORIGINAL_LOGPROB": "0",
+      "OMP_NUM_THREADS": "4"
+    }
+  },
+  "data": {
+    "tasks": [
+      {
+        "task": "gsm8k-less-noise",
+        "train_count": 80
+      }
+    ]
+  },
+  "training": {
+    "num_rollouts": 20,
+    "filter_zero_std_groups": false,
+    "save_checkpoints": false,
+    "skip_eval_before_train": true
+  },
+  "trainer": {
+    "gpus": 4,
+    "expert_parallel_size": 4,
+    "activation_recompute": true
+  },
+  "inference": {
+    "placement_mode": "disaggregated",
+    "gpus": 1,
+    "rollout_batch_size": 4,
+    "samples_per_prompt": 2,
+    "global_batch_size": 8,
+    "max_response_length": 256,
+    "max_context_length": 1024,
+    "radix_cache": false,
+    "sglang_max_running_requests": 8,
+    "sglang_max_total_tokens": 8192,
+    "sglang_max_mamba_cache_size": 16,
+    "sglang_mem_fraction_static": 0.6,
+    "sglang_cuda_graph_backend_decode": "disabled",
+    "sglang_cuda_graph_backend_prefill": "disabled",
+    "sglang_cuda_graph_max_bs_decode": 8,
+    "sglang_attention_backend": "triton",
+    "sglang_sampling_backend": "pytorch",
+    "check_weight_update_equal": false
+  },
+  "optimizer": {
+    "learning_rate": 1e-06,
+    "lr_decay_style": "constant",
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.999,
+    "weight_decay": 0.0,
+    "eps_clip": 0.2,
+    "eps_clip_high": 0.2,
+    "kl_loss_coef": 0.0,
+    "entropy_coef": 0.0
+  },
+  "tracking": {
+    "wandb_mode": "offline",
+    "wandb_project": "open-instruct-miles",
+    "wandb_group": "scmc32-trainer-overhead"
+  },
+  "core": {
+    "publication_mode": "barrier",
+    "attention_backend": "torch",
+    "reward_zero_truncated": false,
+    "router_aux_loss_weight": 0.0,
+    "router_z_loss_weight": 0.0,
+    "diagnostic_interval": 0,
+    "max_train_rollout_logprob_abs_diff": 0.1,
+    "max_run_seconds": 3000,
+    "exclude_ungraded": false,
+    "synchronize_step_timing": true
+  },
+  "miles": {
+    "seed": 17,
+    "rollout_seed": 17,
+    "rollout_temperature": 1.0,
+    "rollout_top_p": 1.0,
+    "rollout_max_prompt_len": 768,
+    "calculate_per_token_loss": true,
+    "disable_grpo_std_normalization": false,
+    "use_rollout_routing_replay": true,
+    "pause_generation_mode": "retract",
+    "custom_generate_function_path": "scripts.miles.score_training_benchmark.generate",
+    "custom_rm_path": "scripts.miles.score_training_benchmark.reward",
+    "log_probs_chunk_size": 128,
+    "loss_type": "policy_loss"
+  },
+  "compiler_cache": {
+    "enabled": false
+  }
+}
