@@ -42,7 +42,7 @@ RECIPES = {
             "--tokenizer_name_or_path",
             "allenai/dolma2-tokenizer-olmo35",
             "--tokenizer_revision",
-            "8b9717061fae09d5be814373d189919a62a9a00d",
+            "03c29652a9d74902fe9d39bc0ad211748c7e7ae6",
             "--chat_template_name",
             "olmo35",
             "--reserved_slot_tokens",
