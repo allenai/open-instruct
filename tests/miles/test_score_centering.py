@@ -40,6 +40,7 @@ def test_packed_core_score_centering_matches_unpacked_gradients(monkeypatch, per
         recompute_loss_function=False,
         use_dynamic_global_batch_size=False,
         multi_lora=False,
+        true_on_policy_mode=False,
     )
     lengths, responses = [5, 7], [2, 3]
     raw = {
