@@ -24,25 +24,46 @@ if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     ray start --head --port=$RAY_NODE_PORT --dashboard-host=0.0.0.0
 else
     echo "Starting Ray worker node $BEAKER_REPLICA_RANK"
+
+    # A task whose spec has no `replicas` gets no BEAKER_REPLICA_RANK, so it reaches this
+    # branch with no leader to join. Fail loudly rather than reporting success.
+    if [ -z "${BEAKER_LEADER_REPLICA_HOSTNAME}" ]; then
+        echo "[ray_node_setup] BEAKER_LEADER_REPLICA_HOSTNAME is empty, so there is no Ray head to join." >&2
+        echo "[ray_node_setup] The task spec is probably missing 'replicas'. Exiting 1." >&2
+        exit 1
+    fi
+
     export RAY_ADDRESS="${BEAKER_LEADER_REPLICA_IP}:${RAY_NODE_PORT}"
-    # Start worker without --block so we can control lifecycle and exit code.
-    ray start --address="${RAY_ADDRESS}" --dashboard-host=0.0.0.0
 
     cleanup() {
-        echo "[ray_node_setup] Cleanup: stopping Ray worker and exiting 0"
+        local code="${1:-0}"
+        echo "[ray_node_setup] Cleanup: stopping Ray worker and exiting ${code}"
         ray stop --force >/dev/null 2>&1 || true
         trap - TERM INT HUP EXIT
-        exit 0
+        exit "${code}"
     }
 
-    trap cleanup TERM INT HUP EXIT
+    trap 'cleanup 0' TERM INT HUP EXIT
+
+    # Start worker without --block so we can control lifecycle and exit code.
+    if ! ray start --address="${RAY_ADDRESS}" --dashboard-host=0.0.0.0; then
+        echo "[ray_node_setup] Failed to join the Ray head at ${RAY_ADDRESS}. Exiting 1." >&2
+        cleanup 1
+    fi
+
+    # Confirm the join took hold. `ray start` can return 0 without this node being
+    # registered with the head, and a worker that never joined must not report success.
+    if ! ray status --address="${RAY_ADDRESS}" >/dev/null 2>&1; then
+        echo "[ray_node_setup] Started, but the head at ${RAY_ADDRESS} is not reachable. Exiting 1." >&2
+        cleanup 1
+    fi
 
     echo "[ray_node_setup] Monitoring Ray head at ${RAY_ADDRESS}"
-    # Poll head availability. Exit 0 when head is gone.
+    # Past this point a head that disappears is the normal end of a run, so exit 0.
     while true; do
         if ! ray status --address="${RAY_ADDRESS}" >/dev/null 2>&1; then
             echo "[ray_node_setup] Head is unreachable. Stopping worker and exiting 0."
-            cleanup
+            cleanup 0
         fi
         sleep 5
     done
