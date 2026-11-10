@@ -493,3 +493,23 @@ Keep these follow-ups separate from the released maintained-verifier pools:
 | Alternative valid code constructions, arithmetic grammar and language detection | Preserve the documented upstream behavior for the first pass; investigate deliberate changes separately. |
 | Runtime verifier outages | Omitted-group W&B metric is implemented; the systemic-failure stopping threshold remains an explicit open decision. |
 | Semantic data quality | Qualification covers loader/reward integration and reviewed controls, not every source reference's scientific or mathematical correctness. Investigate observed training failures without retroactively selecting rows by policy success. |
+
+
+## Reuse rendered source preparation across runs
+
+Large rendered JSONL sources can take substantial time to tokenize. An optional shared cache prepares each source once for a tokenizer, while each run writes a small manifest containing its mixture, pool assignments and verifier registry. This currently supports `data.sources` with `prompt_data`; named-task generation keeps its existing preparation path.
+
+```toml
+[data.preparation]
+cache_dir = "/weka/oe-training-default/your-name/prepared-sources-v1"
+# Optional: import a previously validated sources bundle without tokenization.
+import_manifests = ["/weka/your-old-run/prepared/data/manifest.json"]
+```
+
+Source bytes, tokenizer assets and a preparation semantic version identify cache entries. Moving the tokenizer directory, changing the seed or weights, assigning pools, changing the verifier registry, or increasing the admitted prompt length reuses tokenization. The current verifier configuration and prompt limit are still validated. A smaller limit rejects oversized prompts rather than dropping them. Changed source bytes or tokenizer assets create new entries. File hashes, train/held-out overlap checks and IF admission checks remain enforced.
+
+Publication uses per-entry file locks and atomic directory renames. Failed preparations leave unpublished staging directories; readers cannot consume them. Prepared row indexes are built on CPU and shared through the resolved source paths. Cache hits still read and hash source files for validation; they avoid encoding and rewriting the population.
+
+Legacy import is explicit: the old manifest's inputs, outputs and tokenizer receipts must validate. Imported row bytes are preserved exactly and linked to their original files. **Keep the original imported bundle and its referenced inputs available.** Import is not a migration that makes the old directory disposable. New runs link to shared cache entries, which must likewise remain available for resume.
+
+Keep the preparation configuration and output directory unchanged when resuming an existing cached run. This option does not migrate an existing checkpoint's dataset identity; use it for a fresh run, then resume that run normally.

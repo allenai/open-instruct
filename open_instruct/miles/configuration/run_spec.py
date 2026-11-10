@@ -322,6 +322,13 @@ class RunSpec:
         if type(data["seed"]) is not int or data["seed"] < 0:
             raise InputError("data.seed must be a nonnegative integer")
         data["shuffle"] = _boolean(data.get("shuffle", True), "data.shuffle")
+        if "preparation" in data:
+            options = data["preparation"]
+            run_data.validate_data(data)
+            options["cache_dir"] = _path(options["cache_dir"], base, "data.preparation.cache_dir")
+            options["import_manifests"] = [
+                _path(p, base, "data.preparation.import_manifests") for p in options.get("import_manifests", [])
+            ]
         if "sources" in data:
             run_data.validate_data(data)
             data["sources"] = [

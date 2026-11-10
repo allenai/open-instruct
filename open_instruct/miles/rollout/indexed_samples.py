@@ -21,6 +21,7 @@ class Catalog:
     ):
         self.sample_type = sample_type
         self.sources, self.pool_names = sources, list(pools)
+        self.pool_labels = {name: spec.get("label", name) for name, spec in pools.items()}
         self.indexes, self.fds, self.ends = [], [], []
         codes = []
         self.cache_rows, self.cache_bytes = cache_rows, cache_bytes
@@ -33,7 +34,13 @@ class Catalog:
             for source in sources:
                 path = directory / source["path"]
                 index, header = indexed_rows.open_index(path, source["sha256"], source["rows"], max_prompt_length)
-                mapping = np.asarray([self.pool_names.index(name) for name in header["pools"]], dtype=np.uint32)
+                mapping = np.asarray(
+                    [
+                        self.pool_names.index(source.get("pool_mapping", {}).get(name, name))
+                        for name in header["pools"]
+                    ],
+                    dtype=np.uint32,
+                )
                 codes.append(mapping[index["pool"]])
                 self.indexes.append(index)
                 self.fds.append(os.open(path, os.O_RDONLY))
@@ -100,6 +107,9 @@ class Catalog:
         data = json.loads(raw)
         source = bisect.bisect_right(self.ends, row)
         metadata = data["metadata"] | {"mixture_source": self.sources[source]["name"]}
+        if "pool_mapping" in self.sources[source]:
+            pool = self.pool_names[int(self.pool_codes[row])]
+            metadata.update(sampling_pool=pool, pool_id=self.pool_labels[pool])
         return self.sample_type(prompt=data["input"], label=data.get("label"), metadata=metadata)
 
     def split(self, policy, shuffle, seed):

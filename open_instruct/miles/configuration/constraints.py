@@ -293,6 +293,7 @@ def native_values(args, supplied_flags):
 # Closed structured schemas, also consumed by documentation coverage checks.
 STRUCTURED_FIELDS = {
     "data": {
+        "preparation",
         "eval_prompt_data",
         "prompt_data",
         "recipe",
