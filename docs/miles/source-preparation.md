@@ -58,7 +58,7 @@ and are recorded as omissions rather than moved across conversation turns.
 | `format_v1` | Existing format verifier payload; formatting only |
 | `litmus_v02_v1` | Row-carried regex, answer type and matching policy; all scalar properties/methods are representable |
 | `reasoning_gym_v1` | Saved entries for 104 pinned task families, including state-based graders; no regeneration or difficulty reset |
-| `mcqa_v1` | Displayed options and expected answer, existing final-choice parser; no science-only filtering |
+| `mcqa_v1` | Displayed options and expected answer, final-choice parser with the row's own answer regex when present; no science-only filtering |
 | `math_v1` | Explicit symbolic-math source contract; proof requests are reported as requiring judged support |
 | `deterministic_v1` | Existing numeric, exact-text/JSON, countdown and knights contracts in `target` |
 | `toolrl_v1` | Canonical ToolRL messages, tools and reference calls; original partial-credit reward and format-only answer rows |
