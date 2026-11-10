@@ -47,6 +47,7 @@ from olmo_core.config import DType
 from olmo_core.data import utils as oc_data_utils
 from olmo_core.distributed import parallel
 from olmo_core.distributed.utils import is_distributed
+from olmo_core.nn.ddp import model as ddp_model_lib
 from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, teardown_training_environment
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -115,7 +116,7 @@ def _check_row_aligned_cache(numpy_dir: str) -> None:
     stats_path = os.path.join(numpy_dir, "dataset_statistics.json")
     with open(stats_path) as f:
         stats = json.load(f)
-    if not stats["configuration"].get(numpy_dataset_conversion.ROW_ALIGNED_PARTS_KEY, False):
+    if not stats.get("configuration", {}).get(numpy_dataset_conversion.ROW_ALIGNED_PARTS_KEY, False):
         raise ValueError(f"{numpy_dir} was not written with --row_aligned_parts ({stats_path} has no marker).")
     num_lines = 0
     for path in glob.glob(os.path.join(numpy_dir, numpy_dataset_conversion.TOKEN_IDS_METADATA_GLOB)):
@@ -131,7 +132,8 @@ def _check_row_aligned_cache(numpy_dir: str) -> None:
 def _olmo_core_supports_metadata_boundaries() -> bool:
     """Whether the installed OLMo-core can take packing boundaries from the metadata files.
 
-    `use_array_if_local` reached `NumpyPackedFSLDatasetConfig` in allenai/OLMo-core#843.
+    `use_array_if_local` reached `NumpyPackedFSLDatasetConfig` in allenai/OLMo-core#843, together with
+    building `doc_lens` from the loaded documents, so a row without EOS stays its own document.
     """
     return "use_array_if_local" in {field.name for field in dataclasses.fields(oc_data.NumpyPackedFSLDatasetConfig)}
 
@@ -238,6 +240,15 @@ def _check_extra_numpy_dir(
             f"{numpy_dataset_conversion.TOKEN_IDS_METADATA_GLOB} file for every token part; "
             "pass --no_document_boundaries_from_metadata to scan for EOS instead."
         )
+    if require_metadata and len(token_parts) > 1:
+        # A part cut mid-row would split that row into two documents, the second without its prompt.
+        if not os.path.exists(os.path.join(numpy_dir, "dataset_statistics.json")):
+            raise ValueError(
+                f"{numpy_dir}: a multi-part dir under --document_boundaries_from_metadata must be written with "
+                "--row_aligned_parts (scripts/data/convert_sft_data_for_olmocore.py takes it), and it has no "
+                "dataset_statistics.json to show that."
+            )
+        _check_row_aligned_cache(numpy_dir)
     dtype_name = np.dtype(token_dtype).name
     itemsize = np.dtype(token_dtype).itemsize
     stats = _NumpyDirStats(num_parts=len(token_parts), num_tokens=0, num_loss_tokens=0)
@@ -264,26 +275,44 @@ def _check_extra_numpy_dir(
                     f"{token_path} has token id {max_id:,} >= vocab size {tokenizer.vocab_size:,}; "
                     f"was it written as {dtype_name}?"
                 )
-        if int(tokens[-1]) != tokenizer.eos_token_id:
+        # Only the EOS scan drops a file's tail; metadata boundaries keep rows that end without EOS
+        # (olmo35 tool-call rows end in `<|im_end|>\n`, not EOS).
+        if not require_metadata and int(tokens[-1]) != tokenizer.eos_token_id:
             raise ValueError(
                 f"{token_path} does not end with EOS ({tokenizer.eos_token_id}); OLMo-core's EOS scan "
                 "drops the tokens after a file's last EOS."
             )
         # The boundaries OLMo-core's packer uses: the metadata rows with --document_boundaries_from_metadata,
         # otherwise the EOS positions in the token file.
-        doc_lengths = np.array(
-            [
-                end - start
-                for start, end in oc_data_utils.iter_document_indices(
+        bounds = np.array(
+            list(
+                oc_data_utils.iter_document_indices(
                     token_path,
                     use_array_if_local=not require_metadata,
                     eos_token_id=tokenizer.eos_token_id,
                     bos_token_id=tokenizer.bos_token_id,
                     dtype=token_dtype,
                 )
-            ],
+            ),
             dtype=np.int64,
-        )
+        ).reshape(-1, 2)
+        doc_lengths = bounds[:, 1] - bounds[:, 0]
+        # With no trailing-EOS check, a stale or truncated .csv.gz would silently drop tokens: the rows
+        # must tile the file, each starting where the previous one ended and none ending before it starts.
+        if require_metadata:
+            expected_starts = np.concatenate([[0], bounds[:-1, 1]])
+            bad = np.flatnonzero((bounds[:, 0] != expected_starts) | (doc_lengths < 0))
+            if len(bad) or len(bounds) == 0 or int(bounds[-1, 1]) != num_tokens:
+                if len(bounds) == 0:
+                    where = "no rows"
+                elif len(bad):
+                    where = f"row {int(bad[0])} is {int(bounds[bad[0], 0]):,}-{int(bounds[bad[0], 1]):,}"
+                else:
+                    where = f"the last row ends at {int(bounds[-1, 1]):,}"
+                raise ValueError(
+                    f"{token_path}: its metadata rows do not tile its {num_tokens:,} tokens ({where}); "
+                    "is the .csv.gz stale?"
+                )
         over = doc_lengths[doc_lengths > sequence_length]
         stats.num_docs += len(doc_lengths)
         stats.num_docs_over_length += len(over)
@@ -441,8 +470,10 @@ class SFTConfig:
     """Local pretokenized numpy dirs to train on alongside the chat cache, in the converter's layout:
     `token_ids_part_XXXX.npy` (raw tokens in the dtype OLMo-core picks for the vocab, uint32 for Olmo)
     and `labels_mask_part_XXXX.npy` (one bool per token), plus `token_ids_part_XXXX.csv.gz` (one
-    `start,end` line per doc) unless `--no_document_boundaries_from_metadata`. Each part must end
-    with EOS. Their parts are packed the same way as the cache's, one source file at a time, so an
+    `start,end` line per doc, tiling the file) unless `--no_document_boundaries_from_metadata`, in
+    which case each part must end with EOS. Under metadata boundaries a dir with several parts must be
+    written with `--row_aligned_parts` (`scripts/data/convert_sft_data_for_olmocore.py --row_aligned_parts`
+    writes one). Their parts are packed the same way as the cache's, one source file at a time, so an
     instance never mixes extra docs with chat rows; the loader then shuffles all instances together.
     Docs longer than max_seq_length are truncated. Every node needs the same dirs at the same paths.
     Checked at startup, which logs token and loss-token totals for the cache and the extras."""
@@ -457,6 +488,51 @@ class SFTArguments:
     logging: olmo_core_utils.LoggingConfig
     checkpoint: olmo_core_utils.CheckpointConfig
     sft: SFTConfig
+
+
+def _check_ddp_model_args(
+    args: SFTArguments, use_hf_ckpt: bool, cp_config: train_module_lib.TransformerContextParallelConfig | None
+) -> None:
+    """Raise for settings the OLMoDDPModel (MoE v2) path cannot honour."""
+    config_name = args.model.config_name
+    if config_name is None or not config_name.endswith(".json"):
+        raise ValueError(
+            "An OLMoDDPModel (MoE v2) model needs --config_name to be the checkpoint's olmo-core config.json: "
+            "its train_module section supplies the optimizer and data-parallel settings."
+        )
+    if use_hf_ckpt:
+        raise ValueError("An OLMoDDPModel (MoE v2) model loads from an olmo-core checkpoint, not a HuggingFace one.")
+    if cp_config is not None:
+        raise ValueError("Context parallelism is not wired for OLMoDDPModel (MoE v2) models; drop --cp_degree.")
+    # Before the dataset is built, so a config without the sections fails fast.
+    olmo_core_utils.read_checkpoint_train_module(config_name)
+
+
+def _check_expert_parallel_degree(degree: int | None, is_ddp_model: bool, world_size: int) -> None:
+    """Raise for an --expert_parallel_degree the model or world size cannot use, before the dataset is built."""
+    if degree is None:
+        return
+    if not is_ddp_model:
+        raise ValueError("--expert_parallel_degree is wired only for OLMoDDPModel (MoE v2) models.")
+    if degree in (0, 1):
+        raise ValueError(
+            "--expert_parallel_degree must be above 1 (or negative for all ranks); omit it to train without "
+            "expert parallelism."
+        )
+    if degree > 0 and world_size % degree != 0:
+        raise ValueError(f"--expert_parallel_degree {degree} must divide the world size ({world_size}).")
+
+
+def _save_async(save_async: bool, is_ddp_model: bool) -> bool:
+    """Whether to checkpoint asynchronously: never for OLMoDDPModel (MoE v2) models.
+
+    OLMo-core's async save rejects train modules that save their own state dict, as the DDP
+    train module does, so the first checkpoint would end the run.
+    """
+    if save_async and is_ddp_model:
+        logger.warning("Saving checkpoints synchronously: OLMo-core cannot save an OLMoDDPModel asynchronously.")
+        return False
+    return save_async
 
 
 def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None:
@@ -572,8 +648,14 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     model, model_config = olmo_core_utils.setup_model(
         args.model, tc, init_device="meta", emo_segments_from_doc_lens=args.sft.document_boundaries_from_metadata
     )
+    # MoE v2 models refuse FSDP and train through OLMo-core's DDP train module instead.
+    is_ddp_model = isinstance(model, ddp_model_lib.OLMoDDPModel)
 
+    _check_expert_parallel_degree(args.training.expert_parallel_degree, is_ddp_model, world_size)
     cp_config = olmo_core_utils.build_cp_config(args.training)
+    if is_ddp_model:
+        _check_ddp_model_args(args, use_hf_ckpt, cp_config)
+        olmo_core_utils.require_transformer_engine()
     cp_degree = args.training.cp_degree or 1
     gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 1
     dp_shard_degree = gpus_per_node // cp_degree
@@ -624,22 +706,41 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.training.lr_scheduler_type, args.training.warmup_ratio, effective_steps
     )
 
-    train_module_config = train_module_lib.TransformerTrainModuleConfig(
-        rank_microbatch_size=rank_microbatch_size,
-        max_sequence_length=args.training.max_seq_length,
-        z_loss_multiplier=None,
-        compile_model=args.training.compile_model,
-        optim=optim.SkipStepAdamWConfig(
-            lr=args.training.learning_rate, weight_decay=args.training.weight_decay, betas=(0.9, 0.95), compile=False
-        ),
-        dp_config=dp_config,
-        cp_config=cp_config,
-        ac_config=ac_config,
-        scheduler=scheduler,
-        max_grad_norm=args.training.max_grad_norm
-        if args.training.max_grad_norm and args.training.max_grad_norm > 0
-        else None,
+    max_grad_norm = (
+        args.training.max_grad_norm if args.training.max_grad_norm and args.training.max_grad_norm > 0 else None
     )
+    if is_ddp_model:
+        assert args.model.config_name is not None  # checked by _check_ddp_model_args
+        train_module_config = olmo_core_utils.build_ddp_train_module_config(
+            args.model.config_name,
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            learning_rate=args.training.learning_rate,
+            weight_decay=args.training.weight_decay,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+            compile_model=args.training.compile_model,
+            ac_config=ac_config,
+            expert_parallel_degree=args.training.expert_parallel_degree,
+        )
+    else:
+        train_module_config = train_module_lib.TransformerTrainModuleConfig(
+            rank_microbatch_size=rank_microbatch_size,
+            max_sequence_length=args.training.max_seq_length,
+            z_loss_multiplier=None,
+            compile_model=args.training.compile_model,
+            optim=optim.SkipStepAdamWConfig(
+                lr=args.training.learning_rate,
+                weight_decay=args.training.weight_decay,
+                betas=(0.9, 0.95),
+                compile=False,
+            ),
+            dp_config=dp_config,
+            cp_config=cp_config,
+            ac_config=ac_config,
+            scheduler=scheduler,
+            max_grad_norm=max_grad_norm,
+        )
 
     train_module = train_module_config.build(model)
 
@@ -695,7 +796,7 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         wandb_project=args.logging.wandb_project,
         wandb_entity=args.logging.wandb_entity or "ai2-llm",
         max_checkpoints=args.checkpoint.keep_last_n_checkpoints,
-        save_async=args.sft.save_async,
+        save_async=_save_async(args.sft.save_async, is_ddp_model),
     )
     trainer_callbacks["config_saver"] = callbacks.ConfigSaverCallback(_config=config_dict)
     trainer_callbacks["garbage_collector"] = callbacks.GarbageCollectorCallback()
@@ -729,7 +830,11 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             resumed = True
     if not resumed and not use_hf_ckpt:
         logger.info(f"Loading olmo-core checkpoint from {args.model.model_name_or_path}...")
-        trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False)
+        # A MoE v2 base checkpoint carries its pretraining optimizer state (moments, step counts and
+        # skip-step statistics); SFT starts a fresh optimizer, so load only the weights.
+        trainer.load_checkpoint(
+            args.model.model_name_or_path, load_trainer_state=False, load_optim_state=False if is_ddp_model else None
+        )
 
     # Last point at which the base weights are settled: the HF path loaded them before the
     # trainer was built, the olmo-core path just above, and the trainer is configured with

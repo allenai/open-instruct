@@ -102,6 +102,7 @@ class CoreConfig:
     # standalone-versus-training check that guards the skipped path.
     scoring_pass_required: bool = False
     scoring_check_interval: int = 50
+    # Fail when the mean absolute standalone/training gap exceeds this tolerance.
     scoring_check_tolerance: float = 1e-3
     # Publication layout for routed experts: per-expert HF slices, or one stacked
     # tensor per layer and projection in the serving engine's fused layout.
@@ -115,12 +116,31 @@ class CoreConfig:
     prompt_mixture: str | None = None
     remind_review_fraction: float = 0.02
     remind_enqueue_probability: float = 0.25
+    # Optional history/replay layer over the ordinary shuffle or mixture provider.
+    prompt_replay_enabled: bool = False
+    prompt_replay_fraction: float = 0.1
+    prompt_replay_length_drop: float = 0.1
+    prompt_replay_window: int = 256
+    prompt_replay_max_successes: int = 1
+    prompt_replay_truncation: str = "any"
+    prompt_replay_answer_probe: bool = False
     # Frozen prompt-exclusion table from `records select`, pinned by SHA-256.
     selection_table: str | None = None
     selection_sha256: str | None = None
 
     def __post_init__(self):
-        validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture"))
+        validation.boolean(self.prompt_replay_enabled, "core.prompt_replay_enabled")
+        validation.boolean(self.prompt_replay_answer_probe, "core.prompt_replay_answer_probe")
+        validation.number(self.prompt_replay_fraction, "core.prompt_replay_fraction", maximum=1)
+        validation.number(self.prompt_replay_length_drop, "core.prompt_replay_length_drop", maximum=1)
+        if self.prompt_replay_length_drop == 1:
+            raise constraints.error("core.prompt_replay_length_drop must be below 1")
+        validation.integer(self.prompt_replay_window, "core.prompt_replay_window", minimum=1)
+        validation.integer(self.prompt_replay_max_successes, "core.prompt_replay_max_successes", minimum=0)
+        validation.choice(
+            self.prompt_replay_truncation, "core.prompt_replay_truncation", ("none", "any", "half", "all")
+        )
+        validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture", "pools"))
         validation.number(self.remind_review_fraction, "core.remind_review_fraction", maximum=1, exclusive_min=True)
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
@@ -441,28 +461,60 @@ class RunConfig:
         validation.runtime_values(options)
         if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
             raise constraints.error("Core weight publication supports retract or in_place pause mode")
+        if options.get("sglang_radix_cache_backend") == validation.POLICY_CACHE_BACKEND and (
+            options.get("pause_generation_mode") != "in_place" or options.get("colocate")
+        ):
+            raise constraints.error(
+                'Policy cache backend currently requires non-colocated serving and miles.pause_generation_mode="in_place"'
+            )
         # This preflight checks top-level settings. Refresh/engine_drain reject
         # sglang_config below; barrier-mode server-group overrides are resolved
         # and cache-validated by Core at actor startup.
         if options.get("pause_generation_mode") == "in_place":
             if options.get("colocate"):
                 raise constraints.error("Core in_place publication requires non-colocated serving")
-            if not options.get("sglang_disable_radix_cache"):
-                raise constraints.error("Core in_place publication requires sglang_disable_radix_cache=true")
+            if (
+                not options.get("sglang_disable_radix_cache")
+                and options.get("sglang_radix_cache_backend") != validation.POLICY_CACHE_BACKEND
+            ):
+                raise constraints.error(
+                    "Core in_place publication requires inference.radix_cache=false or "
+                    f"sglang_radix_cache_backend={validation.POLICY_CACHE_BACKEND}"
+                )
         if self.core.records_root is not None and not options.get("fully_async", False):
             # The completed buffer that records groups exists only in fully async runs.
             raise constraints.error(
                 "core.records_root (records.enabled) requires fully_async=true; synchronous runs record nothing"
             )
-        if (self.core.prompt_provider == "mixture") != (self.core.prompt_mixture is not None):
-            raise constraints.error("core.prompt_mixture is required only with prompt_provider=mixture")
-        if self.core.prompt_provider == "mixture" and not options.get("rollout_global_dataset", True):
+        if (self.core.prompt_provider in ("mixture", "pools")) != (self.core.prompt_mixture is not None):
+            raise constraints.error("core.prompt_mixture is required only with prompt_provider=mixture or pools")
+        if self.core.prompt_provider in ("mixture", "pools") and not options.get("rollout_global_dataset", True):
             raise constraints.error("Mixtures require rollout_global_dataset=true")
-        if self.core.prompt_provider == "mixture" and self.core.selection_table is not None:
+        if self.core.prompt_provider in ("mixture", "pools") and self.core.selection_table is not None:
             raise constraints.error(
                 "Mixtures cannot yet be combined with a frozen prompt-exclusion table; "
                 "remove [selection]. Exclusions must be applied within each source to preserve its allocation."
             )
+        if self.core.prompt_provider == "pools":
+            if not options.get("fully_async", False) or self.core.records_root is None:
+                raise constraints.error("Named pools require fully_async=true and inference records")
+            if self.core.prepared_batch_overlap:
+                raise constraints.error("Named pools currently require prepared_batch_overlap=false")
+            if options.get("async_unused_samples_handler", "drop") != "drop":
+                raise constraints.error("Named pools require async_unused_samples_handler=drop")
+            if options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 0) != options.get(
+                "global_batch_size"
+            ):
+                raise constraints.error("Named pools require exactly one optimizer update per collection")
+            if options.get("custom_convert_samples_to_train_data_path") or options.get("load_debug_rollout_data"):
+                raise constraints.error("Named pools require unmodified generated training batches")
+        if self.core.prompt_replay_enabled:
+            if not options.get("fully_async", False) or self.core.records_root is None:
+                raise constraints.error("Prompt replay requires fully_async=true and inference records")
+            if not options.get("rollout_global_dataset", True):
+                raise constraints.error("Prompt replay requires rollout_global_dataset=true")
+            if self.core.prompt_provider == "remind" or self.core.selection_table is not None:
+                raise constraints.error("Prompt replay supports shuffle/mixture without frozen exclusions or ReMind")
         if self.core.prompt_provider == "remind":
             if not options.get("fully_async", False) or self.core.records_root is None:
                 raise constraints.error("ReMind requires fully_async=true and inference records (core.records_root)")

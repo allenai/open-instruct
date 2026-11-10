@@ -19,7 +19,7 @@ from jsonschema.exceptions import SchemaError
 from transformers import AutoTokenizer
 
 from open_instruct import ifeval_constraints
-from open_instruct.miles.datasets import tool_conversations, toolrl
+from open_instruct.miles.datasets import long_context, tool_conversations, toolrl
 from open_instruct.miles.rewards import (
     complete_code,
     litmus,
@@ -31,12 +31,13 @@ from open_instruct.miles.rewards import (
 from open_instruct.miles.rewards import deterministic_verifiers as local
 
 FACTORIES = {
+    "long_context": "open_instruct.miles.rewards.long_context.LongContextVerifier",
     "toolrl": "open_instruct.miles.rewards.toolrl.ToolRLVerifier",
     "single_step_tool": "open_instruct.miles.rewards.nemo_tool_calls.SingleStepToolVerifier",
     "complete_code": "open_instruct.miles.rewards.complete_code.CompleteCodeVerifier",
     "reference_judge": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
     "deterministic": "open_instruct.miles.rewards.deterministic_verifiers.DeterministicVerifier",
-    "math": "open_instruct.ground_truth_utils.MathVerifier",
+    "math": "open_instruct.miles.rewards.math_verifier.MathVerifier",
     "structured": "open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier",
     "instruction": "open_instruct.miles.rewards.nvidia_constraints.InstructionVerifier",
     "ifeval": "open_instruct.miles.rewards.task_verifiers.ManifestIFVerifier",
@@ -171,6 +172,21 @@ def corrected_dolci_target(raw, ms, policy):
     return target
 
 
+def resolved_adapter(raw, kind, options: dict | None = None):
+    """Resolve one explicit route for both adaptation and adapter provenance."""
+    if kind != "routed_v1":
+        return kind, options
+    if options is None:
+        raise ValueError("routed_v1 requires route options")
+    value = raw
+    for key in options["field"].split("."):
+        value = value[key]
+    route = options["routes"].get(value)
+    if not route or route["adapter"] == "routed_v1":
+        raise ValueError("unmapped_or_recursive_route:" + str(value))
+    return route["adapter"], route.get("options")
+
+
 def adapt(raw, kind, options=None):
     options = options or {}
     validate_keyword_option(kind, options)
@@ -183,16 +199,13 @@ def adapt(raw, kind, options=None):
             and options["profile"] not in nemo_tool_calls.THRESHOLDS
         ):
             raise PlanError("Unknown native tool comparison profile")
+    if kind in long_context.ADAPTERS:
+        return long_context.adapt(raw, kind, messages)
     if kind == "toolrl_v1":
         return toolrl.adapt(raw, options)
     if kind == "routed_v1":
-        value = raw
-        for key in options["field"].split("."):
-            value = value[key]
-        route = options["routes"].get(value)
-        if not route or route["adapter"] == "routed_v1":
-            raise ValueError("unmapped_or_recursive_route:" + str(value))
-        return adapt(raw, route["adapter"], route.get("options"))
+        adapter, routed_options = resolved_adapter(raw, kind, options)
+        return adapt(raw, adapter, routed_options)
     if kind == "acecode_v1" and raw.get("context_messages"):
         # AceCode's context is part of the original task, not generated solutions.
         raw = copy.deepcopy(raw)
@@ -320,6 +333,11 @@ def adapt(raw, kind, options=None):
         }
         if target["kind"] not in {"mcqa", "mcqa_final_choice"}:
             raise ValueError("unknown_choice_contract")
+        # Rows can request their own answer format ("Selected Option -> X") and carry
+        # the matching one-capture regex; without it that format cannot be read.
+        template = raw.get("template_metadata")
+        if target["kind"] == "mcqa_final_choice" and isinstance(template, dict) and template.get("output_regex"):
+            target["pattern"] = template["output_regex"]
         local.validate_target(target)
         name, stratum = "deterministic", kind
     elif kind == "math_v1":
@@ -392,6 +410,7 @@ def prepare(plan_path, output, tokenizer):
                     counts["input_rows"] += 1
                     try:
                         ms, target, verifier, stratum = adapt(raw, spec["adapter"], spec.get("options"))
+                        effective_adapter, _ = resolved_adapter(raw, spec["adapter"], spec.get("options"))
                     except (ValueError, KeyError, TypeError, SchemaError) as error:
                         reason = f"{type(error).__name__}: {error}"
                         counts["omitted_rows"] += 1
@@ -447,6 +466,8 @@ def prepare(plan_path, output, tokenizer):
                             "verifiers": [{"name": verifier, "target": target}],
                         },
                     }
+                    if effective_adapter in long_context.ADAPTERS:
+                        row["metadata"]["adapter"] = effective_adapter
                     if spec["adapter"] == "dolci_if_v1":
                         original = dolci_if_target(raw)
                         changes = [

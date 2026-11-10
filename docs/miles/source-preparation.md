@@ -58,7 +58,7 @@ and are recorded as omissions rather than moved across conversation turns.
 | `format_v1` | Existing format verifier payload; formatting only |
 | `litmus_v02_v1` | Row-carried regex, answer type and matching policy; all scalar properties/methods are representable |
 | `reasoning_gym_v1` | Saved entries for 104 pinned task families, including state-based graders; no regeneration or difficulty reset |
-| `mcqa_v1` | Displayed options and expected answer, existing final-choice parser; no science-only filtering |
+| `mcqa_v1` | Displayed options and expected answer, final-choice parser with the row's own answer regex when present; no science-only filtering |
 | `math_v1` | Explicit symbolic-math source contract; proof requests are reported as requiring judged support |
 | `deterministic_v1` | Existing numeric, exact-text/JSON, countdown and knights contracts in `target` |
 | `toolrl_v1` | Canonical ToolRL messages, tools and reference calls; original partial-credit reward and format-only answer rows |
@@ -138,8 +138,7 @@ not assert independent benchmark cleanliness.
 The corrected v2 release recovers one additional string-union row, reducing
 conversion omissions to 413 and increasing the qualified training pool to
 **3,501** rows. The original 80-row holdout and all previously retained rows are
-unchanged. Full-pool qualification and 15 runtime controls passed; see the
-[first-pass handoff](first-pass-data.md) for the corrected release and image.
+unchanged. Full-pool qualification and 15 runtime controls passed.
 
 ### NeMo single-step tool routes
 
@@ -308,6 +307,11 @@ bundle together: `catalog.json`, `qualification.json`, and each source's
 JSONL contains rendered input text, verifier targets, and source metadata; the
 verifier registry selects trusted reward implementations and their configuration.
 
+Qualification itself (reviewed controls, whole-pool loader validation, quarantine
+review and GPU coverage) is owned by the
+[RL Data Workbench](https://github.com/allenai/rl-data-workbench), which calls this
+repository's adapters, loader and registered rewards from a pinned checkout.
+
 Qualification receipts bind each source to the SHA-256 hashes of its prompt data
 and reward configuration. Catalog resolution verifies both those bindings and the
 files themselves. Updating a catalog's file hashes cannot reuse an old receipt:
@@ -316,6 +320,11 @@ requalification. Moving an unchanged bundle preserves qualification because the
 bindings use content hashes rather than absolute paths. These checks apply to
 machine-readable qualification receipts; trusted catalogs with manual qualification
 annotations remain a separate, manually reviewed path.
+
+```bash
+python -m open_instruct.miles.datasets.source_catalog qualified-bundle/catalog.json \
+  --source my-source=1.0 --output data.toml
+```
 
 The catalog command emits source paths and mixture weights for the training
 config. It does not embed the receipt into that config. At run preparation, MILES
@@ -326,67 +335,10 @@ the run manifest establishes what data was used, while the qualification receipt
 records which controls passed for those source artifacts. Direct-path training
 configs do not automatically enforce catalog qualification.
 
-Provide reviewed controls keyed to actual prepared sample IDs. Each stratum needs
-at least one case set containing `gold` (expected 1), `wrong` and `near_miss`
-(expected 0 for binary graders; an explicit score below 1 for native partial-credit graders). A near miss should exercise the likely shortcut: a wrong number containing
-the gold digits, a calendar constraint violation, a malformed schema field, or a
-wrong MCQA option. The command additionally checks empty and truncated responses. Timeout,
-`judge_error` and `service_error` diagnostics fail qualification even when a
-negative control otherwise receives the expected zero.
-Do not manufacture a positive witness by assuming the model's response is right.
-
-```json
-{"source":"my-source","sample_id":"original-stable-id","cases":[{"kind":"gold","response":"2","expected":1},{"kind":"wrong","response":"3","expected":0},{"kind":"near_miss","response":"12","expected":0}]}
-```
-
-```bash
-python -m scripts.data.rl_readiness.qualify_bundle new-bundle/catalog.json \
-  --controls reviewed-controls.jsonl --tokenizer /path/to/checkpoint \
-  --max-prompt-length 8192 --output qualified-bundle
-python -m open_instruct.miles.datasets.source_catalog qualified-bundle/catalog.json \
-  --source my-source=1.0 --output data.toml
-```
-
-Qualification validates the complete pool through `run_data.prepare_data` and
-scores controls through `registered_reward`. It rejects conflicting targets for
-the same prompt. Different code suites, citation-marker sets and equivalent math labels may share
-a prompt only when every row has a reviewed common gold response that passes its
-original target through the runtime bridge. A shared witness establishes joint
-satisfiability, not identical rewards for every response; compatible duplicate
-code/citation targets can still contribute label noise. ReasoningGym export UUIDs are
-provenance only; all scoring fields remain part of duplicate-target comparison. Missing strata, failed controls, unresolved judge services, or
-loader failures leave the source unqualified. Passing control rows never replace
-the full source. Quarantine genuinely malformed source rows without repairing their
-prompts or targets. Pass `--quarantine reviewed-quarantine.jsonl`, with one record
-`{"source":"my-source","id":"original-stable-id","reason":"Invalid original schema"}`
-per reviewed omission. The identities must match **every** omitted row exactly;
-unsupported valid rows cannot silently disappear. The qualifier preserves the
-hashed dispositions and quarantine report, and records the retained population.
-This qualifies the explicitly retained variant, not the original malformed rows.
-The report includes source/controls
-hashes, loader manifest hash, context limit, judge registry fingerprint and all
-missing strata. It does not claim that a GPU optimizer update was exercised.
-
-For a lightweight first IF pass, explicitly select
-`--instruction-family-coverage` and give each control a zero-based
-`constraint_index`. The qualifier projects that real row's selected constraint
-for the control, and requires coverage of every checker family found in the
-complete population. Training retains the original complete constraint bundles.
-The receipt calls this **family coverage**, not a solved witness for every
-combination of constraints. The default remains per-stratum coverage; projected
-controls without the flag are rejected. The flag applies to the invocation, so
-qualify IF and non-IF source catalogs separately before assembling a mixed catalog.
-
-Large prepared files are streamed during qualification, training preparation,
-serialization and resume hashing. Code-test payloads remain complete without
-requiring several whole-file copies in memory. Identity and prompt-hash indexes
-still scale with the number of rows.
-
-Use the readiness Docker overlay on an application image built from this stack,
-so training receives the pinned optional verifier versions. Its build checks the
-qualification and source-preparation entry points. After CPU checks, use the
-existing local toy-model coverage workflow for a GPU mechanics exercise. Controls
-validate reward behavior; training continues to use the complete qualified pool.
+Large prepared files are streamed during training preparation, serialization and
+resume hashing. Code-test payloads remain complete without requiring several
+whole-file copies in memory. Identity and prompt-hash indexes still scale with the
+number of rows.
 
 ## Complete-test code sources
 
@@ -527,9 +479,8 @@ selected reward semantics.
 
 ## Coverage and remaining work
 
-The [first-pass data handoff](first-pass-data.md) records the released source
-variants, counts, qualification scope, artifact location and an example mixture.
-Use that snapshot for initial mixing experiments. Source support does not imply
+Released source variants, their counts, qualification scope and artifact
+locations are recorded in the RL Data Workbench. Source support does not imply
 that every route in a heterogeneous upstream blend has its required judge or
 execution environment.
 

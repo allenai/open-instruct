@@ -519,7 +519,7 @@ def if_prepared_data(tmp_path, target, *, name="ifeval", factory=None):
 def test_preparation_rejects_unsafe_if_training_targets(environment, tmp_path, target, reason):
     data = if_prepared_data(tmp_path, repr([json.dumps(target)]))
     before = Path(data["prompt_data"]).read_bytes()
-    with pytest.raises(InputError, match=f"train row 1:.*if-row.*{reason}.*filter_ifeval_constraints"):
+    with pytest.raises(InputError, match=f"train row 1:.*if-row.*{reason}.*dataset preparation"):
         prepare(environment, data)
     assert not environment[1].exists()
     assert Path(data["prompt_data"]).read_bytes() == before

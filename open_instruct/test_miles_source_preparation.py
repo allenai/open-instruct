@@ -211,6 +211,20 @@ def test_malformed_mcqa_options_do_not_stop_preparation(tmp_path, adapter, bad_o
     assert row["label"] == {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"]}
 
 
+def test_mcqa_adapter_carries_the_row_answer_pattern(tmp_path):
+    pattern = r"Selected Option\s*->\s*([A-Za-z0-9])\s*"
+    record = {
+        "prompt": "Choose one.\nA. one\nB. two\nEnd with: Selected Option -> X.",
+        "expected_answer": "B",
+        "options": [{"A": "one"}, {"B": "two"}],
+        "template_metadata": {"output_regex": pattern},
+    }
+    prepare_one(tmp_path, "mcqa_v1", [record])
+    row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
+    assert row["label"] == {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B"], "pattern": pattern}
+    assert sources.local.score("Selected Option -> B.", row["label"]) == 1
+
+
 def test_invalid_structured_schema_is_omitted_not_fatal(tmp_path):
     pytest.importorskip("xmltodict")
     pytest.importorskip("openapi_schema_validator")
@@ -674,3 +688,15 @@ def test_legacy_source_system_prompt_is_preserved():
         {"role": "system", "content": "detailed thinking off"},
         {"role": "user", "content": "Question"},
     ]
+
+
+def test_named_judge_preserves_reference_and_requires_explicit_route():
+    raw = {"prompt": "Prove the claim", "expected_answer": "Reference proof", "agent_ref": {"name": "math_with_judge"}}
+    with pytest.raises(ValueError, match="explicit_adapter"):
+        sources.adapt(raw, "nemo_v1")
+    route = {"field": "agent_ref.name", "routes": {"math_with_judge": {"adapter": "reference_judge_v1"}}}
+    messages, target, name, _ = sources.adapt(raw, "routed_v1", route)
+    assert target == "Reference proof" and name == "reference_judge"
+    assert messages == [{"role": "user", "content": "Prove the claim"}]
+    with pytest.raises(ValueError, match="unmapped"):
+        sources.adapt(raw, "routed_v1", {**route, "routes": {}})

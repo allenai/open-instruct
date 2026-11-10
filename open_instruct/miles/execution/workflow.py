@@ -414,6 +414,7 @@ def execute(spec):
         completed = result.get("completed_rollout_ids") if result else None
         complete = (
             completed is None
+            or bool(result.get("pools_exhausted"))
             or (bool(result.get("stopped_for_time")) and not result.get("time_stop_resumable"))
             or ((completed[-1] + 1 if completed else result["start_rollout_id"]) == config.miles.get("num_rollout"))
         )

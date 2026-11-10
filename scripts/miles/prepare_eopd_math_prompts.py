@@ -37,7 +37,7 @@ import datasets
 from transformers import AutoTokenizer
 
 INSTRUCTION = "Please reason step by step, and put your final answer within \\boxed{}."
-VERIFIERS = {"math": {"factory": "open_instruct.ground_truth_utils.MathVerifier"}}
+VERIFIERS = {"math": {"factory": "open_instruct.miles.rewards.math_verifier.MathVerifier"}}
 # name -> (repo, revision, config, split, question field, answer field). Answer fields may be
 # prefixed with ``boxed:`` (take the last \\boxed{} of a worked solution) or ``list:`` (a
 # Python-literal list of answers; joined with ", " when there are several).
