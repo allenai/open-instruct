@@ -137,7 +137,8 @@ def test_optional_qualification_costs_are_visible_in_plan():
     assert "periodic_scoring_check" not in codes
 
 
-def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path):
+@pytest.fixture
+def analyzer_run(tmp_path):
     metrics = tmp_path / "checkpoints"
     metrics.mkdir()
 
@@ -162,6 +163,7 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
                 rollout_id=i,
                 response_tokens=100,
                 mixed_responses=1,
+                collection_wait_seconds=1,
                 queue_metrics={"rollout/fully_async/completed_queue/consumer_wait_seconds": 0.25},
             )
             for i in range(4)
@@ -171,6 +173,11 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
         "training_contract_rank0.jsonl",
         [dict(event="optimizer", step=i + 1, optimizer_skipped=False) for i in range(4)],
     )
+    return write
+
+
+def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path, analyzer_run):
+    write = analyzer_run
     result = analyze_throughput.analyze(tmp_path, warmup=1)
     assert result["batch_collection_breakdown"]["completed_queue_get_seconds"] == 0.75
     assert result["batch_collection_breakdown"]["other_collection_seconds"] == 2.25
@@ -212,6 +219,71 @@ def test_analyzer_requires_complete_updates_and_excludes_lifecycle_time(tmp_path
     write("training_contract_rank0.jsonl", [])
     with pytest.raises(ValueError, match="optimizer"):
         analyze_throughput.analyze(tmp_path, warmup=1)
+
+
+def test_analyzer_distinguishes_prefetched_collection_work_from_driver_wait(tmp_path, analyzer_run):
+    analyzer_run(
+        "driver_timing.jsonl",
+        [
+            dict(stage=stage, rollout_id=i, seconds=seconds, passed=True)
+            for i in range(4)
+            for stage, seconds in (("generation_wait", 0.2), ("training", 1), ("publication", 1))
+        ],
+    )
+    analyzer_run(
+        "rollout_flow.jsonl",
+        [
+            dict(
+                rollout_id=i,
+                response_tokens=100,
+                mixed_responses=1,
+                collection_wait_seconds=25,
+                queue_metrics={"rollout/fully_async/completed_queue/consumer_wait_seconds": 24},
+            )
+            for i in range(4)
+        ],
+    )
+    result = analyze_throughput.analyze(tmp_path, warmup=1)
+    breakdown = result["batch_collection_breakdown"]
+    assert breakdown["collection_seconds"] == 75
+    assert breakdown["completed_queue_get_seconds"] == 72
+    assert breakdown["other_collection_seconds"] == 3
+    assert breakdown["completed_queue_get_collection_fraction"] == pytest.approx(0.96)
+    assert result["warm_cycle_seconds"] == pytest.approx(6.6)
+    assert result["useful_response_tokens_per_second"] == pytest.approx(300 / 6.6)
+    assert result["per_update"][0]["generation_wait_seconds"] == 0.2
+    assert result["per_update"][0]["other_collection_seconds"] == 1
+
+
+@pytest.mark.parametrize("queue_wait", [-1, float("inf"), float("nan"), 1.01])
+def test_analyzer_rejects_invalid_queue_waits(tmp_path, analyzer_run, queue_wait):
+    path = tmp_path / "checkpoints/rollout_flow.jsonl"
+    rows = analyze_throughput.rows(path)
+    rows[1]["queue_metrics"]["rollout/fully_async/completed_queue/consumer_wait_seconds"] = queue_wait
+    analyzer_run("rollout_flow.jsonl", rows)
+    with pytest.raises(ValueError, match="Completed-queue wait"):
+        analyze_throughput.analyze(tmp_path, warmup=1)
+
+
+@pytest.mark.parametrize("collection_time", [-1, float("inf"), float("nan")])
+def test_analyzer_rejects_invalid_collection_durations(tmp_path, analyzer_run, collection_time):
+    rows = analyze_throughput.rows(tmp_path / "checkpoints/rollout_flow.jsonl")
+    rows[1]["collection_wait_seconds"] = collection_time
+    analyzer_run("rollout_flow.jsonl", rows)
+    with pytest.raises(ValueError, match="full collection duration"):
+        analyze_throughput.analyze(tmp_path, warmup=1)
+
+
+def test_analyzer_does_not_infer_missing_collection_time_from_driver_wait(tmp_path, analyzer_run):
+    rows = analyze_throughput.rows(tmp_path / "checkpoints/rollout_flow.jsonl")
+    for row in rows:
+        del row["collection_wait_seconds"]
+    analyzer_run("rollout_flow.jsonl", rows)
+    result = analyze_throughput.analyze(tmp_path, warmup=1)
+    assert result["batch_collection_breakdown"] is None
+    assert result["per_update"][0]["collection_seconds"] is None
+    assert result["per_update"][0]["other_collection_seconds"] is None
+    assert result["warm_cycle_seconds"] == 9
 
 
 @pytest.mark.parametrize("value", [0, -1, True, float("inf"), float("nan")])

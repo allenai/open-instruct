@@ -95,6 +95,8 @@ FUNCTION_DICT = {
     _FORMAT + "sentence_hyphens": instructions.SentenceHyphenChecker,
     _KEYWORD + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
     _FORMAT + "square_brackets": instructions.SquareBracketChecker,
+    # Historical prompts said "Include keyword X", but this ID has always graded exactly once.
+    # Preserve that contract; corrected targets use frequency=1 with relation="at least".
     _KEYWORD + "word_once": instructions.KeywordFrequencyOnceChecker,
     _KEYWORD + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
     _KEYWORD + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
@@ -161,6 +163,8 @@ INSTRUCTION_DICT = {
     _FORMAT + "sentence_hyphens": instructions.SentenceHyphenChecker,
     _KEYWORD + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
     _FORMAT + "square_brackets": instructions.SquareBracketChecker,
+    # Historical prompts said "Include keyword X", but this ID has always graded exactly once.
+    # Preserve that contract; corrected targets use frequency=1 with relation="at least".
     _KEYWORD + "word_once": instructions.KeywordFrequencyOnceChecker,
     _KEYWORD + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
     _KEYWORD + "exclude_word_harder": instructions.ExcludeWordHarderChecker,

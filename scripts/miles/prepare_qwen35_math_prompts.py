@@ -31,7 +31,7 @@ from open_instruct.dataset_transformation import CHAT_TEMPLATES
 logger = logger_utils.setup_logger(__name__)
 
 TEMPLATE_NAME = "qwen_instruct_user_boxed_math"
-VERIFIERS = {"math": {"factory": "open_instruct.ground_truth_utils.MathVerifier"}}
+VERIFIERS = {"math": {"factory": "open_instruct.miles.rewards.math_verifier.MathVerifier"}}
 
 
 def _sha(raw):

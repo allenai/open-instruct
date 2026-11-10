@@ -206,6 +206,15 @@ is outside that publication wait, so it is not an absolute shutdown deadline.
 
 ## Checkpoints while inference continues
 
+On resume, `training.save_interval`, `evaluation.interval`, and individual
+`evaluation.tasks[].interval` may change to reduce future artifact production.
+The saved specification is authenticated first; training horizon, recipe,
+evaluation tasks and scoring settings must still match. Changing an interval
+does not delete existing checkpoints or backfill past evaluation milestones.
+Evaluation claim IDs include task intervals: if recovery revisits an update
+after an interval change, it may submit a new evaluation even when an older
+claim exists for that checkpoint. Existing claims and jobs remain unchanged.
+
 Native trainer checkpoints are saved between optimizer updates without draining
 inference, including mixed-policy refresh and rolling engine publication. The
 driver saves the dataset cursor and pending-prompt ledger, writes the trainer's
@@ -277,6 +286,15 @@ Run the completed-run CLI from a checkout:
 ```bash
 python -m scripts.miles.analyze_throughput /path/to/run --warmup 3
 ```
+
+With batch prefetch, collection work can overlap the preceding optimizer update.
+The analyzer keeps the driver's awaited `generation_wait_seconds` separate from
+the full `collection_seconds` recorded by the collector. Queue-get time is part
+of the full collection, so it can exceed the driver's wait without indicating an
+error. The queue breakdown uses collection-time fractions, not cycle fractions;
+missing full-collection timings remain unknown. `capacity_metrics` exposes full
+collection work as `pipeline/collection_work_seconds`, while its existing
+`pipeline/collection_seconds` measures the awaited driver stage.
 
 The two library helpers can be used together without a GPU runtime:
 

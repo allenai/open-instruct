@@ -12,4 +12,4 @@ async def score(sample, registry, args=None):
     # Shared verifier scoring follows the demo baseline, including zero reward
     # for length-truncated responses; OPD training uses its separate teacher loss.
     scoring.olmo_core = CoreConfig(reward_config=registry, reward_final_answer_only=False)
-    return await rewards.registered_reward(scoring, sample)
+    return await rewards.registered_reward(scoring, sample, failure_policy="zero")

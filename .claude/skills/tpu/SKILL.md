@@ -10,23 +10,28 @@ The runbook is `docs/algorithms/tpu_sft_guide.md`; read it before acting. Script
 
 Rules an agent follows:
 
-- **Queue `post-training` only.** Hero owns the quota and preempts us. Never submit to `hero` or `dev`, and never hold
-  a slice in a way that delays hero.
+- **Queue `post-training` only.** It has nominal quota for the `8x8x8` and two `4x4x8`s, and Kueue never preempts a
+  job running within its own queue's nominal quota; hero and dev reclaim only what we borrow (guide: What the cluster
+  is). Never submit to `hero` or `dev`, and never hold a slice in a way that delays hero.
 - **Delete nothing on GCS** (`gs://ai2-olmo-dev`): checkpoints, data and exports belong to the run's owner. Deleting
   your own failed JobSet object is fine; save its pod logs first.
 - **Read loss from `LOSS-PARTS` lines only.** Per-pod `completed step … loss:` lines differ across pods. Compare `ce=`,
   never Tunix's `loss`.
 - **Resume only on the restore-fix image** (`maxtext-posttrain:51f8cc4b-p907d86f3-rfb46e215e`), never from step 0.
-- **Use a `4x4x8`** (guide: What the cluster is). Since 2026-10-21 the cluster is seven `4x4x8`s and three `8x8x16`s;
-  the `8x8x8` is gone. The `8x8x16`s are hero's, borrowed only. Check the live layout before planning (command in the
-  guide); it changes when the cluster is resliced.
+- **Use a `4x4x8` for the tiny SFT recipe (H045)** (guide: What the cluster is). Since 2026-11-03 the cluster is three
+  `4x4x8`s, one `8x8x8` and hero's `8x8x48`. Check the live layout before planning (command in the guide); it changes
+  when the cluster is resliced.
 - **For `ici_context_parallelism` > 1, set `context_parallel_load_balance=False`** and require step-1 `LOSS-PARTS` CE
   to match an HF forward of the same batch within 1e-3 before training. With load balancing on, dense Olmo 3 7B's CE
   was off by +0.39 (cp4) and +1.98 (cp8); with it off, cp4 matched (guide: Traps).
 - **Stop a run by deactivating its Kueue workload** (`spec.active=false`, command in the guide). Suspending the JobSet
   does nothing while it is admitted.
-- **Pick the mesh from the guide's measured table** (Changing the recipe). None of them has been tuned. A new slice or
-  mesh needs an xprof of one TPU step first (in-loop all-gathers cost 140x once), and its own same-slice control.
+- **Pick the mesh from the guide's measured table** (Changing the recipe). On the `8x8x8`, a short sweep of the
+  parallelism split, batch, vocab tiling and XLA collective flags found only data 8 x fsdp 8 faster for tiny (+8%), and
+  small fits only its one config. Don't set `--xla_tpu_enable_async_ragged_all_to_all`: it corrupts an MoE router
+  gate's gradient (~1e33) while the forward loss stays normal, every few steps on the `8x8x8` (guide: Changing the recipe). Run any
+  new slice well past step 20 before trusting it. A new slice or mesh needs an xprof of one TPU step first (in-loop
+  all-gathers cost 140x once), and its own same-slice control.
 - **Stream `REQUIRED_RBF` from JAX process 0 from step 1** (`kubectl logs -f` on that pod) when a rule needs every step.
   Polling `kubectl logs` loses steps at kubelet's log rotation, and the agent account cannot read Cloud Logging.
 - **Mount only the folders a job reads, never one that holds checkpoints.** gcsfuse's metadata prefetch lists

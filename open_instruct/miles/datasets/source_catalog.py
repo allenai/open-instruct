@@ -26,13 +26,31 @@ def resolve(catalog_path, weights):
         entry = catalog["sources"].get(name)
         if not entry or entry.get("status") != "qualified":
             raise InputError(f"Source {name!r} is not qualified in this catalog")
+        if isinstance(receipt := entry.get("qualification"), dict):
+            receipt_path = (path.parent / receipt["path"]).resolve()
+            if (
+                not receipt_path.is_relative_to(path.parent)
+                or hashlib.sha256(receipt_path.read_bytes()).hexdigest() != receipt["sha256"]
+            ):
+                raise InputError(f"Source {name}: qualification receipt hash/path mismatch")
+            report = json.loads(receipt_path.read_text())["sources"][name]
+            if report["status"] != "qualified":
+                raise InputError(f"Source {name}: qualification receipt does not qualify this source")
+            artifacts = report.get("artifact_sha256")
+            if not isinstance(artifacts, dict):
+                raise InputError(f"Source {name}: qualification receipt lacks artifact hashes; requalify the bundle")
+            for key in ("prompt_data", "reward_config"):
+                if artifacts.get(key) != entry[key]["sha256"]:
+                    raise InputError(f"Source {name}: qualification receipt {key} hash mismatch; requalify the bundle")
         source = {"name": name, "fraction": fraction}
         for key in ("prompt_data", "reward_config"):
             descriptor = entry[key]
             filename = (path.parent / descriptor["path"]).resolve()
             if not filename.is_relative_to(path.parent):
                 raise InputError(f"Source {name}: bundle path must stay within the catalog directory")
-            if hashlib.sha256(filename.read_bytes()).hexdigest() != descriptor["sha256"]:
+            with filename.open("rb") as stream:
+                actual = hashlib.file_digest(stream, "sha256").hexdigest()
+            if actual != descriptor["sha256"]:
                 raise InputError(f"Source {name}: {key} hash mismatch")
             source[key] = str(filename)
         sources.append(source)

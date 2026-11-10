@@ -127,6 +127,10 @@ def editable_toml(name):
 
 def incompatibility(name, cluster, model, options):
     """Guard a preset's known model/hardware/topology contract; never select settings."""
+    if options.get("sglang_radix_cache_backend") == validation.POLICY_CACHE_BACKEND:
+        return (
+            'Policy-versioned caching is experimental; use inference.profile="generic" with explicit capacity settings'
+        )
     gpu = PROFILES[name]
     cluster_gpu = gpu_hardware.CLUSTERS.get(cluster, {}).get("gpu")
     if cluster_gpu not in (None, gpu):

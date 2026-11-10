@@ -228,13 +228,38 @@ def runtime_values(values):
 # boundaries and branches); the pool must leave room for retained prefixes.
 KDA_RADIX_STATE_SLOTS_PER_RUNNING_REQUEST = 5
 
+# Owned backend registered by the companion olmo-sglang plugin.
+POLICY_CACHE_BACKEND = "olmo_policy_versioned_v1"
+
 
 def inference_capacity(values):
     """Port of the Megatron implementation's radix-cache and router capacity rules for the resolved options.
 
-    Only explicit values are checked; the pinned runtime supplies its own defaults
-    for anything absent.
+    The policy cache requires explicit recurrent capacities. Other backends may
+    leave values absent and use the pinned runtime's defaults.
     """
+    if values.get("sglang_radix_cache_backend") == POLICY_CACHE_BACKEND:
+        if values.get("sglang_disable_radix_cache", False):
+            raise InputError("Policy cache backend requires inference.radix_cache=true")
+        required = ("sglang_max_running_requests", "sglang_max_mamba_cache_size", "sglang_mamba_radix_cache_strategy")
+        missing = [key for key in required if values.get(key) is None]
+        if missing:
+            raise InputError(f"Policy cache backend requires explicit capacity settings: {', '.join(missing)}")
+        if any(
+            values.get(key, 1) != 1
+            for key in (
+                "rollout_num_gpus_per_engine",
+                "sglang_tp_size",
+                "sglang_pp_size",
+                "sglang_dp_size",
+                "sglang_ep_size",
+            )
+        ):
+            raise InputError("Policy cache backend currently requires single-GPU TP1/PP1/DP1/EP1 inference engines")
+        if values.get("sglang_speculative_algorithm"):
+            raise InputError("Policy cache backend does not support speculative decoding")
+        # The plugin checks resolved engine/model state at startup as well:
+        # sessions, sliding-window attention, adapters and host/external offload.
     running = values.get("sglang_max_running_requests")
     slots = values.get("sglang_max_mamba_cache_size")
     if values.get("sglang_disable_radix_cache", False):

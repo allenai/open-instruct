@@ -13,7 +13,7 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 | `image-delretry/` | Layer on any published image: Orbax's delete of an old checkpoint step retries 5 times with backoff. If only the HNS folder cleanup still fails once every object is gone, it logs `ORBAX-DELETE-LEAKED-FOLDERS` and continues, so a transient GCS error costs storage, not the run; objects still left raise as before. The parallel deleter (`num_threads`, local paths) and the rename/todelete options bypass it. `build.sh <base tag>` builds `<base tag>-dlr<hash>`; the build runs the patch's check against the image's own Orbax. |
 | `k8s/olmo3-sft/` | Kueue JobSet, launcher `train_sft.sh` and settings. Historical smoke base on a `2x2x4` slice (16 chips), which is no longer available; use the `4x4x8` overlay. |
 | `k8s/instruct-sft-4x4x8/` | Overlay: the Olmo 3 7B Instruct SFT recipe on one reserved `4x4x8` slice (128 chips) at 32,768 tokens. |
-| `k8s/olmo35-sft-4x4x8/` | Overlay: the Olmo 3.5 hero-small SFT recipe (16 rows of 65,536 tokens, 11,768 steps) on one `4x4x8` slice. Start here: it is the cheapest per chip-hour. |
+| `k8s/olmo35-sft-4x4x8/` | Overlay: the Olmo 3.5 tiny SFT recipe (16 rows of 65,536 tokens, 11,768 steps) on one `4x4x8` slice. Start here: it is the cheapest per chip-hour. |
 | `k8s/olmo35-sft-8x8x8/` | Overlay: the same budget at 64 rows and 2,942 steps on one `8x8x8` (512 chips), for when no `4x4x8` is free. ~1.09x the chip-hours, ~3.6x sooner (projected); its data order differs, so compare it only with a same-slice control. |
 | `k8s/watch_jobset.sh` | Waits for a JobSet and saves every pod's log. |
 | `data/` | `build_full_dolci.py` writes Dolci-Instruct-SFT as globally shuffled parquet shards. `count_tokens.py` sizes a run. |

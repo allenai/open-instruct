@@ -21,7 +21,7 @@ from open_instruct.miles.configuration import (
     validation,
 )
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
-from open_instruct.miles.datasets import mixture, run_data
+from open_instruct.miles.datasets import mixture, pools, run_data
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.infrastructure import gpu_hardware
@@ -327,7 +327,8 @@ class RunSpec:
             data["sources"] = [
                 {
                     "name": source["name"],
-                    "fraction": source["fraction"],
+                    **({"pool": source["pool"]} if "pool" in source else {}),
+                    **({"fraction": source["fraction"]} if "fraction" in source else {}),
                     **{
                         key: value
                         for key, value in RunSpec._data(mixture.source_data(source, data), base).items()
@@ -689,7 +690,7 @@ class RunSpec:
             "input_key": "input",
             "label_key": "label",
             "metadata_key": "metadata",
-            "custom_rm_path": "open_instruct.miles.rewards.rewards.registered_reward",
+            "custom_rm_path": "open_instruct.miles.rewards.rewards.rollout_reward",
             "custom_rollout_log_function_path": "open_instruct.miles.rollout.rollout_metrics.log_rollout_data",
             "rollout_global_dataset": True,
             "rollout_shuffle": self.data["shuffle"],
@@ -759,7 +760,9 @@ class RunSpec:
                 raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
             miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
             miles.setdefault("async_data_buffer_capacity_factor", 1.0)
-            miles.setdefault("async_unused_samples_handler", "retry")
+            # Finite pools retire stale draws; retry would resubmit a selection
+            # whose exposure reservation was already released.
+            miles.setdefault("async_unused_samples_handler", "drop" if pools.resolve(self.data) else "retry")
             # MILES upstream also defaults its fully-async producer to sample backfill:
             # a finished sibling frees its slot instead of idling until its slowest
             # sibling and rewards finish. Training still consumes whole groups.
@@ -777,7 +780,7 @@ class RunSpec:
             # Nothing to resume from, so a wall-clock stop is final; launch_warnings says so.
             core["max_run_final"] = True
         if "sources" in self.data:
-            put("core.prompt_provider", "mixture", "data.sources")
+            put("core.prompt_provider", "pools" if pools.resolve(self.data) else "mixture", "data.sources")
             put(
                 "core.prompt_mixture",
                 prepared.get("prompt_mixture", str(root / "prepared" / "data" / "mixture.json")),
@@ -874,12 +877,6 @@ class RunSpec:
         )
         result = RunConfig(CoreConfig(**core), miles, inference_profile=profile)
         result.validate()
-        if result.core.reward_final_answer_only and self.judges["judging"]["bindings"]:
-            raise InputError(
-                "core.reward_final_answer_only is incompatible with judging.bindings "
-                "(managed or external named judges); set reward_final_answer_only=false "
-                "or use text verifiers without named judge bindings."
-            )
         return result
 
     def launch_warnings(self, miles, core=None) -> list[str]:

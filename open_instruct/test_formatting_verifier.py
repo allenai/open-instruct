@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 import regex
 
-from open_instruct.miles.rewards import candidate_verifiers as cv
+from open_instruct.miles.rewards import deterministic_verifiers as cv
 from open_instruct.miles.rewards import rewards
 
 QUOTED = {
@@ -153,27 +153,20 @@ def test_failure_capture_io_error_does_not_hide_original_error(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("kind", ["regex", "inline_prose", "string_match"])
-@pytest.mark.parametrize("policy", ["zero", "raise"])
-def test_real_general_pattern_timeout_policy(kind, policy, monkeypatch):
-    monkeypatch.delenv("OI_MILES_FORMAT_TIMEOUT_POLICY", raising=False)
-    monkeypatch.setenv("OI_MILES_MATH_TIMEOUT_POLICY", policy)
+def test_real_general_pattern_timeout_scores_zero(kind):
     value = {"type": kind, "pattern_id": "nested_repetition"}
     if kind == "string_match":
         value.update(expected_markers=["a"], patterns=["^(a|aa)+$"])
     else:
         value["verify_regex"] = ["^(a|aa)+$"]
-    verifier = cv.CandidateVerifier()
+    verifier = cv.DeterministicVerifier()
     call = verifier.async_call([], "a" * 10000 + "!", {"kind": "format", "value": value})
-    if policy == "raise":
-        with pytest.raises(cv.FormattingVerifierTimeout, match="nested_repetition"):
-            asyncio.run(call)
-    else:
-        result = asyncio.run(call)
-        assert result.score == 0.0
-        assert result.diagnostics["status"] == "timeout"
-        assert result.diagnostics["failure_policy"] == "zero"
-        assert "regex timed out" in result.diagnostics["error"]
-        assert result.diagnostics["elapsed_seconds"] > 0
+    result = asyncio.run(call)
+    assert result.score == 0.0
+    assert result.diagnostics["status"] == "timeout"
+    assert result.diagnostics["failure_policy"] == "zero"
+    assert "regex timed out" in result.diagnostics["error"]
+    assert result.diagnostics["elapsed_seconds"] > 0
 
 
 def test_timeout_zero_preserves_input_and_diagnostics_in_reward_bridge(tmp_path, monkeypatch):
@@ -182,9 +175,7 @@ def test_timeout_zero_preserves_input_and_diagnostics_in_reward_bridge(tmp_path,
 
     monkeypatch.setattr(cv.regex, "search", timeout)
     monkeypatch.setattr(rewards, "_FAILURE_CAPTURED", set())
-    monkeypatch.setattr(rewards, "_registry", lambda path: {"format": cv.CandidateVerifier()})
-    monkeypatch.setenv("OI_MILES_MATH_TIMEOUT_POLICY", "raise")
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "zero")  # Explicit format policy takes precedence.
+    monkeypatch.setattr(rewards, "_registry", lambda path: {"format": cv.DeterministicVerifier()})
     target = {"kind": "format", "value": {"type": "regex", "verify_regex": ["x"]}}
     args = SimpleNamespace(
         save=str(tmp_path),
@@ -205,25 +196,19 @@ def test_timeout_zero_preserves_input_and_diagnostics_in_reward_bridge(tmp_path,
     assert "regex timed out" in record["error"]
 
 
-def test_timeout_policy_rejects_invalid_policy_and_preserves_bad_targets(monkeypatch):
-    verifier = cv.CandidateVerifier()
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "invalid")
-    with pytest.raises(ValueError, match="must be zero or raise"):
-        asyncio.run(verifier.async_call([], "", QUOTED))
-    monkeypatch.setenv("OI_MILES_FORMAT_TIMEOUT_POLICY", "zero")
+def test_invalid_formatting_targets_remain_fatal():
+    verifier = cv.DeterministicVerifier()
     with pytest.raises(ValueError, match="Invalid formatting patterns"):
         asyncio.run(verifier.async_call([], "", {"kind": "format", "value": {"type": "regex", "verify_regex": []}}))
 
 
-def test_default_timeout_policy_is_zero(monkeypatch):
+def test_timeout_returns_diagnosed_zero(monkeypatch):
     def timeout(*args, **kwargs):
         raise TimeoutError("regex timed out")
 
-    monkeypatch.delenv("OI_MILES_FORMAT_TIMEOUT_POLICY", raising=False)
-    monkeypatch.delenv("OI_MILES_MATH_TIMEOUT_POLICY", raising=False)
     monkeypatch.setattr(cv.regex, "search", timeout)
     target = {"kind": "format", "value": {"type": "regex", "verify_regex": ["x"]}}
-    result = asyncio.run(cv.CandidateVerifier().async_call([], "x", target))
+    result = asyncio.run(cv.DeterministicVerifier().async_call([], "x", target))
     assert result.score == 0.0 and result.diagnostics["status"] == "timeout"
 
 

@@ -4,7 +4,9 @@ import gzip
 import importlib
 import importlib.util
 import json
+import math
 import os
+import re
 import shlex
 import sys
 import tempfile
@@ -12,10 +14,17 @@ import types
 import unittest
 from unittest import mock
 
+import numpy as np
+import torch
 from olmo_core import data as oc_data
+from olmo_core import optim
+from olmo_core.nn.ddp import model as ddp_model
+from olmo_core.nn.transformer import config as oc_transformer_config
+from olmo_core.train.train_module.transformer import config as train_module_config
+from olmo_core.train.train_module.transformer import ddp_train_module
 from parameterized import parameterized
 
-from open_instruct import olmo_core_finetune, olmo_core_utils, utils
+from open_instruct import dataset_transformation, olmo_core_finetune, olmo_core_utils, utils
 
 
 def _touch(path: str) -> None:
@@ -74,7 +83,7 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
 
 
 class DocumentBoundariesFromMetadataTest(unittest.TestCase):
-    def test_default_cache_dir_is_unchanged(self) -> None:
+    def test_legacy_layout_cache_dir_is_unchanged(self) -> None:
         # The Dolci-Think cache that H038 and H045 trained on.
         self.assertEqual(
             olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, False),
@@ -87,7 +96,7 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
             "/cache/numpy_sft/1edd51f3e3-6068a350-rowaligned",
         )
 
-    def test_default_adds_no_dataset_config_arguments(self) -> None:
+    def test_eos_scan_adds_no_dataset_config_arguments(self) -> None:
         self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False, False), {})
         # The EOS arm of a row-aligned cache reads it exactly as today.
         self.assertEqual(olmo_core_finetune._document_boundary_kwargs(False, True), {})
@@ -110,7 +119,42 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
         ):
             olmo_core_finetune._document_boundary_kwargs(True, True)
 
-    def test_default_dataset_config_matches_previous_arguments(self) -> None:
+    def test_defaults_read_boundaries_from_metadata(self) -> None:
+        sft = utils.ArgumentParserPlus((olmo_core_finetune.SFTConfig,)).parse_args_into_dataclasses([])[0]
+        self.assertTrue(sft.row_aligned_parts)
+        self.assertTrue(sft.document_boundaries_from_metadata)
+        self.assertEqual(
+            olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, sft.row_aligned_parts),
+            "/cache/numpy_sft/1edd51f3e3-6068a350-rowaligned",
+        )
+        self.assertEqual(
+            olmo_core_finetune._document_boundary_kwargs(sft.document_boundaries_from_metadata, sft.row_aligned_parts),
+            {"use_array_if_local": False},
+        )
+
+    def test_opt_out_reproduces_previous_behaviour(self) -> None:
+        """--no_row_aligned_parts --no_document_boundaries_from_metadata reads the pre-flip cache
+        directory with no extra dataset arguments, so its config and packing caches are unchanged."""
+        parser = utils.ArgumentParserPlus((olmo_core_finetune.SFTConfig,))
+        sft = parser.parse_args_into_dataclasses(["--no_row_aligned_parts", "--no_document_boundaries_from_metadata"])[
+            0
+        ]
+        self.assertEqual(
+            olmo_core_finetune._numpy_cache_dir("/cache", "1edd51f3e3", 33333, 65536, sft.row_aligned_parts),
+            "/cache/numpy_sft/1edd51f3e3-6068a350",
+        )
+        self.assertEqual(
+            olmo_core_finetune._document_boundary_kwargs(sft.document_boundaries_from_metadata, sft.row_aligned_parts),
+            {},
+        )
+
+    def test_opting_out_of_row_alignment_alone_fails(self) -> None:
+        parser = utils.ArgumentParserPlus((olmo_core_finetune.SFTConfig,))
+        sft = parser.parse_args_into_dataclasses(["--no_row_aligned_parts"])[0]
+        with self.assertRaisesRegex(ValueError, "--no_document_boundaries_from_metadata"):
+            olmo_core_finetune._document_boundary_kwargs(sft.document_boundaries_from_metadata, sft.row_aligned_parts)
+
+    def test_eos_scan_dataset_config_matches_previous_arguments(self) -> None:
         tokenizer = oc_data.TokenizerConfig(vocab_size=128, eos_token_id=2, pad_token_id=1)
         config = olmo_core_finetune._numpy_dataset_config(
             "/data", tokenizer, work_dir="/work", sequence_length=64, document_boundary_kwargs={}
@@ -126,6 +170,341 @@ class DocumentBoundariesFromMetadataTest(unittest.TestCase):
             sequence_length=64,
         )
         self.assertEqual(config, expected)
+
+
+class MissingCacheCommandTest(unittest.TestCase):
+    """The command printed when the numpy cache is missing must tokenize the cache this job looks for."""
+
+    def _run_main(self, argv: list[str]) -> None:
+        parser = utils.ArgumentParserPlus(
+            (
+                olmo_core_utils.ExperimentConfig,
+                olmo_core_utils.ModelConfig,
+                olmo_core_utils.TrainingConfig,
+                olmo_core_utils.DatasetConfig,
+                olmo_core_utils.LoggingConfig,
+                olmo_core_utils.CheckpointConfig,
+                olmo_core_finetune.SFTConfig,
+                dataset_transformation.TokenizerConfig,
+            )
+        )
+        tracking, model, training, dataset, logging_cfg, checkpoint, sft, tc = parser.parse_args_into_dataclasses(argv)
+        args = olmo_core_finetune.SFTArguments(
+            tracking=tracking,
+            model=model,
+            training=training,
+            dataset=dataset,
+            logging=logging_cfg,
+            checkpoint=checkpoint,
+            sft=sft,
+        )
+        olmo_core_finetune.main(args, tc)
+
+    @parameterized.expand(
+        [
+            ("defaults", [], True),
+            ("eos_scan", ["--no_document_boundaries_from_metadata"], True),
+            ("legacy_layout", ["--no_row_aligned_parts", "--no_document_boundaries_from_metadata"], False),
+        ]
+    )
+    def test_recovery_command_reaches_tokenization(self, _name: str, flags: list[str], row_aligned: bool) -> None:
+        with (
+            tempfile.TemporaryDirectory() as cache_dir,
+            mock.patch.object(olmo_core_finetune, "_olmo_core_supports_metadata_boundaries", return_value=True),
+            mock.patch.object(olmo_core_utils, "setup_tokenizer_and_cache"),
+            mock.patch.object(dataset_transformation, "load_dataset_configs"),
+            mock.patch.object(dataset_transformation, "compute_config_hash", return_value="1edd51f3e3"),
+            mock.patch.object(olmo_core_finetune, "_tokenize_to_numpy_dir") as tokenize,
+        ):
+            argv = [
+                "--model_name_or_path",
+                "Qwen/Qwen3-0.6B",
+                "--tokenizer_name_or_path",
+                "Qwen/Qwen3-0.6B",
+                "--max_seq_length",
+                "1024",
+                "--mixer_list",
+                "ai2-adapt-dev/personas-algebra",
+                "100",
+                "--seed",
+                "123",
+                "--local_cache_dir",
+                cache_dir,
+                *flags,
+            ]
+            with self.assertRaises(FileNotFoundError) as raised:
+                self._run_main(argv)
+            command = str(raised.exception).split("olmo_core_finetune.py", 1)[1].split("\n\nRe-launch", 1)[0]
+            self._run_main(shlex.split(command.replace("\\\n", " ")))
+
+            tokenize.assert_called_once()
+            self.assertEqual(
+                tokenize.call_args.args[0],
+                olmo_core_finetune._numpy_cache_dir(cache_dir, "1edd51f3e3", 123, 1024, row_aligned),
+            )
+            self.assertTrue(tokenize.call_args.args[1].dataset.cache_dataset_only)
+
+
+_EXTRA_EOS = 2
+_EXTRA_PAD = 1
+# Above 2**16, so OLMo-core reads uint32 tokens, as for the Olmo tokenizer.
+_EXTRA_VOCAB = 100_352
+
+
+def _write_parts(numpy_dir: str, docs_per_part: list[list[tuple[list[int], bool]]], token_dtype=np.uint32) -> None:
+    """Write converter-layout parts: each doc is (tokens, loss on every token)."""
+    os.makedirs(numpy_dir, exist_ok=True)
+    for index, docs in enumerate(docs_per_part):
+        tokens = np.array([t for doc, _ in docs for t in doc], dtype=token_dtype)
+        mask = np.array([loss for doc, loss in docs for _ in doc], dtype=np.bool_)
+        tokens.tofile(os.path.join(numpy_dir, f"token_ids_part_{index:04d}.npy"))
+        mask.tofile(os.path.join(numpy_dir, f"labels_mask_part_{index:04d}.npy"))
+        with gzip.open(os.path.join(numpy_dir, f"token_ids_part_{index:04d}.csv.gz"), "wt") as f:
+            start = 0
+            for doc, _ in docs:
+                f.write(f"{start},{start + len(doc)}\n")
+                start += len(doc)
+
+
+class ExtraNumpyDirsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        self.tokenizer = oc_data.TokenizerConfig(
+            vocab_size=_EXTRA_VOCAB, eos_token_id=_EXTRA_EOS, pad_token_id=_EXTRA_PAD
+        )
+        # Chat rows: prompt tokens (10-19) unmasked, so the cache mask is mixed; two parts.
+        self.cache = os.path.join(self.tmp, "cache")
+        _write_parts(self.cache, [[([10, 11, 12, _EXTRA_EOS], False)] * 3, [([13, 14, _EXTRA_EOS], False)] * 2])
+        # Raw documents (tokens >= 50,000), loss on every token; the second dir has two parts.
+        self.extra_a = os.path.join(self.tmp, "extra_a")
+        _write_parts(self.extra_a, [[([50_000, 50_001, 50_002, 50_003, 50_004, _EXTRA_EOS], True)] * 2])
+        self.extra_b = os.path.join(self.tmp, "extra_b")
+        _write_parts(
+            self.extra_b, [[([60_000, 60_001, _EXTRA_EOS], True)], [([60_002, 60_003, 60_004, _EXTRA_EOS], True)] * 3]
+        )
+
+    def _config(self, extra_numpy_dirs=(), sequence_length=8):
+        return olmo_core_finetune._numpy_dataset_config(
+            self.cache,
+            self.tokenizer,
+            work_dir=os.path.join(self.tmp, "work"),
+            sequence_length=sequence_length,
+            document_boundary_kwargs={},
+            extra_numpy_dirs=extra_numpy_dirs,
+        )
+
+    def _check(self, extra_numpy_dirs, sequence_length=8):
+        return olmo_core_finetune._check_extra_numpy_dirs(
+            extra_numpy_dirs, self.cache, self.tokenizer, sequence_length=sequence_length, require_metadata=False
+        )
+
+    def test_empty_flag_leaves_config_unchanged(self) -> None:
+        self.assertEqual(self._config([]), self._config())
+        self.assertEqual(
+            self._config(),
+            olmo_core_finetune._numpy_dataset_config(
+                self.cache,
+                self.tokenizer,
+                work_dir=os.path.join(self.tmp, "work"),
+                sequence_length=8,
+                document_boundary_kwargs={},
+            ),
+        )
+        self.assertEqual(self._check([]), {})
+
+    def test_paths_and_masks_are_aligned_cache_first(self) -> None:
+        config = self._config([self.extra_b, self.extra_a])
+        dirs = [self.cache, self.extra_b, self.extra_a]
+        self.assertEqual(config.paths, [os.path.join(d, "token_ids_part_*.npy") for d in dirs])
+        self.assertEqual(config.label_mask_paths, [os.path.join(d, "labels_mask_part_*.npy") for d in dirs])
+        # What OLMo-core actually pairs after expanding the globs.
+        paths, _, masks = config._resolve_paths_metadata(allow_mix=True, label_mask_paths=config.label_mask_paths)
+        expected = [
+            (d, f"{i:04d}") for d, n in ((self.cache, 2), (self.extra_b, 2), (self.extra_a, 1)) for i in range(n)
+        ]
+        self.assertEqual(len(paths), len(expected))
+        for path, mask, (d, index) in zip(paths, masks, expected):
+            self.assertEqual(path, os.path.join(d, f"token_ids_part_{index}.npy"))
+            self.assertEqual(mask, os.path.join(d, f"labels_mask_part_{index}.npy"))
+
+    def test_extras_pack_apart_from_chat_rows_with_full_loss(self) -> None:
+        self._check([self.extra_a, self.extra_b])
+        dataset = self._config([self.extra_a, self.extra_b]).build()
+        dataset.prepare()
+        seen_extra_tokens = 0
+        for i in range(len(dataset)):
+            item = dataset[i]
+            ids, mask = item["input_ids"], item["label_mask"]
+            real = ids != _EXTRA_PAD
+            is_extra = ids >= 50_000
+            # One source file per instance: never chat rows and raw documents together.
+            self.assertTrue(bool(is_extra[real & (ids != _EXTRA_EOS)].all()) or not bool(is_extra.any()))
+            if is_extra.any():
+                self.assertTrue(bool(mask[real].all()))
+                seen_extra_tokens += int(real.sum())
+            else:
+                self.assertFalse(bool(mask.any()))
+        self.assertEqual(seen_extra_tokens, 2 * 6 + 3 + 3 * 4)
+
+    def test_logs_counts_for_cache_and_extras(self) -> None:
+        with self.assertLogs(olmo_core_finetune.logger.name, level="INFO") as logs:
+            stats = self._check([self.extra_a, self.extra_b], sequence_length=5)
+        self.assertEqual(stats[self.extra_a].num_tokens, 12)
+        self.assertEqual(stats[self.extra_a].num_loss_tokens, 12)
+        self.assertEqual(stats[self.extra_a].num_docs_over_length, 2)
+        self.assertEqual(stats[self.extra_a].num_tokens_truncated, 2)
+        self.assertEqual(stats[self.extra_b].num_parts, 2)
+        self.assertEqual(stats[self.extra_b].num_tokens, 15)
+        joined = "\n".join(logs.output)
+        self.assertIn("Chat cache", joined)
+        self.assertIn("18 tokens, 0 loss tokens", joined)
+        self.assertIn("27 tokens, 27 loss tokens", joined)
+
+    def test_missing_dir(self) -> None:
+        with self.assertRaisesRegex(FileNotFoundError, "not a local directory"):
+            self._check([os.path.join(self.tmp, "nope")])
+
+    def test_no_token_parts(self) -> None:
+        os.makedirs(os.path.join(self.tmp, "empty"))
+        with self.assertRaisesRegex(FileNotFoundError, "no token_ids_part"):
+            self._check([os.path.join(self.tmp, "empty")])
+
+    def test_missing_mask_part(self) -> None:
+        os.remove(os.path.join(self.extra_b, "labels_mask_part_0001.npy"))
+        with self.assertRaisesRegex(ValueError, r"token parts without a label mask: \['0001'\]"):
+            self._check([self.extra_b])
+
+    def test_mask_length_mismatch(self) -> None:
+        np.ones(5, dtype=np.bool_).tofile(os.path.join(self.extra_a, "labels_mask_part_0000.npy"))
+        with self.assertRaisesRegex(ValueError, "one-byte elements"):
+            self._check([self.extra_a])
+
+    def test_wrong_token_dtype(self) -> None:
+        # uint16 tokens: the mask then has twice as many entries as OLMo-core would read tokens.
+        _write_parts(self.extra_a, [[([500, 501, _EXTRA_EOS], True)] * 2], token_dtype=np.uint16)
+        with self.assertRaisesRegex(ValueError, "uint32"):
+            self._check([self.extra_a])
+
+    def test_non_binary_mask(self) -> None:
+        np.full(12, 7, dtype=np.uint8).tofile(os.path.join(self.extra_a, "labels_mask_part_0000.npy"))
+        with self.assertRaisesRegex(ValueError, "not a bool/uint8 label mask"):
+            self._check([self.extra_a])
+
+    def test_part_must_end_with_eos(self) -> None:
+        _write_parts(self.extra_a, [[([50_000, 50_001], True)]])
+        with self.assertRaisesRegex(ValueError, "does not end with EOS"):
+            self._check([self.extra_a])
+
+    def test_rejects_repeated_dir_alias_and_cache(self) -> None:
+        link = os.path.join(self.tmp, "extra_a_link")
+        os.symlink(self.extra_a, link)
+        for dirs in (
+            [self.extra_a, self.extra_a],
+            [self.extra_a, link],
+            [self.extra_a, os.path.join(self.extra_a, ".")],
+            [self.cache],
+        ):
+            with self.subTest(dirs=dirs), self.assertRaisesRegex(ValueError, "repeats a directory or the chat cache"):
+                self._check(dirs)
+
+    def test_rejects_glob_match_that_is_not_an_indexed_part(self) -> None:
+        for name in ("token_ids_part_backup.npy", "labels_mask_part_backup.npy", "token_ids_part_0000.old.npy"):
+            stray = os.path.join(self.extra_a, name)
+            with open(stray, "wb") as f:
+                f.write(b"\0" * 4)
+            try:
+                with self.subTest(name=name), self.assertRaisesRegex(ValueError, re.escape(f"['{stray}']")):
+                    self._check([self.extra_a])
+            finally:
+                os.remove(stray)
+
+    def test_stats_follow_the_selected_boundary_source(self) -> None:
+        # One 12-token row with an EOS inside: two documents by EOS, one by metadata.
+        _write_parts(self.extra_a, [[([50_000, 50_001, 50_002, 50_003, 50_004, _EXTRA_EOS] * 2, True)]])
+        by_eos = self._check([self.extra_a])[self.extra_a]
+        self.assertEqual((by_eos.num_docs, by_eos.num_docs_over_length), (2, 0))
+        by_metadata = olmo_core_finetune._check_extra_numpy_dirs(
+            [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+        )[self.extra_a]
+        self.assertEqual(
+            (by_metadata.num_docs, by_metadata.num_docs_over_length, by_metadata.num_tokens_truncated), (1, 1, 4)
+        )
+
+    def test_trailing_eos_required_only_by_the_eos_scan(self) -> None:
+        # A last row without EOS (e.g. a tool-call turn ending in <|im_end|>): the EOS scan would drop it.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, 50_003], True)]])
+        with self.assertRaisesRegex(ValueError, "does not end with EOS"):
+            self._check([self.extra_a])
+        by_metadata = olmo_core_finetune._check_extra_numpy_dirs(
+            [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+        )[self.extra_a]
+        self.assertEqual((by_metadata.num_docs, by_metadata.num_tokens, by_metadata.num_loss_tokens), (2, 5, 5))
+
+    def test_metadata_must_cover_every_token(self) -> None:
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,3\n")
+        self._check([self.extra_a])
+        with self.assertRaisesRegex(ValueError, "do not tile its 5 tokens"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_metadata_rows_must_not_overlap(self) -> None:
+        # Lengths 3 + 2 add up to the file's 5 tokens, but the second row restarts at 0.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,3\n0,2\n")
+        with self.assertRaisesRegex(ValueError, "row 1 is 0-2"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_metadata_rows_must_not_leave_a_gap(self) -> None:
+        # Token 2 belongs to no row, as when stale metadata would drop tokens.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,2\n3,5\n")
+        with self.assertRaisesRegex(ValueError, "row 1 is 3-5"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_metadata_rows_must_not_run_backwards(self) -> None:
+        # Each row starts where the previous one ended, but row 1 ends before it starts.
+        _write_parts(self.extra_a, [[([50_000, 50_001, _EXTRA_EOS], True), ([50_002, _EXTRA_EOS], True)]])
+        with gzip.open(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,3\n3,2\n2,5\n")
+        with self.assertRaisesRegex(ValueError, "row 1 is 3-2"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_row_aligned_multi_part_dir_passes_under_metadata(self) -> None:
+        stats = {"configuration": {"row_aligned_parts": True}, "overall_statistics": {"total_instances": 4}}
+        _write(os.path.join(self.extra_b, "dataset_statistics.json"), json.dumps(stats))
+        checked = olmo_core_finetune._check_extra_numpy_dirs(
+            [self.extra_b], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+        )[self.extra_b]
+        self.assertEqual((checked.num_parts, checked.num_docs), (2, 4))
+
+    def test_multi_part_dir_needs_row_aligned_parts_under_metadata(self) -> None:
+        _write_parts(self.extra_a, [[([50_000, _EXTRA_EOS], True)], [([50_001, _EXTRA_EOS], True)]])
+        self._check([self.extra_a])
+        with self.assertRaisesRegex(ValueError, "--row_aligned_parts"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
+
+    def test_metadata_required_with_metadata_boundaries(self) -> None:
+        os.remove(os.path.join(self.extra_a, "token_ids_part_0000.csv.gz"))
+        self._check([self.extra_a])
+        with self.assertRaisesRegex(ValueError, "csv.gz"):
+            olmo_core_finetune._check_extra_numpy_dirs(
+                [self.extra_a], self.cache, self.tokenizer, sequence_length=8, require_metadata=True
+            )
 
 
 # EMO routing exists only in newer OLMo-core.
@@ -386,3 +765,326 @@ class WriteProvenanceReadmeTest(unittest.TestCase):
         olmo_core_utils.write_provenance_readme(
             output_dir="/nonexistent-dir/for-sure", run_name="r", model_name_or_path="b", tracking_url=None
         )
+
+
+# The smallest MoE v2 (OLMoDDPModelConfig) architecture: two full-attention blocks, 4 experts, top-2.
+_TINY_MOE_V2_MODEL = {
+    "_CLASS_": "olmo_core.nn.transformer.config.OLMoDDPModelConfig",
+    "name": "moe_fused_v2",
+    "d_model": 16,
+    "n_layers": 2,
+    "vocab_size": 128,
+    "lm_head": {"_CLASS_": "olmo_core.nn.lm_head.LMHeadConfig", "name": "default"},
+    "block": {
+        "_CLASS_": "olmo_core.nn.ddp.block.OLMoDDPTransformerBlockConfig",
+        "name": "moe_fused_v2",
+        "sequence_mixer": {"_CLASS_": "olmo_core.nn.attention.AttentionConfig", "n_heads": 2, "backend": "torch"},
+        "layer_norm": {"_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig", "name": "rms"},
+        "routed_experts": {
+            "_CLASS_": "olmo_core.nn.moe.v2.routed_experts.RoutedExpertsConfig",
+            "d_model": 16,
+            "hidden_size": 8,
+            "num_experts": 4,
+            "bias": False,
+            "dtype": "float32",
+        },
+        "routed_experts_router": {
+            "_CLASS_": "olmo_core.nn.moe.v2.router.MoERouterConfigV2",
+            "d_model": 16,
+            "num_experts": 4,
+            "top_k": 2,
+        },
+    },
+}
+
+# A checkpoint config's train_module section, as an OLMo 3.5 MoE pretraining run writes it (trimmed).
+_CHECKPOINT_TRAIN_MODULE = {
+    "_CLASS_": "olmo_core.train.train_module.transformer.config.OLMoDDPTrainModuleConfig",
+    "rank_microbatch_size": 65536,
+    "max_sequence_length": 65536,
+    "optim": {
+        "_CLASS_": "olmo_core.optim.moe_optimizer.OLMoDDPOptimizerConfig",
+        "group_overrides": [
+            {
+                "_CLASS_": "olmo_core.optim.config.OptimGroupOverride",
+                "params": ["embeddings.weight"],
+                "opts": {"weight_decay": 0.0},
+            }
+        ],
+        "compile": True,
+        "lr": 1.1e-4,
+        "betas": [0.9, 0.95],
+        "weight_decay": 0.1,
+        "max_grad_norm": 1.0,
+    },
+    "dp_config": {
+        "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerDataParallelConfig",
+        "name": "ddp",
+        "reduce_dtype": "float32",
+        "use_reduce_scatter": True,
+    },
+    "z_loss_multiplier": 1e-5,
+}
+
+
+def _write_checkpoint_config(tmp: str, payload: dict) -> str:
+    path = os.path.join(tmp, "config.json")
+    _write(path, json.dumps(payload))
+    return path
+
+
+class TransformerConfigFromJsonTest(unittest.TestCase):
+    def test_checkpoint_config_builds_an_olmo_ddp_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL, "train_module": {}})
+            config = olmo_core_utils.get_transformer_config(path, vocab_size=128, attn_backend="torch")
+        self.assertIsInstance(config, oc_transformer_config.OLMoDDPModelConfig)
+        self.assertEqual((config.n_layers, config.d_model), (2, 16))
+        self.assertIsInstance(config.build(init_device="meta"), ddp_model.OLMoDDPModel)
+
+    def test_bare_model_section(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, _TINY_MOE_V2_MODEL)
+            config = olmo_core_utils.get_transformer_config(path, vocab_size=128, attn_backend="torch")
+        self.assertIsInstance(config, oc_transformer_config.OLMoDDPModelConfig)
+
+    def test_keeps_a_larger_config_vocab_size(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL})
+            with self.assertLogs(olmo_core_utils.logger, level="WARNING") as logs:
+                config = olmo_core_utils.get_transformer_config(path, vocab_size=64, attn_backend="torch")
+        self.assertEqual(config.vocab_size, 128)
+        self.assertIn("keeping the config's value", "\n".join(logs.output))
+
+    def test_tokenizer_vocab_beyond_the_config_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL})
+            with self.assertRaisesRegex(ValueError, "below the tokenizer's padded vocab 256"):
+                olmo_core_utils.get_transformer_config(path, vocab_size=256, attn_backend="torch")
+
+    def test_missing_json_file_is_not_a_config(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not found"):
+            olmo_core_utils.get_transformer_config("/nonexistent/config.json", vocab_size=128, attn_backend="torch")
+
+
+class BuildDdpTrainModuleConfigTest(unittest.TestCase):
+    def _build(self, max_grad_norm: float | None, train_module: dict | None = None, **kwargs):
+        scheduler = optim.CosWithWarmup(warmup=3)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(
+                tmp, {"model": _TINY_MOE_V2_MODEL, "train_module": train_module or _CHECKPOINT_TRAIN_MODULE}
+            )
+            config = olmo_core_utils.build_ddp_train_module_config(
+                path,
+                rank_microbatch_size=4096,
+                max_sequence_length=4096,
+                learning_rate=5e-5,
+                weight_decay=0.0,
+                scheduler=scheduler,
+                max_grad_norm=max_grad_norm,
+                compile_model=False,
+                ac_config=None,
+                **kwargs,
+            )
+        return config, scheduler
+
+    def test_sft_settings_override_the_checkpoint(self) -> None:
+        config, scheduler = self._build(max_grad_norm=0.5)
+        self.assertIsInstance(config, train_module_config.OLMoDDPTrainModuleConfig)
+        self.assertEqual((config.rank_microbatch_size, config.max_sequence_length), (4096, 4096))
+        self.assertEqual((config.optim.lr, config.optim.weight_decay, config.optim.max_grad_norm), (5e-5, 0.0, 0.5))
+        self.assertIs(config.scheduler, scheduler)
+        self.assertFalse(config.compile_model)
+        # The train-module-level threshold would replace the optimizer's; it is left unset.
+        self.assertIsNone(config.max_grad_norm)
+
+    def test_optim_dp_config_and_z_loss_come_from_the_checkpoint(self) -> None:
+        config, _ = self._build(max_grad_norm=1.0)
+        self.assertEqual(tuple(config.optim.betas), (0.9, 0.95))
+        self.assertTrue(config.optim.compile)
+        self.assertEqual(config.optim.group_overrides[0].params, ["embeddings.weight"])
+        self.assertEqual((config.dp_config.name, config.dp_config.use_reduce_scatter), ("ddp", True))
+        self.assertEqual(config.z_loss_multiplier, 1e-5)
+
+    def test_config_without_train_module_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL})
+            with self.assertRaisesRegex(ValueError, "no train_module optim or dp_config"):
+                olmo_core_utils.build_ddp_train_module_config(
+                    path,
+                    rank_microbatch_size=4096,
+                    max_sequence_length=4096,
+                    learning_rate=5e-5,
+                    weight_decay=0.0,
+                    scheduler=None,
+                    max_grad_norm=1.0,
+                    compile_model=False,
+                    ac_config=None,
+                )
+
+    def test_no_expert_parallelism_by_default(self) -> None:
+        config, _ = self._build(max_grad_norm=1.0)
+        self.assertIsNone(config.ep_config)
+
+    def test_expert_parallel_degree(self) -> None:
+        config, _ = self._build(max_grad_norm=1.0, expert_parallel_degree=8)
+        self.assertEqual(config.ep_config.degree, 8)
+
+    def test_checkpoint_expert_parallel_degree_mismatch_is_logged(self) -> None:
+        train_module = {**_CHECKPOINT_TRAIN_MODULE, "ep_config": {"degree": 8}}
+        with self.assertLogs(olmo_core_utils.logger, level="WARNING") as logs:
+            config, _ = self._build(max_grad_norm=1.0, train_module=train_module)
+        self.assertIsNone(config.ep_config)
+        self.assertIn("expert parallelism degree 8", "\n".join(logs.output))
+        self.assertIn("pass --expert_parallel_degree", "\n".join(logs.output))
+
+    def test_no_clipping_becomes_an_infinite_threshold(self) -> None:
+        # The OLMoDDP optimizer always clips, at coefficient min(1, threshold / norm).
+        config, _ = self._build(max_grad_norm=None)
+        self.assertEqual(config.optim.max_grad_norm, math.inf)
+
+
+class CheckDdpModelArgsTest(unittest.TestCase):
+    @staticmethod
+    def _args(config_name: str | None):
+        return types.SimpleNamespace(model=types.SimpleNamespace(config_name=config_name))
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.config_path = _write_checkpoint_config(
+            tmp.name, {"model": _TINY_MOE_V2_MODEL, "train_module": _CHECKPOINT_TRAIN_MODULE}
+        )
+
+    def test_checkpoint_config_json_passes(self) -> None:
+        olmo_core_finetune._check_ddp_model_args(self._args(self.config_path), use_hf_ckpt=False, cp_config=None)
+
+    @parameterized.expand(
+        [
+            ("no_train_module", {}, "train_module optim or dp_config"),
+            ("no_dp_config", {"train_module": {"optim": {}}}, "train_module dp_config"),
+        ]
+    )
+    def test_config_without_train_module_sections_fails(self, _name: str, extra: dict, message: str) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_checkpoint_config(tmp, {"model": _TINY_MOE_V2_MODEL, **extra})
+            with self.assertRaisesRegex(ValueError, message):
+                olmo_core_finetune._check_ddp_model_args(self._args(path), use_hf_ckpt=False, cp_config=None)
+
+    @parameterized.expand([("missing", None), ("preset", "olmo3_7B")])
+    def test_config_name_must_be_a_json_file(self, _name: str, config_name: str | None) -> None:
+        with self.assertRaisesRegex(ValueError, "config.json"):
+            olmo_core_finetune._check_ddp_model_args(self._args(config_name), use_hf_ckpt=False, cp_config=None)
+
+    def test_hf_checkpoint_fails(self) -> None:
+        with self.assertRaisesRegex(ValueError, "HuggingFace"):
+            olmo_core_finetune._check_ddp_model_args(self._args(self.config_path), use_hf_ckpt=True, cp_config=None)
+
+    def test_context_parallelism_fails(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Context parallelism"):
+            olmo_core_finetune._check_ddp_model_args(
+                self._args(self.config_path), use_hf_ckpt=False, cp_config=mock.sentinel.cp_config
+            )
+
+
+class CheckExpertParallelDegreeTest(unittest.TestCase):
+    @parameterized.expand(
+        [("unset_dense", None, False), ("unset_ddp", None, True), ("ddp", 8, True), ("all_ranks", -1, True)]
+    )
+    def test_accepted(self, _name: str, degree: int | None, is_ddp_model: bool) -> None:
+        olmo_core_finetune._check_expert_parallel_degree(degree, is_ddp_model, world_size=16)
+
+    def test_dense_model_fails(self) -> None:
+        with self.assertRaisesRegex(ValueError, "OLMoDDPModel"):
+            olmo_core_finetune._check_expert_parallel_degree(8, is_ddp_model=False, world_size=16)
+
+    @parameterized.expand([("zero", 0), ("one", 1)])
+    def test_degree_without_parallelism_fails(self, _name: str, degree: int) -> None:
+        with self.assertRaisesRegex(ValueError, "above 1"):
+            olmo_core_finetune._check_expert_parallel_degree(degree, is_ddp_model=True, world_size=16)
+
+    def test_degree_must_divide_world_size(self) -> None:
+        with self.assertRaisesRegex(ValueError, "divide the world size"):
+            olmo_core_finetune._check_expert_parallel_degree(3, is_ddp_model=True, world_size=16)
+
+
+class SaveAsyncTest(unittest.TestCase):
+    @parameterized.expand(
+        [("fsdp_async", True, False, True), ("fsdp_sync", False, False, False), ("ddp_sync", False, True, False)]
+    )
+    def test_flag_is_kept(self, _name: str, save_async: bool, is_ddp_model: bool, expected: bool) -> None:
+        self.assertIs(olmo_core_finetune._save_async(save_async, is_ddp_model), expected)
+
+    def test_ddp_model_saves_synchronously(self) -> None:
+        # OLMo-core's Checkpointer.save_async raises for train modules with save_state_dict_direct.
+        with self.assertLogs(olmo_core_finetune.logger, level="WARNING"):
+            self.assertFalse(olmo_core_finetune._save_async(True, is_ddp_model=True))
+
+    def test_olmo_ddp_train_module_saves_its_own_state(self) -> None:
+        # The reason for the override: if this attribute goes away, async saves may work again.
+        self.assertTrue(hasattr(ddp_train_module.OLMoDDPTrainModule, "save_state_dict_direct"))
+
+
+class RequireTransformerEngineTest(unittest.TestCase):
+    def test_missing_transformer_engine_fails_at_startup(self) -> None:
+        with (
+            mock.patch.object(olmo_core_utils.oc_moe_utils, "moe_permute", None),
+            self.assertRaisesRegex(RuntimeError, "transformer-engine"),
+        ):
+            olmo_core_utils.require_transformer_engine()
+
+    def test_installed_transformer_engine_passes(self) -> None:
+        with mock.patch.object(olmo_core_utils.oc_moe_utils, "moe_permute", object()):
+            olmo_core_utils.require_transformer_engine()
+
+
+class _FakeMain:
+    """Stands in for a DTensor optimizer main param: a flat fp32 tensor."""
+
+    def __init__(self, param: torch.Tensor):
+        self.value = param.detach().float().reshape(-1).clone()
+
+    def full_tensor(self) -> torch.Tensor:
+        return self.value
+
+
+def _copy_into_fake_main(dst: _FakeMain, src: torch.Tensor) -> None:
+    dst.value.copy_(src)
+
+
+class SyncOptimizerMainParamsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.embeddings = torch.zeros(4, 2, dtype=torch.bfloat16)
+        self.other = torch.zeros(3, dtype=torch.bfloat16)
+        named_params = {"embeddings.weight": self.embeddings, "blocks.0.w": self.other}
+        self.optimizer = types.SimpleNamespace(
+            param_groups=[{"named_params": named_params}],
+            states={f"{name}.main": _FakeMain(param) for name, param in named_params.items()},
+        )
+
+    def test_optimizer_without_main_params_is_a_no_op(self) -> None:
+        olmo_core_utils.sync_optimizer_main_params(types.SimpleNamespace(param_groups=[]), [self.embeddings])
+        olmo_core_utils.sync_optimizer_main_params(None, [self.embeddings])
+
+    def test_syncs_only_the_seeded_matrices(self) -> None:
+        self.embeddings[1] = 1.5
+        self.other[0] = 2.0
+        with mock.patch.object(olmo_core_utils, "assign_full_tensor_to_dtensor", _copy_into_fake_main):
+            olmo_core_utils.sync_optimizer_main_params(self.optimizer, [self.embeddings])
+        self.assertTrue(torch.equal(self.optimizer.states["embeddings.weight.main"].value[2:4], torch.full((2,), 1.5)))
+        self.assertEqual(float(self.optimizer.states["blocks.0.w.main"].value[0]), 0.0)
+
+    def test_matrix_without_a_main_param_fails(self) -> None:
+        with (
+            mock.patch.object(olmo_core_utils, "assign_full_tensor_to_dtensor", _copy_into_fake_main),
+            self.assertRaisesRegex(RuntimeError, "1 of 2"),
+        ):
+            olmo_core_utils.sync_optimizer_main_params(self.optimizer, [self.embeddings, torch.zeros(1)])
+
+    def test_main_that_does_not_match_after_the_sync_fails(self) -> None:
+        self.embeddings[0] = 3.0
+        with (
+            mock.patch.object(olmo_core_utils, "assign_full_tensor_to_dtensor", lambda dst, src: None),
+            self.assertRaisesRegex(RuntimeError, "does not match"),
+        ):
+            olmo_core_utils.sync_optimizer_main_params(self.optimizer, [self.embeddings])
