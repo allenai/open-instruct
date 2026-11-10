@@ -45,10 +45,11 @@ def load_run(path, modes, name):
     return {"name": name, "source": str(path.resolve()), "modes": modes, "rows": rows, "analysis": analysis}
 
 
-def render(runs, output):
+def render(runs, output, trainer_path=None):
     output.mkdir(parents=True, exist_ok=True)
     plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.right": False})
-    fig, axes = plt.subplots(4, 2, figsize=(21, 19), layout="constrained")
+    trainer = json.loads(trainer_path.read_text()) if trainer_path else None
+    fig, axes = plt.subplots(5 if trainer else 4, 2, figsize=(21, 24 if trainer else 19), layout="constrained")
     export = []
     for col, run in enumerate(runs):
         modes, rows, analysis = run["modes"], run["rows"], run["analysis"]
@@ -122,7 +123,7 @@ def render(runs, output):
         ax.margins(y=0.15)
         ax.set_title("Model inference · labels estimate fraction of benchmark block wall time")
         ax.set_ylabel("Mean sampled model-forward CUDA span (ms/call)")
-        for ax in axes[:, col]:
+        for ax in axes[:4, col]:
             ax.set_xticks(xs, [label(m) for m in modes], rotation=35, ha="right")
             ax.grid(axis="y", alpha=0.15)
             ax.set_axisbelow(True)
@@ -137,6 +138,46 @@ def render(runs, output):
             for stage, values in analysis["sampled_gpu_stages"].get(mode, {}).items():
                 flat.update({f"{stage}_{k}": v for k, v in values.items()})
             export.append(flat)
+    if trainer:
+        labels = ["PPO/GRPO", "SCMC32 + TIS"]
+        xs = np.arange(2)
+        for offset, field, description in [
+            (-0.25, "step_seconds", "Whole update"),
+            (0, "forward_backward_seconds", "Forward + backward"),
+            (0.25, "optimizer_seconds", "Optimizer"),
+        ]:
+            axes[4, 0].bar(
+                xs + offset, [r["stats"][field]["mean"] for r in trainer["runs"].values()], width=0.25, label=description
+            )
+        pct = trainer["overhead"]["step_seconds"]["increase_pct"]
+        axes[4, 0].set_title(f"Jupiter actual training · full loss-path overhead {pct:+.2f}%")
+        axes[4, 0].set_ylabel("Seconds per optimizer update (warmup excluded)")
+        for offset, field, description in [
+            (-0.18, "peak_allocated_bytes", "Allocated"),
+            (0.18, "peak_reserved_bytes", "Reserved"),
+        ]:
+            axes[4, 1].bar(
+                xs + offset,
+                [r["stats"][field]["max"] / 2**30 for r in trainer["runs"].values()],
+                width=0.36,
+                label=description,
+            )
+        axes[4, 1].set_title("Jupiter trainer memory · 4 trainer GPUs, EP4")
+        axes[4, 1].set_ylabel("Peak memory across trainer ranks (GiB)")
+        for ax in axes[4]:
+            ax.set_xticks(xs, labels)
+            ax.legend()
+            ax.grid(axis="y", alpha=0.15)
+            ax.set_axisbelow(True)
+        for mode, run in trainer["runs"].items():
+            export.append(
+                {
+                    "run": "Jupiter trainer",
+                    "source": run["source"],
+                    "mode": mode,
+                    **{f"trainer_{key}_mean": value["mean"] for key, value in run["stats"].items()},
+                }
+            )
     fig.suptitle(
         "Olmo H066 · SCT and SCMC overhead, including packing alternatives\nSaturn A100 80GB · 1,024 prompts × 2 repeats · 256 generated tokens · concurrency 32",
         fontsize=16,
@@ -154,7 +195,23 @@ def render(runs, output):
         writer.writeheader()
         writer.writerows(export)
     (output / "sources.json").write_text(
-        json.dumps([{k: run[k] for k in ("name", "source", "modes")} for run in runs], indent=2) + "\n"
+        json.dumps(
+            [{k: run[k] for k in ("name", "source", "modes")} for run in runs]
+            + (
+                [
+                    {
+                        "name": "Jupiter trainer",
+                        "source": str(trainer_path.resolve()),
+                        "scope": trainer["scope"],
+                        "limitations": trainer["limitations"],
+                    }
+                ]
+                if trainer
+                else []
+            ),
+            indent=2,
+        )
+        + "\n"
     )
 
 
@@ -163,6 +220,7 @@ def main():
     parser.add_argument("--transport-results", required=True, type=Path)
     parser.add_argument("--sweep-results", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--trainer-report", type=Path)
     args = parser.parse_args()
     render(
         [
@@ -170,6 +228,7 @@ def main():
             load_run(args.sweep_results, SWEEP_MODES, "SCT / SCMC count sweep"),
         ],
         args.output_dir,
+        args.trainer_report,
     )
 
 
