@@ -259,12 +259,12 @@ to its own TIS correction, with ordinary `use_tis=false`. Explicitly selecting
 both correction paths is rejected. Set `SGLANG_RETURN_ORIGINAL_LOGPROB=0` on the
 rollout servers, as required by the native score-centering contract.
 
-For **SCMC training**, select the Monte Carlo candidate mode and MIS correction:
+For **SCMC training**, select the Monte Carlo candidate mode and native TIS correction:
 
 ```toml
 [miles]
 loss_type = "score_centering"
-score_centering_is = "mis"
+score_centering_is = "tis"
 rollout_top_logprobs_num = 32
 rollout_score_mode = "mc"
 rollout_score_transport = "array"
@@ -273,8 +273,10 @@ rollout_top_p = 1.0
 ```
 
 SCMC supports 32, 64 and 128 draws. Its loss uses detached importance weights
-and adds a zero-valued correction surrogate, preserving the uncentered loss
-value while centering its gradient. With MIS, this matches the IcePop form.
+in the existing MILES REINFORCE score-centering surrogate, replacing the
+truncated-head correction with an IID Monte Carlo estimate. It does not replace
+the default PPO `policy_loss`; comparisons against that baseline measure the
+complete loss-path change as well as probe handling.
 The SCT estimator continues to reject MC arrays; the dispatcher selects the
 separate MC estimator using the explicit mode. Caller sampling seeds are preserved; missing seeds are
 assigned independently per request because the probe kernel requires a seed.
