@@ -13,6 +13,12 @@ import numpy as np
 DTYPE = np.dtype([("offset", "<u8"), ("length", "<u8"), ("pool", "<u4")])
 
 
+def pool_code(row):
+    """Name a row's pool before any run mapping; the index and cache manifests must agree on it."""
+    metadata = row.get("metadata") or {}
+    return metadata.get("sampling_pool", row.get("pool_id", "__source__"))
+
+
 def digest(path):
     with Path(path).open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -43,7 +49,7 @@ def open_index(path, expected_hash, expected_rows, max_prompt_length=None):
                             continue
                         row = json.loads(line)
                         metadata = row.get("metadata") or {}
-                        pool, tokens = metadata.get("sampling_pool", "__source__"), metadata.get("run_prompt_tokens")
+                        pool, tokens = pool_code(row), metadata.get("run_prompt_tokens")
                         if not isinstance(row.get("input"), str) or not isinstance(pool, str):
                             raise ValueError("Indexed pools require prepared text and sampling_pool metadata")
                         if type(tokens) is not int or tokens < 1:

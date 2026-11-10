@@ -177,7 +177,7 @@ def _source_entry(cache, source, identity, imports, hf, known, overrides):
                         or len(token_hash) != 64
                     ):
                         raise InputError("Legacy import requires validated token lengths and token-ID hashes")
-                    code = meta.get("sampling_pool", row.get("pool_id", "__source__"))
+                    code = indexed_rows.pool_code(row)
                     label = row.get("pool_id")
                     if code in labels and labels[code] != label:
                         raise InputError("Prepared pool code maps to inconsistent canonical labels")
@@ -251,7 +251,9 @@ def prepare(data, hf, output, *, max_prompt_length, seed, registry_overrides):
                 inputs[str(Path(path).resolve())] = run_data._file_sha(path)
             inputs[str(root / "manifest.json")] = run_data._file_sha(root / "manifest.json")
             for split, info in entry["splits"].items():
-                index, _ = indexed_rows.open_index(root / info["file"], entry["files"][info["file"]], info["rows"])
+                index, header = indexed_rows.open_index(
+                    root / info["file"], entry["files"][info["file"]], info["rows"]
+                )
                 index._mmap.close()
                 if info["max_prompt_tokens"] > max_prompt_length:
                     raise InputError(f"Source {source['name']} exceeds prompt length limit; no rows dropped")
@@ -283,6 +285,11 @@ def prepare(data, hf, output, *, max_prompt_length, seed, registry_overrides):
                         if pool not in resolved:
                             raise InputError(f"Source {source['name']}: missing or unknown pool label {label!r}")
                         mapping[code] = pool
+                    # The trainer resolves index pool codes through this mapping; fail here, on CPU.
+                    if unmapped := set(header["pools"]) - set(mapping):
+                        raise InputError(
+                            f"Source {source['name']}: indexed pool codes lack a mapping: {sorted(unmapped)}"
+                        )
                     item["pool_mapping"] = mapping
                 sources.append(item)
         if tokenizer_identity(hf) != tokenizer or any(

@@ -143,6 +143,29 @@ def test_import_legacy_bundle_preserves_exact_bytes_and_skips_tokenization(envir
     assert {r["status"] for r in json.loads(Path(new["manifest"]).read_text())["provenance"]["cache"]} == {"imported"}
 
 
+def test_import_fraction_bundle_with_row_labels_into_pooled_run(environment, tmp_path, monkeypatch):
+    data = config(tmp_path)
+    legacy = copy.deepcopy(data)
+    legacy.pop("preparation")
+    legacy.pop("sampling")
+    for source in legacy["sources"]:
+        source.pop("pool")
+        source["fraction"] = 0.5
+    original = prepare(environment, legacy)
+    data["preparation"]["import_manifests"] = [original["manifest"]]
+    forbid_tokenization(monkeypatch)
+    new = prepare(environment, data, tmp_path / "new")
+    recipe = json.loads(Path(new["prompt_mixture"]).read_text())
+    assert [s["pool_mapping"] for s in recipe["sources"]] == [{"original": "a"}, {"original": "b"}]
+    catalog = indexed_samples.Catalog(
+        Path(new["manifest"]).parent, recipe["sources"], recipe["pools"], sample_type=SimpleNamespace
+    )
+    try:
+        assert [catalog.sample(row).metadata["sampling_pool"] for row in (0, 3)] == ["a", "b"]
+    finally:
+        catalog.close()
+
+
 def test_unused_judge_binding_removal_does_not_invalidate_import(environment, tmp_path, monkeypatch):
     data = config(tmp_path)
     legacy = copy.deepcopy(data)
