@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import heapq
 import logging
 import os
 import threading
@@ -1224,6 +1225,56 @@ def maybe_mask_truncated_completions(
     return batch[stop_idxes], advantages[stop_idxes]
 
 
+def _merge_leftover_packs(packed_sequences: PackedSequences, num_packs: int) -> tuple[PackedSequences, int]:
+    """Move the documents (query-response pairs) of the packs after the first `num_packs` into those packs.
+
+    Documents are added longest first to the currently shortest pack, as long as it does not become
+    longer than the longest of the `num_packs` packs. Documents that fit nowhere are dropped.
+
+    Returns:
+        The first `num_packs` packs (only the fields that are collated for training) and the number
+        of dropped documents.
+    """
+    fields = ("query_responses", "attention_masks", "position_ids", "advantages", "response_masks", "vllm_logprobs")
+    packs = {name: list(getattr(packed_sequences, name)[:num_packs]) for name in fields}
+    shortest = [(len(pack), i) for i, pack in enumerate(packs["query_responses"])]
+    heapq.heapify(shortest)
+    max_len = max((pack_len for pack_len, _ in shortest), default=0)
+
+    leftovers: list[tuple[int, int, int]] = []
+    for p in range(num_packs, len(packed_sequences.query_responses)):
+        _, doc_lens = torch.unique_consecutive(packed_sequences.attention_masks[p], return_counts=True)
+        start = 0
+        for doc_len in doc_lens.tolist():
+            leftovers.append((doc_len, p, start))
+            start += doc_len
+    leftovers.sort(key=lambda doc: -doc[0])
+
+    added: list[list[tuple[int, int, int]]] = [[] for _ in range(num_packs)]
+    num_dropped = 0
+    for doc_len, p, start in leftovers:
+        if not shortest or shortest[0][0] + doc_len > max_len:
+            num_dropped += 1
+            continue
+        pack_len, i = shortest[0]
+        heapq.heapreplace(shortest, (pack_len + doc_len, i))
+        added[i].append((p, start, doc_len))
+
+    for i, docs in enumerate(added):
+        if not docs:
+            continue
+        next_doc_id = int(packs["attention_masks"][i].max()) + 1
+        for name in fields:
+            pieces = [packs[name][i]]
+            for k, (p, start, doc_len) in enumerate(docs):
+                if name == "attention_masks":
+                    pieces.append(torch.full((doc_len,), next_doc_id + k, dtype=pieces[0].dtype))
+                else:
+                    pieces.append(getattr(packed_sequences, name)[p][start : start + doc_len])
+            packs[name][i] = torch.cat(pieces)
+    return PackedSequences(original_responses=packed_sequences.original_responses, **packs), num_dropped
+
+
 def prepare_collated_data_for_workers(
     packed_sequences: PackedSequences,
     dp_world_size: int,
@@ -1234,7 +1285,9 @@ def prepare_collated_data_for_workers(
     """Distributes and collates packed sequences for distributed training.
 
     Splits packed sequences across workers, randomly shuffles each worker's data,
-    and collates into micro-batches for training.
+    and collates into micro-batches for training. Every worker gets the same number of
+    packed sequences; documents in the packed sequences beyond a multiple of `dp_world_size`
+    are moved into the other packed sequences where they fit (see `_merge_leftover_packs`).
 
     Args:
         packed_sequences: Packed training sequences containing query responses,
@@ -1251,13 +1304,14 @@ def prepare_collated_data_for_workers(
         advantages, response_masks, and vllm_logprobs.
     """
     total_sequences = len(packed_sequences.query_responses)
-    if total_sequences % dp_world_size != 0:
-        new_total = (total_sequences // dp_world_size) * dp_world_size
-        logger.warning(
-            f"Total packed sequences ({total_sequences}) is not evenly divisible by dp_world_size ({dp_world_size}). "
-            f"Truncating to {new_total} sequences (dropping {total_sequences - new_total})."
-        )
     B = total_sequences // dp_world_size
+    if total_sequences % dp_world_size != 0:
+        packed_sequences, num_dropped = _merge_leftover_packs(packed_sequences, B * dp_world_size)
+        if num_dropped > 0:
+            logger.warning(
+                f"Total packed sequences ({total_sequences}) is not evenly divisible by dp_world_size ({dp_world_size}). "
+                f"Dropping {num_dropped} responses that do not fit into the first {B * dp_world_size} packed sequences."
+            )
     collated_data = []
     assert packed_sequences.position_ids is not None
     assert packed_sequences.advantages is not None
