@@ -276,7 +276,7 @@ def _final_choice_score(final, target):
 
     Declarations are a boxed letter, "Answer: LETTER" and the row's own requested
     format (``pattern``, one capture). They may repeat but must agree, and nothing
-    but the rest of the line may follow the last one.
+    a same-line gloss naming no other displayed letter may follow the last one.
     """
     value = target["value"]
     declared = [(m.end(), m[1] or m[2] or m[3]) for m in _CHOICE_DECLARATION.finditer(final)]
@@ -295,8 +295,13 @@ def _final_choice_score(final, target):
     if declared:
         if {letter for _, letter in declared} != {value}:
             return 0.0
-        # The rest of that line may gloss the choice; later lines may only close markup.
-        return float(re.fullmatch(r"[^\n]*[\s\\\])$*]*", final[max(end for end, _ in declared) :]) is not None)
+        # The rest of that line may gloss the choice but not name another displayed
+        # letter ("Answer: B, C, or D"); later lines may only close markup.
+        tail = re.fullmatch(r"([^\n]*)[\s\\\])$*]*", final[max(end for end, _ in declared) :])
+        if tail is None:
+            return 0.0
+        named = set(re.findall(r"(?<![A-Za-z0-9])[A-Z](?![A-Za-z0-9])", tail[1]))
+        return float(not named & (set(target["choices"]) - {value}))
     return float(re.fullmatch(r"\**\(?" + re.escape(value) + r"\)?\**[.\s]*", final) is not None)
 
 

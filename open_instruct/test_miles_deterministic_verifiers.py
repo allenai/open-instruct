@@ -218,6 +218,12 @@ def test_opt_in_mcqa_final_choice_positive(text):
         "Answer: B\n\nA further paragraph of discussion.",
         "The answer is **B**.",
         "Answer: b",
+        # A gloss must not hedge across other displayed letters.
+        "Answer: B, A, or I",
+        "Answer: B or A",
+        "Answer: B (or possibly A)",
+        "\\boxed{B} or A",
+        "**Answer: B** and I",
     ],
 )
 def test_opt_in_mcqa_final_choice_rejects_conflicting_answers(text):
@@ -239,6 +245,7 @@ def test_mcqa_final_choice_does_not_read_prose_as_a_choice():
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "\\boxed{B}", 1),
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Answer: A\nSelected Option -> B", 0),
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Selected Option -> A", 0),
+        (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Selected Option -> B, A", 0),
         # Loose row patterns must not read a word, an HTML tag or an undisplayed letter.
         (r"Response:\s*([A-Za-z0-9])\s*", "Response: Because", 0),
         (r"<\s*([A-Za-z0-9])\s*>", "<b>Explanation</b>", 0),

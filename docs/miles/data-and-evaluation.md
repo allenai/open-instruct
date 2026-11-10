@@ -695,7 +695,8 @@ bare choice letter, `Answer: LETTER`, a boxed letter, or the row's own requested
 format when the target carries `pattern` (a one-capture regex; the `mcqa_v1`
 adapter copies it from `template_metadata.output_regex`). Bold, parentheses and
 `\text{}` around the letter are ignored, the same choice may be declared more
-than once, and the rest of the final declaration's line may gloss it. Declarations
+than once, and the rest of the final declaration's line may gloss it as long as
+it names no other displayed choice letter (`Answer: B, C, or D` scores zero). Declarations
 of different letters, a declaration followed by further lines of text, lowercase
 letters and a letter named only in prose ("The answer is B") score zero. A row
 pattern match counts only for a displayed uppercase choice that does not begin a
