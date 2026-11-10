@@ -30,8 +30,6 @@ _CHOICE_DECLARATION = re.compile(
     r"\\boxed\{\s*(?:\\text(?:bf)?\{\s*)?\(?([A-Z])\)?[\s}]*\}"
     r"|(?i:answer)\s*:[\s*]*(?:\\?\(([A-Z])\\?\)|([A-Z])(?![A-Za-z0-9/]))"
 )
-# Words that withdraw a choice within its own line ("Answer: B. Actually, no.").
-_CHOICE_RETRACTION = re.compile(r"\b(?:actually|wait|correction|instead|on second thought|scratch that)\b", re.I)
 logger = logger_utils.setup_logger(__name__)
 
 
@@ -274,18 +272,18 @@ def _format_score(final, value):
 
 
 def _final_choice_score(final, target):
-    """Score one explicit final choice without searching reasoning for a letter.
+    """Score the last explicit choice without searching reasoning for a letter.
 
     Declarations are a boxed letter, "Answer: LETTER" and the row's own requested
-    format (``pattern``, one capture). They may repeat but must all agree. After
-    the last one, only a same-line explanation may follow, and it may neither name
-    another displayed letter nor withdraw the choice.
+    format (``pattern``, one capture). The last one is the answer; earlier ones are
+    superseded. The rest of its line may explain it but not name another
+    displayed letter.
     """
     value = target["value"]
 
     def firm(letter, after):
-        # "A" and "I" before a lowercase word may be prose ("Answer: I think"). Such
-        # a declaration still counts for conflicts but cannot earn credit itself.
+        # "A" and "I" before a lowercase word may be prose ("Answer: I think"), so
+        # such a declaration cannot earn credit.
         return not (letter in ("A", "I") and re.match(r"[ \t]+[a-z]", final[after:]))
 
     # (end offset, letter, firm)
@@ -299,22 +297,20 @@ def _final_choice_score(final, target):
         except TimeoutError as error:
             raise FormattingVerifierTimeout("MCQA answer pattern exceeded its search budget") from error
         # Row patterns are loose ("Response:\\s*([A-Za-z0-9])\\s*"): keep only a displayed
-        # uppercase choice that does not start a word or an HTML tag such as <b>, and
-        # end the declaration before any whitespace (including newlines) it consumed.
+        # uppercase choice that does not start a word, an HTML tag such as <b> or a
+        # prompt echo ("A/B/C/D"), and end the declaration before any whitespace
+        # (including newlines) the pattern consumed.
         declared += [
             (max(m.end(1), m.start() + len(m[0].rstrip())), m[1], firm(m[1], m.end(1)))
             for m in matches
-            if m[1] in target["choices"] and not final[m.end(1) : m.end(1) + 1].isalnum()
+            if m[1] in target["choices"] and re.match(r"[A-Za-z0-9/]", final[m.end(1) :]) is None
         ]
     if declared:
-        end, _, last_is_firm = max(declared)
-        if {letter for _, letter, _ in declared} != {value} or not last_is_firm:
+        end, letter, is_firm = max(declared)
+        if letter != value or not is_firm:
             return 0.0
-        # Later lines may only close markup.
-        tail = re.fullmatch(r"([^\n]*)[\s\\\])$*]*", final[end:])
-        if tail is None or _CHOICE_RETRACTION.search(tail[1]):
-            return 0.0
-        named = set(re.findall(r"(?<![A-Za-z0-9])[A-Z](?![A-Za-z0-9])", tail[1]))
+        # "Answer: B, C, or D" does not choose B.
+        named = set(re.findall(r"(?<![A-Za-z0-9])[A-Z](?![A-Za-z0-9])", final[end:].split("\n", 1)[0]))
         return float(not named & (set(target["choices"]) - {value}))
     return float(re.fullmatch(r"\**\(?" + re.escape(value) + r"\)?\**[.\s]*", final) is not None)
 

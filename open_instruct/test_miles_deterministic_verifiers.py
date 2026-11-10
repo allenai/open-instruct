@@ -189,20 +189,27 @@ MCQA_TARGET = {"kind": "mcqa_final_choice", "value": "B", "choices": ["A", "B", 
         "Answer: B",
         "Explanation.\n\\boxed{B}",
         "<think>A</think>Answer: B.",
-        # Presentation around the letter, repeats and a same-line gloss are not content.
+        # Presentation around the letter and repeats are not content.
         "**Answer: B**",
         "**Answer:** B",
         "Answer: (B)",
         "Answer: \\boxed{\\text{B}}",
         "**Answer: \\boxed{B}**\n\nAnswer: \\boxed{B}",
-        "Answer: B. Diffusion is uniform",
-        "**Answer: B** (no net separation).",
         "The final answer is:\n\\[\n\\boxed{B}\n\\]",
         "Answer: A/B/I\n\nAnswer: B",
-        # An explanation earns the same credit whatever its capitalisation.
+        # The last declaration is the answer; earlier ones are superseded.
+        "Answer: A\nAnswer: B",
+        "\\boxed{A} \\boxed{B}",
+        "**Answer: A**\n\nAnswer: \\boxed{B}",
+        "Answer: A is correct.\nAnswer: B",
+        "Answer: I think so.\nAnswer: B",
+        # Text after it is an explanation, whatever its capitalisation or length.
+        "Answer: B. Diffusion is uniform",
+        "**Answer: B** (no net separation).",
         "Answer: B because diffusion is uniform",
         "Answer: B Because diffusion is uniform",
-        "Answer: B is correct.\n\nAnswer: B",
+        "Answer: B\n\nA further paragraph of discussion.",
+        "Answer: B\nActually A",
     ],
 )
 def test_opt_in_mcqa_final_choice_positive(text):
@@ -214,30 +221,23 @@ def test_opt_in_mcqa_final_choice_positive(text):
     [
         "A",
         "",
-        "Answer: A\nAnswer: B",
-        "\\boxed{A} \\boxed{B}",
         "B or A",
-        "Answer: B\nActually A",
-        "**Answer: A**\n\nAnswer: \\boxed{B}",
-        "Answer: B\n\nA further paragraph of discussion.",
         "The answer is **B**.",
         "Answer: b",
-        # A gloss must not hedge across other displayed letters.
+        # The last declaration decides.
+        "Answer: B\nAnswer: A",
+        "\\boxed{B} \\boxed{A}",
+        "Answer: B is tempting.\n\n\\boxed{A}",
+        # Its own line must not name another displayed letter.
         "Answer: B, A, or I",
         "Answer: B or A",
         "Answer: B (or possibly A)",
         "\\boxed{B} or A",
         "**Answer: B** and I",
-        # ... or withdraw the choice.
         "Answer: B. Actually, the correct answer is A.",
-        "Answer: B. Actually, that is wrong.",
-        "Answer: B. Wait, no.",
-        # A declaration followed by prose still conflicts with a later one.
-        "Answer: A is correct.\nAnswer: B",
-        "Answer: I think so.\nAnswer: B",
     ],
 )
-def test_opt_in_mcqa_final_choice_rejects_conflicting_answers(text):
+def test_opt_in_mcqa_final_choice_negative(text):
     assert cv.score(text, MCQA_TARGET) == 0
 
 
@@ -245,7 +245,7 @@ def test_mcqa_final_choice_does_not_read_prose_as_a_choice():
     target = {**MCQA_TARGET, "value": "I"}
     assert cv.score("Answer: I think it is unclear", target) == 0
     assert cv.score("Response: I think it is unclear", {**target, "pattern": r"Response:\s*([A-Za-z0-9])\s*"}) == 0
-    # "A"/"I" before a lowercase word cannot earn credit alone, but a firm repeat can.
+    # "A"/"I" before a lowercase word cannot earn credit, but a firm repeat can.
     assert cv.score("Answer: I is correct.\n\nAnswer: I", target) == 1
     assert cv.score("Answer: I. Impedance decreases", target) == 1
 
@@ -255,23 +255,24 @@ def test_mcqa_final_choice_does_not_read_prose_as_a_choice():
     [
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Reasoning.\n\nSelected Option -> B.", 1),
         (r"ANSWER IS\s*([A-Za-z0-9])\s*", "ANSWER IS B. Mean", 1),
-        (r"<final_answer>\s*([A-Za-z0-9])\s*</final_answer>", "<final_answer>B</final_answer>", 1),
+        (r"<final_answer>\s*([A-Za-z0-9])\s*</final_answer>", "<final_answer>\nB\n</final_answer>", 1),
         (r"Answer:\s*\*([A-Za-z0-9])\*", "Answer: *B*", 1),
-        # The generic forms stay accepted, and must agree with the requested one.
+        # The generic forms stay accepted; whichever declaration is last decides.
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "\\boxed{B}", 1),
-        (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Answer: A\nSelected Option -> B", 0),
+        (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Answer: A\nSelected Option -> B", 1),
+        (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Selected Option -> B\nAnswer: A", 0),
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Selected Option -> A", 0),
         (r"Selected Option\s*->\s*([A-Za-z0-9])\s*", "Selected Option -> B, A", 0),
-        # Whitespace consumed by the row pattern must not turn later lines into a gloss.
-        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B\nActually A", 0),
-        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B\nThe third option is also plausible", 0),
-        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B\n\n", 1),
-        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B (uniform diffusion)", 1),
-        (r"<final_answer>\s*([A-Za-z0-9])\s*</final_answer>", "<final_answer>\nB\n</final_answer>", 1),
-        # Loose row patterns must not read a word, an HTML tag or an undisplayed letter.
+        # Loose row patterns must not read a word, an HTML tag, a prompt echo or an
+        # undisplayed letter.
         (r"Response:\s*([A-Za-z0-9])\s*", "Response: Because", 0),
         (r"<\s*([A-Za-z0-9])\s*>", "<b>Explanation</b>", 0),
         (r"<\s*([A-Za-z0-9])\s*>", "<b>Explanation</b> <B>", 1),
+        (r"Answer\s*:\s*(?!Answer)\s*([A-Za-z0-9])\s*", "\\boxed{B}\n\nAnswer: A/B/I", 1),
+        # Whitespace consumed by the row pattern must not pull the next line into the
+        # answer's own line.
+        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B\nA uniform profile results", 1),
+        (r"Response:\s*([A-Za-z0-9])\s*", "Response: B, A", 0),
     ],
 )
 def test_mcqa_final_choice_reads_the_format_requested_by_the_row(pattern, text, expected):
