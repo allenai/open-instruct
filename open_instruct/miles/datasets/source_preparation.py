@@ -141,6 +141,50 @@ def validate_keyword_option(kind, options):
         raise PlanError("keyword_inclusion correction requires the dolci_if_v1 adapter")
 
 
+WORD_COUNT_CONSTRAINT = "keywords:word_count_different_numbers"
+
+
+def validate_word_count_option(kind, options):
+    policy = options.get("word_count_relation", "preserve")
+    if policy not in {"preserve", "stated_count_at_least_v1"}:
+        raise PlanError("Unknown word_count_relation policy: " + str(policy))
+    if policy != "preserve" and kind not in {"dolci_if_v1", "instruction_v1", "nemo_v1"}:
+        raise PlanError("word_count_relation correction requires an instruction-following adapter")
+
+
+def correct_word_count_relation(names, kwargs, prompt):
+    """Grade the stated word count as a minimum, in place.
+
+    The generator's sentence is "the word W should appear N times" for both
+    relations, so a "less than" target scores zero for doing what was asked.
+    """
+    for name, args in zip(names, kwargs, strict=True):
+        if name != WORD_COUNT_CONSTRAINT:
+            continue
+        # NeMo exports may carry unused arguments as nulls; the checker drops them.
+        if not isinstance(args, dict) or {k for k, v in args.items() if v is not None} != {
+            "keyword",
+            "frequency",
+            "relation",
+        }:
+            raise ValueError("Word count correction requires the audited argument shape")
+        keyword, frequency, relation = args["keyword"], args["frequency"], args["relation"]
+        if (
+            not isinstance(keyword, str)
+            or re.fullmatch(r"[A-Za-z]+", keyword) is None
+            or type(frequency) is not int
+            or frequency < 1
+            or relation not in {"less than", "at least"}
+        ):
+            raise ValueError("Word count correction requires the audited argument shape")
+        # This repair is for the audited generator wording, which never states the
+        # relation. A prompt which does state one is not covered and is omitted.
+        # No trailing period: bundled constraints are joined with ", and".
+        if f"In your response, the word {keyword} should appear {frequency} times" not in prompt:
+            raise ValueError("Word count correction requires the original count instruction")
+        args["relation"] = "at least"
+
+
 def dolci_if_target(raw):
     if raw.get("dataset", ["ifeval"]) != ["ifeval"]:
         raise ValueError("dolci_if_v1 requires a single ifeval route")
@@ -150,11 +194,13 @@ def dolci_if_target(raw):
     return ifeval_constraints.parse_constraint_bundle(ground_truth[0])
 
 
-def corrected_dolci_target(raw, ms, policy):
+def corrected_dolci_target(raw, ms, policy, word_count_policy="preserve"):
     target = dolci_if_target(raw)
     issues = ifeval_constraints.if_training_issues(target)
     if issues:
         raise ValueError(f"Unsuitable IF training target: {issues}")
+    if word_count_policy == "stated_count_at_least_v1":
+        correct_word_count_relation(target["instruction_id"], target["kwargs"], ms[-1]["content"])
     if policy == "at_least_once_v1":
         for index, (name, args) in enumerate(zip(target["instruction_id"], target["kwargs"], strict=True)):
             if name != "keywords:word_once":
@@ -190,6 +236,7 @@ def resolved_adapter(raw, kind, options: dict | None = None):
 def adapt(raw, kind, options=None):
     options = options or {}
     validate_keyword_option(kind, options)
+    validate_word_count_option(kind, options)
     if kind in {"toolrl_v1", "single_step_tool_v1"}:
         if options.get("tool_format", "olmo_pythonic_v1") not in {"olmo_pythonic_v1", "olmo_xml_v1"}:
             raise PlanError("Unknown tool rendering format")
@@ -293,18 +340,25 @@ def adapt(raw, kind, options=None):
             stratum += ":" + raw["verifier"]["pattern_id"]
     elif kind == "instruction_v1":
         original = raw.get("args") or (meta if "instruction_id_list" in meta else raw)
+        arguments = original.get("kwargs", original.get("instruction_kwargs"))
+        if options.get("word_count_relation", "preserve") == "stated_count_at_least_v1":
+            # The arguments still alias the raw row here; correct a copy.
+            arguments = copy.deepcopy(arguments)
+            correct_word_count_relation(original["instruction_id_list"], arguments, ms[-1]["content"])
         target = {
             "family": "nemo",
             "target": {
                 "instruction_id_list": original["instruction_id_list"],
-                "kwargs": original.get("kwargs", original.get("instruction_kwargs")),
+                "kwargs": arguments,
                 "grading_mode": original.get("grading_mode", "all"),
             },
         }
         nvidia_constraints.instruction_contract(json.dumps(target, sort_keys=True))
         name, stratum = "instruction", kind + ":" + "+".join(sorted(original["instruction_id_list"]))
     elif kind == "dolci_if_v1":
-        target = corrected_dolci_target(raw, ms, options.get("keyword_inclusion", "preserve"))
+        target = corrected_dolci_target(
+            raw, ms, options.get("keyword_inclusion", "preserve"), options.get("word_count_relation", "preserve")
+        )
         name, stratum = "ifeval", kind + ":" + "+".join(sorted(target["instruction_id"]))
     elif kind == "calendar_v1":
         target = copy.deepcopy(raw["exp_cal_state"])
@@ -389,6 +443,7 @@ def prepare(plan_path, output, tokenizer):
         if re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", name) is None:
             raise ValueError("Invalid source name")
         validate_keyword_option(spec["adapter"], spec.get("options") or {})
+        validate_word_count_option(spec["adapter"], spec.get("options") or {})
         root = output / name
         root.mkdir()
         # A prior hygiene receipt is required; this operation does not rerun decon.
@@ -472,7 +527,7 @@ def prepare(plan_path, output, tokenizer):
                         original = dolci_if_target(raw)
                         changes = [
                             {
-                                "name": "dolci_keyword_inclusion_v1",
+                                "name": "dolci_keyword_inclusion_v1" if before != after else "word_count_relation_v1",
                                 "constraint_index": i,
                                 "from": before,
                                 "to": after,
@@ -482,7 +537,7 @@ def prepare(plan_path, output, tokenizer):
                             for i, (before, after) in enumerate(
                                 zip(original["instruction_id"], target["instruction_id"], strict=True)
                             )
-                            if before != after
+                            if before != after or original["kwargs"][i] != target["kwargs"][i]
                         ]
                         row["metadata"]["original_target_sha256"] = digest(original)
                         row["metadata"]["target_transformations"] = changes

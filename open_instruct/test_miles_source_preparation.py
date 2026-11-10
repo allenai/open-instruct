@@ -12,7 +12,7 @@ from transformers import PreTrainedTokenizerFast
 
 from open_instruct import dataset_transformation
 from open_instruct.miles.datasets import source_preparation as sources
-from open_instruct.miles.rewards import litmus, task_verifiers
+from open_instruct.miles.rewards import litmus, nvidia_constraints, task_verifiers
 
 
 class Tokenizer:
@@ -464,6 +464,146 @@ def test_dolci_keyword_option_cannot_silently_change_nemo():
             sources.adapt(raw, kind, {"keyword_inclusion": "at_least_once_v1"})
     with pytest.raises(sources.PlanError, match="Unknown keyword_inclusion"):
         sources.adapt(dolci_keyword_row(), "dolci_if_v1", {"keyword_inclusion": "typo"})
+
+
+WORD_COUNT_OPTION = {"word_count_relation": "stated_count_at_least_v1"}
+
+
+def word_count_rows(relation="less than", joiner=". "):
+    """The same published constraint through the Dolci and NeMo routes."""
+    prompt = f"Describe a kitchen. In your response, the word oven should appear 2 times{joiner}Do not use commas."
+    ids = ["keywords:word_count_different_numbers", "punctuation:no_comma"]
+    kwargs = [{"keyword": "oven", "frequency": 2, "relation": relation}, None]
+    dolci = {
+        "dataset": ["ifeval"],
+        "ground_truth": [repr([{"instruction_id": ids, "kwargs": kwargs}])],
+        "prompt": [{"role": "user", "content": prompt}],
+    }
+    nemo = {"prompt": prompt, "instruction_id_list": ids, "kwargs": kwargs}
+    return dolci, nemo
+
+
+@pytest.mark.parametrize("joiner", [". ", ", and "])
+@pytest.mark.parametrize("relation", ["less than", "at least"])
+def test_word_count_correction_grades_the_stated_count_on_both_routes(relation, joiner):
+    dolci, nemo = word_count_rows(relation, joiner)
+    originals = copy.deepcopy((dolci, nemo))
+    expected = {"keyword": "oven", "frequency": 2, "relation": "at least"}
+    followed, ignored = "The oven is hot and the oven is old", "The stove is hot"
+
+    ms, unchanged, _, stratum = sources.adapt(dolci, "dolci_if_v1")
+    corrected_ms, corrected, _, corrected_stratum = sources.adapt(dolci, "dolci_if_v1", WORD_COUNT_OPTION)
+    assert (ms, stratum) == (corrected_ms, corrected_stratum)
+    assert unchanged["kwargs"][0]["relation"] == relation
+    assert corrected["kwargs"] == [expected, {}]
+    verifier = task_verifiers.ManifestIFVerifier()
+    assert asyncio.run(verifier.async_call([], followed, corrected)).score == 1.0
+    assert asyncio.run(verifier.async_call([], ignored, corrected)).score == 0.5
+    if relation == "less than":
+        # The published target pays for ignoring the instruction.
+        assert asyncio.run(verifier.async_call([], followed, unchanged)).score == 0.5
+        assert asyncio.run(verifier.async_call([], ignored, unchanged)).score == 1.0
+
+    for kind in ["instruction_v1", "nemo_v1"]:
+        _, unchanged, _, stratum = sources.adapt(nemo, kind)
+        _, corrected, _, corrected_stratum = sources.adapt(nemo, kind, WORD_COUNT_OPTION)
+        assert stratum == corrected_stratum
+        assert unchanged["target"]["kwargs"][0]["relation"] == relation
+        assert corrected["target"]["kwargs"] == [expected, None]
+        _, compiled = nvidia_constraints.instruction_contract(json.dumps(corrected, sort_keys=True))
+        assert all(checker.check_following(followed) for _, checker, _ in compiled)
+        assert not all(checker.check_following(ignored) for _, checker, _ in compiled)
+    assert (dolci, nemo) == originals
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "In your response, the word oven should appear less than 2 times.",
+        "In your response, the word oven should appear 3 times.",
+        "Describe a kitchen.",
+    ],
+)
+def test_word_count_correction_omits_unrecognized_wording(prompt):
+    for raw, kind in zip(word_count_rows(), ["dolci_if_v1", "instruction_v1"], strict=True):
+        if kind == "dolci_if_v1":
+            raw["prompt"][-1]["content"] = prompt
+        else:
+            raw["prompt"] = prompt
+        with pytest.raises(ValueError, match="original count instruction"):
+            sources.adapt(raw, kind, WORD_COUNT_OPTION)
+        sources.adapt(raw, kind)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"keyword": "o.en", "frequency": 2, "relation": "less than"},
+        {"keyword": "oven", "frequency": 0, "relation": "less than"},
+        {"keyword": "oven", "frequency": True, "relation": "less than"},
+        {"keyword": "oven", "frequency": 2, "relation": "exactly"},
+        {"keyword": "oven", "frequency": 2},
+    ],
+)
+def test_word_count_correction_omits_unaudited_arguments(args):
+    _, raw = word_count_rows()
+    raw["kwargs"][0] = args
+    with pytest.raises(ValueError, match="audited argument shape|Unsuitable IF training target"):
+        sources.adapt(raw, "instruction_v1", WORD_COUNT_OPTION)
+
+
+def test_word_count_correction_accepts_null_padding_and_leaves_other_rows_alone():
+    _, raw = word_count_rows()
+    raw["kwargs"][0]["keywords"] = None
+    _, target, _, _ = sources.adapt(raw, "instruction_v1", WORD_COUNT_OPTION)
+    assert target["target"]["kwargs"][0]["relation"] == "at least"
+    other = {
+        "prompt": "Answer with less than 5 words.",
+        "instruction_id_list": ["length_constraints:number_words"],
+        "kwargs": [{"num_words": 5, "relation": "less than"}],
+    }
+    assert sources.adapt(other, "instruction_v1", WORD_COUNT_OPTION) == sources.adapt(other, "instruction_v1")
+
+
+def test_word_count_option_is_validated():
+    dolci, _ = word_count_rows()
+    with pytest.raises(sources.PlanError, match="Unknown word_count_relation"):
+        sources.adapt(dolci, "dolci_if_v1", {"word_count_relation": "typo"})
+    with pytest.raises(sources.PlanError, match="requires an instruction-following adapter"):
+        sources.adapt({"problem": "1+1", "answer": "2"}, "math_v1", WORD_COUNT_OPTION)
+
+
+def test_word_count_correction_receipts(tmp_path):
+    dolci, _ = word_count_rows()
+    raw = tmp_path / "input.jsonl"
+    raw.write_text(json.dumps(dolci) + "\n")
+    receipt = tmp_path / "hygiene.json"
+    receipt.write_text('{"completed":true}')
+    source = {
+        "adapter": "dolci_if_v1",
+        "options": WORD_COUNT_OPTION,
+        "inputs": [{"path": str(raw), "sha256": sources.file_hash(raw), "revision": "fixed", "split": "train"}],
+        "hygiene_receipt": {"path": str(receipt), "sha256": sources.file_hash(receipt)},
+    }
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"schema_version": 1, "sources": {"source": source}}))
+    entry = sources.prepare(plan, tmp_path / "out", Tokenizer())["sources"]["source"]
+    assert entry["counts"]["transformed_rows"] == entry["counts"]["transformed_constraints"] == 1
+    row = json.loads((tmp_path / "out/source/prompts.jsonl").read_text())
+    assert row["metadata"]["target_transformations"] == [
+        {
+            "name": "word_count_relation_v1",
+            "constraint_index": 0,
+            "from": "keywords:word_count_different_numbers",
+            "to": "keywords:word_count_different_numbers",
+            "from_kwargs": {"keyword": "oven", "frequency": 2, "relation": "less than"},
+            "to_kwargs": {"keyword": "oven", "frequency": 2, "relation": "at least"},
+        }
+    ]
+    source["options"] = {"word_count_relation": "typo"}
+    plan.write_text(json.dumps({"schema_version": 1, "sources": {"source": source}}))
+    with pytest.raises(sources.PlanError, match="Unknown word_count_relation"):
+        sources.prepare(plan, tmp_path / "typo", Tokenizer())
 
 
 def test_dolci_prepared_correction_receipts(tmp_path):

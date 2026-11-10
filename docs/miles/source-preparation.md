@@ -284,6 +284,33 @@ the audited Dolci rows: the existing frequency checker treats keywords as regexe
 so expanding this repair to arbitrary punctuation would require a separate decision.
 Unrecognized wording or keyword shapes are reported as omitted rows. Other
 constraints and prompt text are preserved; existing admission screens still apply.
+
+### Stated word counts
+
+The generator sentence for `keywords:word_count_different_numbers` is
+`In your response, the word X should appear N times` for both of its relations,
+so the prompt never says "less than" or "at least". A published `less than`
+target therefore scores zero for a response which uses the word N times, and
+passes one which never uses it. The `dolci_if_v1`, `instruction_v1` and `nemo_v1`
+adapters accept an explicit correction:
+
+```json
+{
+  "adapter": "instruction_v1",
+  "options": {"word_count_relation": "stated_count_at_least_v1"}
+}
+```
+
+The default policy is `preserve`. With `stated_count_at_least_v1`, each such
+constraint is graded as `at least` N; the prompt, the constraint name and the
+other constraints are unchanged. A minimum is used instead of an exact count
+because the checker counts substring matches, so a plural would break an exact
+rule. The final user message must contain the generator sentence for that keyword
+and count (compared literally, without the trailing period, since bundled
+constraints are joined with `, and`), the keyword must contain only ASCII
+letters, the count must be a positive integer and the relation must be one of
+the two published values. Rows which fail these checks, including prompts which
+do state a relation, are reported as omitted so they can be reviewed.
 An already-present frequency constraint remains a separate constraint in the bundle.
 
 Each prepared row records `original_target_sha256` and `target_transformations`,
