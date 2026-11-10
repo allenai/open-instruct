@@ -143,11 +143,14 @@ def render(runs, output, trainer_path=None):
         xs = np.arange(2)
         for offset, field, description in [
             (-0.25, "step_seconds", "Whole update"),
-            (0, "forward_backward_seconds", "Forward + backward"),
-            (0.25, "optimizer_seconds", "Optimizer"),
+            (0, "forward_backward_seconds", "Forward/backward host span"),
+            (0.25, "optimizer_seconds", "Optimizer host span"),
         ]:
             axes[4, 0].bar(
-                xs + offset, [r["stats"][field]["mean"] for r in trainer["runs"].values()], width=0.25, label=description
+                xs + offset,
+                [r["stats"][field]["mean"] for r in trainer["runs"].values()],
+                width=0.25,
+                label=description,
             )
         pct = trainer["overhead"]["step_seconds"]["increase_pct"]
         axes[4, 0].set_title(f"Jupiter actual training · full loss-path overhead {pct:+.2f}%")

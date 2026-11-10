@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "name": "goncalof-h066-trainer-baseline-20261109",
+  "name": "goncalof-h066-trainer-nosync-baseline-20261109",
   "model": {
     "source": "/weka/gfaria/models/Olmo-3.5-Small-RL-h066",
     "format": "hf"
   },
   "output": {
-    "root": "/weka/gfaria/open-instruct/runs/scmc32-training-20261109/baseline",
+    "root": "/weka/gfaria/open-instruct/runs/scmc32-training-nosync-20261109/baseline",
     "export_hf": false,
     "rollout_sample_rate": 1.0
   },
@@ -99,8 +99,7 @@
     "diagnostic_interval": 0,
     "max_train_rollout_logprob_abs_diff": 0.1,
     "max_run_seconds": 3000,
-    "exclude_ungraded": false,
-    "synchronize_step_timing": true
+    "exclude_ungraded": false
   },
   "miles": {
     "seed": 17,

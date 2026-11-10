@@ -96,7 +96,7 @@ def main():
         "warmup_steps": args.warmup,
         "overhead": overhead,
         "scope": "Native PPO/GRPO baseline versus MILES REINFORCE score centering with TIS and MC32 array probes; full loss-path comparison.",
-        "limitations": "Separate jobs, synthetic balanced rewards, fixed response lengths, independently evolving policies. Synchronized host timings include CUDA work. Not a convergence test or paired same-trajectory benchmark.",
+        "limitations": "Separate jobs, synthetic balanced rewards, fixed response lengths, independently evolving policies. Native host wall timings, with no added CUDA synchronization; stage spans are not completed GPU execution times. Not a convergence test or paired same-trajectory benchmark.",
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "trainer-report.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -109,8 +109,8 @@ def main():
     xs = np.arange(2)
     for offset, field, label in [
         (-0.25, "step_seconds", "Optimizer update"),
-        (0, "forward_backward_seconds", "Forward + backward"),
-        (0.25, "optimizer_seconds", "Optimizer"),
+        (0, "forward_backward_seconds", "Forward/backward host span"),
+        (0.25, "optimizer_seconds", "Optimizer host span"),
     ]:
         axes[0].bar(xs + offset, [run["stats"][field]["mean"] for run in runs.values()], width=0.25, label=label)
     axes[0].set_ylabel("Mean seconds per measured update")
