@@ -193,6 +193,11 @@ def parse(value, launch):
                 raise InputError("SciCode development evaluation requires arguments.split=validation")
             if not isinstance(arguments.get("h5py_host_path"), str) or not arguments["h5py_host_path"]:
                 raise InputError("SciCode requires arguments.h5py_host_path for its reference data")
+            if "YOUR_" in arguments["h5py_host_path"]:
+                raise InputError(
+                    "SciCode arguments.h5py_host_path still contains a template placeholder: "
+                    f"{arguments['h5py_host_path']}. Point it at a readable copy of test_data.h5."
+                )
         elif "arguments" in task:
             raise InputError("evaluation task arguments require kind=external")
         preset = task.get("harness_preset", "default")
@@ -281,6 +286,30 @@ def total_updates(options):
         * options["n_samples_per_prompt"]
         // options["global_batch_size"]
     )
+
+
+def check_reference_data(config, mounts):
+    """Fail before training when an evaluator would later fail on missing reference data.
+
+    Evaluator jobs inherit the trainer's WEKA mounts, so a file the trainer cannot
+    see is a file they cannot see. A path below a declared mount that is absent on
+    this host (a run outside the cluster) cannot be judged and is left to the evaluator.
+    """
+    if config["mode"] != "background":
+        return
+    for task in config["tasks"]:
+        if task.get("kind") != "external":
+            continue
+        path = Path(task["arguments"]["h5py_host_path"])
+        mount = next((mount["mount_path"] for mount in mounts if path.is_relative_to(mount["mount_path"])), None)
+        if mount is not None and not Path(mount).is_dir():
+            logger.warning(f"Cannot verify SciCode reference data: {mount} is not mounted on this host")
+            continue
+        if not path.is_file():
+            raise InputError(
+                f"SciCode reference data is missing: {path}. Every SciCode evaluation of this run would fail; "
+                "correct evaluation.tasks arguments.h5py_host_path or remove the task."
+            )
 
 
 def snapshot(root, update):

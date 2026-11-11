@@ -598,3 +598,38 @@ def test_manual_scicode_cannot_override_client_model_name(three_node, arguments)
     document["evaluation"]["external_server_args"] = arguments
     with pytest.raises(InputError, match="cannot override snapshot, served model name"):
         RunSpec.from_dict(document)
+
+
+def scicode_document(three_node, path):
+    document = three_node.to_dict()
+    task = next(task for task in document["evaluation"]["tasks"] if task["task"] == "scicode")
+    task["arguments"]["h5py_host_path"] = str(path)
+    return document
+
+
+def test_scicode_template_placeholder_is_rejected_at_validation(three_node):
+    document = scicode_document(three_node, "/weka/oe-adapt-default/YOUR_USERNAME/scicode/test_data.h5")
+    with pytest.raises(InputError, match="template placeholder"):
+        RunSpec.from_dict(document)
+
+
+def test_missing_scicode_reference_data_stops_the_run_before_training(three_node, tmp_path):
+    spec = RunSpec.from_dict(scicode_document(three_node, tmp_path / "test_data.h5"))
+    mounts = spec.launch["weka_mounts"]
+    with pytest.raises(InputError, match="SciCode reference data is missing"):
+        evaluation.check_reference_data(spec.evaluation, mounts)
+    (tmp_path / "test_data.h5").touch()
+    evaluation.check_reference_data(spec.evaluation, mounts)
+
+
+def test_scicode_reference_data_below_an_absent_mount_is_left_to_the_evaluator(three_node, tmp_path):
+    spec = RunSpec.from_dict(scicode_document(three_node, tmp_path / "weka" / "test_data.h5"))
+    absent = [{"weka": "bucket", "mount_path": str(tmp_path / "weka")}]
+    evaluation.check_reference_data(spec.evaluation, absent)
+    (tmp_path / "weka").mkdir()
+    with pytest.raises(InputError, match="SciCode reference data is missing"):
+        evaluation.check_reference_data(spec.evaluation, absent)
+
+
+def test_shared_evaluation_has_no_reference_data_to_check():
+    evaluation.check_reference_data({"mode": "shared"}, [])

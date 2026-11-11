@@ -347,6 +347,8 @@ def run_directory(spec):
 
 
 def execute(spec):
+    # Before the run directory exists: a wrong path should not leave a failed run behind.
+    evaluation.check_reference_data(spec.evaluation, spec.launch.get("weka_mounts", []))
     with run_directory(spec) as (root, state):
         timing_args = SimpleNamespace(save=root)
         with stage(timing_args, "model_preparation"):

@@ -144,6 +144,11 @@ those CLI arguments replace the typed serving settings for SciCode only.
 Only SciCode currently
 has a supported external artifact contract. Development runs require
 `arguments.split="validation"` and an accessible `arguments.h5py_host_path`.
+Validation rejects a path that still contains a template placeholder (`YOUR_`).
+The training job checks that the file exists before it creates the run directory,
+because evaluator jobs receive the same WEKA mounts and would otherwise fail on it
+only after training; outside the cluster, where the path's mount is absent, the
+check is skipped with a warning.
 The evaluator checks per-problem predictions and step counts, rejecting
 infrastructure errors even when upstream reports success with numeric zero scores.
 SciCode's sandbox installs its pinned scientific dependencies from the upstream
