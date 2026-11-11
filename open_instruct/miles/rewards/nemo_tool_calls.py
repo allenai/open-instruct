@@ -56,8 +56,11 @@ def declared_tools(raw):
 @lru_cache(maxsize=4096)
 def contract(serialized):
     target = json.loads(serialized)
-    if set(target) != {"profile", "tool_format", "expected_action", "tools"}:
+    fields = set(target) - {"think_prefix_in_prompt"}
+    if fields != {"profile", "tool_format", "expected_action", "tools"}:
         raise ValueError("Unexpected single-step tool target fields")
+    if type(target.get("think_prefix_in_prompt", False)) is not bool:
+        raise ValueError("think_prefix_in_prompt must be a boolean")
     if target["profile"] not in THRESHOLDS:
         raise ValueError("Unknown native tool comparison profile")
     if target["tool_format"] not in {"olmo_pythonic_v1", "olmo_xml_v1"}:
@@ -86,6 +89,26 @@ def target_for_row(raw, options):
     if target["tool_format"] == "olmo_xml_v1":
         validate_xml_reference(target)
     return target
+
+
+def action_text(prediction, think_prefix_in_prompt=False):
+    """Return the response's action region, or None while its reasoning is still open.
+
+    Upstream NeMo Gym receives reasoning as a separate output item and grades only the
+    assistant message or calls that follow it. Reasoning that never closes therefore
+    contains no action, and prose or calls written inside it never count. Prompts that
+    end with the opening tag (``think_prefix_in_prompt``) leave it out of the response.
+    """
+    if "</think>" in prediction:
+        final = prediction.rsplit("</think>", 1)[1]
+    elif think_prefix_in_prompt or "<think>" in prediction:
+        return None
+    else:
+        final = prediction
+    # Reasoning reopened after the last close has not finished either.
+    if "<think>" in final:
+        return None
+    return common.answer_text(final)
 
 
 def parse_action(text, target):
@@ -171,8 +194,11 @@ class SingleStepToolVerifier(nvidia_constraints._IsolatedAdapter):
 
     def __call__(self, tokenized_prediction, prediction, label, **kwargs):
         target, expected, config = contract(json.dumps(label, allow_nan=False))
+        text = action_text(prediction, target.get("think_prefix_in_prompt", False))
+        if text is None:
+            return self.result(0.0, category="unclosed_thinking")
         try:
-            actual = parse_action(common.answer_text(prediction), target)
+            actual = parse_action(text, target)
             if actual is None:
                 return self.result(0.0, category="no_action")
             result = native.ActionComparator(config=config).compare_action(expected, actual)

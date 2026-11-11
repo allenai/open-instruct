@@ -438,9 +438,13 @@ def prepare(plan_path, output, tokenizer):
                     text = tokenizer.apply_chat_template(
                         render_messages, tokenize=False, add_generation_prompt=True, **template_options
                     )
-                    if verifier == "toolrl":
+                    if verifier in {"single_step_tool", "toolrl"}:
+                        # The verifier needs to know whether the prompt opened the reasoning
+                        # block, so that a response that never closes it earns no action.
                         if text.rstrip().endswith("<think>") and not text.endswith("<think>"):
-                            raise PlanError("ToolRL requires an exact reasoning prefix, without trailing whitespace")
+                            raise PlanError(
+                                "Tool sources require an exact reasoning prefix, without trailing whitespace"
+                            )
                         target["think_prefix_in_prompt"] = text.endswith("<think>")
                     tokens = len(tokenizer.encode(text, add_special_tokens=False))
                     registry[verifier] = {"factory": FACTORIES[verifier]}

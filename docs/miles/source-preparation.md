@@ -169,7 +169,15 @@ and 0 for SWE-pivot; numeric tolerance is 1e-6. Zero word-count tolerance still
 ignores word order. Calls take precedence over accompanying prose; with native
 parallel-call rewarding disabled, surplus calls are not penalized when the expected
 calls match. A message target rewards any nonempty assistant prose, not semantic
-equivalence to the reference message. Preserve these upstream limitations for
+equivalence to the reference message.
+
+Only the text after the reasoning is an action, as in NeMo Gym, which receives
+reasoning as a separate output item. A response whose reasoning never closes scores
+zero (category `unclosed_thinking`), and prose or calls written inside the reasoning
+never count. Preparation records whether the rendered prompt opens the reasoning
+block in the target's `think_prefix_in_prompt`; without that flag (sources prepared
+before it existed), an unclosed block is recognised only when the response itself
+contains `<think>`. Preserve these upstream limitations for
 initial mixing; investigate stricter behavior separately rather than silently
 changing reward semantics. Response parsing/resource failures score zero with
 diagnostics, while malformed targets remain fatal verifier errors.

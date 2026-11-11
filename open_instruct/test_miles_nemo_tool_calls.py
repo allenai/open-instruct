@@ -3,8 +3,10 @@
 import asyncio
 import copy
 import json
+from pathlib import Path
 
 import pytest
+from transformers.utils import chat_template_utils
 
 from open_instruct.miles.datasets import source_preparation
 from open_instruct.miles.rewards import nemo_tool_calls as tools
@@ -184,3 +186,122 @@ def test_existing_xml_target_with_bad_schema_scores_zero(schema):
     verifier = tools.SingleStepToolVerifier()
     assert verifier([], response, target).score == 0
     assert asyncio.run(verifier.async_call([], response, target)).score == 0
+
+
+def thinking_target(expected_action, think_prefix_in_prompt=True):
+    target = tools.target_for_row(raw_row(), {})
+    target["expected_action"] = expected_action
+    target["think_prefix_in_prompt"] = think_prefix_in_prompt
+    return target
+
+
+CALL = '<function_calls>lookup(item="apples", count=2)</function_calls>'
+MESSAGE = {"type": "message", "content": "Reference prose"}
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "I should tell the user the stock levels.",  # the prompt opened reasoning; it never closed
+        "<think>I should tell the user the stock levels.",  # the response opened it itself
+        "Plan.</think>Here are the varieties.<think>More thought",  # reopened and left open
+    ],
+)
+def test_unclosed_reasoning_is_not_a_reply(response):
+    verifier = tools.SingleStepToolVerifier()
+    result = verifier([], response + "<|endoftext|>", thinking_target(MESSAGE))
+    assert result.score == 0
+    assert result.diagnostics["category"] == "unclosed_thinking"
+
+
+def test_reply_after_closed_reasoning_still_earns_message_credit():
+    verifier = tools.SingleStepToolVerifier()
+    assert verifier([], "Plan the reply.</think>We have two varieties.<|im_end|>", thinking_target(MESSAGE)).score == 1
+    # Closing the reasoning is not itself a reply.
+    assert verifier([], "Plan the reply.</think>\n<|im_end|>", thinking_target(MESSAGE)).score == 0
+
+
+def test_calls_inside_reasoning_never_count():
+    verifier = tools.SingleStepToolVerifier()
+    expected_call = {"type": "function_call", "name": "lookup", "arguments": '{"item":"apples","count":2}'}
+    # A call drafted in unfinished reasoning is not an action.
+    assert verifier([], "Maybe " + CALL + " would work", thinking_target(expected_call)).score == 0
+    # A call drafted in closed reasoning is not an action either; the prose after it is the action.
+    assert verifier([], "Maybe " + CALL + "</think>Let me check.", thinking_target(expected_call)).score == 0
+    assert verifier([], "Maybe " + CALL + "</think>Let me check.", thinking_target(MESSAGE)).score == 1
+    assert verifier([], "Check stock.</think>" + CALL, thinking_target(expected_call)).score == 1
+
+
+def test_non_thinking_prompts_keep_grading_the_whole_response():
+    verifier = tools.SingleStepToolVerifier()
+    assert verifier([], "We have two varieties.", thinking_target(MESSAGE, think_prefix_in_prompt=False)).score == 1
+    # Labels prepared before the flag existed keep their previous behaviour.
+    assert verifier([], CALL, tools.target_for_row(raw_row(), {})).score == 1
+
+
+def test_think_prefix_flag_must_be_boolean():
+    target = thinking_target(MESSAGE)
+    target["think_prefix_in_prompt"] = "yes"
+    with pytest.raises(ValueError, match="boolean"):
+        tools.SingleStepToolVerifier()([], "Reply.", target)
+
+
+class TemplateTokenizer:
+    def __init__(self, prefix):
+        self.chat_template = (Path(__file__).parent / "test_data/olmo35_chat_template.jinja").read_text()
+        self.prefix = prefix
+
+    def apply_chat_template(self, messages, **kwargs):
+        rendered = chat_template_utils._compile_jinja_template(self.chat_template).render(
+            messages=messages,
+            tools=kwargs.get("tools", []),
+            eos_token="<|endoftext|>",
+            add_generation_prompt=kwargs.get("add_generation_prompt", False),
+        )
+        if kwargs.get("add_generation_prompt"):
+            rendered = rendered.removesuffix("<think>") + self.prefix
+        return rendered
+
+    def encode(self, text, **kwargs):
+        return list(text.encode())
+
+
+@pytest.mark.parametrize("prefix", ["", "<think>"])
+def test_preparation_records_whether_the_prompt_opens_reasoning(tmp_path, prefix):
+    source = tmp_path / "train.jsonl"
+    source.write_text(json.dumps(raw_row()) + "\n")
+    receipt = tmp_path / "hygiene.json"
+    receipt.write_text('{"test_fixture":true}')
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "sources": {
+                    "nemo_tools": {
+                        "adapter": "single_step_tool_v1",
+                        "options": {"tool_format": "olmo_xml_v1"},
+                        "inputs": [
+                            {
+                                "path": str(source),
+                                "sha256": source_preparation.file_hash(source),
+                                "revision": "test",
+                                "split": "train",
+                            }
+                        ],
+                        "hygiene_receipt": {"path": str(receipt), "sha256": source_preparation.file_hash(receipt)},
+                    }
+                },
+            }
+        )
+    )
+    tokenizer = TemplateTokenizer(prefix)
+    output = tmp_path / "prepared"
+    catalog = source_preparation.prepare(plan, output, tokenizer)
+    entry = catalog["sources"]["nemo_tools"]
+    rows = [json.loads(line) for line in (output / entry["prompt_data"]["path"]).read_text().splitlines()]
+    (target,) = [spec["target"] for spec in rows[0]["metadata"]["verifiers"]]
+    assert target["think_prefix_in_prompt"] is bool(prefix)
+    tokenizer.prefix = "<think>\n"
+    with pytest.raises(source_preparation.PlanError, match="whitespace"):
+        source_preparation.prepare(plan, tmp_path / "whitespace-prefix", tokenizer)
