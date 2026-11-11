@@ -13,6 +13,13 @@
 #          --extra_numpy_dirs; S_R=<steps> is required (H182 R4', per seed, from the offline loader replay).
 #   b1r-superior|b1r-ifchatv2|b1r-sciv1|b1r-scimcq   ledger H183-H186: b1r plus one source parquet at 1.0 (the
 #          source screen's cache) and the arm's own replay dir; S_R from the arm's R4'.
+#   b1r-qwen   b1r with C12's Dolci parquet replaced by its Qwen3.8-27B regeneration (QWEN_PARQUET, built by
+#          the qwen-c12 data job: same rows minus those without a Qwen answer, final assistant turn replaced). The
+#          other three C12 parquets, their weights and H182's replay dir are unchanged, and S_R is the control
+#          seed's own (18,410 for 34521), so the token budget matches H182. Its cache is QWEN_CACHE, built by
+#          MODE=tokenize. Uses chrisg_ secrets.
+#   tokenize   (mode) 1 node, 0 GPUs: olmo_core_finetune.py --cache_dataset_only with the arm's exact tokenization
+#          arguments; prints the numpy cache dir to pass back as QWEN_CACHE.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -70,7 +77,7 @@ LR=5e-5
 EXTRA_ARGS=""
 DESC="ledger H161 GPU companion (draft)"
 case "$ARM" in
-    b1r|b1r-superior|b1r-ifchatv2|b1r-sciv1|b1r-scimcq)
+    b1r|b1r-superior|b1r-ifchatv2|b1r-sciv1|b1r-scimcq|b1r-qwen)
          MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
          HF_REF=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed
          LR=2e-4; REPLAY=/weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r
@@ -84,7 +91,13 @@ case "$ARM" in
              (sciv1) HYP=h185; ADD=$D/h174/data/sciv1-b41afb5d.parquet; CACHE=e55fb4bb90-6068a350-rowaligned ;;
              (scimcq) HYP=h186; ADD=$D/h175/data/out-a1/h175-scimcq-6a60033f.parquet; CACHE=125b9c5edc-6068a350-rowaligned ;;
          esac
-         if [[ -n "$SRC" ]]; then
+         if [[ "$SRC" == qwen ]]; then
+             QP="${QWEN_PARQUET:?QWEN_PARQUET=<qwen-dolci-c12-*.parquet>}"
+             MIXER="${MIXER/$P\/dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet/$QP}"
+             [[ "$MIXER" == "$QP "* ]] || { echo "Dolci parquet not replaced in MIXER" >&2; exit 1; }
+             CACHE="${QWEN_CACHE:-}"; HYP=qwenc12; SECRETS=chrisg
+             OUT_ROOT=/weka/olmo-3p5-post-checkpoints/chrisg/qwen-c12-gpu; DESC="qwen-c12 b1r (H182 recipe, Qwen Dolci)"; HOURS=16
+         elif [[ -n "$SRC" ]]; then
              MIXER="$MIXER $ADD 1.0"; REPLAY=/weka/olmo-3p5-post-checkpoints/abhishekr/$HYP/replay-$SRC
              OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/$HYP-gpu; DESC="ledger $HYP $SRC-b1-gpu"; HOURS=16
          fi
@@ -105,6 +118,8 @@ case "$MODE" in
            MIN_RUNTIME="${MIN_RUNTIME:-5m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-1}"
            MAX_RETRIES="${MAX_RETRIES:-1}" ;;
     train) MIN_RUNTIME="${MIN_RUNTIME:-1h}"; ENTRY=open_instruct/olmo_core_finetune.py; AUTO_RESUME="${AUTO_RESUME:-1}" ;;
+    tokenize) RUN_NAME="${RUN_NAME}-tokenize"; MIN_RUNTIME="${MIN_RUNTIME:-8h}"; HOURS=14; AUTO_RESUME="${AUTO_RESUME:-1}"
+           ENTRY=open_instruct/olmo_core_finetune.py ;;
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
 esac
 TIMEOUT="${TIMEOUT:-${HOURS}h}"
@@ -181,6 +196,11 @@ fi
 exit \$RC"
     EXTRA_ENV='{"name": "H161_DUMP_DIR", "value": "'"$DUMP_DIR"'"}, {"name": "H161_NO_FINAL_SAVE", "value": "1"},
     {"name": "H161_BATCH_HASH", "value": "1"},'
+elif [[ "$MODE" == tokenize ]]; then
+    CMD="echo H161-TOKENIZE-START \$(date -u +%FT%TZ); python $ENTRY $ARGS --cache_dataset_only; RC=\$?
+ls -la /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/ | tail -5
+echo H161-TOKENIZE-EXIT \$RC \$(date -u +%FT%TZ); exit \$RC"
+    EXTRA_ENV=""
 else
     CMD="$WAIT
 $TORCHRUN"
@@ -192,7 +212,6 @@ CMD="$CMD" python3 - "$SPEC" <<EOF
 import json, os, sys
 env = [
     {"name": "OLMO_SHARED_FS", "value": "1"},
-    {"name": "EXPECTED_NUMPY_CACHE", "value": "$CACHE"},
     {"name": "HF_HOME", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/huggingface"},
     {"name": "HF_DATASETS_CACHE", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/huggingface"},
     {"name": "HF_HUB_CACHE", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/hub"},
@@ -200,10 +219,12 @@ env = [
     {"name": "NCCL_SOCKET_IFNAME", "value": "ib"},
     {"name": "NCCL_IB_HCA", "value": "^=mlx5_bond_0"},
     $EXTRA_ENV
-    {"name": "HF_TOKEN", "secret": "abhishekr_HF_TOKEN"},
-    {"name": "WANDB_API_KEY", "secret": "abhishekr_WANDB_API_KEY"},
-    {"name": "BEAKER_TOKEN", "secret": "abhishekr_BEAKER_TOKEN"},
+    {"name": "HF_TOKEN", "secret": "${SECRETS:-abhishekr}_HF_TOKEN"},
+    {"name": "WANDB_API_KEY", "secret": "${SECRETS:-abhishekr}_WANDB_API_KEY"},
+    {"name": "BEAKER_TOKEN", "secret": "${SECRETS:-abhishekr}_BEAKER_TOKEN"},
 ]
+if "$CACHE":
+    env.insert(1, {"name": "EXPECTED_NUMPY_CACHE", "value": "$CACHE"})
 task = {
     "name": "$RUN_NAME",
     "image": {"beaker": "$IMAGE"},
@@ -229,6 +250,11 @@ spec = {"version": "v2", "budget": "ai2/oe-other",
         "tasks": [task]}
 if int("${MAX_RETRIES:-0}"):
     spec["retry"] = {"allowedTaskRetries": int("${MAX_RETRIES:-0}")}
+if "$MODE" == "tokenize":
+    for k in ("replicas", "leaderSelection", "hostNetworking", "propagateFailure", "propagatePreemption", "synchronizedStartTimeout"):
+        task.pop(k)
+    task["resources"] = {"cpuCount": 64, "memory": "400GiB"}
+    task["constraints"] = {"cluster": ["ai2/hammond", "ai2/phobos", "ai2/saturn", "ai2/neptune", "ai2/jupiter"]}
 json.dump(spec, open(sys.argv[1], "w"), indent=1)
 EOF
 if [[ "${DRY_RUN:-0}" == 1 ]]; then cat "$SPEC"; exit 0; fi
