@@ -139,15 +139,19 @@ harness = { "sandboxes.0.inject_swerex" = true }
 [[evaluation.tasks]]
 task = "scicode"
 kind = "external"
-# Reference data: olmo-eval's shared Ai2 copy. The run stops before training if
-# this file is not readable in the training job, because every SciCode job would
-# fail on it later. If you point this elsewhere, the path must sit under one of
-# the launch.weka_mounts above; evaluator jobs receive only those mounts.
+# Reference data: the only copy found on WEKA on 2026-11-11 (1.0 GB, sha256
+# 48b0272a88b17dbd29777c217e1b4fb2b019b92e11cc2add847409db9541b890). It sits in a
+# personal directory, so it can move; olmo-eval's own default,
+# /weka/oe-adapt-default/finbarrt/scicode/test_data.h5, no longer exists.
+# The run stops before training if this file is not readable in the training
+# job, because every SciCode job would fail on it later. If you point this
+# elsewhere, the path must sit under one of the launch.weka_mounts above;
+# evaluator jobs receive only those mounts.
 # Still unverified by that check: SciCode starts its own model server and its
 # sandbox installs scientific packages from the network at startup. Watch the
 # update-0 SciCode job to completion before relying on the final one; neither
 # the trainer nor the submitter reports or retries a failed evaluator job.
-arguments = { split = "validation", h5py_host_path = "/weka/oe-adapt-default/finbarrt/scicode/test_data.h5" }
+arguments = { split = "validation", h5py_host_path = "/weka/oe-training-default/robertb/open-instruct/data/rl-dataset-qualification/eval-assets/scicode-48b0272a88b1/test_data.h5" }
 
 # Text safety for reasoning models. olmo-eval manages these evaluation judges
 # on the additional GPU reserved per group, separate from the policy server.
