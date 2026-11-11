@@ -138,6 +138,9 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR $EXTRA_ARGS"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
+# chrisg_WANDB_API_KEY gets a 403 on ai2-llm; W&B is off for chrisg runs (owner's decision 2026-11-02, H170/H174),
+# and losses are read from Beaker stdout (--logging_steps 1).
+if [[ "${SECRETS:-abhishekr}" == chrisg ]]; then ARGS="${ARGS/ --with_tracking/}"; fi
 
 BASE_RECEIPT="$(dirname "$MODEL")/RECEIPT.json"
 WAIT="for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
