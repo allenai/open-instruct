@@ -4,12 +4,12 @@ from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
 
 
-def enabled(options):
+def is_enabled(options):
     return options.get("loss_type") == "score_centering"
 
 
 def validate(options):
-    if not enabled(options):
+    if not is_enabled(options):
         return
     validation.integer(options.get("rollout_top_logprobs_num", 0), "miles.rollout_top_logprobs_num")
     validation.choice(options.get("score_centering_is", "none"), "miles.score_centering_is", ("none", "tis", "mis"))
@@ -39,5 +39,5 @@ def validate(options):
         raise InputError("Score centering requires miles.sglang_enable_fp32_lm_head=true")
 
 
-def weighted(options):
-    return enabled(options) and options.get("score_centering_is", "none") in ("tis", "mis")
+def uses_importance_sampling(options):
+    return is_enabled(options) and options.get("score_centering_is", "none") in ("tis", "mis")

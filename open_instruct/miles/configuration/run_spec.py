@@ -747,7 +747,7 @@ class RunSpec:
             raise InputError(
                 "off_policy_correction supports tis; other corrections require an explicitly qualified custom_tis_function_path"
             )
-        centering = score_centering.enabled(miles)
+        centering = score_centering.is_enabled(miles)
         if "off_policy_correction" in controls and centering:
             put("miles.score_centering_is", "tis", controls["off_policy_correction"][1])
         elif "off_policy_correction" in controls:
@@ -760,7 +760,9 @@ class RunSpec:
                 "use_tis and use_rollout_logprobs cannot both be enabled; use use_tis=true with use_rollout_logprobs=false for trainer-scored correction."
             )
         if asynchronous:
-            if not (miles["use_tis"] or miles["use_rollout_logprobs"] or score_centering.weighted(miles)):
+            if not (
+                miles["use_tis"] or miles["use_rollout_logprobs"] or score_centering.uses_importance_sampling(miles)
+            ):
                 raise InputError(
                     "Async training requires TIS, score_centering_is=tis/mis, or an explicit rollout-logprob policy anchor"
                 )

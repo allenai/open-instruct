@@ -343,7 +343,7 @@ class RunConfig:
                 options[name] = True
             if not options.get("sglang_router_policy"):
                 options.setdefault("router_policy", "round_robin")
-        if self.core.fp32_lm_head or score_centering.enabled(options):
+        if self.core.fp32_lm_head or score_centering.is_enabled(options):
             if options.get("sglang_enable_fp32_lm_head") is False:
                 raise constraints.error("core.fp32_lm_head conflicts with miles.sglang_enable_fp32_lm_head=false")
             options["sglang_enable_fp32_lm_head"] = True
@@ -735,7 +735,7 @@ class RunConfig:
             self._validate_engine_drain(options, collection, samples)
         except InputError as error:
             raise InputError(str(error).replace("engine_drain", "refresh")) from error
-        if not (options.get("use_tis", False) or score_centering.weighted(options)) or options.get(
+        if not (options.get("use_tis", False) or score_centering.uses_importance_sampling(options)) or options.get(
             "use_rollout_logprobs", False
         ):
             raise constraints.error(
