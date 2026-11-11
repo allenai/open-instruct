@@ -61,6 +61,20 @@ The key implementation idea is that you configure the rollout from the script la
 - **Usage costs:** keyed requests are billed per You.com's pricing. See [you.com/platform](https://you.com/platform?utm_source=allenai-open-instruct&utm_medium=oss_integration&utm_campaign=2026-10-oss-integrations&utm_content=docs) for current rates and credits. Every tool call during rollouts is a billed request.
 - **Attribution:** requests to You.com send `User-Agent: youdotcom-integration/allenai-open-instruct` so You.com can attribute the traffic. The header is set only on requests to You.com, not on other tools' traffic.
 
+### Optional keyless search through `generic_mcp`: Keenable
+
+`generic_mcp` can connect to any hosted Streamable HTTP MCP server, so a keyless web search backend doesn't need a dedicated tool class. For example, [Keenable's public MCP server](https://docs.keenable.ai/mcp-server) needs no account or API key:
+
+```bash
+--tools generic_mcp \
+--tool_configs '{"server_url": "https://api.keenable.ai/mcp-public", "transport": "http", "timeout": 60}'
+```
+
+With no `tool_name`, Open-Instruct discovers the server's tools at startup and registers `search_web_pages` (takes `query`) and `fetch_page_content` (takes `url`) under those names. To expose only search, add `"tool_name": "search_web_pages"` and pick the name the model sees with `--tool_call_names`.
+
+- **Opt-in:** nothing changes unless you select it. It doesn't replace Serper, You.com, S2, or other configured tools.
+- **Network and limits:** queries and requested URLs leave the local machine, so omit it for offline runs. Anonymous access is rate limited. Errors come back through `generic_mcp`'s normal error and retry handling, with no fallback to another provider. No credentials are read or sent.
+
 ## Adding Your Own Tools or Environments
 
 When adding your own tool or environment, there are three potential options:
