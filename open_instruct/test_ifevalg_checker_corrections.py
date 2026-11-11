@@ -111,3 +111,36 @@ def test_legacy_keyword_generation_and_scores():
     assert not checker.check_following("computer computer")
     checker.build_description(keyword="(?i)apple")
     assert checker.check_following("APPLE")
+
+
+CAPITAL_ENGLISH = (
+    "SONS: ROBERT, JOHN, TAZEWELL, DAVID, JOHN ALEXANDER, LACHLAN, LYON, ROBERT FITZWALTER. "
+    "DAUGHTERS: MARY, LETITIA, ELIZABETH, ANNE, ALICE, JULIA, MARGARET PEARL."
+)
+
+
+def test_capital_checker_detects_language_on_lowercased_text():
+    checker = instructions.CapitalLettersEnglishChecker("change_case:english_capital")
+    checker.build_description()
+    with patch.object(instructions.langdetect, "detect", return_value="en") as detect:
+        assert checker.check_following("THE ANSWER IS YES.")
+        assert not checker.check_following("The answer is yes.")
+    detect.assert_called_once_with("the answer is yes.")
+
+
+def test_capital_checker_accepts_capitalised_english_and_rejects_other_languages():
+    checker = instructions.CapitalLettersEnglishChecker("change_case:english_capital")
+    checker.build_description()
+    # Unseeded langdetect on the capitalised text reports German for this published answer.
+    assert checker.check_following(CAPITAL_ENGLISH)
+    assert not checker.check_following("DIE BESPRECHUNG BEGINNT HEUTE UM ZWÖLF UHR IM GROSSEN SAAL.")
+    assert not checker.check_following(CAPITAL_ENGLISH.lower())
+
+
+def test_language_verdicts_do_not_depend_on_the_random_state():
+    # Capitalised text leaves langdetect near a tie, which is where unseeded calls disagree.
+    text = "THE MEETING WILL START AT NOON AND EVERYONE SHOULD BRING THEIR NOTES."
+    instructions.langdetect.DetectorFactory.seed = None
+    verdicts = {instructions._detect_language(text) for _ in range(20)}
+    assert len(verdicts) == 1
+    assert instructions.langdetect.DetectorFactory.seed == 0

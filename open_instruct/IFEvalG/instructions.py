@@ -28,6 +28,16 @@ from open_instruct.IFEvalG import instructions_util
 
 _InstructionArgsDtype = dict[str, int | str | Sequence[str]] | None
 
+
+def _detect_language(text: str) -> str:
+    """Return langdetect's language code for `text`, the same one on every call."""
+    # TODO: consider alternative language detection.
+    # langdetect samples its smoothing weight, so an unseeded call can label one text
+    # differently from run to run. Seeding here keeps a response's verdict fixed.
+    langdetect.DetectorFactory.seed = 0
+    return langdetect.detect(text)
+
+
 _LANGUAGES = instructions_util.LANGUAGE_CODES
 
 # The relational operation for comparison.
@@ -178,7 +188,7 @@ class ResponseLanguageChecker(Instruction):
         assert isinstance(value, str)
 
         try:
-            return langdetect.detect(value) == self._language
+            return _detect_language(value) == self._language
         except langdetect.LangDetectException as e:
             # Count as instruction is followed.
             logging.error("Unable to detect language for text %s due to %s", value, e)  # refex: disable=pytotw.037
@@ -1360,7 +1370,10 @@ class CapitalLettersEnglishChecker(Instruction):
         assert isinstance(value, str)
 
         try:
-            return value.isupper() and langdetect.detect(value) == "en"
+            # langdetect discards every word written entirely in capitals, treating it as an
+            # acronym, so it has almost nothing to read in a correct answer. Detect on a
+            # lowercased copy; the capital-letter requirement is checked on the original.
+            return value.isupper() and _detect_language(value.lower()) == "en"
         except langdetect.LangDetectException as e:
             # Count as instruction is followed.
             logging.error("Unable to detect language for text %s due to %s", value, e)  # refex: disable=pytotw.037
@@ -1389,7 +1402,7 @@ class LowercaseLettersEnglishChecker(Instruction):
         assert isinstance(value, str)
 
         try:
-            return value.islower() and langdetect.detect(value) == "en"
+            return value.islower() and _detect_language(value) == "en"
         except langdetect.LangDetectException as e:
             # Count as instruction is followed.
             logging.error("Unable to detect language for text %s due to %s", value, e)  # refex: disable=pytotw.037
