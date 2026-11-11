@@ -197,7 +197,12 @@ exit \$RC"
     EXTRA_ENV='{"name": "H161_DUMP_DIR", "value": "'"$DUMP_DIR"'"}, {"name": "H161_NO_FINAL_SAVE", "value": "1"},
     {"name": "H161_BATCH_HASH", "value": "1"},'
 elif [[ "$MODE" == tokenize ]]; then
-    CMD="echo H161-TOKENIZE-START \$(date -u +%FT%TZ); python $ENTRY $ARGS --cache_dataset_only; RC=\$?
+    # A resume with every sample already collected calls select(range(N, N)), which datasets rejects;
+    # select([]) gives the empty dataset the loop expects. Patched in the container, checked by grep.
+    CMD="F=open_instruct/numpy_dataset_conversion.py
+sed -i 's/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples)) if start_idx < total_samples else train_dataset.select([])/' \$F
+grep -q 'else train_dataset.select(\[\])' \$F || { echo H161-PATCH-FAILED; exit 2; }
+echo H161-TOKENIZE-START \$(date -u +%FT%TZ); python $ENTRY $ARGS --cache_dataset_only; RC=\$?
 ls -la /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/ | tail -5
 echo H161-TOKENIZE-EXIT \$RC \$(date -u +%FT%TZ); exit \$RC"
     EXTRA_ENV=""
