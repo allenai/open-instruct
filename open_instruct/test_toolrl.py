@@ -155,6 +155,42 @@ def test_truncated_response_gets_the_verifier_floor_not_a_fixed_zero(tmp_path, u
     )
 
 
+@pytest.mark.parametrize("gate", [None, "truncated", "missing_final_answer"])
+@pytest.mark.parametrize("mask_ungraded", [False, True])
+def test_invalid_target_uses_the_same_training_failure_policy_with_or_without_gate(
+    tmp_path, monkeypatch, gate, mask_ungraded
+):
+    args, sample = _toolrl_sample(
+        tmp_path, {"unit_scale": False}, "truncated" if gate == "truncated" else "completed", "malformed"
+    )
+    args.olmo_core.reward_final_answer_only = gate == "missing_final_answer"
+    args.save = str(tmp_path / "capture")
+    sample.group_index = 7
+    sample.metadata["verifiers"][0]["target"] = {"format": "invalid"}
+    monkeypatch.setattr(rewards, "masks_ungraded", lambda unused: mask_ungraded)
+
+    assert asyncio.run(rewards.rollout_reward(args, sample)) == (0.0 if mask_ungraded else None)
+    assert sample.metadata["reward_omission"]["verifier"] == "toolrl"
+    assert "ValueError: ToolRL reference requires olmo-toolrl-v1" in sample.metadata["reward_omission"]["error"]
+    assert "reward_components" not in sample.metadata
+    if gate:
+        assert sample.metadata["reward_gate"] == gate
+    captures = list((Path(args.save) / "verifier_failures").glob("*.json"))
+    assert len(captures) == 1
+    assert json.loads(captures[0].read_text())["verifier"]["target"] == {"format": "invalid"}
+
+
+@pytest.mark.parametrize("gate", [None, "truncated", "missing_final_answer"])
+def test_invalid_target_still_raises_in_evaluation_with_or_without_gate(tmp_path, gate):
+    args, sample = _toolrl_sample(
+        tmp_path, {"unit_scale": False}, "truncated" if gate == "truncated" else "completed", "malformed"
+    )
+    args.olmo_core.reward_final_answer_only = gate == "missing_final_answer"
+    sample.metadata["verifiers"][0]["target"] = {"format": "invalid"}
+    with pytest.raises(ValueError, match="ToolRL reference requires olmo-toolrl-v1"):
+        asyncio.run(rewards.rollout_reward(args, sample))
+
+
 def test_score_outside_the_unit_range_warns_once_per_verifier(tmp_path, caplog):
     rewards._RANGE_WARNED.clear()
     args, sample = _toolrl_sample(tmp_path, {"unit_scale": False}, "completed", "malformed")

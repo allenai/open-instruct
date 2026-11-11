@@ -1,10 +1,12 @@
 """MILES bindings for ToolRL's offline reference-call reward.
 
 ToolRL's published reward runs from -3 to 4 on rows that expect calls and from 0
-to 1 on rows that expect none. MILES rewards are otherwise in [0, 1], and a group's
-advantages scale with its reward range, so the binding maps both row kinds onto
-[0, 1] by default. Within one prompt group this is a positive rescaling: it keeps
-the ordering and relative spacing of the responses. ``unit_scale=False`` keeps the
+to 1 on rows that expect none. MILES rewards are otherwise in [0, 1]. Without
+``grpo_std_normalization``, a group's advantages scale with its reward range, so
+this binding maps both row kinds onto [0, 1] by default. With group std
+normalization, this affine rescaling leaves advantages unchanged apart from
+numerical stabilization. Within one prompt group this is a positive rescaling:
+it keeps the ordering and relative spacing of the responses. ``unit_scale=False`` keeps the
 published scale; ``score_floor`` then tells the reward gates that the worst score
 on a call row is -3, not 0.
 """

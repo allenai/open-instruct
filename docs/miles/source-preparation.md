@@ -118,13 +118,19 @@ reasoning/answer boundary as well as the calls.
 | No reference calls | Plain response format only, from 0 to 1; no factual correctness check | Unchanged |
 
 The reward factory is `open_instruct.miles.rewards.toolrl.ToolRLVerifier`. It
-returns the training reward on 0 to 1 by default, because a prompt group's
-advantages scale with its reward range and every other MILES verifier is on 0 to
-1; diagnostics keep the published values (`partial_score`, `binary_score`). The
-mapping is one positive rescaling per row, so the ordering and relative spacing of
-responses within a group are those of the published reward. Set the verifier
-config `unit_scale: false` to train on the published scale. The truncated-response
-gate gives a response the verifier's lowest score for that row (0 by default, −3
+returns the training reward on 0 to 1 by default. Without
+`grpo_std_normalization`, a prompt group's advantages scale with its reward range;
+every other MILES verifier is on 0 to 1. Structured run files default this
+normalization to off; the raw MILES parser defaults it to on. With normalization
+on, the affine rescaling leaves advantages unchanged apart from numerical
+stabilization; the floor gate still fixes the truncation incentive on the
+published scale. Diagnostics keep the published values (`partial_score`,
+`binary_score`). The mapping is one positive rescaling per row, so the ordering
+and relative spacing of responses within a group are those of the published
+reward. Set the verifier
+config `unit_scale: false` to train on the published scale. When resuming a run
+started on the published scale, set this explicitly to avoid changing reward
+scales mid-run. The truncated-response gate gives a response the verifier's lowest score for that row (0 by default, −3
 for a call row on the published scale), so a truncated response never outranks a
 completed wrong answer. Any verifier score outside 0 to 1 is logged once per
 verifier as a warning.
