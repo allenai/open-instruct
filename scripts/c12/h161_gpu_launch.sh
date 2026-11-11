@@ -253,7 +253,7 @@ if int("${MAX_RETRIES:-0}"):
 if "$MODE" == "tokenize":
     for k in ("replicas", "leaderSelection", "hostNetworking", "propagateFailure", "propagatePreemption", "synchronizedStartTimeout"):
         task.pop(k)
-    task["resources"] = {"cpuCount": 64, "memory": "400GiB"}
+    task["resources"] = {"cpuCount": 64, "memory": "${TOK_MEMORY:-1000GiB}"}
     task["constraints"] = {"cluster": ["ai2/hammond", "ai2/phobos", "ai2/saturn", "ai2/neptune", "ai2/jupiter"]}
 json.dump(spec, open(sys.argv[1], "w"), indent=1)
 EOF
