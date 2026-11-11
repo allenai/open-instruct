@@ -9,9 +9,11 @@ import ast
 import json
 import re
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import Any
 
 from jsonschema import validators
+from jsonschema.exceptions import SchemaError
 from referencing import Registry, Resource
 from referencing.exceptions import Unresolvable
 from referencing.jsonschema import DRAFT202012
@@ -54,17 +56,29 @@ def _literal(node):
     raise ValueError("Tool arguments must contain JSON values only")
 
 
+@lru_cache(maxsize=256)
+def _schema_validator(serialized):
+    schema = json.loads(serialized)
+    cls = validators.validator_for(schema)
+    try:
+        cls.check_schema(schema)
+    except SchemaError as error:
+        raise ValueError("Invalid tool parameter schema") from error
+    return cls(schema, registry=Registry())
+
+
 def parameter_value(value, schema, root_schema=None):
     """Decode native unquoted strings and JSON scalars/containers using the tool schema."""
     value = value.strip()
+    root_schema = root_schema if root_schema is not None else schema
+    validator = _schema_validator(json.dumps(root_schema, sort_keys=True, allow_nan=False))
     if schema is False:
         raise ValueError("Parameter forbidden by its schema")
     schema = schema if isinstance(schema, dict) else {}
     # Unconstrained and plain string parameters retain the native unquoted spelling.
     if not schema or schema.get("type") == "string":
         return value
-    root_schema = root_schema or schema
-    validator = validators.validator_for(root_schema)(root_schema, registry=Registry()).evolve(schema=schema)
+    validator = validator.evolve(schema=schema)
     return _decode_parameter(value, validator.is_valid)
 
 
@@ -90,6 +104,7 @@ def property_value(value, name, schema):
     Projection considers only this property's constraints. Required sibling fields
     and oneOf branch exclusivity are checked against the complete final instance.
     """
+    _schema_validator(json.dumps(schema, sort_keys=True, allow_nan=False))
     if not any(key in schema for key in ("$ref", "$dynamicRef", "allOf", "anyOf", "oneOf")):
         return parameter_value(value, schema.get("properties", {}).get(name, {}), schema)
     resource = Resource.from_contents(schema, default_specification=DRAFT202012)

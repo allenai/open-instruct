@@ -457,8 +457,11 @@ def test_xml_structured_payload_retains_schema_reward_and_rejects_wrong_calls():
         assert verifier([], invalid, target).score == 0
 
 
-def test_source_preparation_records_xml_target_and_template_identity(tmp_path):
+@pytest.mark.parametrize("root_ref", [False, True])
+def test_source_preparation_records_xml_target_and_template_identity(tmp_path, root_ref):
     schema = {"type": "object", "properties": {"n": {"type": "integer"}}}
+    if root_ref:
+        schema = {"$defs": {"payload": schema}, "$ref": "#/$defs/payload"}
     raw = {
         "schema_type": "json",
         "schema_str": json.dumps(schema),
@@ -504,6 +507,9 @@ def test_source_preparation_records_xml_target_and_template_identity(tmp_path):
     source_preparation.prepare(plan, tmp_path / "output", tokenizer)
     row = json.loads((tmp_path / "output/structured/prompts.jsonl").read_text())
     assert row["label"]["tool_call_format"] == "olmo_xml_v1"
+    assert row["label"]["schema_policy"] == "nemo_strict_v1"
+    response = "<tool_call><function=submit><parameter=n>3</parameter></function></tool_call>"
+    assert asyncio.run(structured.StructuredOutputVerifier().async_call([], response, row["label"])).score == 1
     assert row["metadata"]["rendering_template_sha256"] == hashlib.sha256(tokenizer.chat_template.encode()).hexdigest()
 
 
@@ -536,10 +542,11 @@ def test_source_preparation_records_xml_target_and_template_identity(tmp_path):
     ids=["root-ref", "root-dynamic-ref", "root-allof", "nested-resource-scope"],
 )
 @pytest.mark.parametrize("payload_key", [None, "result"])
-def test_xml_answers_resolve_root_property_schemas(schema, payload_key):
+@pytest.mark.parametrize("schema_policy", ["as_declared", "nemo_strict_v1"])
+def test_xml_answers_resolve_root_property_schemas(schema, payload_key, schema_policy):
     target = {
         "format": "json",
-        "schema_policy": "as_declared",
+        "schema_policy": schema_policy,
         "schema": schema,
         "response_mode": "tool_call",
         "tool_name": "submit",
@@ -596,3 +603,20 @@ def test_xml_property_projection_leaves_branch_selection_to_final_validation(key
     verifier = structured.StructuredOutputVerifier()
     assert verifier([], response, target).score == 1
     assert verifier([], response.replace("left", "neither"), target).score == 0
+
+
+@pytest.mark.parametrize("arguments", ["result=", 'result={"n":3} x', "**"])
+def test_malformed_pythonic_answers_score_zero_and_worker_recovers(arguments):
+    verifier = structured.StructuredOutputVerifier()
+    response = f"<function_calls>submit({arguments})</function_calls>"
+    assert verifier([], response, tool_target()).score == 0
+
+    async def run():
+        result = await verifier.async_call([], response, tool_target())
+        assert result.score == 0
+        assert result.diagnostics["status"] == "parse_error"
+        assert (
+            await verifier.async_call([], '<function_calls>submit(result={"n":3})</function_calls>', tool_target())
+        ).score == 1
+
+    asyncio.run(run())

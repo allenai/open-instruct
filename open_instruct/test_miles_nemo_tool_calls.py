@@ -162,3 +162,25 @@ def test_history_reasoning_is_preserved_in_content_for_older_templates():
 def test_unknown_tool_plan_option_is_fatal():
     with pytest.raises(source_preparation.PlanError, match="tool rendering"):
         source_preparation.adapt(raw_row(), "single_step_tool_v1", {"tool_format": "misspelled"})
+
+
+@pytest.mark.parametrize("schema", [{"type": "dict"}, {"properties": []}])
+@pytest.mark.parametrize("message_reference", [False, True])
+def test_xml_admission_checks_unused_tool_schemas(schema, message_reference):
+    raw = raw_row()
+    raw["responses_create_params"]["tools"].append({"type": "function", "name": "unused", "parameters": schema})
+    if message_reference:
+        raw["expected_action"] = {"type": "message", "content": "Hello"}
+    with pytest.raises(ValueError, match="Invalid declared tool schema"):
+        tools.target_for_row(raw, {"tool_format": "olmo_xml_v1"})
+
+
+@pytest.mark.parametrize("schema", [{"type": "dict"}, {"properties": []}])
+def test_existing_xml_target_with_bad_schema_scores_zero(schema):
+    target = tools.target_for_row(raw_row(), {})
+    target["tool_format"] = "olmo_xml_v1"
+    target["tools"][0]["function"]["parameters"] = schema
+    response = "<tool_call><function=lookup><parameter=count>2</parameter></function></tool_call>"
+    verifier = tools.SingleStepToolVerifier()
+    assert verifier([], response, target).score == 0
+    assert asyncio.run(verifier.async_call([], response, target)).score == 0

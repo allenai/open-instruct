@@ -6,6 +6,7 @@ import re
 from functools import lru_cache
 
 from jsonschema import validators
+from jsonschema.exceptions import SchemaError
 from pydantic import TypeAdapter
 from referencing import Registry
 from referencing.exceptions import Unresolvable
@@ -130,7 +131,10 @@ def parse_action(text, target):
 def _reference_validator(serialized_schema):
     schema = json.loads(serialized_schema)
     cls = validators.validator_for(schema)
-    cls.check_schema(schema)
+    try:
+        cls.check_schema(schema)
+    except SchemaError as error:
+        raise ValueError("Invalid declared tool schema") from error
     return cls(schema, registry=Registry())
 
 
@@ -138,6 +142,9 @@ def validate_xml_reference(target):
     """Admit only references representable by the declared schemas and XML grammar."""
     _, expected, config = contract(json.dumps(target, allow_nan=False))
     tools = {tool["function"]["name"]: tool["function"] for tool in target["tools"]}
+    # Even tools unused by the reference may be called by a model response.
+    for tool in tools.values():
+        _reference_validator(json.dumps(tool["parameters"], sort_keys=True, allow_nan=False))
     blocks = []
     for call in native.get_tool_calls(expected):
         arguments = json_object(call.arguments)

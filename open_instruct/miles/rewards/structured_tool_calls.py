@@ -70,7 +70,10 @@ def parse_payload(text, target):
                 for name, value in call["parameters"].items()
             }
     else:
-        calls = tool_call_parsing.parse_pythonic_calls(text, tools)
+        try:
+            calls = tool_call_parsing.parse_pythonic_calls(text, tools)
+        except SyntaxError as error:
+            raise ValueError("Malformed final function call") from error
     if len(calls) != 1 or calls[0]["name"] != target["tool_name"]:
         raise ValueError("Expected exactly one final call to the declared function")
     arguments = calls[0]["parameters"]
