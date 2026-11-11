@@ -868,7 +868,13 @@ Pool mode supports fully asynchronous disaggregated serving, with or without
 [prepared-batch overlap](core.md#prepared-batch-overlap). With overlap, the batch
 prepared for the next update is staged while the current update trains; exposure
 is still credited once per completed update, in training order, and a checkpoint
-taken in between regenerates the prepared prompts on resume. The application requires the companion MILES
+taken in between regenerates the prepared prompts on resume.
+
+Keep `core.prepared_batch_overlap` unchanged when resuming an existing run:
+switching it from `false` to `true` (or back) is rejected by the run-spec identity
+check. This support does not enable changing the setting on resume.
+
+The application requires the companion MILES
 runtime's `core_commit_exposure` callback and finite-pool termination support,
 included in this branch's runtime source pin. Older images fail explicitly.
 Build an image from this branch before launching this mode; the existing image
