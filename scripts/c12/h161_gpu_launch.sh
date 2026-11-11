@@ -16,6 +16,10 @@
 #   scb    the same on B1 (step20000, b1r's base and HF reference): S-C on B1, the owner's 2026-11-06 order.
 #   c14f   ledger H202 (c14f-b1): b1r with the fixed C14 add-on cache as a second extra dir, before the replay
 #          (C14F_ADDONS, the cache c14f_tok.sh wrote, then H202's 10% replay dir); S_R=<steps> from H202 R4'.
+#   rfn    ledger H210 (c12rf): scn with the release data fixes. The C12rf cache (C12's frozen parquets minus the release
+#          manifest's rows, plus 116 identity rows at 1.0, tokenizer revision 03c29652; RF_CACHE names it) in place of
+#          C12's, H182's replay dir, two passes, seed 34521, noag. S_R=<steps> from H210 R4'. Placement excludes
+#          holmes-cs-aus-544 (EXCLUDE_HOSTS, a hostname list of the live holmes nodes minus those).
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -65,6 +69,8 @@ $P/nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
 $P/nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
 /weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/if/nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456"
 CACHE=bf82a8fab8-6068a350-rowaligned
+TOKREV=8b9717061fae09d5be814373d189919a62a9a00d
+EXCLUDE_HOSTS="${EXCLUDE_HOSTS:-}"
 I_C12=449487
 EPOCH_STEPS=$((I_C12 / 16))   # 28,092
 OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h161-gpu
@@ -99,6 +105,21 @@ case "$ARM" in
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/s-c-gpu; DESC="ledger H196 s-c"
          STEPS="${S_R:?S_R=<steps from H196 R4 prime>}"; EPOCHS=2; CKPT=$((STEPS / 2)); HOURS=96 ;;
+    rfn) B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
+         MODEL=$B/olmo35-small-mm-ckpt2-256k-noagentic/step21159-lm-olmocore/model_and_optim
+         HF_REF=$H/olmo35-small-mm-ckpt2-256k-noagentic-step21159-base-h149-c12seed
+         [[ "$SEED" == 34521 ]] || { echo "c12rf runs seed 34521 only" >&2; exit 1; }
+         F=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/rf
+         MIXER="$F/filtered/00000-dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet 1.0 \
+$F/filtered/00001-nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
+$F/filtered/00002-nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
+$F/filtered/00003-nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456 \
+$F/identity/identity.jsonl 1.0"
+         CACHE="${RF_CACHE:?RF_CACHE=<the C12rf cache name from h210_cache.sh>}"; TOKREV=03c29652a9d74902fe9d39bc0ad211748c7e7ae6
+         EXCLUDE_HOSTS="${EXCLUDE_HOSTS:-holmes-cs-aus-544}"
+         LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/c12rf-gpu; DESC="ledger H210 c12rf"
+         STEPS="${S_R:?S_R=<steps from H210 R4 prime>}"; EPOCHS=2; CKPT=$((STEPS / 2)); HOURS=48 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
@@ -110,6 +131,7 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == scn ]] && RUN_NAME="s-c-noag-s${SEED}"
 [[ "$ARM" == scb ]] && RUN_NAME="s-c-b1-s${SEED}"
 [[ "$ARM" == c14f ]] && RUN_NAME="c14f-s${SEED}"
+[[ "$ARM" == rfn ]] && RUN_NAME="c12rf-noag-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
@@ -124,7 +146,7 @@ OUTPUT_DIR="$OUT_ROOT/$RUN_NAME"
 DUMP_DIR="$OUTPUT_DIR/step1"
 
 ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
---tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
+--tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision $TOKREV \
 --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
 --row_aligned_parts --document_boundaries_from_metadata --max_seq_length 65536 \
 --per_device_train_batch_size 1 --gradient_accumulation_steps 1 --learning_rate $LR --warmup_ratio 0.03 \
@@ -210,7 +232,14 @@ $TORCHRUN"
 fi
 
 SPEC=$(mktemp -t h161spec.XXXXXX)
-CMD="$CMD" python3 - "$SPEC" <<EOF
+HOSTS=""
+if [[ -n "$EXCLUDE_HOSTS" ]]; then
+    HOSTS=$(beaker cluster nodes ai2/holmes --format json | python3 -c "import json, sys
+ex = sys.argv[1].split()
+print(' '.join(sorted(h for h in (n['hostname'] for n in json.load(sys.stdin)) if h.split('.')[0] not in ex)))" "$EXCLUDE_HOSTS")
+    [[ -n "$HOSTS" ]] || { echo "no holmes hosts left after excluding $EXCLUDE_HOSTS" >&2; exit 1; }
+fi
+HOSTS="$HOSTS" CMD="$CMD" python3 - "$SPEC" <<EOF
 import json, os, sys
 env = [
     {"name": "OLMO_SHARED_FS", "value": "1"},
@@ -237,7 +266,7 @@ task = {
     "result": {"path": "/output"},
     "resources": {"gpuCount": 8, "sharedMemory": "10GiB"},
     "context": {"priority": "${PRIORITY:-high}", "minRuntime": "$MIN_RUNTIME", "autoResume": "$AUTO_RESUME" == "1"},
-    "constraints": {"cluster": ["ai2/holmes"]},
+    "constraints": {"hostname": os.environ["HOSTS"].split()} if os.environ["HOSTS"] else {"cluster": ["ai2/holmes"]},
     "replicas": 2,
     "leaderSelection": True,
     "hostNetworking": True,
