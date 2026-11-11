@@ -228,3 +228,121 @@ async recipe.
 Agents discover this workflow through AGENTS.md; no
 special prompt is needed. Follow the [documentation index](index.md) for model
 support, configuration, data, parallelism and operations.
+
+## Score-candidate collection
+
+MILES already provides top-k score centering (SCT), nested candidate collection,
+and the `score_centering` loss. These extensions add array-preserving transport
+and SCMC (independent samples with replacement) through native `/generate`.
+These are extraction controls; `rollout_top_k` still controls response sampling.
+Use matching MILES and SGLang revisions from the runtime lock. The benchmark
+image `01M737J78XJT3P2STBR9DT897B` contains those revisions and passed the paired
+training checks below; changing TOML alone does not install the extensions in an
+older image.
+
+For SCT32 with the existing score-centering loss:
+
+```toml
+[miles]
+loss_type = "score_centering"
+rollout_top_logprobs_num = 32
+rollout_score_mode = "topk"
+rollout_score_transport = "array"
+use_miles_router = true
+rollout_top_k = -1
+rollout_top_p = 1.0
+score_centering_is = "mis"
+score_centering_mis_low = 0.5
+score_centering_mis_high = 5.0
+```
+
+Use 64 or 128 for SCT64/SCT128. `score_centering_is` also supports `none` and
+`tis`; `score_centering_tis_clip` controls TIS. Async score-centering runs default
+to its own TIS correction, with ordinary `use_tis=false`. Explicitly selecting
+both correction paths is rejected. Set `SGLANG_RETURN_ORIGINAL_LOGPROB=0` on the
+rollout servers, as required by the native score-centering contract.
+
+For **SCMC training**, select the Monte Carlo candidate mode and native TIS correction:
+
+```toml
+[miles]
+loss_type = "score_centering"
+score_centering_is = "tis"
+rollout_top_logprobs_num = 32
+rollout_score_mode = "mc"
+rollout_score_transport = "array"
+use_miles_router = true
+rollout_top_k = -1
+rollout_top_p = 1.0
+```
+
+SCMC supports 32, 64 and 128 draws. Its loss uses detached importance weights
+in the existing MILES REINFORCE score-centering surrogate, replacing the
+truncated-head correction with an IID Monte Carlo estimate. It does not replace
+the default PPO `policy_loss`; comparisons against that baseline measure the
+complete loss-path change as well as probe handling.
+The SCT estimator continues to reject MC arrays; the dispatcher selects the
+separate MC estimator using the explicit mode. Caller sampling seeds are preserved; missing seeds are
+assigned independently per request because the probe kernel requires a seed.
+
+Packed `flat` and `array` transport require `use_miles_router=true`. The pinned
+SGLang router (0.3.2) strips the extended sampling and packing fields when it
+re-serializes requests; MILES forwards the raw request and response bytes.
+
+Transport alternatives remain selectable:
+
+| `rollout_score_transport` | SCT | SCMC | Server/client representation |
+|---|---|---|---|
+| `nested` (default) | Yes | No | Ordinary JSON lists, converted to NumPy by MILES |
+| `flat` | Yes | No | Server lists flattened into little-endian base64 buffers |
+| `array` | Yes | Yes | NumPy arrays retained through server IPC, then base64 buffers |
+
+Packed modes collect **generated tokens only**, without streaming. They currently
+require unfiltered sampling, non-speculative Python SGLang and the native
+`/generate` path. OpenAI/session endpoints are rejected for packed modes; their
+existing nested SCT path remains available. `array` requires the local SGLang
+extension; `flat` uses its flat/base64 response API.
+
+The decoder checks response shape `[generated_tokens, width]`, zero null prefix,
+float32 log probabilities, int32 token IDs, exact byte lengths and score mode.
+It preserves normalized behavior-policy log probabilities and repeated MC draws,
+without rescoring, deduplicating or renormalizing. The selected-token rollout
+log probabilities remain a separate field. Candidate arrays and their mode
+survive multi-turn merging, observation padding, truncation, safetensors transport,
+DP partitioning and Core sequence packing.
+
+The historical field names `Sample.rollout_topk_token_ids` and
+`Sample.rollout_topk_log_probs` carry both modes; `Sample.rollout_score_mode`
+distinguishes them and travels with training batches. A missing mode on a legacy
+sample means `topk`. SCMC payloads must explicitly identify themselves.
+
+The overhead report keeps nested, flat and array SCT transport alongside the
+SCMC count sweep. Run `python -m scripts.miles.score_overhead_report --help` for
+the renderer. It compares each completed run against its own paired baseline,
+reports HTTP packing/unpacking fractions, and separates model-forward spans
+from extraction spans. Those server benchmarks do not measure the new MILES
+parser or a training update.
+
+### Trainer benchmark
+
+The H066 baseline and SCMC32-array runs each completed 20 optimizer updates on
+Jupiter, using four trainer GPUs (EP4) and one inference GPU. Each update used
+eight generated responses of 256 tokens with balanced synthetic rewards. After
+discarding four warmup updates, mean trainer-update time was 0.993 seconds for
+native PPO/GRPO and 1.028 seconds for native SCMC32 with TIS: a 3.53% increase
+(35 milliseconds). Median times were 0.906 and 0.930 seconds. Peak allocated
+memory was effectively unchanged at approximately 61 GiB per trainer GPU.
+
+Runs:
+
+1. [Native PPO/GRPO baseline](https://beaker.org/ex/01M737K99YD7WV52KRGGGEP4VY).
+2. [SCMC32 with array transport](https://beaker.org/ex/01M737KBZ3DSCQJW4J68BDTNK0).
+
+These are native host-wall trainer timings, excluding generation, rewards,
+weight publication and startup, with no added CUDA synchronization. They compare
+different loss paths in separate runs with independently evolving policies;
+they do not isolate the MC correction or establish convergence or large-batch
+performance. Use `scripts/miles/trainer_overhead_report.py` on the job logs to
+reproduce the table and pass its JSON to `score_overhead_report.py` to include
+trainer results alongside the inference/transport plots. NVFP4 is not qualified
+by these BF16 runs.

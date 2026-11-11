@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Merged pool exposure, explicit discard feedback and terminal serving-startup failure propagation integrated with main masked REINFORCE++ returns; strict scoring tolerance restored after eager-scoring validation. SwiGLU int64 offsets and source-bundle IDs retained. Weighted-pool GPU runs qualified at application 55703fbbf/runtime bbcb01d; current runtime revision CPU-validated.",
+  "status": "SCT/SCMC benchmark overlay; BF16 H066 baseline and SCMC32 array training each passed 20 updates on Jupiter. NVFP4 qualification pending.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -11,16 +11,16 @@
       "revision": "903e57d46cc2c62cb5611e49c4d0e2052eb798d2"
     },
     "miles": {
-      "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "6b78328406a42d41d5dce260779655f685dc4524"
+      "repository": "https://github.com/goncalorafaria/miles-olmo-core.git",
+      "revision": "a55a38ac224fd82c369cdb0689012851dadbdfc7"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
       "revision": "069dc0a3cf0e28bd9f03d035aa98fc2bd5e8896a"
     },
     "sglang": {
-      "repository": "https://github.com/sgl-project/sglang.git",
-      "revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
+      "repository": "https://github.com/goncalorafaria/sglang.git",
+      "revision": "0a514e1236b0bb5eccf940b1ce7dd322ae31886f"
     },
     "megatron-lm": {
       "repository": "https://github.com/radixark/Megatron-LM.git",

@@ -306,3 +306,31 @@ def compiler_cache_root(shared):
         re.fullmatch(r"tmp-[1-9][0-9]*[hdwmy]", part) for part in resolved.parts
     ):
         raise ValueError("WEKA cache root requires an expiry component such as tmp-30d")
+
+
+def score_candidates(options):
+    """CPU preflight for score extraction; runtime validates per-request settings too."""
+    width = options.get("rollout_top_logprobs_num", 0)
+    mode = options.get("rollout_score_mode", "topk")
+    transport = options.get("rollout_score_transport", "nested")
+    integer(width, "rollout_top_logprobs_num", minimum=0)
+    if not width and (mode != "topk" or transport != "nested"):
+        raise InputError("Score mode/transport requires rollout_top_logprobs_num > 0")
+    if mode == "mc" and (width not in (32, 64, 128) or transport != "array"):
+        raise InputError("SCMC requires 32, 64 or 128 candidates and rollout_score_transport=array")
+    if width and transport != "nested":
+        if not options.get("use_miles_router", False):
+            raise InputError(
+                "Packed scores require use_miles_router=true; the pinned SGLang router drops score fields"
+            )
+        if options.get("rollout_top_k", -1) != -1 or options.get("rollout_top_p", 1.0) != 1.0:
+            raise InputError("Packed scores require unfiltered sampling: rollout_top_k=-1, rollout_top_p=1")
+        if options.get("use_session_server") or options.get("sglang_speculative_algorithm"):
+            raise InputError("Packed scores require native non-speculative /generate; sessions are unsupported")
+    if options.get("loss_type") == "score_centering":
+        if not width:
+            raise InputError("Score centering requires rollout_top_logprobs_num > 0")
+        if options.get("use_tis"):
+            raise InputError("Score centering uses score_centering_is instead of use_tis")
+        if options.get("advantage_estimator", "grpo") != "grpo":
+            raise InputError("Score centering requires advantage_estimator=grpo")

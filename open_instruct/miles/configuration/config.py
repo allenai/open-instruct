@@ -459,6 +459,7 @@ class RunConfig:
         ):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
+        validation.score_candidates(options)
         if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
             raise constraints.error("Core weight publication supports retract or in_place pause mode")
         if options.get("sglang_radix_cache_backend") == validation.POLICY_CACHE_BACKEND and (
