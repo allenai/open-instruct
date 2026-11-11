@@ -41,6 +41,7 @@ _MATH_FACTORIES = {
 _POOLS = weakref.WeakKeyDictionary()
 _CHILDREN = set()
 _FAILURE_CAPTURED = set()
+_RANGE_WARNED = set()
 _RESPONSE_PREFIX = b"MILES_VERIFIER_RESULT "
 
 
@@ -395,12 +396,17 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
         if not separator or not response.strip():
             reason = "missing_final_answer"
     if reason:
+        # A gated response gets each verifier's worst score. That is 0 for the usual
+        # [0, 1] verifier; a verifier with a lower floor declares it, or the gated
+        # response would outrank every completed wrong answer in its group.
         metadata["reward_gate"] = reason
-        metadata["reward_components"] = [
-            {"name": spec["name"], "score": 0.0, "weight": spec.get("weight", 1.0), "cost": 0.0}
-            for spec in metadata["verifiers"]
-        ]
-        return 0.0
+        components = []
+        for spec, weight in weighted_specs:
+            floor = getattr(registry[spec["name"]], "score_floor", None)
+            score = _finite(floor(copy.deepcopy(spec["target"])), "verifier score floor") if floor else 0.0
+            components.append({"name": spec["name"], "score": score, "weight": weight, "cost": 0.0})
+        metadata["reward_components"] = components
+        return _finite(sum(c["weight"] * c["score"] for c in components), "combined reward")
     components = []
     total = 0.0
     for spec, weight in weighted_specs:
@@ -449,6 +455,16 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                 )
                 score = 0.0
             score = _finite(score, "verifier score")
+            if not 0.0 <= score <= 1.0 and name not in _RANGE_WARNED:
+                # Group advantages scale with the reward range, so one verifier on a
+                # wider scale outweighs the rest of a mixture. Warn once per verifier.
+                _RANGE_WARNED.add(name)
+                logger.warning(
+                    "Verifier %s returned score %s outside [0, 1]; its prompt groups carry "
+                    "proportionally larger advantages than [0, 1] verifiers in the same run",
+                    name,
+                    score,
+                )
             total = _finite(total + weight * score, "combined reward")
         except Exception as error:
             _capture_verifier_failure(args, sample, spec, response, error)

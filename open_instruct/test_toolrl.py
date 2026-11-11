@@ -89,10 +89,86 @@ def test_binary_reward_requires_complete_calls_and_format(forced_prefix):
     for response, expected in cases:
         prediction = response.removeprefix("<think>") if forced_prefix else response
         result = asyncio.run(verifier.async_call([], prediction, reference))
-        assert result.score == expected
+        # The training score is on [0, 1]; diagnostics keep the published scale.
+        assert result.score == (1 if expected == 4 else 0)
         assert result.diagnostics["full_success"] == (expected == 4)
         assert result.diagnostics["binary_score"] == expected
         assert result.diagnostics["required_calls"] == 2
+
+
+def _scores(config, reference, responses):
+    verifier = toolrl_verifier.ToolRLVerifier(config)
+    return [asyncio.run(verifier.async_call([], response, reference)).score for response in responses]
+
+
+def test_unit_scale_is_the_default_and_preserves_group_ordering():
+    reference = target([call("xbox"), call("android")])
+    responses = [completion([call("android"), call("xbox")]), completion([call("xbox")]), "malformed"]
+    unit = _scores(None, reference, responses)
+    native = _scores(toolrl_verifier.ToolRLConfig(unit_scale=False), reference, responses)
+    assert native[0] == 4 and native[2] == -3 and native[2] < native[1] < native[0]
+    assert unit[0] == 1 and unit[2] == 0
+    # One positive rescaling per row: relative spacing inside a prompt group is unchanged.
+    assert unit == pytest.approx([(score + 3) / 7 for score in native])
+    # Rows without reference calls were already graded from 0 to 1.
+    answers = [completion(response="answer"), "malformed"]
+    assert _scores(None, target(), answers) == _scores(
+        toolrl_verifier.ToolRLConfig(unit_scale=False), target(), answers
+    )
+    assert _scores(None, target(), answers) == [1, 0]
+
+
+def _toolrl_sample(tmp_path, config, status, response):
+    registry = tmp_path / "verifiers.json"
+    factory = "open_instruct.miles.rewards.toolrl.ToolRLVerifier"
+    registry.write_text(json.dumps({"toolrl": {"factory": factory, "config": config}}))
+    args = SimpleNamespace(
+        olmo_core=SimpleNamespace(
+            reward_config=str(registry), reward_zero_truncated=True, reward_final_answer_only=False
+        )
+    )
+    sample = SimpleNamespace(
+        prompt="q",
+        response=response,
+        metadata={"verifiers": [{"name": "toolrl", "target": target([call("xbox")]), "weight": 1.0}]},
+        tokens=[],
+        response_length=0,
+        status=status,
+    )
+    return args, sample
+
+
+@pytest.mark.parametrize(("unit_scale", "floor"), [(True, 0.0), (False, -3.0)])
+def test_truncated_response_gets_the_verifier_floor_not_a_fixed_zero(tmp_path, unit_scale, floor):
+    """A truncated response must not outrank a completed wrong answer in its group."""
+    config = {"unit_scale": unit_scale}
+    args, wrong = _toolrl_sample(tmp_path, config, "completed", "malformed")
+    _, truncated = _toolrl_sample(tmp_path, config, "truncated", completion([call("xbox")]))
+    wrong_reward = asyncio.run(rewards.registered_reward(args, wrong))
+    truncated_reward = asyncio.run(rewards.registered_reward(args, truncated))
+    assert wrong_reward == truncated_reward == floor
+    assert truncated.metadata["reward_gate"] == "truncated"
+    assert truncated.metadata["reward_components"] == [{"name": "toolrl", "score": floor, "weight": 1.0, "cost": 0.0}]
+    # Rows without reference calls bottom out at zero on either scale.
+    assert (
+        toolrl_verifier.ToolRLVerifier(toolrl_verifier.ToolRLConfig(unit_scale=unit_scale)).score_floor(target()) == 0
+    )
+
+
+def test_score_outside_the_unit_range_warns_once_per_verifier(tmp_path, caplog):
+    rewards._RANGE_WARNED.clear()
+    args, sample = _toolrl_sample(tmp_path, {"unit_scale": False}, "completed", "malformed")
+    with caplog.at_level("WARNING"):
+        assert asyncio.run(rewards.registered_reward(args, sample)) == -3
+        assert asyncio.run(rewards.registered_reward(args, copy.deepcopy(sample))) == -3
+    assert caplog.text.count("returned score -3.0 outside [0, 1]") == 1
+    caplog.clear()
+    rewards._RANGE_WARNED.clear()
+    (tmp_path / "unit").mkdir()  # The registry is cached by path.
+    args, sample = _toolrl_sample(tmp_path / "unit", {"unit_scale": True}, "completed", "malformed")
+    with caplog.at_level("WARNING"):
+        assert asyncio.run(rewards.registered_reward(args, sample)) == 0
+    assert "outside [0, 1]" not in caplog.text
 
 
 def test_binary_mode_preserves_no_call_grading():
@@ -229,7 +305,7 @@ def test_string_union_reference_survives_preparation_and_native_reward(kind):
     result = asyncio.run(
         toolrl_verifier.ToolRLVerifier().async_call([], completion([call("Paris")]), prepared["ground_truth"])
     )
-    assert result.score == 4
+    assert result.score == 1
 
 
 @pytest.mark.parametrize(
@@ -248,7 +324,7 @@ def test_canonical_string_union_keeps_source_string_type_and_pythonic_reward(val
     assert calls == [call(value)]
     label = {**target(calls, tools), "tool_format": "olmo_pythonic_v1"}
     prediction = f"<think>plan</think>\n<function_calls>giveaways(platform={value!r})</function_calls>"
-    assert asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], prediction, label)).score == 4
+    assert asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], prediction, label)).score == 1
 
 
 def test_union_keeps_typed_nonstring_source_and_explicit_string_disambiguation():
@@ -282,7 +358,7 @@ def test_native_xml_union_explicit_quoting_preserves_string_reference(value):
     calls = toolrl.canonical_calls([call(value)], tools)
     label = target(calls, tools)
     prediction = completion([call(json.dumps(value))])
-    assert asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], prediction, label)).score == 4
+    assert asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], prediction, label)).score == 1
 
 
 def test_nonstring_union_still_rejects_bare_text():
@@ -375,7 +451,7 @@ def test_manifest_to_miles_to_reward_and_resume(tmp_path, monkeypatch, prefix):
         response_length=0,
         status="completed",
     )
-    assert asyncio.run(rewards.registered_reward(args, sample)) == 4
+    assert asyncio.run(rewards.registered_reward(args, sample)) == 1
     tokenizer.prefix = "<think>\n"
     with pytest.raises(source_preparation.PlanError, match="whitespace"):
         source_preparation.prepare(plan, tmp_path / "whitespace-prefix", tokenizer)
@@ -519,5 +595,5 @@ def test_template_literal_names_are_not_renamed(name, key):
         + ")</function_calls>"
     )
     result = asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], response, reference))
-    assert result.score == 4
+    assert result.score == 1
     assert result.diagnostics["correctness_score"] == 3
