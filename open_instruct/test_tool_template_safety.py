@@ -87,7 +87,11 @@ def test_resume_checks_recorded_template_without_retokenizing_or_rewriting(tmp_p
     if recorded is not None:
         metadata["rendering_template_sha256"] = hashlib.sha256(recorded.encode()).hexdigest()
     inputs = tmp_path / "input.jsonl"
-    inputs.write_text(json.dumps({"input": "prompt", "metadata": metadata}) + "\n")
+    inputs.write_text(
+        "".join(json.dumps({"input": f"prompt {index}", "metadata": metadata}) + "\n" for index in range(3))
+    )
+    warnings = []
+    monkeypatch.setattr(run_data.logger, "warning", lambda *args: warnings.append(args))
     registry = tmp_path / "registry.json"
     registry.write_text(
         json.dumps({"v": {"factory": "open_instruct.miles.rewards.task_verifiers.MultiplicationVerifier"}})
@@ -98,6 +102,8 @@ def test_resume_checks_recorded_template_without_retokenizing_or_rewriting(tmp_p
     with monkeypatch.context() as historical:
         historical.setattr(run_data, "_verify_rendering_template", lambda *a: None)
         result = run_data.prepare_data(data, hf, output, max_prompt_length=10, seed=17)
+    assert len(warnings) == (1 if recorded is None else 0)
+    warnings.clear()
     before = {path: path.read_bytes() for path in output.iterdir() if path.is_file()}
     tokenizer.encode = lambda *a, **k: pytest.fail("Resume must not retokenize")
     if recorded == "old-pythonic":
@@ -105,4 +111,13 @@ def test_resume_checks_recorded_template_without_retokenizing_or_rewriting(tmp_p
             run_data.prepare_data(data, hf, output, max_prompt_length=10, seed=17)
     else:
         assert run_data.prepare_data(data, hf, output, max_prompt_length=10, seed=17) == result
+    assert len(warnings) == (1 if recorded is None else 0)
     assert all(path.read_bytes() == raw for path, raw in before.items())
+
+
+def test_legacy_prepared_row_without_fingerprint_does_not_check_template():
+    row = {"input": "original Dolci prompt", "metadata": {"verifiers": [{"name": "v", "target": "answer"}]}}
+    tokenizer = SimpleNamespace(encode=lambda *a, **k: [1])
+    run_data._verify_row(row, tokenizer, 10, {"v"})
+    assert row["input"] == "original Dolci prompt"
+    assert "rendering_template_sha256" not in row["metadata"]

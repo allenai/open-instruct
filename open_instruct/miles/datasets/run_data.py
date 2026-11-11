@@ -18,12 +18,14 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from open_instruct import ifeval_constraints
+from open_instruct import ifeval_constraints, logger_utils
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.datasets import mixture, pools, synlogic
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import judging, task_verifiers
 from open_instruct.miles.rollout import pool_sampling
+
+logger = logger_utils.setup_logger(__name__)
 
 # Preserve factory paths in existing prepared datasets and reward registries.
 RewardConfig = task_verifiers.RewardConfig
@@ -378,6 +380,14 @@ def _verify_rendering_template(metadata, tokenizer):
             )
 
 
+def _warn_missing_rendering_template(source):
+    logger.warning(
+        "Prepared dataset %s has rows without metadata.rendering_template_sha256; "
+        "template compatibility cannot be verified. Continuing with existing inputs.",
+        source,
+    )
+
+
 def _verify_resumed_rendering_templates(result, hf_checkpoint):
     # Old caches can contain rendering hashes even though their original loader
     # did not enforce them. Validate all partitions without retokenizing or editing.
@@ -385,12 +395,16 @@ def _verify_resumed_rendering_templates(result, hf_checkpoint):
     paths = list(result.get("train_sources", [result["prompt_data"]]))
     paths.extend(result["eval_prompt_data"][1::2])
     for path in dict.fromkeys(paths):
+        warned_missing = False
         with Path(path).open(encoding="utf-8") as stream:
             for index, line in enumerate(stream, 1):
                 if not line.strip():
                     continue
                 metadata = json.loads(line).get("metadata", {})
                 if metadata.get("rendering_template_sha256") is None:
+                    if not warned_missing:
+                        _warn_missing_rendering_template(path)
+                        warned_missing = True
                     continue
                 if tokenizer is None:
                     tokenizer = _tokenizer(hf_checkpoint)
@@ -726,6 +740,7 @@ def prepare_data(
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
     for split, rows in partitions.items():
+        warned_missing = False
         if isinstance(rows, _JsonlRows) and resolved_pools and split in training:
             # Streaming rows are recreated for validation and output. Apply the
             # same pool assignment on every pass, keeping held-out rows unchanged.
@@ -742,6 +757,13 @@ def prepare_data(
                 if resolved_pools and split in training and not isinstance(rows, _JsonlRows):
                     pools.annotate(row, resolved_pools, source_pool=source_pools.get(split), labels=pool_labels)
                 _verify_row(row, tokenizer, max_prompt_length, known)
+                if (
+                    isinstance(rows, _JsonlRows)
+                    and row["metadata"].get("rendering_template_sha256") is None
+                    and not warned_missing
+                ):
+                    _warn_missing_rendering_template(rows.path)
+                    warned_missing = True
                 if split in training:
                     _verify_if_training_row(row, if_verifiers)
             except InputError as error:
