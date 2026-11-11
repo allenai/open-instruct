@@ -320,13 +320,7 @@ def _verify_row(row, tokenizer, limit, known):
         weight = spec.get("weight", 1.0)
         if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight):
             raise InputError("Verifier weight must be finite")
-    template_hash = metadata.get("rendering_template_sha256")
-    if template_hash is not None:
-        template = tokenizer.chat_template
-        if not isinstance(template, str) or template_hash != hashlib.sha256(template.encode()).hexdigest():
-            raise InputError(
-                "Prepared rendering template hash differs from the checkpoint chat template; re-render inputs"
-            )
+    _verify_rendering_template(metadata, tokenizer)
     ids = tokenizer.encode(row["input"], add_special_tokens=False)
     if not 0 < len(ids) <= limit:
         raise InputError(
@@ -372,6 +366,38 @@ def _verify_if_training_row(row, names):
                 "Remove these rows during dataset preparation, then use the cleaned file in a new run root; "
                 "existing training data is never filtered in place."
             )
+
+
+def _verify_rendering_template(metadata, tokenizer):
+    template_hash = metadata.get("rendering_template_sha256")
+    if template_hash is not None:
+        template = tokenizer.chat_template
+        if not isinstance(template, str) or template_hash != hashlib.sha256(template.encode()).hexdigest():
+            raise InputError(
+                "Prepared rendering template hash differs from the checkpoint chat template; re-render inputs"
+            )
+
+
+def _verify_resumed_rendering_templates(result, hf_checkpoint):
+    # Old caches can contain rendering hashes even though their original loader
+    # did not enforce them. Validate all partitions without retokenizing or editing.
+    tokenizer = None
+    paths = list(result.get("train_sources", [result["prompt_data"]]))
+    paths.extend(result["eval_prompt_data"][1::2])
+    for path in dict.fromkeys(paths):
+        with Path(path).open(encoding="utf-8") as stream:
+            for index, line in enumerate(stream, 1):
+                if not line.strip():
+                    continue
+                metadata = json.loads(line).get("metadata", {})
+                if metadata.get("rendering_template_sha256") is None:
+                    continue
+                if tokenizer is None:
+                    tokenizer = _tokenizer(hf_checkpoint)
+                try:
+                    _verify_rendering_template(metadata, tokenizer)
+                except InputError as error:
+                    raise InputError(f"{path}: row {index}: {error}") from error
 
 
 def _verify_resumed_if_training_data(result):
@@ -678,6 +704,7 @@ def prepare_data(
         # Older preparations may predate the constraint screen. Keep their bytes
         # immutable, but do not silently bypass validation on resume.
         _verify_resumed_if_training_data(result)
+        _verify_resumed_rendering_templates(result, hf_checkpoint)
         return result
     tokenizer = _tokenizer(hf_checkpoint)
     template = tokenizer.chat_template

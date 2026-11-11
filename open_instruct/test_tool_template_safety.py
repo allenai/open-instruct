@@ -147,3 +147,35 @@ def test_source_preparation_records_xml_target_and_template_identity(tmp_path):
     row = json.loads((tmp_path / "output/structured/prompts.jsonl").read_text())
     assert row["label"]["tool_call_format"] == "olmo_xml_v1"
     assert row["metadata"]["rendering_template_sha256"] == hashlib.sha256(tokenizer.chat_template.encode()).hexdigest()
+
+
+@pytest.mark.parametrize("recorded", [None, "native", "old-pythonic"])
+def test_resume_checks_recorded_template_without_retokenizing_or_rewriting(tmp_path, monkeypatch, recorded):
+    hf = tmp_path / "hf"
+    hf.mkdir()
+    (hf / "tokenizer_config.json").write_text("{}")
+    tokenizer = SimpleNamespace(chat_template="native", encode=lambda *a, **k: [1])
+    monkeypatch.setattr(run_data, "_tokenizer", lambda path: tokenizer)
+    metadata = {"verifiers": [{"name": "v", "target": "2"}]}
+    if recorded is not None:
+        metadata["rendering_template_sha256"] = hashlib.sha256(recorded.encode()).hexdigest()
+    inputs = tmp_path / "input.jsonl"
+    inputs.write_text(json.dumps({"input": "prompt", "metadata": metadata}) + "\n")
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps({"v": {"factory": "open_instruct.miles.rewards.task_verifiers.MultiplicationVerifier"}})
+    )
+    data = {"prompt_data": str(inputs), "reward_config": str(registry)}
+    output = tmp_path / "prepared"
+    # Model a cache created before the recorded hash was enforced.
+    with monkeypatch.context() as historical:
+        historical.setattr(run_data, "_verify_rendering_template", lambda *a: None)
+        result = run_data.prepare_data(data, hf, output, max_prompt_length=10, seed=17)
+    before = {path: path.read_bytes() for path in output.iterdir() if path.is_file()}
+    tokenizer.encode = lambda *a, **k: pytest.fail("Resume must not retokenize")
+    if recorded == "old-pythonic":
+        with pytest.raises(InputError, match="row 1:.*template hash"):
+            run_data.prepare_data(data, hf, output, max_prompt_length=10, seed=17)
+    else:
+        assert run_data.prepare_data(data, hf, output, max_prompt_length=10, seed=17) == result
+    assert all(path.read_bytes() == raw for path, raw in before.items())
