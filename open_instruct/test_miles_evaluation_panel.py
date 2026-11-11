@@ -40,14 +40,18 @@ def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_nod
     tasks = three_node.evaluation["tasks"]
     assert len(tasks) == len({task["task"] for task in tasks}) == 25
     assert all(not task["scoring"] for task in tasks)
+    math = [f"aime_{year}:pass_at_32:16k" for year in range(2022, 2027)]
+    math += ["hmmt_nov_2025:pass_at_32:16k", "hmmt_feb_2026:pass_at_32:16k"]
     assert {t["task"]: t["generation"] for t in tasks if t["generation"]} == {
         "omega_500:hillclimb": {"max_tokens": "null"},
         "omega_500_out": {"max_tokens": "null"},
+        # Eight attempts per problem instead of the variant's 32.
+        **dict.fromkeys(math, {"num_samples": 8}),
     }
     milestones = three_node.plan()["evaluation"]["milestones"]
     assert [point["update"] for point in milestones] == [0, 200]
     assert all(sum(map(len, point["groups"])) == 25 for point in milestones)
-    assert len(milestones[0]["groups"]) == 6
+    assert len(milestones[0]["groups"]) == 7
     # Extending the run never introduces periodic full-panel evaluations.
     document = three_node.to_dict()
     document["training"]["num_rollouts"] = 2500
@@ -83,27 +87,27 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
     manager.dispatch(0, initial)
     manager.worker.join(5)
     assert not manager.worker.is_alive()
-    assert len(calls) == 6
+    assert len(calls) == 7
     for update in (1, 999, 1000, 2000, 2499):
         assert evaluation.training_snapshot(args, update) is None
         manager.dispatch(update, "unused-checkpoint")
-    assert len(calls) == 6
+    assert len(calls) == 7
     final = Path(evaluation.training_snapshot(args, 2500))
     final.mkdir(parents=True)
     (final / ".complete").touch()
     manager.dispatch(2500, final)
     manager.worker.join(5)
     assert not manager.worker.is_alive()
-    assert len(calls) == 12
+    assert len(calls) == 14
 
     receipts = [
         json.loads(path.read_text())
         for path in (Path(run.output["root"]) / "evaluation").glob("update-*.json")
         if not path.name.endswith(".beaker.json")
     ]
-    assert len(receipts) == 12
+    assert len(receipts) == 14
     assert {r["status"] for r in receipts} == {"submitted"}
-    assert {r["experiment_id"] for r in receipts} == {f"experiment-{i}" for i in range(1, 13)}
+    assert {r["experiment_id"] for r in receipts} == {f"experiment-{i}" for i in range(1, 15)}
     assert {r["update"] for r in receipts} == {0, 2500}
     for update, checkpoint in ((0, initial), (2500, final)):
         endpoint = [r for r in receipts if r["update"] == update]
@@ -113,8 +117,8 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
             run.evaluation["tasks"], key=lambda task: task["task"]
         )
         assert all(r["training"] == training and r["evaluation"]["revision"] == config["revision"] for r in endpoint)
-    for specs in (calls[:6], calls[6:]):
-        assert sorted(spec["tasks"][0]["resources"]["gpuCount"] for spec in specs) == [1, 1, 1, 1, 2, 2]
+    for specs in (calls[:7], calls[7:]):
+        assert sorted(spec["tasks"][0]["resources"]["gpuCount"] for spec in specs) == [1, 1, 1, 1, 1, 2, 2]
         for spec in specs:
             job = spec["tasks"][0]
             assert job["image"] == {"beaker": config["image"]}
@@ -125,12 +129,12 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
     resumed.dispatch(0, initial)
     resumed.dispatch(2500, final)
     assert resumed.worker is None
-    assert len(calls) == 12
+    assert len(calls) == 14
 
 
 def test_panel_groups_keep_execution_requirements_separate(three_node):
     groups = evaluation.groups(three_node.evaluation, 0, 200)
-    assert sorted(map(len, groups)) == [1, 1, 1, 2, 5, 15]
+    assert sorted(map(len, groups)) == [1, 1, 1, 2, 5, 7, 8]
     for group in groups:
         for task in group:
             assert task.get("harness", {}) == group[0].get("harness", {})

@@ -82,26 +82,38 @@ provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
 [[evaluation.tasks]]
 # Official measurement uses full datasets and pinned upstream sampling settings.
 # Periodic subsets are not enabled; see docs/miles/background-evaluation.md.
-# Seven AIME/HMMT variants preserve pass@32 with a 16K response budget.
+# Seven AIME/HMMT sets: 8 attempts per problem with a 16K response budget. The
+# evaluator registers only a 32-attempt variant, so the count is cut with a
+# generation override; pass_at_16 and pass_at_32 are then reported but equal
+# pass_at_8. Read pass_at_1 (average single-attempt accuracy): each set has about
+# 30 problems, so any-of-k moves 3 points per problem. Remove the override to
+# restore 32 attempts, at roughly four times the GPU time.
 task = "aime_2022:pass_at_32:16k"
+generation = { num_samples = 8 }
 
 [[evaluation.tasks]]
 task = "aime_2023:pass_at_32:16k"
+generation = { num_samples = 8 }
 
 [[evaluation.tasks]]
 task = "aime_2024:pass_at_32:16k"
+generation = { num_samples = 8 }
 
 [[evaluation.tasks]]
 task = "aime_2025:pass_at_32:16k"
+generation = { num_samples = 8 }
 
 [[evaluation.tasks]]
 task = "aime_2026:pass_at_32:16k"
+generation = { num_samples = 8 }
 
 [[evaluation.tasks]]
 task = "hmmt_nov_2025:pass_at_32:16k"
+generation = { num_samples = 8 }
 
 [[evaluation.tasks]]
 task = "hmmt_feb_2026:pass_at_32:16k"
+generation = { num_samples = 8 }
 
 [[evaluation.tasks]]
 task = "gpqa_diamond:cot"

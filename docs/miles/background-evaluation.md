@@ -108,8 +108,11 @@ Tasks with the same generation overrides, harness preset, harness overrides and
 execution kind and auxiliary GPU count share a job. Empty generation overrides preserve each task's own
 defaults. Each unfinished task starts its own native SGLang engine; completed
 tasks remain reusable after preemption. Model loading repeats between tasks.
-The three-node panel creates five groups: 17 ordinary tasks, LiveCodeBench, SciCode,
-five WildGuard-judged tasks and StrongREJECT. Each group requests one policy GPU;
+The three-node panel creates seven groups: eight ordinary tasks, seven AIME/HMMT
+sets at eight attempts per problem (`generation = { num_samples = 8 }` on the
+evaluator's 32-attempt variant, whose `pass_at_16` and `pass_at_32` then equal
+`pass_at_8`), two Omega tasks, LiveCodeBench, SciCode, five WildGuard-judged tasks
+and StrongREJECT. Each group requests one policy GPU;
 each judge group also reserves one GPU with task `auxiliary_gpus=1`. The worker
 exposes the policy and auxiliary GPUs to olmo-eval, whose planner assigns
 non-overlapping GPU sets and manages judge startup and shutdown. One HF snapshot serves all groups. A coincident
