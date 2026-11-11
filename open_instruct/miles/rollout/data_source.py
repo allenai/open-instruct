@@ -303,14 +303,27 @@ class DashboardDrainingRolloutDataSource:
                     del self._pending_groups[identity]
 
     def requeue_pending_groups(self, identities: list[int]) -> int:
-        """Reset joined, unconsumed async work to its pristine checkpoint ledger."""
+        """Requeue joined, unconsumed work and release its staged exposure atomically."""
         with self._cursor_lock:
             identities = list(dict.fromkeys(identities))
             if not self._fully_async or any(i not in self._pending_groups for i in identities):
                 raise RuntimeError("cannot requeue an untracked async prompt group")
             selected = set(identities)
             groups = [copy.deepcopy(self._pending_groups[i]) for i in identities]
+            selections = {(group[0].metadata or {}).get("pool_selection_id") for group in groups}
+            released = []
+            for update, batch in self._exposure_batches.items():
+                if selections.intersection(batch):
+                    if not selections.issuperset(batch):
+                        raise RuntimeError("cannot requeue part of a staged exposure batch")
+                    released.append(update)
             self._delegate.buffer = groups + [g for g in self._delegate.buffer if g[0].group_index not in selected]
+            # PreparedBatch.close() joins preparation before requeueing on either
+            # cancellation path. Its staged batch must be released too, so the
+            # same update can be prepared again. Consumed groups fail the ledger
+            # check above; unrelated staged updates retain their commit ordering.
+            for update in released:
+                del self._exposure_batches[update]
             return len(groups)
 
     def save(self, rollout_id: int) -> None:
