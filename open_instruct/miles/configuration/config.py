@@ -498,8 +498,6 @@ class RunConfig:
         if self.core.prompt_provider == "pools":
             if not options.get("fully_async", False) or self.core.records_root is None:
                 raise constraints.error("Named pools require fully_async=true and inference records")
-            if self.core.prepared_batch_overlap:
-                raise constraints.error("Named pools currently require prepared_batch_overlap=false")
             if options.get("async_unused_samples_handler", "drop") != "drop":
                 raise constraints.error("Named pools require async_unused_samples_handler=drop")
             if options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 0) != options.get(

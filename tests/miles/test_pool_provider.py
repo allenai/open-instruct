@@ -173,6 +173,61 @@ def test_actual_filter_does_not_credit_until_optimizer_commit_and_restore(args, 
         source.close()
 
 
+def test_prepared_overlap_stages_next_update_before_commit_and_survives_checkpoint(args, tmp_path):
+    """Overlap prepares update N + 1 during update N; credit stays per completed update, in order."""
+    setup(args, tmp_path, "uniform")
+    source = DashboardDrainingRolloutDataSource(args)
+    buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, source.add_samples))
+    recorder = buffer._delegate._records
+    try:
+        current, following = source.get_samples(2)
+        pristine = copy.deepcopy(test_prompt_provider.payload([following]))
+        for group in (current, following):
+            assert asyncio.run(buffer.put(test_remind_provider.scored(group, [0, 1]))) is True
+        source.acknowledge_groups([current])
+        source.stage_training_batch(0, current)
+        # Prepared while update 0 trains: reserved, not yet consumed, still in the restart ledger.
+        source.stage_training_batch(1, following)
+        with pytest.raises(RuntimeError, match="Uncommitted exposure batch"):
+            source.stage_training_batch(2, following)
+        with pytest.raises(RuntimeError, match="Missing or mismatched"):
+            source.commit_training_batch(1)
+        with pytest.raises(RuntimeError, match="uncommitted exposure batch"):
+            source.save(0)
+        source.commit_training_batch(0)
+        assert sum(source.provider.trained.values()) == 1
+        source.save(0)
+        source.acknowledge_groups([following])
+        with pytest.raises(RuntimeError, match="consumed, uncommitted"):
+            source.save(0)
+        source.commit_training_batch(1)
+        assert sum(source.provider.trained.values()) == 2 and not source.provider.pending
+        receipts = [
+            json.loads(line)
+            for path in (tmp_path / "records").glob("pool-exposure-*.jsonl")
+            for line in path.read_text().splitlines()
+        ]
+        assert [receipt["update"] for receipt in receipts] == [1, 2]
+        assert [receipt["selection_ids"] for receipt in receipts] == [
+            [group[0].metadata["pool_selection_id"]] for group in (current, following)
+        ]
+        recorder.close()
+        source.close()
+        args.load, args.start_rollout_id = args.save, 1
+        restored = DashboardDrainingRolloutDataSource(args)
+        try:
+            # The checkpoint predates update 1: its prepared prompts regenerate, uncredited.
+            restored.load(0)
+            assert sum(restored.provider.trained.values()) == 1
+            assert list(restored.provider.pending) == [following[0].metadata["pool_selection_id"]]
+            assert test_prompt_provider.payload(restored.get_samples(1)) == pristine
+        finally:
+            restored.close()
+    finally:
+        recorder.close()
+        source.close()
+
+
 @pytest.mark.parametrize("policy", ["shuffle", "uniform", "weighted", "exposure"])
 def test_expired_queue_entry_releases_exposure_reservation(args, tmp_path, policy):
     setup(args, tmp_path, policy)

@@ -148,14 +148,11 @@ def test_pool_mode_validation_and_no_fraction_ambiguity(tmp_path):
     }
     run_data.validate_data(data)
     spec = test_miles_run_spec.spec(
-        tmp_path,
-        data=data,
-        records={"enabled": True, "root": "/records"},
-        core={"prepared_batch_overlap": False},
-        **{"async": {"fully_async": True}},
+        tmp_path, data=data, records={"enabled": True, "root": "/records"}, **{"async": {"fully_async": True}}
     )
     # Use a single optimizer batch per collection; the default fixture may differ.
-    spec.compile()
+    # Pools accept the default prepared-batch overlap.
+    assert spec.compile().core.prepared_batch_overlap is True
     bad = copy.deepcopy(data)
     bad["sources"][0]["fraction"] = 1
     with pytest.raises(ValueError, match="omit source fraction"):
