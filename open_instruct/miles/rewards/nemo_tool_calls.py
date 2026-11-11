@@ -56,11 +56,8 @@ def declared_tools(raw):
 @lru_cache(maxsize=4096)
 def contract(serialized):
     target = json.loads(serialized)
-    fields = set(target) - {"think_prefix_in_prompt"}
-    if fields != {"profile", "tool_format", "expected_action", "tools"}:
+    if set(target) != {"profile", "tool_format", "expected_action", "tools"}:
         raise ValueError("Unexpected single-step tool target fields")
-    if type(target.get("think_prefix_in_prompt", False)) is not bool:
-        raise ValueError("think_prefix_in_prompt must be a boolean")
     if target["profile"] not in THRESHOLDS:
         raise ValueError("Unknown native tool comparison profile")
     if target["tool_format"] not in {"olmo_pythonic_v1", "olmo_xml_v1"}:
@@ -91,17 +88,18 @@ def target_for_row(raw, options):
     return target
 
 
-def action_text(prediction, think_prefix_in_prompt=False):
+def action_text(prediction, prompt_opens_reasoning=False):
     """Return the response's action region, or None while its reasoning is still open.
 
-    Upstream NeMo Gym receives reasoning as a separate output item and grades only the
-    assistant message or calls that follow it. Reasoning that never closes therefore
-    contains no action, and prose or calls written inside it never count. Prompts that
-    end with the opening tag (``think_prefix_in_prompt``) leave it out of the response.
+    NeMo Gym receives reasoning as a separate output item (vLLM's Nemotron V3 and
+    DeepSeek-R1 reasoning parsers treat output without a closing tag as all reasoning)
+    and grades only the assistant message or calls that follow it. Reasoning that never
+    closes therefore contains no action, and prose or calls written inside it never
+    count. When the prompt ends with the opening tag, the response does not repeat it.
     """
     if "</think>" in prediction:
         final = prediction.rsplit("</think>", 1)[1]
-    elif think_prefix_in_prompt or "<think>" in prediction:
+    elif prompt_opens_reasoning or "<think>" in prediction:
         return None
     else:
         final = prediction
@@ -191,10 +189,12 @@ def validate_xml_reference(target):
 
 class SingleStepToolVerifier(nvidia_constraints._IsolatedAdapter):
     kind = "nemo_single_step_tool_v1"
+    # The reward step tells this verifier whether the rendered prompt opened reasoning.
+    reads_prompt_reasoning = True
 
-    def __call__(self, tokenized_prediction, prediction, label, **kwargs):
+    def __call__(self, tokenized_prediction, prediction, label, prompt_opens_reasoning=False, **kwargs):
         target, expected, config = contract(json.dumps(label, allow_nan=False))
-        text = action_text(prediction, target.get("think_prefix_in_prompt", False))
+        text = action_text(prediction, prompt_opens_reasoning)
         if text is None:
             return self.result(0.0, category="unclosed_thinking")
         try:

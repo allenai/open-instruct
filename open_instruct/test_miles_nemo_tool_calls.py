@@ -4,12 +4,14 @@ import asyncio
 import copy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from transformers.utils import chat_template_utils
 
-from open_instruct.miles.datasets import source_preparation
+from open_instruct.miles.datasets import run_data, source_preparation
 from open_instruct.miles.rewards import nemo_tool_calls as tools
+from open_instruct.miles.rewards import rewards
 
 
 def raw_row():
@@ -166,84 +168,73 @@ def test_unknown_tool_plan_option_is_fatal():
         source_preparation.adapt(raw_row(), "single_step_tool_v1", {"tool_format": "misspelled"})
 
 
-@pytest.mark.parametrize("schema", [{"type": "dict"}, {"properties": []}])
-@pytest.mark.parametrize("message_reference", [False, True])
-def test_xml_admission_checks_unused_tool_schemas(schema, message_reference):
-    raw = raw_row()
-    raw["responses_create_params"]["tools"].append({"type": "function", "name": "unused", "parameters": schema})
-    if message_reference:
-        raw["expected_action"] = {"type": "message", "content": "Hello"}
-    with pytest.raises(ValueError, match="Invalid declared tool schema"):
-        tools.target_for_row(raw, {"tool_format": "olmo_xml_v1"})
-
-
-@pytest.mark.parametrize("schema", [{"type": "dict"}, {"properties": []}])
-def test_existing_xml_target_with_bad_schema_scores_zero(schema):
-    target = tools.target_for_row(raw_row(), {})
-    target["tool_format"] = "olmo_xml_v1"
-    target["tools"][0]["function"]["parameters"] = schema
-    response = "<tool_call><function=lookup><parameter=count>2</parameter></function></tool_call>"
-    verifier = tools.SingleStepToolVerifier()
-    assert verifier([], response, target).score == 0
-    assert asyncio.run(verifier.async_call([], response, target)).score == 0
-
-
-def thinking_target(expected_action, think_prefix_in_prompt=True):
+def thinking_target(expected_action):
     target = tools.target_for_row(raw_row(), {})
     target["expected_action"] = expected_action
-    target["think_prefix_in_prompt"] = think_prefix_in_prompt
     return target
 
 
 CALL = '<function_calls>lookup(item="apples", count=2)</function_calls>'
 MESSAGE = {"type": "message", "content": "Reference prose"}
+EXPECTED_CALL = {"type": "function_call", "name": "lookup", "arguments": '{"item":"apples","count":2}'}
+
+
+def opened(response, expected_action):
+    """Score a response to a prompt that ends with the opening reasoning tag."""
+    return tools.SingleStepToolVerifier()([], response, thinking_target(expected_action), prompt_opens_reasoning=True)
 
 
 @pytest.mark.parametrize(
-    "response",
+    "response,prompt_opens_reasoning",
     [
-        "I should tell the user the stock levels.",  # the prompt opened reasoning; it never closed
-        "<think>I should tell the user the stock levels.",  # the response opened it itself
-        "Plan.</think>Here are the varieties.<think>More thought",  # reopened and left open
+        ("I should tell the user the stock levels.", True),  # the prompt opened reasoning; it never closed
+        ("<think>I should tell the user the stock levels.", False),  # the response opened it itself
+        ("Plan.</think>Here are the varieties.<think>More thought", True),  # reopened and left open
     ],
 )
-def test_unclosed_reasoning_is_not_a_reply(response):
+def test_unclosed_reasoning_is_not_a_reply(response, prompt_opens_reasoning):
     verifier = tools.SingleStepToolVerifier()
-    result = verifier([], response + "<|endoftext|>", thinking_target(MESSAGE))
+    result = verifier(
+        [], response + "<|endoftext|>", thinking_target(MESSAGE), prompt_opens_reasoning=prompt_opens_reasoning
+    )
     assert result.score == 0
     assert result.diagnostics["category"] == "unclosed_thinking"
 
 
 def test_reply_after_closed_reasoning_still_earns_message_credit():
-    verifier = tools.SingleStepToolVerifier()
-    assert verifier([], "Plan the reply.</think>We have two varieties.<|im_end|>", thinking_target(MESSAGE)).score == 1
+    assert opened("Plan the reply.</think>We have two varieties.<|im_end|>", MESSAGE).score == 1
     # Closing the reasoning is not itself a reply.
-    assert verifier([], "Plan the reply.</think>\n<|im_end|>", thinking_target(MESSAGE)).score == 0
+    assert opened("Plan the reply.</think>\n<|im_end|>", MESSAGE).score == 0
 
 
 def test_calls_inside_reasoning_never_count():
-    verifier = tools.SingleStepToolVerifier()
-    expected_call = {"type": "function_call", "name": "lookup", "arguments": '{"item":"apples","count":2}'}
     # A call drafted in unfinished reasoning is not an action.
-    assert verifier([], "Maybe " + CALL + " would work", thinking_target(expected_call)).score == 0
-    # A call drafted in closed reasoning is not an action either; the prose after it is the action.
-    assert verifier([], "Maybe " + CALL + "</think>Let me check.", thinking_target(expected_call)).score == 0
-    assert verifier([], "Maybe " + CALL + "</think>Let me check.", thinking_target(MESSAGE)).score == 1
-    assert verifier([], "Check stock.</think>" + CALL, thinking_target(expected_call)).score == 1
+    assert opened("Maybe " + CALL + " would work", EXPECTED_CALL).score == 0
+    # A call drafted in closed reasoning is not an action either; the prose after it is.
+    assert opened("Maybe " + CALL + "</think>Let me check.", EXPECTED_CALL).score == 0
+    assert opened("Maybe " + CALL + "</think>Let me check.", MESSAGE).score == 1
+    assert opened("Check stock.</think>" + CALL, EXPECTED_CALL).score == 1
 
 
-def test_non_thinking_prompts_keep_grading_the_whole_response():
+def test_prompts_without_reasoning_keep_grading_the_whole_response():
     verifier = tools.SingleStepToolVerifier()
-    assert verifier([], "We have two varieties.", thinking_target(MESSAGE, think_prefix_in_prompt=False)).score == 1
-    # Labels prepared before the flag existed keep their previous behaviour.
-    assert verifier([], CALL, tools.target_for_row(raw_row(), {})).score == 1
+    assert verifier([], "We have two varieties.", thinking_target(MESSAGE)).score == 1
+    assert verifier([], CALL, thinking_target(EXPECTED_CALL), prompt_opens_reasoning=False).score == 1
 
 
-def test_think_prefix_flag_must_be_boolean():
-    target = thinking_target(MESSAGE)
-    target["think_prefix_in_prompt"] = "yes"
-    with pytest.raises(ValueError, match="boolean"):
-        tools.SingleStepToolVerifier()([], "Reply.", target)
+@pytest.mark.parametrize(
+    "prompt,final_answer_only,expected",
+    [
+        ("<|im_start|>assistant\n<think>", False, True),
+        ("<|im_start|>assistant\n<think>\n", False, True),
+        ("<|im_start|>assistant\n", False, False),
+        ([{"role": "user", "content": "Find apples."}], False, False),
+        # The reasoning has already been removed from the response.
+        ("<|im_start|>assistant\n<think>", True, False),
+    ],
+)
+def test_reward_step_reads_reasoning_state_from_the_prompt(prompt, final_answer_only, expected):
+    assert rewards._prompt_opens_reasoning(prompt, final_answer_only=final_answer_only) is expected
 
 
 class TemplateTokenizer:
@@ -266,13 +257,17 @@ class TemplateTokenizer:
         return list(text.encode())
 
 
-@pytest.mark.parametrize("prefix", ["", "<think>"])
-def test_preparation_records_whether_the_prompt_opens_reasoning(tmp_path, prefix):
+def prepared_row(tmp_path, monkeypatch, prefix, expected_action):
+    raw = raw_row()
+    raw["expected_action"] = expected_action
     source = tmp_path / "train.jsonl"
-    source.write_text(json.dumps(raw_row()) + "\n")
+    source.write_text(json.dumps(raw) + "\n")
     receipt = tmp_path / "hygiene.json"
     receipt.write_text('{"test_fixture":true}')
     plan = tmp_path / "plan.json"
+    inputs = [
+        {"path": str(source), "sha256": source_preparation.file_hash(source), "revision": "test", "split": "train"}
+    ]
     plan.write_text(
         json.dumps(
             {
@@ -281,14 +276,7 @@ def test_preparation_records_whether_the_prompt_opens_reasoning(tmp_path, prefix
                     "nemo_tools": {
                         "adapter": "single_step_tool_v1",
                         "options": {"tool_format": "olmo_xml_v1"},
-                        "inputs": [
-                            {
-                                "path": str(source),
-                                "sha256": source_preparation.file_hash(source),
-                                "revision": "test",
-                                "split": "train",
-                            }
-                        ],
+                        "inputs": inputs,
                         "hygiene_receipt": {"path": str(receipt), "sha256": source_preparation.file_hash(receipt)},
                     }
                 },
@@ -297,11 +285,71 @@ def test_preparation_records_whether_the_prompt_opens_reasoning(tmp_path, prefix
     )
     tokenizer = TemplateTokenizer(prefix)
     output = tmp_path / "prepared"
-    catalog = source_preparation.prepare(plan, output, tokenizer)
-    entry = catalog["sources"]["nemo_tools"]
-    rows = [json.loads(line) for line in (output / entry["prompt_data"]["path"]).read_text().splitlines()]
-    (target,) = [spec["target"] for spec in rows[0]["metadata"]["verifiers"]]
-    assert target["think_prefix_in_prompt"] is bool(prefix)
-    tokenizer.prefix = "<think>\n"
-    with pytest.raises(source_preparation.PlanError, match="whitespace"):
-        source_preparation.prepare(plan, tmp_path / "whitespace-prefix", tokenizer)
+    entry = source_preparation.prepare(plan, output, tokenizer)["sources"]["nemo_tools"]
+    hf = tmp_path / "hf"
+    hf.mkdir()
+    monkeypatch.setattr(run_data, "_tokenizer", lambda path: tokenizer)
+    data = {
+        "sources": [
+            {
+                "name": "nemo_tools",
+                "fraction": 1.0,
+                **{key: str(output / entry[key]["path"]) for key in ("prompt_data", "reward_config")},
+            }
+        ]
+    }
+    result = run_data.prepare_data(data, hf, tmp_path / "loaded", max_prompt_length=5000, seed=17)
+    return json.loads(Path(result["prompt_data"]).read_text().splitlines()[0]), result["reward_config"]
+
+
+def reward(row, reward_config, response, *, final_answer_only=False):
+    args = SimpleNamespace(
+        olmo_core=SimpleNamespace(
+            reward_config=reward_config, reward_zero_truncated=True, reward_final_answer_only=final_answer_only
+        )
+    )
+    sample = SimpleNamespace(
+        prompt=row["input"],
+        response=response,
+        metadata=copy.deepcopy(row["metadata"]),
+        tokens=[],
+        response_length=0,
+        status="completed",
+    )
+    return asyncio.run(rewards.registered_reward(args, sample))
+
+
+@pytest.mark.parametrize("prefix", ["", "<think>"])
+def test_registered_reward_reads_the_rendered_prompt(tmp_path, monkeypatch, prefix):
+    row, reward_config = prepared_row(tmp_path, monkeypatch, prefix, MESSAGE)
+    assert row["input"].endswith("<think>") is bool(prefix)
+    unfinished = "I should tell the user about the two varieties.<|im_end|>"
+    finished = "Two varieties.</think>We have two varieties.<|im_end|>"
+    # Unfinished reasoning earns no reply credit only when the prompt opened the reasoning.
+    assert reward(row, reward_config, unfinished) == (0.0 if prefix else 1.0)
+    assert reward(row, reward_config, finished) == 1.0
+    # Final-answer-only grading strips the reasoning first and gates a missing close itself.
+    assert reward(row, reward_config, finished, final_answer_only=True) == 1.0
+    assert reward(row, reward_config, unfinished, final_answer_only=True) == 0.0
+
+
+@pytest.mark.parametrize("schema", [{"type": "dict"}, {"properties": []}])
+@pytest.mark.parametrize("message_reference", [False, True])
+def test_xml_admission_checks_unused_tool_schemas(schema, message_reference):
+    raw = raw_row()
+    raw["responses_create_params"]["tools"].append({"type": "function", "name": "unused", "parameters": schema})
+    if message_reference:
+        raw["expected_action"] = {"type": "message", "content": "Hello"}
+    with pytest.raises(ValueError, match="Invalid declared tool schema"):
+        tools.target_for_row(raw, {"tool_format": "olmo_xml_v1"})
+
+
+@pytest.mark.parametrize("schema", [{"type": "dict"}, {"properties": []}])
+def test_existing_xml_target_with_bad_schema_scores_zero(schema):
+    target = tools.target_for_row(raw_row(), {})
+    target["tool_format"] = "olmo_xml_v1"
+    target["tools"][0]["function"]["parameters"] = schema
+    response = "<tool_call><function=lookup><parameter=count>2</parameter></function></tool_call>"
+    verifier = tools.SingleStepToolVerifier()
+    assert verifier([], response, target).score == 0
+    assert asyncio.run(verifier.async_call([], response, target)).score == 0

@@ -174,10 +174,10 @@ equivalence to the reference message.
 Only the text after the reasoning is an action, as in NeMo Gym, which receives
 reasoning as a separate output item. A response whose reasoning never closes scores
 zero (category `unclosed_thinking`), and prose or calls written inside the reasoning
-never count. Preparation records whether the rendered prompt opens the reasoning
-block in the target's `think_prefix_in_prompt`; without that flag (sources prepared
-before it existed), an unclosed block is recognised only when the response itself
-contains `<think>`. Preserve these upstream limitations for
+never count. Thinking chat templates end the prompt with `<think>`, so the response
+contains only the closing tag; the reward step reads each sample's rendered prompt to
+tell the verifier whether the response starts inside reasoning. Prepared labels are
+unchanged. Preserve these upstream limitations for
 initial mixing; investigate stricter behavior separately rather than silently
 changing reward semantics. Response parsing/resource failures score zero with
 diagnostics, while malformed targets remain fatal verifier errors.
