@@ -834,7 +834,6 @@ enabled = true
 root = "/run/inference-records"
 
 [core]
-prepared_batch_overlap = false
 prompt_replay_enabled = true
 prompt_replay_max_successes = 0
 prompt_replay_truncation = "any"
@@ -865,8 +864,11 @@ unchanged by the sampler; an eight-response recipe remains eight-response.
 | Stale work | Pool mode defaults to `async_unused_samples_handler="drop"`; explicit retry is rejected. Drops release reservations; dropped fresh rows are not redrawn, so complete traversal does not imply complete observed or trained coverage. |
 | Recovery | Manifest and selection-policy identity, cursors, RNG, targets, delivery counters, reservations, and replay histories are checkpointed with pending prompts. |
 
-The first implementation supports fully asynchronous disaggregated serving,
-without prepared-batch overlap. The application requires the companion MILES
+Pool mode supports fully asynchronous disaggregated serving, with or without
+[prepared-batch overlap](core.md#prepared-batch-overlap). With overlap, the batch
+prepared for the next update is staged while the current update trains; exposure
+is still credited once per completed update, in training order, and a checkpoint
+taken in between regenerates the prepared prompts on resume. The application requires the companion MILES
 runtime's `core_commit_exposure` callback and finite-pool termination support,
 included in this branch's runtime source pin. Older images fail explicitly.
 Build an image from this branch before launching this mode; the existing image
