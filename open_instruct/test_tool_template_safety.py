@@ -179,3 +179,94 @@ def test_resume_checks_recorded_template_without_retokenizing_or_rewriting(tmp_p
     else:
         assert run_data.prepare_data(data, hf, output, max_prompt_length=10, seed=17) == result
     assert all(path.read_bytes() == raw for path, raw in before.items())
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {
+            "$defs": {"payload": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}},
+            "$ref": "#/$defs/payload",
+        },
+        {
+            "$defs": {"payload": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}},
+            "$dynamicRef": "#/$defs/payload",
+        },
+        {"allOf": [{"type": "object", "properties": {"n": {"type": "integer"}}}, {"required": ["n"]}]},
+        {
+            "$id": "https://example.invalid/root",
+            "$defs": {
+                "payload": {
+                    "$id": "child",
+                    "$defs": {"value": {"type": "integer"}},
+                    "type": "object",
+                    "properties": {"n": {"$ref": "#/$defs/value"}},
+                    "required": ["n"],
+                }
+            },
+            "$ref": "#/$defs/payload",
+        },
+    ],
+    ids=["root-ref", "root-dynamic-ref", "root-allof", "nested-resource-scope"],
+)
+@pytest.mark.parametrize("payload_key", [None, "result"])
+def test_xml_answers_resolve_root_property_schemas(schema, payload_key):
+    target = {
+        "format": "json",
+        "schema_policy": "as_declared",
+        "schema": schema,
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "tool_payload_key": payload_key,
+        "tool_call_format": "olmo_xml_v1",
+    }
+    parameter = "<parameter=n>3</parameter>" if payload_key is None else '<parameter=result>{"n":3}</parameter>'
+    response = f"<tool_call><function=submit>{parameter}</function></tool_call>"
+    verifier = structured_outputs.StructuredOutputVerifier()
+    assert verifier([], response, target).score == 1
+    assert verifier([], response.replace("3", "3.5"), target).score == 0
+
+
+def test_xml_allof_properties_decode_independently_of_required_siblings():
+    schema = {
+        "allOf": [
+            {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]},
+            {"properties": {"active": {"type": "boolean"}}, "required": ["active"]},
+        ]
+    }
+    target = {
+        "format": "json",
+        "schema_policy": "as_declared",
+        "schema": schema,
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "tool_call_format": "olmo_xml_v1",
+    }
+    response = "<tool_call><function=submit><parameter=n>3</parameter><parameter=active>true</parameter></function></tool_call>"
+    assert structured_outputs.StructuredOutputVerifier()([], response, target).score == 1
+
+
+@pytest.mark.parametrize("keyword", ["anyOf", "oneOf"])
+def test_xml_property_projection_leaves_branch_selection_to_final_validation(keyword):
+    branches = [
+        {
+            "type": "object",
+            "properties": {"n": {"type": "integer"}, "side": {"enum": [side]}},
+            "required": ["n", "side"],
+        }
+        for side in ["left", "right"]
+    ]
+    target = {
+        "format": "json",
+        "schema_policy": "as_declared",
+        "schema": {keyword: branches},
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "tool_call_format": "olmo_xml_v1",
+    }
+    response = (
+        "<tool_call><function=submit><parameter=n>3</parameter><parameter=side>left</parameter></function></tool_call>"
+    )
+    verifier = structured_outputs.StructuredOutputVerifier()
+    assert verifier([], response, target).score == 1
+    assert verifier([], response.replace("left", "neither"), target).score == 0

@@ -12,8 +12,9 @@ from collections.abc import Sequence
 from typing import Any
 
 from jsonschema import validators
-from referencing import Registry
+from referencing import Registry, Resource
 from referencing.exceptions import Unresolvable
+from referencing.jsonschema import DRAFT202012
 
 
 def _unique_keys(pairs):
@@ -64,19 +65,83 @@ def parameter_value(value, schema, root_schema=None):
         return value
     root_schema = root_schema or schema
     validator = validators.validator_for(root_schema)(root_schema, registry=Registry()).evolve(schema=schema)
+    return _decode_parameter(value, validator.is_valid)
+
+
+def _decode_parameter(value, is_valid):
     try:
         decoded = json.loads(value, object_pairs_hook=_unique_keys, parse_constant=_invalid_constant)
     except json.JSONDecodeError:
         decoded = value
     json.dumps(decoded, allow_nan=False)
     try:
-        if validator.is_valid(decoded):
+        if is_valid(decoded):
             return decoded
-        if validator.is_valid(value):
+        if is_valid(value):
             return value
     except Unresolvable as error:
         raise ValueError("Parameter schema references an unavailable resource") from error
     raise ValueError("Parameter value does not match its declared type/schema")
+
+
+def property_value(value, name, schema):
+    """Decode an object property through root references/composition in its own scope.
+
+    Projection considers only this property's constraints. Required sibling fields
+    and oneOf branch exclusivity are checked against the complete final instance.
+    """
+    if not any(key in schema for key in ("$ref", "$dynamicRef", "allOf", "anyOf", "oneOf")):
+        return parameter_value(value, schema.get("properties", {}).get(name, {}), schema)
+    resource = Resource.from_contents(schema, default_specification=DRAFT202012)
+    uri = resource.id() or ""
+    registry = Registry().with_resource(uri, resource).crawl()
+    validator = validators.validator_for(schema)(schema, registry=registry)
+
+    def project(node, resolver, seen):
+        if isinstance(node, bool):
+            return (lambda candidate: False) if not node else None
+        if id(node) in seen:
+            return None
+        seen = seen | {id(node)}
+        checks = []
+        if name in node.get("properties", {}):
+            child = node["properties"][name]
+            scope = resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012))
+            checks.append(
+                lambda candidate, child=child, scope=scope: not any(
+                    validator.descend(candidate, child, resolver=scope)
+                )
+            )
+        for keyword in ("$ref", "$dynamicRef"):
+            if keyword in node:
+                resolved = resolver.lookup(node[keyword])
+                checks.append(project(resolved.contents, resolved.resolver, seen))
+        for child in node.get("allOf", []):
+            scope = resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012))
+            checks.append(project(child, scope, seen))
+        for keyword in ("anyOf", "oneOf"):
+            if keyword in node:
+                alternatives = [
+                    project(
+                        child,
+                        resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012)),
+                        seen,
+                    )
+                    for child in node[keyword]
+                ]
+                checks.append(
+                    lambda candidate, alternatives=alternatives: any(
+                        check is None or check(candidate) for check in alternatives
+                    )
+                )
+        checks = [check for check in checks if check is not None]
+        return (lambda candidate: all(check(candidate) for check in checks)) if checks else None
+
+    try:
+        check = project(schema, registry.resolver(uri), set())
+        return value.strip() if check is None else _decode_parameter(value.strip(), check)
+    except Unresolvable as error:
+        raise ValueError("Parameter schema references an unavailable resource") from error
 
 
 def parse_native_calls(body, tools):
@@ -103,7 +168,7 @@ def parse_native_calls(body, tools):
             if re.search(r"</?(?:tool_call|function|parameter)(?:[=>])", value):
                 raise ValueError("Ambiguous structural tag in parameter")
             schema = schemas.get(name, {})
-            parameters[key] = parameter_value(value, schema.get("properties", {}).get(key, {}), schema)
+            parameters[key] = property_value(value, key, schema)
             content = content[parameter.end() :].strip()
         calls.append({"name": name, "parameters": parameters})
         remaining = remaining[match.end() :].strip()

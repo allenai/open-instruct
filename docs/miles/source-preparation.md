@@ -531,3 +531,8 @@ includes contradictory reference types and values that the native XML grammar
 cannot represent unambiguously. No tool is executed during this check. Structured
 XML answers retain the selected function, payload key and JSON-schema reward;
 malformed, duplicate and wrong-function calls still fail.
+
+XML function answers also resolve property schemas behind root `$ref` and
+composition keywords, retaining nested resource scopes. Instance numeric overflow
+or recursion limits during decoding use the same zero-reward diagnostics as final
+schema validation; invalid target configurations remain fatal.

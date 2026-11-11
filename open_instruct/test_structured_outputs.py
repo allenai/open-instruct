@@ -189,7 +189,9 @@ def test_alarm_during_cleanup_scores_zero_and_restores_signal(monkeypatch):
     def alarm_on_disarm(which, seconds, interval=0):
         if seconds == 0 and not cleanup_alarm.called:
             cleanup_alarm()
-            signal.getsignal(signal.SIGALRM)(signal.SIGALRM, None)
+            handler = signal.getsignal(signal.SIGALRM)
+            assert callable(handler)
+            handler(signal.SIGALRM, None)
         return real_setitimer(which, seconds, interval)
 
     monkeypatch.setattr(signal, "setitimer", alarm_on_disarm)
@@ -237,22 +239,33 @@ def test_real_worker_timeout_logs_in_parent(monkeypatch):
     ],
     ids=["recursive-arrays", "huge-integer-multiple"],
 )
-def test_async_instance_validation_limits_score_zero(schema, prediction, error_type):
+@pytest.mark.parametrize("response_mode", ["text", "xml_tool"])
+def test_async_instance_validation_limits_score_zero(schema, prediction, error_type, response_mode):
     label = target(schema=schema)
+    if response_mode == "xml_tool":
+        label.update(
+            response_mode="tool_call", tool_name="submit", tool_payload_key="result", tool_call_format="olmo_xml_v1"
+        )
+
+    def response(body):
+        if response_mode == "xml_tool":
+            return f"<tool_call><function=submit><parameter=result>{body}</parameter></function></tool_call>"
+        return body
+
     # Both inputs pass parsing/serialization and target validation. The failure
     # happens only when the schema validator traverses/calculates on the instance.
     structured.parse(prediction, "json", structured.validate_target(label), False)
 
     async def score_and_recover():
         verifier = structured.StructuredOutputVerifier()
-        result = await verifier.async_call([], prediction, label)
+        result = await verifier.async_call([], response(prediction), label)
         assert result.score == 0
         assert result.diagnostics["status"] == "validation_error"
         assert result.diagnostics["error_type"] == error_type
         assert result.diagnostics["failure_policy"] == "zero"
         assert result.diagnostics["elapsed_seconds"] >= 0
         assert result.diagnostics["error"]
-        assert (await verifier.async_call([], "1", label)).score == 1
+        assert (await verifier.async_call([], response("1"), label)).score == 1
 
     asyncio.run(score_and_recover())
 

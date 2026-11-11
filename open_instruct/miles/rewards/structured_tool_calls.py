@@ -62,12 +62,10 @@ def parse_payload(text, target):
         calls = tool_call_parsing.parse_native_calls(text, tools)
         for call in calls:
             call["parameters"] = {
-                name: tool_call_parsing.parameter_value(
-                    value,
-                    target["schema"]
+                name: (
+                    tool_call_parsing.parameter_value(value, target["schema"])
                     if key is not None and name == key
-                    else target["schema"].get("properties", {}).get(name, {}),
-                    target["schema"],
+                    else tool_call_parsing.property_value(value, name, target["schema"])
                 )
                 for name, value in call["parameters"].items()
             }
