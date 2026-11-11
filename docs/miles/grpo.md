@@ -229,14 +229,16 @@ Agents discover this workflow through AGENTS.md; no
 special prompt is needed. Follow the [documentation index](index.md) for model
 support, configuration, data, parallelism and operations.
 
-## Score-candidate collection (local development)
+## Score-candidate collection
 
-The local score-transport branches add native `/generate` collection for SCT
-(top-k candidates) and SCMC (independent samples with replacement). These are
-extraction controls; `rollout_top_k` still controls response sampling. The
-published runtime image has not been rebuilt with these changes. Test with the
-matching MILES checkout and the array/SCMC SGLang extension before launching;
-changing TOML alone does not install them in the locked runtime image.
+MILES already provides top-k score centering (SCT), nested candidate collection,
+and the `score_centering` loss. These extensions add array-preserving transport
+and SCMC (independent samples with replacement) through native `/generate`.
+These are extraction controls; `rollout_top_k` still controls response sampling.
+Use matching MILES and SGLang revisions from the runtime lock. The benchmark
+image `01M737J78XJT3P2STBR9DT897B` contains those revisions and passed the paired
+training checks below; changing TOML alone does not install the extensions in an
+older image.
 
 For SCT32 with the existing score-centering loss:
 
@@ -320,3 +322,27 @@ the renderer. It compares each completed run against its own paired baseline,
 reports HTTP packing/unpacking fractions, and separates model-forward spans
 from extraction spans. Those server benchmarks do not measure the new MILES
 parser or a training update.
+
+### Trainer benchmark
+
+The H066 baseline and SCMC32-array runs each completed 20 optimizer updates on
+Jupiter, using four trainer GPUs (EP4) and one inference GPU. Each update used
+eight generated responses of 256 tokens with balanced synthetic rewards. After
+discarding four warmup updates, mean trainer-update time was 0.993 seconds for
+native PPO/GRPO and 1.028 seconds for native SCMC32 with TIS: a 3.53% increase
+(35 milliseconds). Median times were 0.906 and 0.930 seconds. Peak allocated
+memory was effectively unchanged at approximately 61 GiB per trainer GPU.
+
+Runs:
+
+1. [Native PPO/GRPO baseline](https://beaker.org/ex/01M737K99YD7WV52KRGGGEP4VY).
+2. [SCMC32 with array transport](https://beaker.org/ex/01M737KBZ3DSCQJW4J68BDTNK0).
+
+These are native host-wall trainer timings, excluding generation, rewards,
+weight publication and startup, with no added CUDA synchronization. They compare
+different loss paths in separate runs with independently evolving policies;
+they do not isolate the MC correction or establish convergence or large-batch
+performance. Use `scripts/miles/trainer_overhead_report.py` on the job logs to
+reproduce the table and pass its JSON to `score_overhead_report.py` to include
+trainer results alongside the inference/transport plots. NVFP4 is not qualified
+by these BF16 runs.

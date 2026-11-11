@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Local SCT/SCMC trainer benchmark overlay; GPU qualification in progress.",
+  "status": "SCT/SCMC benchmark overlay; BF16 H066 baseline and SCMC32 array training each passed 20 updates on Jupiter. NVFP4 qualification pending.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
