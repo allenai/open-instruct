@@ -320,6 +320,13 @@ def _verify_row(row, tokenizer, limit, known):
         weight = spec.get("weight", 1.0)
         if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight):
             raise InputError("Verifier weight must be finite")
+    template_hash = metadata.get("rendering_template_sha256")
+    if template_hash is not None:
+        template = tokenizer.chat_template
+        if not isinstance(template, str) or template_hash != hashlib.sha256(template.encode()).hexdigest():
+            raise InputError(
+                "Prepared rendering template hash differs from the checkpoint chat template; re-render inputs"
+            )
     ids = tokenizer.encode(row["input"], add_special_tokens=False)
     if not 0 < len(ids) <= limit:
         raise InputError(

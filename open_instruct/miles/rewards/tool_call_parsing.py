@@ -11,7 +11,9 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from open_instruct.miles.rewards import structured_tool_calls
+from jsonschema import validators
+from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 
 def _unique_keys(pairs):
@@ -27,36 +29,54 @@ def _invalid_constant(value):
     raise ValueError(f"Nonfinite JSON constant: {value}")
 
 
-def parameter_value(value, schema):
+def _literal(node):
+    # The template emits JSON literals inside Pythonic keyword arguments. Accept
+    # both JSON and Python spellings, without evaluating expressions or calls.
+    if isinstance(node, ast.Constant) and type(node.value) in (str, int, float, bool, type(None)):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in {"true", "false", "null"}:
+        return {"true": True, "false": False, "null": None}[node.id]
+    if isinstance(node, ast.List):
+        return [_literal(value) for value in node.elts]
+    if isinstance(node, ast.Dict):
+        result = {}
+        for key, value in zip(node.keys, node.values, strict=True):
+            key = _literal(key)
+            if not isinstance(key, str) or key in result:
+                raise ValueError("Tool arguments require distinct string keys")
+            result[key] = _literal(value)
+        return result
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _literal(node.operand)
+        if type(value) in (int, float):
+            return value if isinstance(node.op, ast.UAdd) else -value
+    raise ValueError("Tool arguments must contain JSON values only")
+
+
+def parameter_value(value, schema, root_schema=None):
     """Decode native unquoted strings and JSON scalars/containers using the tool schema."""
     value = value.strip()
-    kind = schema.get("type", "string")
-    if kind == "string":
+    if schema is False:
+        raise ValueError("Parameter forbidden by its schema")
+    schema = schema if isinstance(schema, dict) else {}
+    # Unconstrained and plain string parameters retain the native unquoted spelling.
+    if not schema or schema.get("type") == "string":
         return value
-    kinds = kind if isinstance(kind, list) else [kind]
+    root_schema = root_schema or schema
+    validator = validators.validator_for(root_schema)(root_schema, registry=Registry()).evolve(schema=schema)
     try:
         decoded = json.loads(value, object_pairs_hook=_unique_keys, parse_constant=_invalid_constant)
     except json.JSONDecodeError:
-        # Native tool calls leave string arguments unquoted, including strings
-        # admitted by a union. Keep duplicate-key/nonfinite checks strict.
-        if "string" in kinds:
+        decoded = value
+    json.dumps(decoded, allow_nan=False)
+    try:
+        if validator.is_valid(decoded):
+            return decoded
+        if validator.is_valid(value):
             return value
-        raise
-    json.dumps(decoded, allow_nan=False)  # Reject overflow such as 1e999, including nested values.
-    matches = {
-        "null": decoded is None,
-        "boolean": type(decoded) is bool,
-        "integer": type(decoded) is int,
-        "number": type(decoded) in (int, float),
-        "array": isinstance(decoded, list),
-        "object": isinstance(decoded, dict),
-        "string": isinstance(decoded, str),
-    }
-    if not any(matches.get(item, False) for item in kinds):
-        if "string" in kinds:
-            return value
-        raise ValueError("Parameter value does not match its declared type")
-    return decoded
+    except Unresolvable as error:
+        raise ValueError("Parameter schema references an unavailable resource") from error
+    raise ValueError("Parameter value does not match its declared type/schema")
 
 
 def parse_native_calls(body, tools):
@@ -66,7 +86,7 @@ def parse_native_calls(body, tools):
     All non-whitespace action text must belong to a call. Parallel calls have
     separate wrappers, and duplicate parameters or malformed tails fail closed.
     """
-    schemas = {tool["function"]["name"]: tool["function"]["parameters"].get("properties", {}) for tool in tools}
+    schemas = {tool["function"]["name"]: tool["function"]["parameters"] for tool in tools}
     calls = []
     remaining = body.strip()
     while remaining:
@@ -82,7 +102,8 @@ def parse_native_calls(body, tools):
             key, value = parameter[1], parameter[2]
             if re.search(r"</?(?:tool_call|function|parameter)(?:[=>])", value):
                 raise ValueError("Ambiguous structural tag in parameter")
-            parameters[key] = parameter_value(value, schemas.get(name, {}).get(key, {}))
+            schema = schemas.get(name, {})
+            parameters[key] = parameter_value(value, schema.get("properties", {}).get(key, {}), schema)
             content = content[parameter.end() :].strip()
         calls.append({"name": name, "parameters": parameters})
         remaining = remaining[match.end() :].strip()
@@ -145,13 +166,13 @@ def parse_pythonic_calls(body: str, tools: Sequence[dict[str, Any]] = ()):
             end = _boundary(args, ",")
             argument = args[:end].strip()
             if argument.startswith("**"):
-                values = structured_tool_calls._literal(ast.parse(argument[2:], mode="eval").body)
+                values = _literal(ast.parse(argument[2:], mode="eval").body)
             else:
                 key, separator, value = argument.partition("=")
                 key = key.strip()
                 if not separator or not key or any(c in key for c in "()[]{}<>\n"):
                     raise ValueError("Expected named literal arguments")
-                values = {key: structured_tool_calls._literal(ast.parse(value.strip(), mode="eval").body)}
+                values = {key: _literal(ast.parse(value.strip(), mode="eval").body)}
             if not isinstance(values, dict) or any(k in arguments for k in values):
                 raise ValueError("Duplicate or malformed arguments")
             arguments.update(values)

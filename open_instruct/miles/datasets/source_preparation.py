@@ -16,9 +16,8 @@ from collections import Counter
 from pathlib import Path
 
 from jsonschema.exceptions import SchemaError
-from transformers import AutoTokenizer
 
-from open_instruct import ifeval_constraints
+from open_instruct import ifeval_constraints, tokenizer_utils
 from open_instruct.miles.datasets import long_context, tool_conversations, toolrl
 from open_instruct.miles.rewards import (
     complete_code,
@@ -190,6 +189,8 @@ def resolved_adapter(raw, kind, options: dict | None = None):
 def adapt(raw, kind, options=None):
     options = options or {}
     validate_keyword_option(kind, options)
+    if "tool_call_format" in options and options["tool_call_format"] not in structured_tool_calls.FORMATS:
+        raise PlanError("Unknown structured tool rendering format")
     if kind in {"toolrl_v1", "single_step_tool_v1"}:
         if options.get("tool_format", "olmo_pythonic_v1") not in {"olmo_pythonic_v1", "olmo_xml_v1"}:
             raise PlanError("Unknown tool rendering format")
@@ -272,7 +273,7 @@ def adapt(raw, kind, options=None):
                 response_mode="tool_call",
                 tool_name=raw.get("tool_name"),
                 tool_payload_key=raw.get("tool_payload_key"),
-                tool_call_format="olmo3_pythonic_v1",
+                tool_call_format=options.get("tool_call_format", "olmo3_pythonic_v1"),
             )
         structured.validate_target(target)
         # These native parsers have fixed root shapes. A schema demanding the
@@ -379,12 +380,15 @@ def write(path, value):
 
 
 def prepare(plan_path, output, tokenizer):
+    if not isinstance(tokenizer.chat_template, str) or not tokenizer.chat_template:
+        raise PlanError("Source preparation requires an explicit checkpoint chat template")
+    template_sha256 = hashlib.sha256(tokenizer.chat_template.encode()).hexdigest()
     plan_path, output = Path(plan_path).resolve(), Path(output).resolve()
     plan = json.loads(plan_path.read_text())
     if plan.get("schema_version") != 1 or not plan.get("sources"):
         raise ValueError("Expected versioned source plan")
     output.mkdir(parents=True, exist_ok=False)
-    catalog: dict = {"schema_version": 1, "sources": {}}
+    catalog: dict = {"schema_version": 1, "chat_template_sha256": template_sha256, "sources": {}}
     for name, spec in plan["sources"].items():
         if re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", name) is None:
             raise ValueError("Invalid source name")
@@ -423,8 +427,8 @@ def prepare(plan_path, output, tokenizer):
                             raise PlanError("Tool target format does not match the selected chat template")
                         template_options["tools"] = target["tools"]
                     if verifier == "structured" and target.get("response_mode") == "tool_call":
-                        if "<function_calls>" not in tokenizer.chat_template:
-                            raise PlanError("Structured tool answers require the Olmo Pythonic tool-call template")
+                        if structured_tool_calls.FORMATS[target["tool_call_format"]] not in tokenizer.chat_template:
+                            raise PlanError("Structured tool answer format does not match the selected chat template")
                         template_options["tools"] = structured_tool_calls.tools_for_template(raw)
                     render_messages = (
                         tool_conversations.for_template(ms, tokenizer.chat_template)
@@ -462,6 +466,7 @@ def prepare(plan_path, output, tokenizer):
                             "hygiene_status": wrapper.get("hygiene_status", wrapper.get("status")),
                             "hygiene_labels": wrapper.get("labels", []),
                             "prompt_tokens": tokens,
+                            "rendering_template_sha256": template_sha256,
                             "provenance": wrapper.get("provenance", descriptor),
                             "verifiers": [{"name": verifier, "target": target}],
                         },
@@ -519,6 +524,8 @@ def prepare(plan_path, output, tokenizer):
             entry[key] = {"path": str(path.relative_to(output)), "sha256": file_hash(path)}
         catalog["sources"][name] = entry
     write(output / "plan.json", plan)
+    if hashlib.sha256(tokenizer.chat_template.encode()).hexdigest() != template_sha256:
+        raise PlanError("Checkpoint chat template changed during source preparation")
     write(output / "catalog.json", catalog)
     return catalog
 
@@ -529,7 +536,7 @@ def main():
     parser.add_argument("--tokenizer", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True)
+    tokenizer = tokenizer_utils.load_tokenizer(args.tokenizer, local_files_only=True)
     prepare(args.plan, args.output, tokenizer)
 
 
