@@ -43,6 +43,7 @@ _CHILDREN = set()
 _FAILURE_CAPTURED = set()
 _RANGE_WARNED = set()
 _RESPONSE_PREFIX = b"MILES_VERIFIER_RESULT "
+_STRIPPED_SPECIAL_TOKENS = frozenset({"<|endoftext|>", "<|im_end|>"})
 
 
 def _kill_remaining_children():
@@ -375,6 +376,22 @@ def _capture_verifier_failure(args, sample, spec, response, error, *, capture_ki
         logger.exception("Could not save failed verifier input; preserving original verifier exception")
 
 
+def _response_text(response: str, *, stripped_special_tokens: frozenset[str] = _STRIPPED_SPECIAL_TOKENS) -> str:
+    """Remove one terminal generation marker without changing answer structure.
+
+    MILES retains stop tokens in sample.response. Keep that original text and the
+    trajectory tokens for training/records, but exclude the terminal marker from
+    grading. Other special tokens and interior occurrences remain visible.
+    """
+    trimmed = response.rstrip()
+    # Prefer the longest suffix if the selected set ever contains overlapping
+    # markers. An empty set preserves the response verbatim.
+    for stop_token in sorted(stripped_special_tokens, key=len, reverse=True):
+        if trimmed.endswith(stop_token):
+            return trimmed.removesuffix(stop_token)
+    return response
+
+
 async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
     registry = _registry(args.olmo_core.reward_config)
     metadata = sample.metadata
@@ -388,7 +405,7 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
         weighted_specs.append((spec, _finite(spec.get("weight", 1.0), "weight")))
     status = getattr(sample.status, "value", sample.status) if hasattr(sample, "status") else None
     reason = None
-    response = sample.response
+    response = _response_text(sample.response, stripped_special_tokens=_STRIPPED_SPECIAL_TOKENS)
     if args.olmo_core.reward_zero_truncated and status == "truncated":
         reason = "truncated"
     elif args.olmo_core.reward_final_answer_only:
