@@ -142,3 +142,22 @@ def test_direct_parameter_enters_its_resource_scope(root_id, ref_key):
     target = nemo_tool_calls.target_for_row(raw, {"tool_format": "olmo_xml_v1"})
     response = "<tool_call><function=lookup><parameter=n>3</parameter></function></tool_call>"
     assert nemo_tool_calls.SingleStepToolVerifier()([], response, target).score == 1
+
+
+@pytest.mark.parametrize("keyword,key", [("additionalProperties", ""), ("patternProperties", "^n$")])
+@pytest.mark.parametrize("wrapper", ["direct", "$ref", "allOf"])
+def test_typed_open_property_references_are_admitted(keyword, key, wrapper):
+    child = {"$id": "value", "$defs": {"num": {"type": "integer"}}, "$ref": "#/$defs/num"}
+    schema = {"type": "object", "required": ["n"], keyword: {key: child} if key else child}
+    if wrapper == "$ref":
+        schema = {"$defs": {"arguments": schema}, "$ref": "#/$defs/arguments"}
+    elif wrapper == "allOf":
+        schema = {"allOf": [schema]}
+    raw = {
+        "agent_ref": {"name": "single_step_tool_use_with_argument_comparison_agent"},
+        "responses_create_params": {"tools": [{"type": "function", "name": "lookup", "parameters": schema}]},
+        "expected_action": {"type": "function_call", "name": "lookup", "arguments": '{"n":3}'},
+    }
+    target = nemo_tool_calls.target_for_row(raw, {"tool_format": "olmo_xml_v1"})
+    response = "<tool_call><function=lookup><parameter=n>3</parameter></function></tool_call>"
+    assert nemo_tool_calls.SingleStepToolVerifier()([], response, target).score == 1

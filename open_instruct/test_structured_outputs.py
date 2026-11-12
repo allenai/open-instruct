@@ -665,3 +665,49 @@ def test_xml_direct_property_local_reference_uses_child_resource(root_id, schema
     assert asyncio.run(verifier.async_call([], response, label)).score == 1
     assert verifier([], response.replace(">3<", ">0<"), label).score == 0
     assert verifier([], response.replace(">3<", ">3.5<"), label).score == 0
+
+
+@pytest.mark.parametrize("wrapper", ["direct", "$ref", "allOf"])
+@pytest.mark.parametrize("schema_policy", ["as_declared", "nemo_strict_v1"])
+@pytest.mark.parametrize(
+    "fields,value,wrong",
+    [
+        ({"additionalProperties": {"type": "integer"}}, "3", "3.5"),
+        ({"patternProperties": {"^n$": {"type": "integer"}}, "additionalProperties": False}, "3", "3.5"),
+        ({"patternProperties": {"^x$": {"type": "string"}}, "additionalProperties": {"type": "integer"}}, "3", "3.5"),
+        ({"properties": {"n": {"type": "integer"}}, "patternProperties": {"^n$": {"minimum": 1}}}, "3", "0"),
+        ({"patternProperties": {"^n": {"type": "integer"}, "n$": {"minimum": 1}}}, "3", "0"),
+        (
+            {"additionalProperties": {"$id": "child", "$defs": {"v": {"type": "integer"}}, "$ref": "#/$defs/v"}},
+            "3",
+            "3.5",
+        ),
+    ],
+)
+def test_xml_decodes_applicable_pattern_and_additional_properties(fields, value, wrong, wrapper, schema_policy):
+    schema = {"type": "object", "required": ["n"], **fields}
+    if wrapper == "$ref":
+        schema = {"$defs": {"arguments": schema}, "$ref": "#/$defs/arguments"}
+    elif wrapper == "allOf":
+        schema = {"allOf": [schema]}
+    label = tool_target(schema=schema, schema_policy=schema_policy)
+    label["tool_call_format"] = "olmo_xml_v1"
+    label["tool_payload_key"] = None
+    response = f"<tool_call><function=submit><parameter=n>{value}</parameter></function></tool_call>"
+    verifier = structured.StructuredOutputVerifier()
+    # NeMo strictification closes schemas that explicitly declare properties.
+    assert verifier([], response, label).score == 1
+    assert verifier([], response.replace(f">{value}<", f">{wrong}<"), label).score == 0
+
+
+def test_additional_properties_do_not_apply_to_declared_or_pattern_matched_fields():
+    for fields in [
+        {"properties": {"n": {"type": "string"}}, "additionalProperties": {"type": "integer"}},
+        {"patternProperties": {"^n$": {"type": "string"}}, "additionalProperties": {"type": "integer"}},
+        {"patternProperties": {"^n$": {}}, "additionalProperties": {"type": "integer"}},
+    ]:
+        label = tool_target(schema={"type": "object", "required": ["n"], **fields})
+        label["tool_call_format"] = "olmo_xml_v1"
+        label["tool_payload_key"] = None
+        response = "<tool_call><function=submit><parameter=n>text</parameter></function></tool_call>"
+        assert structured.StructuredOutputVerifier()([], response, label).score == 1

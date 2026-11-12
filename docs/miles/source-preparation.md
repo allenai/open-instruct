@@ -525,8 +525,8 @@ source on fresh preparation and resume; they do not gain a claim of verified
 rendering provenance. Task-mode and adopted-manifest inputs rendered during the
 run do not emit that legacy warning. Resume parses each prepared row once:
 training rows get IF-target and template checks, evaluation rows get template
-checks only, without retokenizing or rewriting either partition. Source preparation uses the shared
-checkpoint tokenizer loader, preserving the serialized tokenization backend.
+checks only, without retokenizing or rewriting either partition. Source
+preparation uses the shared checkpoint tokenizer loader, preserving the serialized tokenization backend.
 
 New XML next-action references must satisfy their declared argument schemas and
 retain full comparator reward after serialization and parsing. Incompatible
@@ -537,13 +537,16 @@ XML answers retain the selected function, payload key and JSON-schema reward;
 malformed, duplicate and wrong-function calls still fail.
 
 XML function answers also resolve property schemas behind root `$ref` and
-composition keywords, retaining nested resource scopes. Instance numeric overflow
+composition keywords, retaining nested resource scopes. Decoding applies all
+matching `patternProperties` schemas and uses typed `additionalProperties` only
+when neither an explicit property nor a pattern matches. Instance numeric overflow
 or recursion limits during decoding use the same zero-reward diagnostics as final
 schema validation; invalid target configurations remain fatal.
 
 XML parameter schemas guide decoding, including references and composition. A
 parseable value that has the declared JSON type but violates a constraint such as
 `minimum`, `enum` or a nested `required` field remains available to the task's
-comparator, preserving ToolRL partial credit. Empty-schema parameters keep the native string spelling. Structured-output grading still validates the entire
+comparator, preserving ToolRL partial credit. Empty-schema parameters keep the
+native string spelling. Structured-output grading still validates the entire
 final instance against its full schema; invalid source references still fail
 preparation admission independently of response parsing.

@@ -160,7 +160,9 @@ def property_value(value, name, schema):
     and oneOf branch exclusivity are checked against the complete final instance.
     """
     _schema_validator(json.dumps(schema, sort_keys=True, allow_nan=False))
-    if not any(key in schema for key in ("$ref", "$dynamicRef", "allOf", "anyOf", "oneOf")):
+    if not any(
+        key in schema for key in ("$ref", "$dynamicRef", "allOf", "anyOf", "oneOf", "patternProperties")
+    ) and not isinstance(schema.get("additionalProperties"), dict):
         return parameter_value(value, schema.get("properties", {}).get(name, {}), schema)
     resource = Resource.from_contents(schema, default_specification=DRAFT202012)
     uri = resource.id() or ""
@@ -174,8 +176,15 @@ def property_value(value, name, schema):
             return None
         seen = seen | {id(node)}
         checks = []
-        if name in node.get("properties", {}):
-            child = node["properties"][name]
+        properties = node.get("properties", {})
+        children = [properties[name]] if name in properties else []
+        patterns = [child for pattern, child in node.get("patternProperties", {}).items() if re.search(pattern, name)]
+        children.extend(patterns)
+        if name not in properties and not patterns and isinstance(node.get("additionalProperties"), dict):
+            children.append(node["additionalProperties"])
+        for child in children:
+            if child is True or child == {}:
+                continue
             scope = resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012))
             if types_only:
                 checks.append(
