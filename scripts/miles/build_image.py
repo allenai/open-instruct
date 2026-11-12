@@ -6,6 +6,7 @@ Instruct with its separately pinned GPU dependencies.
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -24,6 +25,21 @@ def main():
     if actual != lock["base_image"]["docker_id"]:
         raise ValueError("Base image differs from runtime.lock.json; qualify a new runtime before changing the pin")
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    env = dict(os.environ)
+    secrets = []
+    if options.target == "application":
+        token = env.get("GH_TOKEN") or env.get("GITHUB_TOKEN")
+        if not token:
+            try:
+                token = subprocess.check_output(["gh", "auth", "token"], text=True, stderr=subprocess.PIPE).strip()
+            except (FileNotFoundError, subprocess.CalledProcessError) as error:
+                raise ValueError(
+                    "Task grader installation requires GH_TOKEN, GITHUB_TOKEN, or gh auth login"
+                ) from error
+        if not token:
+            raise ValueError("GitHub authentication returned an empty token")
+        env["MILES_BUILD_GITHUB_TOKEN"] = token
+        secrets = ["--secret", "id=github_token,env=MILES_BUILD_GITHUB_TOKEN"]
     subprocess.run(
         [
             "docker",
@@ -40,10 +56,12 @@ def main():
             options.target,
             "--tag",
             options.tag,
+            *secrets,
             ".",
         ],
         cwd=root,
         check=True,
+        env=env,
     )
 
 

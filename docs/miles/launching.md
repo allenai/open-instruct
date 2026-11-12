@@ -351,3 +351,16 @@ Inspect the latest attempt for **each task and replica rank**, not the first job
 experiment. Scheduler events explain pending jobs. Small reports/logs are copied
 to Beaker results; checkpoints and rollout tensors remain on WEKA. See
 [operations](operations.md) for completion, recovery and artifact interpretation.
+
+### Task grader dependencies
+
+MILES application images include the pinned ReasoningGym/RDKit task libraries,
+structured-output parsers and the complete-test code client. A readiness overlay
+is not required for these graders. Application builds need `GH_TOKEN`,
+`GITHUB_TOKEN` or `gh auth login` with read access to
+`allenai/code-execution-service`; the build helper supplies a BuildKit secret.
+The image build checks correct/incorrect ReasoningGym and XML grades, RDKit
+loading, and code-client imports/label conversion without calling a remote
+service. Code grading still requires its configured execution endpoint and runtime
+credentials. Existing published image digests must be rebuilt to acquire these
+dependencies. The binary base and CUDA stack remain pinned.

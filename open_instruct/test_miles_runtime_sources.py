@@ -43,6 +43,7 @@ def test_prepare_sources(tmp_path, source_repo, use_cache):
 @pytest.mark.parametrize("target", ["runtime-base", "application"])
 @pytest.mark.parametrize("base_matches", [True, False])
 def test_image_build_validates_base_and_records_revision(tmp_path, monkeypatch, target, base_matches):
+    monkeypatch.setenv("GH_TOKEN", "test-token")
     lock_path = tmp_path / "runtime/miles/runtime.lock.json"
     lock_path.parent.mkdir(parents=True)
     lock_path.write_text(json.dumps({"base_image": {"docker_id": "base-digest"}}))
@@ -70,4 +71,5 @@ def test_image_build_validates_base_and_records_revision(tmp_path, monkeypatch, 
     assert args[args.index("--target") + 1] == target
     assert "BASE_IMAGE=base" in args
     assert "SOURCE_REVISION=application-revision" in args
-    assert "--secret" not in args
+    assert ("--secret" in args) == (target == "application")
+    assert not any("test-token" in arg for arg in args)
