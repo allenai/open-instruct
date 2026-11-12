@@ -13,7 +13,7 @@ from referencing.exceptions import Unresolvable
 
 from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import nemo_tool_comparison as native
-from open_instruct.miles.rewards import nvidia_constraints, tool_call_parsing
+from open_instruct.miles.rewards import nvidia_constraints, response_text, tool_call_parsing
 
 UPSTREAM_REVISION = "966145fc02ae58b887fd49379675604cc38fdd43"
 ROUTES = {
@@ -89,7 +89,7 @@ def target_for_row(raw, options):
 
 
 def parse_action(text, target):
-    text = re.sub(r"(?:<\|im_end\|>|<\|endoftext\|>)\s*$", "", text, count=1).strip()
+    text = response_text.strip_terminal_special_tokens(text).strip()
     calls = []
     if target["tool_format"] == "olmo_pythonic_v1" and "<function_calls>" in text:
         blocks = re.findall(r"<function_calls>(.*?)</function_calls>", text, re.S)

@@ -7,10 +7,25 @@ import pytest
 
 from open_instruct import ground_truth_utils
 from open_instruct.miles.configuration.config import CoreConfig
-from open_instruct.miles.rewards import rewards, task_verifiers
+from open_instruct.miles.rewards import (
+    deterministic_verifiers,
+    nemo_tool_calls,
+    response_text,
+    rewards,
+    task_verifiers,
+)
+
+STOP_SEQUENCES = [
+    "<|endoftext|>",
+    "<|im_end|>",
+    "<|im_end|><|endoftext|>",
+    "<|endoftext|><|im_end|>",
+    "<|endoftext|><|endoftext|>",
+    "<|im_end|> \n<|endoftext|>  \n",
+]
 
 
-@pytest.mark.parametrize("stop_token", ["<|endoftext|>", "<|im_end|>"])
+@pytest.mark.parametrize("stop_token", STOP_SEQUENCES)
 @pytest.mark.parametrize(
     "instruction,kwargs,answer",
     [
@@ -44,7 +59,8 @@ def test_registered_if_reward_ignores_terminal_stop_token(monkeypatch, stop_toke
 
 
 @pytest.mark.parametrize("managed_judge", [False, True])
-def test_all_reward_routes_receive_cleaned_text_and_original_tokens(monkeypatch, managed_judge):
+@pytest.mark.parametrize("stop_token", STOP_SEQUENCES)
+def test_all_reward_routes_receive_cleaned_text_and_original_tokens(monkeypatch, managed_judge, stop_token):
     received = []
 
     async def verify(tokens, prediction, target, **kwargs):
@@ -53,7 +69,7 @@ def test_all_reward_routes_receive_cleaned_text_and_original_tokens(monkeypatch,
 
     async def judge(args, sample, *, prediction, **kwargs):
         received.append((sample.tokens, prediction))
-        assert sample.response.endswith("<|endoftext|>")
+        assert sample.response.endswith(stop_token)
         return 1.0
 
     monkeypatch.setattr(rewards, "_registry", lambda path: {"test": SimpleNamespace(async_call=verify)})
@@ -62,7 +78,7 @@ def test_all_reward_routes_receive_cleaned_text_and_original_tokens(monkeypatch,
     args = SimpleNamespace(olmo_core=CoreConfig(reward_config="unused"))
     answer = '<think>Plan</think><tool_call>{"name": "test"}</tool_call>Answer'
     sample = SimpleNamespace(
-        response=answer + "<|endoftext|>",
+        response=answer + stop_token,
         tokens=[101, 102],
         response_length=2,
         prompt="Prompt",
@@ -70,10 +86,10 @@ def test_all_reward_routes_receive_cleaned_text_and_original_tokens(monkeypatch,
     )
     assert asyncio.run(rewards.registered_reward(args, sample)) == 1.0
     assert received == [([101, 102], answer)]
-    assert sample.response == answer + "<|endoftext|>"
+    assert sample.response == answer + stop_token
 
 
-@pytest.mark.parametrize("stop_token", ["<|endoftext|>", "<|im_end|>"])
+@pytest.mark.parametrize("stop_token", STOP_SEQUENCES)
 def test_empty_final_answer_with_only_stop_token_stays_gated(monkeypatch, stop_token):
     monkeypatch.setattr(rewards, "_registry", lambda path: {"test": SimpleNamespace()})
     args = SimpleNamespace(olmo_core=CoreConfig(reward_config="unused", reward_final_answer_only=True))
@@ -97,12 +113,29 @@ def test_empty_final_answer_with_only_stop_token_stays_gated(monkeypatch, stop_t
     ],
 )
 def test_other_content_is_preserved(text):
-    assert rewards._response_text(text) == text
+    assert response_text.strip_terminal_special_tokens(text) == text
 
 
 def test_selected_special_tokens_are_stripped_by_default_and_can_be_extended():
     text = "  Answer\n<|endoftext|>  \n"
-    assert rewards._response_text(text) == "  Answer\n"
-    assert rewards._response_text(text, stripped_special_tokens=frozenset()) == text
-    selected = rewards._STRIPPED_SPECIAL_TOKENS | {"<custom_stop>"}
-    assert rewards._response_text("Answer<custom_stop>", stripped_special_tokens=selected) == "Answer"
+    assert response_text.strip_terminal_special_tokens(text) == "  Answer\n"
+    assert response_text.strip_terminal_special_tokens(text, stripped_special_tokens=frozenset()) == text
+    selected = response_text.STRIPPED_SPECIAL_TOKENS | {"<custom_stop>"}
+    assert (
+        response_text.strip_terminal_special_tokens("Answer<custom_stop>", stripped_special_tokens=selected)
+        == "Answer"
+    )
+
+
+@pytest.mark.parametrize("stop_token", STOP_SEQUENCES)
+def test_shared_cleanup_is_idempotent_and_direct_callers_agree(stop_token):
+    answer = 'Mention "<|endoftext|>" literally.'
+    original = answer + stop_token
+    cleaned = response_text.strip_terminal_special_tokens(original)
+    assert cleaned == answer
+    assert response_text.strip_terminal_special_tokens(cleaned) == cleaned
+    assert deterministic_verifiers.answer_text(original) == cleaned
+    assert deterministic_verifiers.answer_text(cleaned) == cleaned
+    target = {"tool_format": "olmo_pythonic_v1"}
+    assert nemo_tool_calls.parse_action(original, target).content == cleaned
+    assert nemo_tool_calls.parse_action(cleaned, target).content == cleaned
