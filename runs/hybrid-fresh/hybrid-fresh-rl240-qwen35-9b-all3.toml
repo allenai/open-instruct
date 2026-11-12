@@ -1,0 +1,123 @@
+# Fresh hybrid, stage B (2026-11-11): mixed RL for student updates 60-299, continuing stage A's update-59
+# Megatron checkpoint (weights, Adam moments and step, RNG, LR scheduler) and its data cursor. The root is
+# seeded with hardlinks to stage A's iter_0000059, marker 59 and global_dataset_state_dict_59.pt before launch;
+# training.initial_rollout = 60 refuses to start without them.
+# A copy of mixrl-qwen35-9b-all3-300u.toml (mixed RL 300 seed 1); changed: name, training.initial_rollout,
+# output.root on olmo-3p5-post-checkpoints and that mount. num_rollouts stays 300 so saves, evals and the
+# final hf-299 fall on the same global update numbers. Prepared assets are shared with mixed RL 300.
+#
+# MOPD 3-domain (seed 1) mixed-RL baseline: Qwen3.5-9B verifier GRPO on data v4 `mix_all3` (2026-10-30),
+# 300 updates of 64 prompts x 8 samples with the domain-balanced token mean (each domain gets a third of the
+# loss weight). As in the math+IF pilot, one run gives both compute points (constant LR: hf-99 = 100 updates,
+# hf-299 = 300). Otherwise the pilot recipe: DPPO TV 0.1, truncated samples kept, all three evals every 10
+# updates (1 sample, temperature 1). save_interval 25 (pilot: 50) so a preemption after the min runtime
+# costs less; hf-99 and hf-299 are still exported.
+schema_version = 1
+name = "hybrid-fresh-rl240-qwen35-9b-all3"
+
+[model]
+source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets-pr1924/Qwen3.5-9B-c20223623576"
+architecture = "qwen3.5-9B"
+
+[training]
+algorithm = "grpo"
+resume = true
+num_rollouts = 300
+save_interval = 25
+eval_interval = 10
+optimizer_steps_per_rollout = 1
+loss_aggregation = "domain"
+keep_checkpoints = 0
+initial_rollout = 60
+
+[trainer]
+backend = "megatron"
+gpus = 4
+tensor_parallel_size = 2
+
+[inference]
+gpus = 4
+tensor_parallel_size = 1
+rollout_batch_size = 64
+samples_per_prompt = 8
+max_prompt_length = 2048
+max_response_length = 16384
+max_context_length = 18432
+max_running_requests = 128
+temperature = 1.0
+top_p = 1.0
+eval_temperature = 1.0
+eval_top_p = 1.0
+eval_samples_per_prompt = 1
+
+[optimizer]
+learning_rate = 1e-6
+lr_decay_style = "constant"
+weight_decay = 0.0
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+adam_eps = 1e-8
+clip_grad = 1.0
+
+[objective]
+policy_loss = "dppo"
+use_rollout_logprobs = true
+dppo_divergence_type = "tv"
+dppo_threshold = 0.1
+std_normalization = false
+
+[reward]
+exclude_truncated = false
+
+[output]
+root = "/weka/olmo-3p5-post-checkpoints/kevinfarhat/mopd-phase1/runs/hybrid-fresh-rl240-qwen35-9b-all3"
+assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/assets/megatron-grpo-qwen35-9b"
+
+[data]
+seed = 42
+prompt_data = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/mix_all3.jsonl"
+eval_prompt_data = [
+  "eval_math", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/eval_math.jsonl",
+  "eval_ifeval", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/eval_ifeval.jsonl",
+  "eval_code", "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/eval_code.jsonl",
+]
+reward_config = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/data/dolci-rl-qwen35-9b-v4/verifiers.json"
+
+[tracking]
+wandb_mode = "online"
+wandb_project = "miles-mopd-phase1"
+wandb_entity = "allenai-team1"
+
+[launch]
+workspace = "ai2/olmo-instruct"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "urgent"
+min_runtime = "4h"
+timeout = "48h"
+auto_resume = true
+gpus_per_replica = 8
+weka_mounts = [
+  { weka = "oe-adapt-default", mount_path = "/weka/oe-adapt-default" },
+  { weka = "olmo-3p5-post-checkpoints", mount_path = "/weka/olmo-3p5-post-checkpoints" },
+]
+
+[launch.secrets]
+WANDB_API_KEY = "kevinfarhat_WANDB_API_KEY"
+
+# Async producer as in the Qwen3.5-2B async OPD smoke (opd2b-graphon128-251-async-smoke2), with the
+# teacher run's age budget of 5. 1024 in-flight samples matches Open Instruct async 4 (4 x 256).
+[miles]
+fully_async = true
+max_weight_staleness = 5
+async_max_concurrent_samples = 1024
+async_data_buffer_capacity_factor = 2.0
+async_unused_samples_handler = "drop"
+rollout_submission_granularity = "group"
+pause_generation_mode = "retract"
+
+# Serving setting from the audited OPD 100-update run.
+sglang_disable_cuda_graph = false
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 128
+sglang_cuda_graph_backend_prefill = "disabled"

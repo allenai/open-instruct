@@ -1,0 +1,57 @@
+--- mopd-qwen35-9b-all3-100u.toml	2026-10-30 18:42:40
++++ hybrid-fresh/hybrid-fresh-mopd60-qwen35-9b-all3.toml	2026-11-11 16:30:41
+@@ -1,3 +1,9 @@
++# Fresh hybrid, stage A (2026-11-11): MOPD for student updates 0-59, seed 42, then stage B
++# (hybrid-fresh-rl240-qwen35-9b-all3) continues the same Megatron state with mixed RL for updates 60-299.
++# A copy of mopd-qwen35-9b-all3-100u.toml (MOPD 100 seed 1); changed: name, num_rollouts 100 -> 60,
++# keep_checkpoints 1 -> 2 (Nov 11 OPD default; iter_0000059 is the last save, so it is never pruned),
++# output.root on olmo-3p5-post-checkpoints and that mount. Prepared assets are shared with MOPD 100 s1.
++#
+ # Multi-teacher OPD (MOPD), 3 domains, 100 updates (2026-10-30): one Qwen3.5-9B base student distills from
+ # the v4 math, IFEval and code specialist teachers (each hf-99). Miles routes each prompt by metadata.domain
+ # ("math", "ifeval" or "code") to the teacher of that name. Otherwise identical to the math+IF pilot
+@@ -8,7 +14,7 @@
+ # fractions 0.25, 0.33, 0.5 give each about a quarter of the GPU. Holmes (B300) only: three 9B
+ # teachers do not fit on one 80 GB Jupiter H100.
+ schema_version = 1
+-name = "mopd-qwen35-9b-all3-100u"
++name = "hybrid-fresh-mopd60-qwen35-9b-all3"
+ 
+ [model]
+ source = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-opd/assets-pr1924/Qwen3.5-9B-c20223623576"
+@@ -40,12 +46,12 @@
+ [training]
+ algorithm = "opd"
+ resume = true
+-num_rollouts = 100
++num_rollouts = 60
+ save_interval = 10
+ eval_interval = 10
+ optimizer_steps_per_rollout = 1
+ loss_aggregation = "domain"
+-keep_checkpoints = 1
++keep_checkpoints = 2
+ 
+ [trainer]
+ backend = "megatron"
+@@ -81,7 +87,7 @@
+ adam_beta2 = 0.999
+ 
+ [output]
+-root = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/runs/mopd-qwen35-9b-all3-100u"
++root = "/weka/olmo-3p5-post-checkpoints/kevinfarhat/mopd-phase1/runs/hybrid-fresh-mopd60-qwen35-9b-all3"
+ assets = "/weka/oe-adapt-default/allennlp/deletable_checkpoint/kevinfarhat/miles-rl/assets/mopd-qwen35-9b-all3-v4-100u"
+ 
+ [data]
+@@ -108,7 +114,10 @@
+ timeout = "16h"
+ auto_resume = true
+ gpus_per_replica = 8
+-weka_mounts = [{ weka = "oe-adapt-default", mount_path = "/weka/oe-adapt-default" }]
++weka_mounts = [
++  { weka = "oe-adapt-default", mount_path = "/weka/oe-adapt-default" },
++  { weka = "olmo-3p5-post-checkpoints", mount_path = "/weka/olmo-3p5-post-checkpoints" },
++]
+ 
+ [launch.secrets]
+ WANDB_API_KEY = "kevinfarhat_WANDB_API_KEY"
