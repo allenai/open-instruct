@@ -1,10 +1,12 @@
-"""Non-executing structured tool answers in the Olmo Pythonic call format."""
+"""Non-executing structured tool answers in declared Olmo call formats."""
 
-import ast
 import copy
 import json
 import keyword
-import re
+
+from open_instruct.miles.rewards import tool_call_parsing
+
+FORMATS = {"olmo3_pythonic_v1": "<function_calls>", "olmo_xml_v1": "<tool_call>"}
 
 
 def validate_contract(target):
@@ -14,8 +16,8 @@ def validate_contract(target):
         return
     if target["response_mode"] != "tool_call" or target.get("format") != "json":
         raise ValueError("Structured tool calls require response_mode=tool_call and format=json")
-    if target.get("tool_call_format") != "olmo3_pythonic_v1":
-        raise ValueError("Specify tool_call_format=olmo3_pythonic_v1")
+    if target.get("tool_call_format") not in FORMATS:
+        raise ValueError("Specify tool_call_format=olmo3_pythonic_v1 or olmo_xml_v1")
     name = target.get("tool_name")
     if not isinstance(name, str) or not name.isidentifier() or keyword.iskeyword(name):
         raise ValueError("Expected an Olmo-compatible tool_name")
@@ -51,51 +53,30 @@ def tools_for_template(raw):
     return result
 
 
-def _literal(node):
-    # The template emits JSON literals inside Pythonic keyword arguments. Accept
-    # both JSON and Python spellings, without evaluating expressions or calls.
-    if isinstance(node, ast.Constant) and type(node.value) in (str, int, float, bool, type(None)):
-        return node.value
-    if isinstance(node, ast.Name) and node.id in {"true", "false", "null"}:
-        return {"true": True, "false": False, "null": None}[node.id]
-    if isinstance(node, ast.List):
-        return [_literal(value) for value in node.elts]
-    if isinstance(node, ast.Dict):
-        result = {}
-        for key, value in zip(node.keys, node.values, strict=True):
-            key = _literal(key)
-            if not isinstance(key, str) or key in result:
-                raise ValueError("Tool arguments require distinct string keys")
-            result[key] = _literal(value)
-        return result
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-        value = _literal(node.operand)
-        if type(value) in (int, float):
-            return value if isinstance(node.op, ast.UAdd) else -value
-    raise ValueError("Tool arguments must contain JSON values only")
-
-
 def parse_payload(text, target):
-    match = re.fullmatch(r"\s*<function_calls>\s*(.*?)\s*</function_calls>\s*", text, re.S)
-    if match is None:
-        raise ValueError("Expected exactly one final function call")
-    try:
-        call = ast.parse(match[1], mode="eval").body
-    except SyntaxError as error:
-        raise ValueError("Malformed final function call") from error
-    if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name) or call.args:
-        raise ValueError("Expected a function name with keyword arguments")
-    if call.func.id != target["tool_name"]:
-        raise ValueError("Wrong final function name")
-    arguments = {}
-    for arg in call.keywords:
-        # Literal dictionary expansion represents schema fields such as 'class',
-        # which cannot be written as Python keyword arguments. Nothing is executed.
-        values = _literal(arg.value) if arg.arg is None else {arg.arg: _literal(arg.value)}
-        if not isinstance(values, dict) or any(key in arguments for key in values):
-            raise ValueError("Tool arguments must have distinct string keys")
-        arguments.update(values)
     key = target.get("tool_payload_key")
+    tools = [{"type": "function", "function": {"name": target["tool_name"], "parameters": {}}}]
+    if target["tool_call_format"] == "olmo_xml_v1":
+        # Parse the wrapper first, then decode each value in the original schema's
+        # reference scope. Wrapping a payload schema would move its local $refs.
+        calls = tool_call_parsing.parse_native_calls(text, tools)
+        for call in calls:
+            call["parameters"] = {
+                name: (
+                    tool_call_parsing.parameter_value(value, target["schema"])
+                    if key is not None and name == key
+                    else tool_call_parsing.property_value(value, name, target["schema"])
+                )
+                for name, value in call["parameters"].items()
+            }
+    else:
+        try:
+            calls = tool_call_parsing.parse_pythonic_calls(text, tools)
+        except SyntaxError as error:
+            raise ValueError("Malformed final function call") from error
+    if len(calls) != 1 or calls[0]["name"] != target["tool_name"]:
+        raise ValueError("Expected exactly one final call to the declared function")
+    arguments = calls[0]["parameters"]
     if key is not None:
         if key not in arguments:
             raise ValueError("Missing tool payload key")

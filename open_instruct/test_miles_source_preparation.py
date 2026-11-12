@@ -16,6 +16,8 @@ from open_instruct.miles.rewards import litmus, task_verifiers
 
 
 class Tokenizer:
+    chat_template = "fixture template"
+
     def apply_chat_template(self, messages, **kwargs):
         return json.dumps(messages)
 

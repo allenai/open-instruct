@@ -506,3 +506,47 @@ Keep these follow-ups separate from the released maintained-verifier pools:
 | Alternative valid code constructions, arithmetic grammar and language detection | Preserve the documented upstream behavior for the first pass; investigate deliberate changes separately. |
 | Runtime verifier outages | Omitted-group W&B metric is implemented; the systemic-failure stopping threshold remains an explicit open decision. |
 | Semantic data quality | Qualification covers loader/reward integration and reviewed controls, not every source reference's scientific or mathematical correctness. Investigate observed training failures without retroactively selecting rows by policy success. |
+
+## Tool formats and pre-rendered template provenance
+
+Offline rendering remains supported. Render with the selected starting checkpoint's
+own tokenizer and chat template; do not replace its template to satisfy a dataset
+format label. Olmo 3.5 tool plans use `tool_format = "olmo_xml_v1"`. Structured
+function answers additionally select `tool_call_format = "olmo_xml_v1"`; the
+legacy `olmo3_pythonic_v1` answer contract remains available for older checkpoints.
+Changing these options requires rebuilding targets and rendered inputs, not only
+editing a label in an existing artifact.
+
+Source preparation records the SHA256 of the effective template string in
+`metadata.rendering_template_sha256`. The prepared-data loader checks a supplied
+hash against the starting checkpoint's effective template before accepting the
+row. Legacy prepared inputs without this field remain readable and warn once per
+source on fresh preparation and resume; they do not gain a claim of verified
+rendering provenance. Task-mode and adopted-manifest inputs rendered during the
+run do not emit that legacy warning. Resume parses each prepared row once:
+training rows get IF-target and template checks, evaluation rows get template
+checks only, without retokenizing or rewriting either partition. Source
+preparation uses the shared checkpoint tokenizer loader, preserving the serialized tokenization backend.
+
+New XML next-action references must satisfy their declared argument schemas and
+retain full comparator reward after serialization and parsing. Incompatible
+references are reported through the existing omitted-row dispositions. This
+includes contradictory reference types and values that the native XML grammar
+cannot represent unambiguously. No tool is executed during this check. Structured
+XML answers retain the selected function, payload key and JSON-schema reward;
+malformed, duplicate and wrong-function calls still fail.
+
+XML function answers also resolve property schemas behind root `$ref` and
+composition keywords, retaining nested resource scopes. Decoding applies all
+matching `patternProperties` schemas and uses typed `additionalProperties` only
+when neither an explicit property nor a pattern matches. Instance numeric overflow
+or recursion limits during decoding use the same zero-reward diagnostics as final
+schema validation; invalid target configurations remain fatal.
+
+XML parameter schemas guide decoding, including references and composition. A
+parseable value that has the declared JSON type but violates a constraint such as
+`minimum`, `enum` or a nested `required` field remains available to the task's
+comparator, preserving ToolRL partial credit. Empty-schema parameters keep the
+native string spelling. Structured-output grading still validates the entire
+final instance against its full schema; invalid source references still fail
+preparation admission independently of response parsing.

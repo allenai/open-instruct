@@ -5,7 +5,11 @@ import json
 import re
 from functools import lru_cache
 
+from jsonschema import validators
+from jsonschema.exceptions import SchemaError
 from pydantic import TypeAdapter
+from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import nemo_tool_comparison as native
@@ -79,6 +83,8 @@ def target_for_row(raw, options):
         "tools": declared_tools(raw),
     }
     contract(json.dumps(target, allow_nan=False))
+    if target["tool_format"] == "olmo_xml_v1":
+        validate_xml_reference(target)
     return target
 
 
@@ -119,6 +125,45 @@ def parse_action(text, target):
     if re.search(r"</?(?:function_calls|tool_call)>", text):
         raise ValueError("Empty function-call block")
     return native.MessageAction(type="message", content=text) if text else None
+
+
+@lru_cache(maxsize=256)
+def _reference_validator(serialized_schema):
+    schema = json.loads(serialized_schema)
+    cls = validators.validator_for(schema)
+    try:
+        cls.check_schema(schema)
+    except SchemaError as error:
+        raise ValueError("Invalid declared tool schema") from error
+    return cls(schema, registry=Registry())
+
+
+def validate_xml_reference(target):
+    """Admit only references representable by the declared schemas and XML grammar."""
+    _, expected, config = contract(json.dumps(target, allow_nan=False))
+    tools = {tool["function"]["name"]: tool["function"] for tool in target["tools"]}
+    # Even tools unused by the reference may be called by a model response.
+    for tool in tools.values():
+        _reference_validator(json.dumps(tool["parameters"], sort_keys=True, allow_nan=False))
+    blocks = []
+    for call in native.get_tool_calls(expected):
+        arguments = json_object(call.arguments)
+        schema = tools[call.name]["parameters"]
+        validator = _reference_validator(json.dumps(schema, sort_keys=True, allow_nan=False))
+        try:
+            if not validator.is_valid(arguments):
+                raise ValueError("Reference arguments violate the declared tool schema")
+        except Unresolvable as error:
+            raise ValueError("Reference schema contains an unavailable resource") from error
+        parameters = "".join(
+            f"<parameter={name}>\n{value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, allow_nan=False)}\n</parameter>\n"
+            for name, value in arguments.items()
+        )
+        blocks.append(f"<tool_call>\n<function={call.name}>\n{parameters}</function>\n</tool_call>")
+    if blocks:
+        actual = parse_action("\n".join(blocks), target)
+        if native.ActionComparator(config=config).compare_action(expected, actual).reward != 1:
+            raise ValueError("Reference call does not round-trip through the XML parser")
 
 
 class SingleStepToolVerifier(nvidia_constraints._IsolatedAdapter):

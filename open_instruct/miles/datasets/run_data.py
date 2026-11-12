@@ -18,12 +18,14 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from open_instruct import ifeval_constraints
+from open_instruct import ifeval_constraints, logger_utils
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.datasets import mixture, pools, synlogic
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import judging, task_verifiers
 from open_instruct.miles.rollout import pool_sampling
+
+logger = logger_utils.setup_logger(__name__)
 
 # Preserve factory paths in existing prepared datasets and reward registries.
 RewardConfig = task_verifiers.RewardConfig
@@ -320,6 +322,7 @@ def _verify_row(row, tokenizer, limit, known):
         weight = spec.get("weight", 1.0)
         if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight):
             raise InputError("Verifier weight must be finite")
+    _verify_rendering_template(metadata, tokenizer)
     ids = tokenizer.encode(row["input"], add_special_tokens=False)
     if not 0 < len(ids) <= limit:
         raise InputError(
@@ -367,20 +370,77 @@ def _verify_if_training_row(row, names):
             )
 
 
-def _verify_resumed_if_training_data(result):
+def _verify_rendering_template(metadata, tokenizer):
+    template_hash = metadata.get("rendering_template_sha256")
+    if template_hash is not None:
+        template = tokenizer.chat_template
+        if not isinstance(template, str) or template_hash != hashlib.sha256(template.encode()).hexdigest():
+            raise InputError(
+                "Prepared rendering template hash differs from the checkpoint chat template; re-render inputs"
+            )
+
+
+def _warn_missing_rendering_template(source):
+    logger.warning(
+        "Prepared dataset %s has rows without metadata.rendering_template_sha256; "
+        "template compatibility cannot be verified. Continuing with existing inputs.",
+        str(source),
+    )
+
+
+def _prepared_warning_sources(data, result):
+    """Map cached partitions to original pre-rendered inputs, excluding task/adopt modes."""
+    output = Path(result["manifest"]).parent
+    sources = data.get("sources", [{**data, "name": None}])
+    paths = {}
+    for source in sources:
+        if source.get("prompt_data") is None:
+            continue
+        name = source.get("name")
+        split = f"source-{name}" if name is not None else "train"
+        paths[str(output / f"{split}.jsonl")] = str(Path(source["prompt_data"]).resolve())
+        evaluation = source.get("eval_prompt_data", [])
+        for label, path in zip(evaluation[::2], evaluation[1::2], strict=True):
+            split = f"eval-{name}-{label}" if name is not None else label
+            paths[str(output / f"{split}.jsonl")] = str(Path(path).resolve())
+    return paths
+
+
+def _verify_resumed_data(result, hf_checkpoint, data):
+    # One JSON parse per row: training gets IF + template checks; evaluation gets
+    # template checks only. Old caches are validated without editing/retokenizing.
     registry = _read_json_object(result["reward_config"], {})
     names = _if_verifier_names(registry)
-    if not names:
-        return
-    for path in result.get("train_sources", [result["prompt_data"]]):
+    training = set(result.get("train_sources", [result["prompt_data"]]))
+    paths = list(result.get("train_sources", [result["prompt_data"]]))
+    paths.extend(result["eval_prompt_data"][1::2])
+    warning_sources = _prepared_warning_sources(data, result)
+    warned = set()
+    tokenizer = None
+    for path in dict.fromkeys(paths):
         with Path(path).open(encoding="utf-8") as stream:
             for index, line in enumerate(stream, 1):
                 if not line.strip():
                     continue
+                row = json.loads(line)
+                if path in training and names:
+                    try:
+                        _verify_if_training_row(row, names)
+                    except InputError as error:
+                        raise InputError(f"{path}: training row {index}: {error}") from error
+                metadata = row.get("metadata", {})
+                if metadata.get("rendering_template_sha256") is None:
+                    source = warning_sources.get(path)
+                    if source is not None and source not in warned:
+                        _warn_missing_rendering_template(source)
+                        warned.add(source)
+                    continue
+                if tokenizer is None:
+                    tokenizer = _tokenizer(hf_checkpoint)
                 try:
-                    _verify_if_training_row(json.loads(line), names)
+                    _verify_rendering_template(metadata, tokenizer)
                 except InputError as error:
-                    raise InputError(f"{path}: training row {index}: {error}") from error
+                    raise InputError(f"{path}: row {index}: {error}") from error
 
 
 def _adopt(data, tokenizer, template, inputs):
@@ -670,7 +730,7 @@ def prepare_data(
         )
         # Older preparations may predate the constraint screen. Keep their bytes
         # immutable, but do not silently bypass validation on resume.
-        _verify_resumed_if_training_data(result)
+        _verify_resumed_data(result, hf_checkpoint, data)
         return result
     tokenizer = _tokenizer(hf_checkpoint)
     template = tokenizer.chat_template
@@ -692,6 +752,7 @@ def prepare_data(
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
     for split, rows in partitions.items():
+        warned_missing = False
         if isinstance(rows, _JsonlRows) and resolved_pools and split in training:
             # Streaming rows are recreated for validation and output. Apply the
             # same pool assignment on every pass, keeping held-out rows unchanged.
@@ -708,6 +769,15 @@ def prepare_data(
                 if resolved_pools and split in training and not isinstance(rows, _JsonlRows):
                     pools.annotate(row, resolved_pools, source_pool=source_pools.get(split), labels=pool_labels)
                 _verify_row(row, tokenizer, max_prompt_length, known)
+                # Only _prepared returns _JsonlRows. Task/adopt rendering records
+                # its template in provenance rather than per-row metadata.
+                if (
+                    isinstance(rows, _JsonlRows)
+                    and row["metadata"].get("rendering_template_sha256") is None
+                    and not warned_missing
+                ):
+                    _warn_missing_rendering_template(rows.path)
+                    warned_missing = True
                 if split in training:
                     _verify_if_training_row(row, if_verifiers)
             except InputError as error:
