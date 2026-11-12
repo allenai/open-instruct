@@ -22,22 +22,26 @@ configuration errors or unexpected failures; a backend configured to raise still
 raises. Local validation timeouts retain their existing zero-with-diagnostics
 contract and are not service failures.
 
-## Optional verifier dependencies
+## Verifier dependencies
 
-Install these pinned packages in the training image before using the optional
-dataset verifiers. The complete-test code client requires authenticated
-installation from the private repository:
+The standard MILES application image includes these task-verifier dependencies.
+The additional ReasoningGym/RDKit libraries are pinned in
+`runtime/miles/task-verifier-requirements.txt`; XML/schema dependencies are pinned
+in `runtime/miles/verifier-requirements.txt`. Image builds exercise the installed
+graders, and existing image digests must be rebuilt to acquire dependency updates.
 
-```text
-reasoning-gym==0.1.25
-rdkit==2025.9.3
-openapi-schema-validator==0.6.3
-xmltodict==0.14.2
-code-execution-service[client] @ git+https://github.com/allenai/code-execution-service.git@103ca279b35e8e81d118947f82b72c22676c6540
+The complete-test HTTP client is shipped in
+`open_instruct.code_utils.execution_client`. It requires no private service
+package or GitHub build credential. For runtime authentication, configure only a
+Beaker secret name under `[launch.secrets]`:
+
+```toml
+[launch.secrets]
+CODE_EXECUTION_TOKEN = "your-code-execution-beaker-secret"
 ```
 
-`regex` comes from the main `transformers` dependency; the schema verifier requires
-`openapi-schema-validator` explicitly rather than relying on its transitive presence.
+Beaker injects the token value at runtime; never put it in an image, dataset row
+or verifier configuration. See [launching](launching.md#task-grader-dependencies).
 
 ## Structured output sources
 

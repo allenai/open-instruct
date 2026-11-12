@@ -1,4 +1,4 @@
-"""All-test Python rewards through the pinned, authenticated execution client.
+"""All-test Python rewards through the in-tree, authenticated execution client.
 
 Only the external service executes submitted code. A failed test scores zero;
 missing results and infrastructure failures propagate rather than inventing a grade.
@@ -116,7 +116,7 @@ class CompleteCodeVerifier:
                 raise RuntimeError("Complete-code service returned a nonbinary aggregate")
             score *= result.score
             partitions.append(result.diagnostics)
-        # The pinned client raises infrastructure failures, but never trust a
+        # The in-tree client raises infrastructure failures, but never trust a
         # returned zero without a completed-grade status. Preserve failures at
         # the boundary consumed by qualification and training omission checks.
         failed = any(
