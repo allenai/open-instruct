@@ -453,14 +453,15 @@ overlap, still applies to all candidate rows, including excluded rows.
 
 `prepared/data/manifest.json` records `prompt_length`: the effective policy,
 integer prompt limit, training scope, and original/excluded/retained counts by
-configured source name (or `metadata.source_dataset`, falling back to `train`,
-for a single input). Pool counts are included when pools are configured. The same
-counts appear in preparation logs. Each configured `data.sources` entry and each
+configured source name. For a single input, it uses the first nonempty string in
+`metadata.source_dataset`, then `metadata.source_name`, falling back to `train`
+when neither is available. This also supports older Workbench exports. Pool counts
+are included when pools are configured. The same counts appear in preparation logs. Each configured `data.sources` entry and each
 previously populated pool must retain at least one row to preserve its sampling
 allocation; otherwise preparation fails before publishing data. In single-input
-and named-task runs, `metadata.source_dataset` groups are reporting-only and may
-lose all their rows. This label is a dataset identifier, not a per-task allocation;
-tasks sharing a dataset share its reporting bucket. The overall training input
+and named-task runs, metadata-based source groups are reporting-only and may
+lose all their rows. These labels identify provenance, not per-task allocations;
+named tasks sharing a dataset share its reporting bucket. The overall training input
 must still retain at least one row. Configured empty pools retain their existing
 behavior.
 

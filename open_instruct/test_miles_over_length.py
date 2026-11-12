@@ -262,3 +262,43 @@ def test_exclusion_cannot_empty_overall_training_input(environment, tmp_path, mo
     with pytest.raises(InputError, match="Training data has no rows after prompt-length exclusion"):
         prepare(environment, data | {"over_length": "exclude"}, limit=100)
     assert not environment[1].exists()
+
+
+@pytest.mark.parametrize(
+    "metadata,expected",
+    [
+        ({"source_dataset": "dataset", "source_name": "route"}, "dataset"),
+        ({"source_name": "route"}, "route"),
+        ({"source_dataset": None, "source_name": "route"}, "route"),
+        ({"source_dataset": "", "source_name": "route"}, "route"),
+        ({"source_dataset": [], "source_name": "route"}, "route"),
+        ({}, "train"),
+        ({"source_dataset": None, "source_name": None}, "train"),
+        ({"source_dataset": {}, "source_name": []}, "train"),
+        ({"source_dataset": "", "source_name": ""}, "train"),
+    ],
+)
+def test_source_accounting_falls_back_without_requiring_metadata(environment, tmp_path, metadata, expected):
+    data = prepared_input(tmp_path, [row("valid", **metadata)])
+    result = prepare(environment, data)
+    counts = json.loads(Path(result["manifest"]).read_text())["prompt_length"]["sources"]
+    assert counts == {expected: {"original": 1, "excluded": 0, "retained": 1}}
+
+
+def test_old_workbench_source_names_keep_exclusion_breakdown(environment, tmp_path, caplog):
+    caplog.set_level("INFO", logger=run_data.logger.name)
+    data = prepared_input(tmp_path, [row("short", source_name="c040"), row("x" * 11, source_name="lc-golong")])
+    result = prepare(environment, data | {"over_length": "exclude"})
+    counts = json.loads(Path(result["manifest"]).read_text())["prompt_length"]["sources"]
+    assert counts == {
+        "c040": {"original": 1, "excluded": 0, "retained": 1},
+        "lc-golong": {"original": 1, "excluded": 1, "retained": 0},
+    }
+    assert "source=lc-golong original=1 excluded=1 retained=0" in caplog.text
+
+
+def test_configured_source_name_takes_precedence_over_metadata(environment, tmp_path):
+    source = prepared_input(tmp_path, [row("valid", source_dataset="dataset", source_name="route")])
+    result = prepare(environment, {"sources": [{"name": "configured", "fraction": 1.0, **source}]})
+    counts = json.loads(Path(result["manifest"]).read_text())["prompt_length"]["sources"]
+    assert counts == {"configured": {"original": 1, "excluded": 0, "retained": 1}}
