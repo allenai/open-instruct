@@ -50,7 +50,10 @@ BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
 HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
 
 [data]
-# Full allenai/Dolci-Think-RL-7B train split, preserving its published mixture.
+# Exclude over-budget training prompts and record per-source counts; held-out data stays strict.
+over_length = "exclude"
+# Start from the full allenai/Dolci-Think-RL-7B train split.
+# Length exclusion can change source-group proportions; review the prepared manifest/logs.
 # Source revision: 0fb6466d31ef3a9dd16985ef635e6429e05a6491.
 # Preparation contract: docs/miles/data-and-evaluation.md#three-node-training-mixture
 prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/train.jsonl"

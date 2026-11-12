@@ -71,6 +71,16 @@ lock, or rebuild before submitting.
 
 ## Inputs and expected outputs
 
+All three examples explicitly set `data.over_length = "exclude"`, so preparation
+skips training prompts above the run's effective prompt limit and records
+original/excluded/retained counts per source in its manifest and logs. Source
+weights remain unchanged; an emptied configured source or previously populated
+pool fails preparation, as does an empty overall training input. Reporting-only
+source groups (`source_dataset`, or `source_name` when absent) may disappear at a
+smaller budget. Held-out prompts still fail on excess length. The library default
+remains `"fail"`; remove this example override or set it to `"fail"` to reject
+over-limit training prompts too.
+
 `dev` retains its compatible tiny-checkpoint placeholder and short GSM8K workload.
 It exercises preparation,
 generation, training, shared-engine evaluation, native checkpoint saving and final
@@ -103,9 +113,14 @@ its combined trainer/inference memory footprint checked before replacing the
 `three-node` uses a three-node, 24-GPU footprint. The nodes contain 8 training
 GPUs, 8 inference GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs
 are unused.
-Its training input is the full published `allenai/Dolci-Think-RL-7B` mixture,
+Its starting input is the full published `allenai/Dolci-Think-RL-7B` mixture,
 including general-quality tasks, prepared according to the
-[source and preparation contract](../../../docs/miles/data-and-evaluation.md#three-node-training-mixture). It requires
+[source and preparation contract](../../../docs/miles/data-and-evaluation.md#three-node-training-mixture).
+The example's explicit `over_length = "exclude"` keeps the subset that fits the
+run's prompt budget. This single-file input has no configured source fractions,
+so exclusions can change source-group proportions. Review the preparation manifest
+and logs for the retained population; set `over_length = "fail"` when every input
+row must fit. It requires
 a prepared Qwen3-32B judge with named verifier bindings. It also requires an
 accessible `launch.secrets.BEAKER_TOKEN` for background evaluation.
 Evaluator jobs allocate GPUs beyond the training plan;

@@ -413,22 +413,71 @@ reports these source-group counts:
 | General | 20,636 |
 | Total | 102,014 |
 
-Prepare every source row once, preserving the published proportions, source
-identities, verifier names and targets. Do not substitute a balanced four-domain
-basket, an RLZero mixture or a smoke-test subset. Render and tokenize prompts with
-the selected policy checkpoint; the source's saved token IDs belong to its original
-tokenizer. Preserve the full question for judged examples in `metadata.judge_query`.
+Prepare the full published split as the starting population, preserving source
+identities, verifier names and targets. Render and tokenize prompts with the
+selected policy checkpoint; the source's saved token IDs belong to its original
+tokenizer. The example explicitly sets `data.over_length = "exclude"`, so the
+training population contains only rows that fit the run's effective prompt budget.
+At smaller budgets, this can change source-group proportions in the single input
+file; the published counts above describe the starting population, not a guarantee
+about retained rows. Preserve the full question for judged examples in
+`metadata.judge_query`.
 The trusted verifier registry must support math, code/code_stdio and instruction
 following; general-quality and general-quality_ref use the template's named bindings.
 Code verification requires an externally provisioned service.
 
 The `dolci-think-rl-7b` paths in the template are **prepared-artifact placeholders**,
 not an automatic Hugging Face download or proof of provenance. Before launch,
-record the source ID/revision and verify row counts, source-group counts and retained
-identities against the pinned source. Record any deliberate exclusions as a changed
-mixture; do not silently filter rows to satisfy the policy's prompt-length limit.
-Use the existing prepared-JSONL or immutable-manifest input contract. Background
-benchmark evaluation is configured separately and does not change this training mix.
+record the source ID/revision and verify the starting row counts, source-group
+counts and identities against the pinned source. Preparation records the prompt
+limit and per-source original/excluded/retained counts in its manifest and logs.
+Review those counts as the run's changed training population before interpreting
+results. To require the entire prepared input to fit, explicitly set
+`data.over_length = "fail"`; this remains the library default when the option is
+omitted. Use the existing prepared-JSONL or immutable-manifest input contract.
+Background benchmark evaluation is configured separately and does not change the
+training population.
+
+## Run-specific prompt limits
+
+A release can serve runs with different context and response budgets. Preparation
+checks rendered prompts using the run's tokenizer against `rollout_max_prompt_len`,
+which defaults to `inference.max_context_length - inference.max_response_length`.
+Prompts exactly at the limit are accepted. The default policy, `fail`, stops on
+any over-limit prompt. To exclude over-limit **training** prompts, set:
+
+```toml
+[data]
+over_length = "exclude"
+# Keep your existing tasks, sources, rl_manifest, or prompt_data settings.
+```
+
+This applies to all training sources; per-source overrides are rejected. It
+preserves prompt text, ordering, identities and configured source fractions or
+pool weights. Named-task counts select the initial candidate rows; exclusion does
+not backfill them. Held-out prompts still fail on excess length. Other validation,
+including token-ID/template compatibility, verifier constraints and train/held-out
+overlap, still applies to all candidate rows, including excluded rows.
+
+`prepared/data/manifest.json` records `prompt_length`: the effective policy,
+integer prompt limit, training scope, and original/excluded/retained counts by
+configured source name. For a single input, it uses the first nonempty string in
+`metadata.source_dataset`, then `metadata.source_name`, falling back to `train`
+when neither is available. This also supports older Workbench exports. Pool counts
+are included when pools are configured. The same counts appear in preparation logs. Each configured `data.sources` entry and each
+previously populated pool must retain at least one row to preserve its sampling
+allocation; otherwise preparation fails before publishing data. In single-input
+and named-task runs, metadata-based source groups are reporting-only and may
+lose all their rows. These labels identify provenance, not per-task allocations;
+named tasks sharing a dataset share its reporting bucket. The overall training input
+must still retain at least one row. Configured empty pools retain their existing
+behavior.
+
+The mixture manifest's row counts and hashes describe the retained files, so the
+runtime sampler continues to enforce its row-count check. The source release
+remains unchanged. Policy and limit are part of immutable preparation identity;
+changing either requires a fresh run root. This is preparation-time filtering;
+launch-time length preflight remains separate work.
 
 ## Online group filtering
 

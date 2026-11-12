@@ -224,6 +224,7 @@
     "data.reward_config": "Trusted verifier registry path for prepared inputs.",
     "data.rl_manifest": "Path to immutable prepared manifest with supported verifier contracts; exclusive data selector.",
     "data.seed": "Nonnegative integer, default 17; controls preparation and default rollout seeds.",
+    "data.over_length": "Training prompt policy: fail (default) or exclude. Exclude removes prompts above the effective run prompt limit, records per-source counts, preserves source fractions, and fails if a configured source, populated pool, or the overall training input becomes empty. Dataset-label groups in single-input and task runs are reporting-only. Held-out data remains strict; set only at the outer data level.",
     "data.shuffle": "Boolean, default true; shuffle prepared training data.",
     "data.tasks": "Nonempty array of unique task tables; cannot combine with another data selector.",
     "data.tasks[].eval_count": "Positive integer number of held-out prompts; omit for no held-out rows from this task.",
