@@ -206,10 +206,14 @@ elif [[ "$MODE" == tokenize ]]; then
     # scripts/c12/tok_stats_patch.py: _aggregate_stats sums trainable tokens in chunks instead of casting the whole
     # label mask to int64 (8x its size; the 400 GiB job was killed there), so the job fits a 1 TiB node.
     STATS_PATCH=$(gzip -9c "$HERE/tok_stats_patch.py" | base64 | tr -d '\n')
+    # scripts/c12/tok_count_patch.py: backport of #1904 (99b1ee970), Arrow-batch token counting in place of a
+    # single-process per-row map that took ~6.5 h of a 13.5 h build. Same counts, same cache hash.
+    COUNT_PATCH=$(gzip -9c "$HERE/tok_count_patch.py" | base64 | tr -d '\n')
     CMD="F=open_instruct/numpy_dataset_conversion.py
 sed -i 's/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples)) if start_idx < total_samples else train_dataset.select([])/' \$F
 grep -q 'else train_dataset.select(\[\])' \$F || { echo H161-PATCH-FAILED; exit 2; }
 printf %s '$STATS_PATCH' | base64 -d | gunzip > /tmp/tok_stats_patch.py && python /tmp/tok_stats_patch.py \$F || { echo H161-STATS-PATCH-FAILED; exit 2; }
+printf %s '$COUNT_PATCH' | base64 -d | gunzip > /tmp/tok_count_patch.py && python /tmp/tok_count_patch.py . || { echo H161-COUNT-PATCH-FAILED; exit 2; }
 echo H161-TOKENIZE-START \$(date -u +%FT%TZ); python $ENTRY $ARGS --cache_dataset_only; RC=\$?
 ls -la /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/ | tail -5
 echo H161-TOKENIZE-EXIT \$RC \$(date -u +%FT%TZ); exit \$RC"
