@@ -430,6 +430,41 @@ mixture; do not silently filter rows to satisfy the policy's prompt-length limit
 Use the existing prepared-JSONL or immutable-manifest input contract. Background
 benchmark evaluation is configured separately and does not change this training mix.
 
+## Run-specific prompt limits
+
+A release can serve runs with different context and response budgets. Preparation
+checks rendered prompts using the run's tokenizer against `rollout_max_prompt_len`,
+which defaults to `inference.max_context_length - inference.max_response_length`.
+Prompts exactly at the limit are accepted. The default policy, `fail`, stops on
+any over-limit prompt. To exclude over-limit **training** prompts, set:
+
+```toml
+[data]
+over_length = "exclude"
+# Keep your existing tasks, sources, rl_manifest, or prompt_data settings.
+```
+
+This applies to all training sources; per-source overrides are rejected. It
+preserves prompt text, ordering, identities and configured source fractions or
+pool weights. Named-task counts select the initial candidate rows; exclusion does
+not backfill them. Held-out prompts still fail on excess length. Other validation,
+including token-ID/template compatibility, verifier constraints and train/held-out
+overlap, still applies to all candidate rows, including excluded rows.
+
+`prepared/data/manifest.json` records `prompt_length`: the effective policy,
+integer prompt limit, training scope, and original/excluded/retained counts by
+configured source name (or `metadata.source_dataset`, falling back to `train`,
+for a single input). Pool counts are included when pools are configured. The same
+counts appear in preparation logs. Each source and each previously populated pool
+must retain at least one row; otherwise preparation fails before publishing data.
+Configured empty pools retain their existing behavior.
+
+The mixture manifest's row counts and hashes describe the retained files, so the
+runtime sampler continues to enforce its row-count check. The source release
+remains unchanged. Policy and limit are part of immutable preparation identity;
+changing either requires a fresh run root. This is preparation-time filtering;
+launch-time length preflight remains separate work.
+
 ## Online group filtering
 
 MILES/Core training defaults to online reward-group filtering:

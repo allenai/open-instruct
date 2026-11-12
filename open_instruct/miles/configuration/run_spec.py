@@ -318,6 +318,7 @@ class RunSpec:
             raise InputError(
                 f"data must select exactly one of tasks, sources, recipe, rl_manifest or prompt_data; found {selectors or 'none'}. Remove competing selectors or add data.tasks."
             )
+        validation.choice(data.get("over_length", "fail"), "data.over_length", ("fail", "exclude"))
         data.setdefault("seed", 17)
         if type(data["seed"]) is not int or data["seed"] < 0:
             raise InputError("data.seed must be a nonnegative integer")

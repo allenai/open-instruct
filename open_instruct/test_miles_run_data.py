@@ -328,8 +328,8 @@ def test_changed_source_during_preparation_never_commits(environment, tmp_path, 
     path = source_manifest(tmp_path)
     original = run_data._verify_row
 
-    def verify(*args):
-        original(*args)
+    def verify(*args, **kwargs):
+        original(*args, **kwargs)
         path.write_text(path.read_text() + " ")
 
     monkeypatch.setattr(run_data, "_verify_row", verify)
