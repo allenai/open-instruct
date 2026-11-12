@@ -355,6 +355,9 @@ should be measured on the chosen packing and expert-parallel layout.
 Select the inherited native score-centering objective through `[miles]`:
 
 ```toml
+[trainer]
+fp32_lm_head = true
+
 [miles]
 loss_type = "score_centering"
 rollout_top_logprobs_num = 20
@@ -366,10 +369,11 @@ Use `advantage_estimator="grpo"` and omit legacy `use_tis`; the compiler selects
 score centering's own weighting. Explicit `async.off_policy_correction="tis"`
 also selects this native TIS mode. Refresh accepts `tis` or `mis`, retaining its
 policy-lag, routing-replay and unfiltered-sampling constraints. Unweighted score
-centering is available for synchronous runs. The serving FP32 head is required
-and enabled automatically; an explicit false setting is rejected. For matched
-comparisons set `trainer.fp32_lm_head=true` in both arms so both the Core and
-serving heads use the same precision, and record the same candidates in both.
+centering is available for synchronous runs. Score centering requires
+`trainer.fp32_lm_head=true` (or `core.fp32_lm_head=true` in the low-level API);
+validation rejects an unset or false Core setting. Core then enables the serving
+FP32 head and rejects an explicit false serving setting. For matched comparisons
+use the same head precision and candidate recording in both arms.
 
 The original implementation is upstream
 [#3621–#3626](https://github.com/radixark/miles/pull/3625). This runtime also

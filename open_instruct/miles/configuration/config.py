@@ -333,6 +333,7 @@ class RunConfig:
         """Resolve Core router, precision and group-filter settings for all entry points."""
         options = cli_options.normalize_options(self.miles)
         options.setdefault("calculate_per_token_loss", False)
+        score_centering.validate(options, fp32_lm_head=self.core.fp32_lm_head)
         if not options.get("use_miles_router", False):
             # Mirror the pinned MILES Core invariant during offline planning.
             # Core owns request retries and weight-ready membership. Refuse
@@ -343,7 +344,7 @@ class RunConfig:
                 options[name] = True
             if not options.get("sglang_router_policy"):
                 options.setdefault("router_policy", "round_robin")
-        if self.core.fp32_lm_head or score_centering.is_enabled(options):
+        if self.core.fp32_lm_head:
             if options.get("sglang_enable_fp32_lm_head") is False:
                 raise constraints.error("core.fp32_lm_head conflicts with miles.sglang_enable_fp32_lm_head=false")
             options["sglang_enable_fp32_lm_head"] = True
@@ -460,7 +461,6 @@ class RunConfig:
             if self.core.packing_max_tokens < self.core.max_sequence_length:
                 raise constraints.error("packing_max_tokens must cover max_sequence_length; samples are never split")
         options = self.resolved_miles()
-        score_centering.validate(options)
         if self.core.reward_zero_truncated and options.get("custom_reward_post_process_path") not in (
             None,
             EXCLUDE_UNGRADED,

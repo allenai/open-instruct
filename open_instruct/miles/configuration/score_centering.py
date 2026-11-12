@@ -8,9 +8,12 @@ def is_enabled(options):
     return options.get("loss_type") == "score_centering"
 
 
-def validate(options):
+def validate(options, *, fp32_lm_head):
+    """Validate score centering before Core resolves serving precision."""
     if not is_enabled(options):
         return
+    if not fp32_lm_head:
+        raise InputError("Score centering requires core.fp32_lm_head=true")
     validation.integer(options.get("rollout_top_logprobs_num", 0), "miles.rollout_top_logprobs_num")
     validation.choice(options.get("score_centering_is", "none"), "miles.score_centering_is", ("none", "tis", "mis"))
     validation.number(
