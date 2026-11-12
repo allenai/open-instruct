@@ -34,6 +34,7 @@ ENV PYTHONPATH=/opt/core-rl/sources/sglang/python:/opt/core-rl/sources/olmo-sgla
 WORKDIR /opt/core-rl
 RUN python -m compileall -q /opt/core-rl/open_instruct/miles /opt/core-rl/sources/olmo-core/src/olmo_core /opt/core-rl/sources/miles/miles
 RUN python -c "from open_instruct.miles.configuration.config import RunConfig"
+RUN python -c "import open_instruct.miles.rewards.structured_outputs"
 
 RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; v = GSM8KVerifier(); assert v([], 'The answer is 42', '42').score == 1; assert v([], 'The answer is 43', '42').score == 0"
 
