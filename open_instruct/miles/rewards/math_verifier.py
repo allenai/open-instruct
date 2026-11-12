@@ -6,6 +6,7 @@ permissive grader.
 """
 
 import dataclasses
+import functools
 import re
 import threading
 from itertools import product
@@ -13,6 +14,7 @@ from typing import Any
 
 import math_verify
 from math_verify import errors
+from sympy import Eq
 
 from open_instruct import ground_truth_utils, logger_utils
 from open_instruct.miles.rewards import rewards
@@ -70,6 +72,41 @@ def _parse(text: str, configs: tuple, diagnostics: dict[str, int]) -> list:
     return []
 
 
+@functools.lru_cache(maxsize=1)
+def _false_equation():
+    sentinel = math_verify.parse(
+        r"\boxed{1 + 2 = 8}",
+        extraction_config=(math_verify.LatexExtractionConfig(),),
+        parsing_timeout=_TIMEOUT_SECONDS,
+        raise_on_error=True,
+    )
+    if not sentinel:
+        raise ValueError("Math-Verify could not parse the false-equation sentinel")
+    return sentinel
+
+
+@functools.lru_cache(maxsize=4096)
+def _requires_string_comparison(reference: str) -> bool:
+    """Cache whether this reference accepts a known-wrong equation.
+
+    Math-Verify 0.9.0 can match unrelated equations when its solver returns two
+    empty lists. Such references may only use the existing literal-string path.
+    Probe equation candidates only: a scalar 8 legitimately matches an equation
+    with RHS 8 under the library's answer-extraction rules.
+    Cache only the decision, not parsed references; exceptions are never cached.
+    """
+    gold = math_verify.parse(
+        r"\boxed{" + reference + "}",
+        extraction_config=(math_verify.LatexExtractionConfig(),),
+        parsing_timeout=_TIMEOUT_SECONDS,
+        raise_on_error=True,
+    )
+    equations = [value for value in gold if isinstance(value, Eq)]
+    return bool(equations) and math_verify.verify(
+        equations, _false_equation(), timeout_seconds=_TIMEOUT_SECONDS, raise_on_error=True
+    )
+
+
 def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
     """Score on a process main thread; async callers must use process isolation."""
     if threading.current_thread() is not threading.main_thread():
@@ -92,6 +129,19 @@ def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
         ),
         diagnostics,
     )
+    try:
+        string_only = _requires_string_comparison(reference)
+    except errors.TimeoutException:
+        _record_timeout(diagnostics)
+        string_only = True
+    except Exception:
+        logger.debug("Math-Verify reference probe failed; using literal-string comparison")
+        string_only = True
+    if string_only:
+        # A failed probe cannot certify symbolic comparison either. Preserve
+        # exact extracted-string matches, never a symbolic match on this path.
+        gold = [value for value in gold if isinstance(value, str)]
+        target = [value for value in target if isinstance(value, str)]
     # Reproduce verify(list, list)'s candidate order and exception recovery, but
     # expose timeout counts. The library also supplies literal-string candidates;
     # those may still agree after a symbolic comparison times out.
