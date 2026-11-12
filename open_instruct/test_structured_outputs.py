@@ -620,3 +620,24 @@ def test_malformed_pythonic_answers_score_zero_and_worker_recovers(arguments):
         ).score == 1
 
     asyncio.run(run())
+
+
+def test_xml_constraint_failure_is_still_rejected_by_final_schema_validation():
+    label = tool_target(
+        schema={"type": "object", "properties": {"n": {"type": "integer", "minimum": 1}}, "required": ["n"]}
+    )
+    label["tool_call_format"] = "olmo_xml_v1"
+    result = structured.StructuredOutputVerifier()(
+        [], '<tool_call><function=submit><parameter=result>{"n":0}</parameter></function></tool_call>', label
+    )
+    assert result.score == 0
+    assert result.diagnostics["status"] == "completed"
+
+
+@pytest.mark.parametrize("constraint", [{"enum": [1, 2]}, {"const": 1}])
+def test_xml_typeless_numeric_constraints_remain_answerable(constraint):
+    label = tool_target(schema={"type": "object", "properties": {"n": constraint}, "required": ["n"]})
+    label["tool_call_format"] = "olmo_xml_v1"
+    label["tool_payload_key"] = None
+    response = "<tool_call><function=submit><parameter=n>1</parameter></function></tool_call>"
+    assert structured.StructuredOutputVerifier()([], response, label).score == 1

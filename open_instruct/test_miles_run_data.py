@@ -672,3 +672,73 @@ def test_prepared_jsonl_streams_and_preserves_validation_metadata(environment, t
     source.write_text(source.read_text().replace('"42"', '"43"', 1))
     with pytest.raises(InputError, match="source changed"):
         prepare(environment, data)
+
+
+@pytest.mark.parametrize("mode", ["tasks", "adopt", "mixture"])
+def test_resume_warns_only_for_original_prepared_inputs(environment, tmp_path, monkeypatch, mode):
+    warnings = []
+    monkeypatch.setattr(run_data.logger, "warning", lambda *args: warnings.append(args))
+    tasks = {"tasks": [{"task": "multiplication", "train_count": 2, "eval_count": 1}]}
+    if mode == "tasks":
+        data = tasks
+    elif mode == "adopt":
+        data = {"rl_manifest": str(source_manifest(tmp_path))}
+    else:
+        path = tmp_path / "original.jsonl"
+        path.write_text(
+            json.dumps({"input": "legacy", "metadata": {"verifiers": [{"name": "multiplication", "target": "2"}]}})
+            + "\n"
+        )
+        registry = tmp_path / "registry.json"
+        registry.write_text(json.dumps({"multiplication": {"factory": run_data.FACTORIES["multiplication"]}}))
+        data = {
+            "sources": [
+                {"name": "raw", "fraction": 0.5, **tasks},
+                {"name": "legacy", "fraction": 0.5, "prompt_data": str(path), "reward_config": str(registry)},
+            ]
+        }
+    result = prepare(environment, data)
+    fresh_warnings = list(warnings)
+    assert len(fresh_warnings) == (1 if mode == "mixture" else 0)
+    warnings.clear()
+    monkeypatch.setattr(
+        run_data, "_tokenizer", lambda path: pytest.fail("Resume must not load tokenizer without a hash")
+    )
+    assert prepare(environment, data) == result
+    assert warnings == fresh_warnings
+
+
+def test_resume_parses_each_row_once_and_screens_only_training(tmp_path, monkeypatch):
+    training = tmp_path / "train.jsonl"
+    evaluation = tmp_path / "eval.jsonl"
+    row = {"input": "prompt", "metadata": {"rendering_template_sha256": hashlib.sha256(b"native").hexdigest()}}
+    training.write_text((json.dumps(row) + "\n") * 2)
+    evaluation.write_text(json.dumps(row) + "\n")
+    before = {path: path.read_bytes() for path in (training, evaluation)}
+    monkeypatch.setattr(run_data, "_read_json_object", lambda *args: {})
+    monkeypatch.setattr(run_data, "_if_verifier_names", lambda registry: {"if"})
+    screened = []
+    monkeypatch.setattr(run_data, "_verify_if_training_row", lambda row, names: screened.append(row))
+    monkeypatch.setattr(run_data, "_tokenizer", lambda path: SimpleNamespace(chat_template="native"))
+    parsed = []
+    original = json.loads
+
+    def loads(line):
+        parsed.append(line)
+        return original(line)
+
+    monkeypatch.setattr(run_data.json, "loads", loads)
+    result = {
+        "prompt_data": str(training),
+        "eval_prompt_data": ["eval", str(evaluation)],
+        "reward_config": "unused",
+        "manifest": str(tmp_path / "manifest.json"),
+    }
+    run_data._verify_resumed_data(result, tmp_path, {"tasks": []})
+    assert len(parsed) == 3
+    assert len(screened) == 2
+    assert all(path.read_bytes() == contents for path, contents in before.items())
+    row["metadata"]["rendering_template_sha256"] = "0" * 64
+    evaluation.write_text(json.dumps(row) + "\n")
+    with pytest.raises(InputError, match="eval.jsonl: row 1:.*template hash"):
+        run_data._verify_resumed_data(result, tmp_path, {"tasks": []})

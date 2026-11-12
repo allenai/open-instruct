@@ -633,3 +633,43 @@ def test_template_literal_names_are_not_renamed(name, key):
     result = asyncio.run(toolrl_verifier.ToolRLVerifier().async_call([], response, reference))
     assert result.score == 1
     assert result.diagnostics["correctness_score"] == 3
+
+
+@pytest.mark.parametrize(
+    "schema,expected,wrong",
+    [
+        ({"type": "integer", "minimum": 1}, 1, 0),
+        ({"type": "integer", "enum": [1]}, 1, 0),
+        ({"enum": ["1"]}, "1", "0"),
+        ({"type": "object", "properties": {"key": {"type": "integer"}}, "required": ["key"]}, {"key": 1}, {}),
+        ({"anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]}, 1, 0),
+    ],
+)
+@pytest.mark.parametrize("reference_schema", ["inline", "property-ref", "root-ref", "root-allof"])
+def test_xml_schema_constraint_mistakes_preserve_pythonic_partial_credit(schema, expected, wrong, reference_schema):
+    parameters = {
+        "type": "object",
+        "properties": {"n": schema, "left": {"type": "string"}, "right": {"type": "integer"}},
+    }
+    if reference_schema == "property-ref":
+        parameters["$defs"] = {"value": schema}
+        parameters["properties"]["n"] = {"$ref": "#/$defs/value"}
+    if reference_schema == "root-ref":
+        parameters = {
+            "properties": parameters["properties"],
+            "$defs": {"arguments": parameters},
+            "$ref": "#/$defs/arguments",
+        }
+    elif reference_schema == "root-allof":
+        parameters = {"properties": parameters["properties"], "allOf": [parameters]}
+    tools = [{"type": "function", "function": {"name": "giveaways", "parameters": parameters}}]
+    reference = target([{"name": "giveaways", "parameters": {"n": expected, "left": "same", "right": 2}}], tools)
+    actual = {"name": "giveaways", "parameters": {"n": wrong, "left": "same", "right": 2}}
+    xml = toolrl_utils.score_response(completion([actual]), reference)
+    pythonic = toolrl_utils.score_response(
+        f'<think>plan</think><function_calls>giveaways(n={json.dumps(wrong)}, left="same", right=2)</function_calls>',
+        {**reference, "tool_format": "olmo_pythonic_v1"},
+    )
+    assert xml.format_score == pythonic.format_score == 1
+    assert xml.score == pythonic.score == pytest.approx(2.8)
+    assert toolrl_utils.score_response(completion(reference["calls"]), reference).score == 4

@@ -67,6 +67,41 @@ def _schema_validator(serialized):
     return cls(schema, registry=Registry())
 
 
+def _parameter_type_matches(value, schema, resolver, checker, seen):
+    """Check wire types only; constraints belong to the task's reward policy."""
+    if isinstance(schema, bool):
+        return schema
+    if id(schema) in seen:
+        return True
+    seen = seen | {id(schema)}
+    kinds = schema.get("type")
+    if kinds is not None:
+        kinds = kinds if isinstance(kinds, list) else [kinds]
+        if not any(checker.is_type(value, kind) for kind in kinds):
+            return False
+    for key in ("$ref", "$dynamicRef"):
+        if key in schema:
+            resolved = resolver.lookup(schema[key])
+            if not _parameter_type_matches(value, resolved.contents, resolved.resolver, checker, seen):
+                return False
+    for key in ("allOf", "anyOf", "oneOf"):
+        if key in schema:
+            matches = [
+                _parameter_type_matches(
+                    value,
+                    child,
+                    resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012)),
+                    checker,
+                    seen,
+                )
+                for child in schema[key]
+            ]
+            # Branch exclusivity depends on full constraints, not just wire types.
+            if not (all(matches) if key == "allOf" else any(matches)):
+                return False
+    return True
+
+
 def parameter_value(value, schema, root_schema=None):
     """Decode native unquoted strings and JSON scalars/containers using the tool schema."""
     value = value.strip()
@@ -79,10 +114,20 @@ def parameter_value(value, schema, root_schema=None):
     if not schema or schema.get("type") == "string":
         return value
     validator = validator.evolve(schema=schema)
-    return _decode_parameter(value, validator.is_valid)
+
+    def matches_type(candidate):
+        resource = Resource.from_contents(root_schema, default_specification=DRAFT202012)
+        uri = resource.id() or ""
+        registry = Registry().with_resource(uri, resource).crawl()
+        scope = registry.resolver(uri)
+        if schema is not root_schema:
+            scope = scope.in_subresource(Resource.from_contents(schema, default_specification=DRAFT202012))
+        return _parameter_type_matches(candidate, schema, scope, validator.TYPE_CHECKER, set())
+
+    return _decode_parameter(value, validator.is_valid, matches_type)
 
 
-def _decode_parameter(value, is_valid):
+def _decode_parameter(value, is_valid, matches_type):
     try:
         decoded = json.loads(value, object_pairs_hook=_unique_keys, parse_constant=_invalid_constant)
     except json.JSONDecodeError:
@@ -92,6 +137,12 @@ def _decode_parameter(value, is_valid):
         if is_valid(decoded):
             return decoded
         if is_valid(value):
+            return value
+        # Preserve parseable model mistakes for comparator partial credit. The
+        # structured-output verifier still validates the complete final schema.
+        if matches_type(decoded):
+            return decoded
+        if matches_type(value):
             return value
     except Unresolvable as error:
         raise ValueError("Parameter schema references an unavailable resource") from error
@@ -112,7 +163,7 @@ def property_value(value, name, schema):
     registry = Registry().with_resource(uri, resource).crawl()
     validator = validators.validator_for(schema)(schema, registry=registry)
 
-    def project(node, resolver, seen):
+    def project(node, resolver, seen, types_only=False):
         if isinstance(node, bool):
             return (lambda candidate: False) if not node else None
         if id(node) in seen:
@@ -122,18 +173,25 @@ def property_value(value, name, schema):
         if name in node.get("properties", {}):
             child = node["properties"][name]
             scope = resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012))
-            checks.append(
-                lambda candidate, child=child, scope=scope: not any(
-                    validator.descend(candidate, child, resolver=scope)
+            if types_only:
+                checks.append(
+                    lambda candidate, child=child, scope=scope: _parameter_type_matches(
+                        candidate, child, scope, validator.TYPE_CHECKER, set()
+                    )
                 )
-            )
+            else:
+                checks.append(
+                    lambda candidate, child=child, scope=scope: not any(
+                        validator.descend(candidate, child, resolver=scope)
+                    )
+                )
         for keyword in ("$ref", "$dynamicRef"):
             if keyword in node:
                 resolved = resolver.lookup(node[keyword])
-                checks.append(project(resolved.contents, resolved.resolver, seen))
+                checks.append(project(resolved.contents, resolved.resolver, seen, types_only))
         for child in node.get("allOf", []):
             scope = resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012))
-            checks.append(project(child, scope, seen))
+            checks.append(project(child, scope, seen, types_only))
         for keyword in ("anyOf", "oneOf"):
             if keyword in node:
                 alternatives = [
@@ -141,6 +199,7 @@ def property_value(value, name, schema):
                         child,
                         resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012)),
                         seen,
+                        types_only,
                     )
                     for child in node[keyword]
                 ]
@@ -154,7 +213,14 @@ def property_value(value, name, schema):
 
     try:
         check = project(schema, registry.resolver(uri), set())
-        return value.strip() if check is None else _decode_parameter(value.strip(), check)
+        if check is None:
+            return value.strip()
+
+        def matches_type(candidate):
+            type_check = project(schema, registry.resolver(uri), set(), types_only=True)
+            return type_check is None or type_check(candidate)
+
+        return _decode_parameter(value.strip(), check, matches_type)
     except Unresolvable as error:
         raise ValueError("Parameter schema references an unavailable resource") from error
 
