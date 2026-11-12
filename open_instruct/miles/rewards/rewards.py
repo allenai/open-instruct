@@ -217,7 +217,8 @@ async def isolated_verifier_call(
             label=label,
             query=query,
             rollout_state=rollout_state,
-            # Only verifiers that opt in (``reads_prompt_reasoning``) receive extra arguments.
+            # Forwarded to the verifier's __call__; _score supplies prompt state
+            # only to verifiers that declare reads_prompt_reasoning.
             **extra,
         )
     )
@@ -303,7 +304,8 @@ def _prompt_opens_reasoning(prompt, *, final_answer_only):
 
     Thinking chat templates end the generation prompt with ``<think>``, so the response
     contains only the closing tag. With final-answer-only grading the response passed
-    on is already the text after the reasoning.
+    on is already the text after the reasoning. Only rendered string prompts
+    carry this suffix contract; other prompt types retain non-thinking behavior.
     """
     return not final_answer_only and isinstance(prompt, str) and prompt.rstrip().endswith("<think>")
 

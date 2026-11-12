@@ -103,7 +103,8 @@ def action_text(prediction, prompt_opens_reasoning=False):
         return None
     else:
         final = prediction
-    # Reasoning reopened after the last close has not finished either.
+    # Conservatively treat any literal opener in the final region, including
+    # quoted tags or tool-argument text, as reopened and unfinished reasoning.
     if "<think>" in final:
         return None
     return common.answer_text(final)
@@ -193,6 +194,12 @@ class SingleStepToolVerifier(nvidia_constraints._IsolatedAdapter):
     reads_prompt_reasoning = True
 
     def __call__(self, tokenized_prediction, prediction, label, prompt_opens_reasoning=False, **kwargs):
+        """Grade an action; direct callers must supply the prompt's reasoning state.
+
+        Set prompt_opens_reasoning=True when the rendered prompt ends in <think>.
+        Without that state, tag-less text is treated as a non-thinking response.
+        registered_reward supplies the state automatically for string prompts.
+        """
         target, expected, config = contract(json.dumps(label, allow_nan=False))
         text = action_text(prediction, prompt_opens_reasoning)
         if text is None:

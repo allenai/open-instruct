@@ -169,7 +169,10 @@ and 0 for SWE-pivot; numeric tolerance is 1e-6. Zero word-count tolerance still
 ignores word order. Calls take precedence over accompanying prose; with native
 parallel-call rewarding disabled, surplus calls are not penalized when the expected
 calls match. A message target rewards any nonempty assistant prose, not semantic
-equivalence to the reference message.
+equivalence to the reference message. Preserve these upstream comparison
+limitations for initial mixing; investigate stricter behavior separately rather
+than silently changing reward semantics. Response parsing/resource failures score
+zero with diagnostics, while malformed targets remain fatal verifier errors.
 
 Only the text after the reasoning is an action, as in NeMo Gym, which receives
 reasoning as a separate output item. A response whose reasoning never closes scores
@@ -177,10 +180,12 @@ zero (category `unclosed_thinking`), and prose or calls written inside the reaso
 never count. Thinking chat templates end the prompt with `<think>`, so the response
 contains only the closing tag; the reward step reads each sample's rendered prompt to
 tell the verifier whether the response starts inside reasoning. Prepared labels are
-unchanged. Preserve these upstream limitations for
-initial mixing; investigate stricter behavior separately rather than silently
-changing reward semantics. Response parsing/resource failures score zero with
-diagnostics, while malformed targets remain fatal verifier errors.
+unchanged. Direct callers of `SingleStepToolVerifier` must pass
+`prompt_opens_reasoning=True` when their rendered prompt ends with `<think>`;
+otherwise tag-less text is treated as a non-thinking reply or action. Message-list
+prompts are not inspected for an opening tag. A literal `<think>` anywhere in the
+selected action region, even inside a quoted string, is conservatively treated as
+reopened, unfinished reasoning.
 
 These routes do not implement SWE patch execution, Workplace Assistant state
 changes, browser interaction or Lean compilation. Those environment-dependent
