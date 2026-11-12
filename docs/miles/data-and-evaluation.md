@@ -413,22 +413,30 @@ reports these source-group counts:
 | General | 20,636 |
 | Total | 102,014 |
 
-Prepare every source row once, preserving the published proportions, source
-identities, verifier names and targets. Do not substitute a balanced four-domain
-basket, an RLZero mixture or a smoke-test subset. Render and tokenize prompts with
-the selected policy checkpoint; the source's saved token IDs belong to its original
-tokenizer. Preserve the full question for judged examples in `metadata.judge_query`.
+Prepare the full published split as the starting population, preserving source
+identities, verifier names and targets. Render and tokenize prompts with the
+selected policy checkpoint; the source's saved token IDs belong to its original
+tokenizer. The example explicitly sets `data.over_length = "exclude"`, so the
+training population contains only rows that fit the run's effective prompt budget.
+At smaller budgets, this can change source-group proportions in the single input
+file; the published counts above describe the starting population, not a guarantee
+about retained rows. Preserve the full question for judged examples in
+`metadata.judge_query`.
 The trusted verifier registry must support math, code/code_stdio and instruction
 following; general-quality and general-quality_ref use the template's named bindings.
 Code verification requires an externally provisioned service.
 
 The `dolci-think-rl-7b` paths in the template are **prepared-artifact placeholders**,
 not an automatic Hugging Face download or proof of provenance. Before launch,
-record the source ID/revision and verify row counts, source-group counts and retained
-identities against the pinned source. Record any deliberate exclusions as a changed
-mixture; do not silently filter rows to satisfy the policy's prompt-length limit.
-Use the existing prepared-JSONL or immutable-manifest input contract. Background
-benchmark evaluation is configured separately and does not change this training mix.
+record the source ID/revision and verify the starting row counts, source-group
+counts and identities against the pinned source. Preparation records the prompt
+limit and per-source original/excluded/retained counts in its manifest and logs.
+Review those counts as the run's changed training population before interpreting
+results. To require the entire prepared input to fit, explicitly set
+`data.over_length = "fail"`; this remains the library default when the option is
+omitted. Use the existing prepared-JSONL or immutable-manifest input contract.
+Background benchmark evaluation is configured separately and does not change the
+training population.
 
 ## Run-specific prompt limits
 

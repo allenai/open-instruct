@@ -113,9 +113,14 @@ its combined trainer/inference memory footprint checked before replacing the
 `three-node` uses a three-node, 24-GPU footprint. The nodes contain 8 training
 GPUs, 8 inference GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs
 are unused.
-Its training input is the full published `allenai/Dolci-Think-RL-7B` mixture,
+Its starting input is the full published `allenai/Dolci-Think-RL-7B` mixture,
 including general-quality tasks, prepared according to the
-[source and preparation contract](../../../docs/miles/data-and-evaluation.md#three-node-training-mixture). It requires
+[source and preparation contract](../../../docs/miles/data-and-evaluation.md#three-node-training-mixture).
+The example's explicit `over_length = "exclude"` keeps the subset that fits the
+run's prompt budget. This single-file input has no configured source fractions,
+so exclusions can change source-group proportions. Review the preparation manifest
+and logs for the retained population; set `over_length = "fail"` when every input
+row must fit. It requires
 a prepared Qwen3-32B judge with named verifier bindings. It also requires an
 accessible `launch.secrets.BEAKER_TOKEN` for background evaluation.
 Evaluator jobs allocate GPUs beyond the training plan;
