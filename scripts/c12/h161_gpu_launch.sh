@@ -47,6 +47,16 @@
 # WAIT_FOR_BASE=<minutes> (default 0: the job waits that long for the base's RECEIPT.json, then
 # exits 3 without training; for a smoke queued while the conversion job is still running), DRY_RUN=1.
 #
+# Tokenize-mode patches. The image's open-instruct (37a119ffd) is patched in the container before tokenizing, in this
+# order; each step fails the job with H161-*PATCH-FAILED if it does not apply. (1) sed: a resume with every row already
+# collected uses select([]) instead of select(range(N, N)), which datasets rejects. (2) tok_stats_patch.py: the
+# statistics stage sums trainable tokens in chunks instead of casting the whole label mask to int64 (the 400 GiB job
+# was killed there). (3) tok_count_patch.py: backport of #1904, Arrow-batch token counting (the per-row count map took
+# ~6.6 h). (4) tok_collect_patch.py: the collect loop reads Arrow batches on worker threads instead of a one-thread loop
+# over rows (2h31m at 438 rows/s); test_tok_collect_patch.py proves its partial files byte-identical to the original's.
+# The cache directory name hashes the arguments, not the code, so every patch here must keep the output byte-identical.
+# Notes: dev/projects/2026-11-05--dolci-qwen38-distillation/tokenization.md.
+#
 # Before the first launch, the cache must resolve inside a Beaker job: setup_tokenizer_and_cache forces
 # --local_cache_dir to the oe-adapt deletable cache when BEAKER_JOB_ID is set, so that dir holds a symlink
 # numpy_sft/bf82a8fab8-6068a350-rowaligned -> the frozen C12 cache (made 2026-10-30). EXPECTED_NUMPY_CACHE makes any
@@ -209,11 +219,16 @@ elif [[ "$MODE" == tokenize ]]; then
     # scripts/c12/tok_count_patch.py: backport of #1904 (99b1ee970), Arrow-batch token counting in place of a
     # single-process per-row map that took ~6.5 h of a 13.5 h build. Same counts, same cache hash.
     COUNT_PATCH=$(gzip -9c "$HERE/tok_count_patch.py" | base64 | tr -d '\n')
+    # scripts/c12/tok_collect_patch.py: the collect loop reads 1,024-row batches with array operations over Arrow on 16
+    # threads, 32 batches ahead, in place of a one-thread Python loop over rows (250-440 rows/s, 2.5 h). Byte-identical
+    # partial files, checked by scripts/c12/test_tok_collect_patch.py, so resume and the cache are unchanged.
+    COLLECT_PATCH=$(gzip -9c "$HERE/tok_collect_patch.py" | base64 | tr -d '\n')
     CMD="F=open_instruct/numpy_dataset_conversion.py
 sed -i 's/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples)) if start_idx < total_samples else train_dataset.select([])/' \$F
 grep -q 'else train_dataset.select(\[\])' \$F || { echo H161-PATCH-FAILED; exit 2; }
 printf %s '$STATS_PATCH' | base64 -d | gunzip > /tmp/tok_stats_patch.py && python /tmp/tok_stats_patch.py \$F || { echo H161-STATS-PATCH-FAILED; exit 2; }
 printf %s '$COUNT_PATCH' | base64 -d | gunzip > /tmp/tok_count_patch.py && python /tmp/tok_count_patch.py . || { echo H161-COUNT-PATCH-FAILED; exit 2; }
+printf %s '$COLLECT_PATCH' | base64 -d | gunzip > /tmp/tok_collect_patch.py && python /tmp/tok_collect_patch.py \$F && grep -q '_prepare_arrow_batch(' \$F || { echo H161-COLLECT-PATCH-FAILED; exit 2; }
 echo H161-TOKENIZE-START \$(date -u +%FT%TZ); python $ENTRY $ARGS --cache_dataset_only; RC=\$?
 ls -la /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/ | tail -5
 echo H161-TOKENIZE-EXIT \$RC \$(date -u +%FT%TZ); exit \$RC"
