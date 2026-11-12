@@ -88,6 +88,28 @@ def target_for_row(raw, options):
     return target
 
 
+def action_text(prediction, prompt_opens_reasoning=False):
+    """Return the response's action region, or None while its reasoning is still open.
+
+    NeMo Gym receives reasoning as a separate output item (vLLM's Nemotron V3 and
+    DeepSeek-R1 reasoning parsers treat output without a closing tag as all reasoning)
+    and grades only the assistant message or calls that follow it. Reasoning that never
+    closes therefore contains no action, and prose or calls written inside it never
+    count. When the prompt ends with the opening tag, the response does not repeat it.
+    """
+    if "</think>" in prediction:
+        final = prediction.rsplit("</think>", 1)[1]
+    elif prompt_opens_reasoning or "<think>" in prediction:
+        return None
+    else:
+        final = prediction
+    # Conservatively treat any literal opener in the final region, including
+    # quoted tags or tool-argument text, as reopened and unfinished reasoning.
+    if "<think>" in final:
+        return None
+    return common.answer_text(final)
+
+
 def parse_action(text, target):
     text = response_text.strip_terminal_special_tokens(text).strip()
     calls = []
@@ -168,11 +190,22 @@ def validate_xml_reference(target):
 
 class SingleStepToolVerifier(nvidia_constraints._IsolatedAdapter):
     kind = "nemo_single_step_tool_v1"
+    # The reward step tells this verifier whether the rendered prompt opened reasoning.
+    reads_prompt_reasoning = True
 
-    def __call__(self, tokenized_prediction, prediction, label, **kwargs):
+    def __call__(self, tokenized_prediction, prediction, label, prompt_opens_reasoning=False, **kwargs):
+        """Grade an action; direct callers must supply the prompt's reasoning state.
+
+        Set prompt_opens_reasoning=True when the rendered prompt ends in <think>.
+        Without that state, tag-less text is treated as a non-thinking response.
+        registered_reward supplies the state automatically for string prompts.
+        """
         target, expected, config = contract(json.dumps(label, allow_nan=False))
+        text = action_text(prediction, prompt_opens_reasoning)
+        if text is None:
+            return self.result(0.0, category="unclosed_thinking")
         try:
-            actual = parse_action(common.answer_text(prediction), target)
+            actual = parse_action(text, target)
             if actual is None:
                 return self.result(0.0, category="no_action")
             result = native.ActionComparator(config=config).compare_action(expected, actual)

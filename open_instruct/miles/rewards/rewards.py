@@ -189,7 +189,7 @@ class _MathProcessPool:
 
 
 async def isolated_verifier_call(
-    factory_spec, tokenized_prediction, prediction, label, query=None, rollout_state=None
+    factory_spec, tokenized_prediction, prediction, label, query=None, rollout_state=None, **extra
 ):
     """Call an explicitly trusted verifier on a subprocess main thread.
 
@@ -217,6 +217,9 @@ async def isolated_verifier_call(
             label=label,
             query=query,
             rollout_state=rollout_state,
+            # Forwarded to the verifier's __call__; _score supplies prompt state
+            # only to verifiers that declare reads_prompt_reasoning.
+            **extra,
         )
     )
 
@@ -294,6 +297,17 @@ def _math_worker():
             response = {"schema_version": 1, "error": f"{type(exc).__name__}: {exc}"}
         output.write(_RESPONSE_PREFIX.decode() + json.dumps(response, allow_nan=False) + "\n")
         output.flush()
+
+
+def _prompt_opens_reasoning(prompt, *, final_answer_only):
+    """Whether the response starts inside a reasoning block the rendered prompt opened.
+
+    Thinking chat templates end the generation prompt with ``<think>``, so the response
+    contains only the closing tag. With final-answer-only grading the response passed
+    on is already the text after the reasoning. Only rendered string prompts
+    carry this suffix contract; other prompt types retain non-thinking behavior.
+    """
+    return not final_answer_only and isinstance(prompt, str) and prompt.rstrip().endswith("<think>")
 
 
 def _finite(value, field):
@@ -433,6 +447,11 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                 score_response = verifier.async_call
                 if args.olmo_core.reward_final_answer_only:
                     score_response = getattr(verifier, "async_call_final_answer", score_response)
+                extra = {}
+                if getattr(verifier, "reads_prompt_reasoning", False):
+                    extra["prompt_opens_reasoning"] = _prompt_opens_reasoning(
+                        sample.prompt, final_answer_only=args.olmo_core.reward_final_answer_only
+                    )
                 result = await score_response(
                     tokens,
                     response,
@@ -440,6 +459,7 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                     copy.deepcopy(spec["target"]),
                     query=metadata.get("query", sample.prompt),
                     rollout_state=metadata.get("rollout_state"),
+                    **extra,
                 )
                 diagnostics = getattr(result, "diagnostics", None)
                 if isinstance(diagnostics, dict) and diagnostics.get("status") == "timeout":
