@@ -325,6 +325,7 @@ See [topology](topology.md) for replica and engine counts and
 [launch.secrets]
 HF_TOKEN = "your-hf-beaker-secret"
 WANDB_API_KEY = "your-wandb-beaker-secret"
+CODE_EXECUTION_TOKEN = "your-code-execution-beaker-secret"
 ```
 
 These are secret names, not token values. Use `launch.env` only for nonsecret
@@ -351,3 +352,20 @@ Inspect the latest attempt for **each task and replica rank**, not the first job
 experiment. Scheduler events explain pending jobs. Small reports/logs are copied
 to Beaker results; checkpoints and rollout tensors remain on WEKA. See
 [operations](operations.md) for completion, recovery and artifact interpretation.
+
+### Task grader dependencies
+
+MILES application images include the pinned ReasoningGym/RDKit task libraries,
+structured-output parsers and the code-execution HTTP client shipped in
+`open_instruct.code_utils.execution_client`. No private execution-service package,
+GitHub build credential or readiness overlay is required for these graders. The
+executor and its deployment remain separate from the client.
+
+The image build checks correct/incorrect ReasoningGym and XML grades, RDKit
+loading, and code-client imports/label conversion without calling a remote
+service. For code grading, reference the Beaker secret by name under
+`[launch.secrets]`, as above; Beaker injects its value into `CODE_EXECUTION_TOKEN`
+at runtime. Never put a bearer-token value in `launch.env`, a dataset row,
+verifier configuration, build argument or image. Existing published image digests
+must be rebuilt to acquire these dependencies. The binary base and CUDA stack
+remain pinned.

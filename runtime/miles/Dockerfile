@@ -19,7 +19,12 @@ RUN mkdir -p /src && ln -sT /opt/core-rl/sources/megatron-lm /src/Megatron-LM
 FROM runtime-base AS application
 # Pure-Python verifier updates must also reach builds using the pinned binary base.
 COPY runtime/miles/verifier-requirements.txt /opt/core-rl/runtime/miles/verifier-requirements.txt
-RUN uv pip install --system --no-deps -r /opt/core-rl/runtime/miles/verifier-requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    UV_LINK_MODE=copy uv pip install --system --no-deps -r /opt/core-rl/runtime/miles/verifier-requirements.txt
+# Task-grader libraries reach application builds reusing the pinned binary base.
+COPY runtime/miles/task-verifier-requirements.txt /opt/core-rl/runtime/miles/task-verifier-requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    UV_LINK_MODE=copy uv pip install --system --no-deps -r /opt/core-rl/runtime/miles/task-verifier-requirements.txt
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 RUN printf '%s\n' "$SOURCE_REVISION" > /opt/core-rl/source-revision
@@ -34,7 +39,7 @@ ENV PYTHONPATH=/opt/core-rl/sources/sglang/python:/opt/core-rl/sources/olmo-sgla
 WORKDIR /opt/core-rl
 RUN python -m compileall -q /opt/core-rl/open_instruct/miles /opt/core-rl/sources/olmo-core/src/olmo_core /opt/core-rl/sources/miles/miles
 RUN python -c "from open_instruct.miles.configuration.config import RunConfig"
-RUN python -c "import open_instruct.miles.rewards.structured_outputs"
+RUN python scripts/miles/check_verifier_dependencies.py
 
 RUN python -c "from open_instruct.miles.rewards.verifiers import GSM8KVerifier; v = GSM8KVerifier(); assert v([], 'The answer is 42', '42').score == 1; assert v([], 'The answer is 43', '42').score == 0"
 
