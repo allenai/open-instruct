@@ -173,3 +173,11 @@ def test_run_spec_and_direct_preparation_validate_policy(tmp_path, policy):
             test_miles_run_spec.spec(tmp_path, data=data)
         with pytest.raises(InputError, match="data.over_length"):
             run_data.validate_data(data)
+
+
+@pytest.mark.parametrize("dataset", [None, [], {}])
+def test_optional_source_metadata_does_not_break_accounting(environment, tmp_path, dataset):
+    data = prepared_input(tmp_path, [row("valid", source_dataset=dataset)])
+    result = prepare(environment, data)
+    counts = json.loads(Path(result["manifest"]).read_text())["prompt_length"]["sources"]
+    assert counts == {"train": {"original": 1, "excluded": 0, "retained": 1}}

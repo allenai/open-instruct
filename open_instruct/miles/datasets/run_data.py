@@ -800,7 +800,8 @@ def prepare_data(
                 raise InputError(f"{split} row {index}: {error}") from error
             if split in training:
                 over_limit = row["metadata"]["run_prompt_tokens"] > max_prompt_length
-                name = source_names.get(split, row["metadata"].get("source_dataset", split))
+                dataset = row["metadata"].get("source_dataset")
+                name = source_names.get(split, dataset if isinstance(dataset, str) and dataset else split)
                 counts = length_counts.setdefault(name, {"original": 0, "excluded": 0, "retained": 0})
                 counts["original"] += 1
                 counts["excluded" if over_limit else "retained"] += 1
