@@ -27,7 +27,15 @@ DEFAULTS = {
     "model": {"source": "", "architecture": "qwen3-1.7B", "native_checkpoint": {}},
     # eval_only runs the pre-training eval of the starting model, then stops without training.
     # domain_weights: relative loss shares per domain under loss_aggregation="domain" (default equal).
-    "training": {**opd_config.DEFAULTS["training"], "algorithm": "grpo", "eval_only": False, "domain_weights": {}},
+    # initial_rollout: rollouts another trainer (e.g. OPD) completed before this root was seeded with its
+    # Megatron checkpoint and data cursor; this run trains rollouts initial_rollout..num_rollouts-1 only.
+    "training": {
+        **opd_config.DEFAULTS["training"],
+        "algorithm": "grpo",
+        "eval_only": False,
+        "domain_weights": {},
+        "initial_rollout": 0,
+    },
     "trainer": dict(opd_config.DEFAULTS["trainer"]),
     "inference": {**opd_config.DEFAULTS["inference"], "max_prompt_length": 2048, "max_context_length": 4096},
     "optimizer": {**opd_config.DEFAULTS["optimizer"], "adam_beta2": 0.95, "adam_eps": 1e-8, "clip_grad": 1.0},
@@ -147,6 +155,12 @@ class MegatronGRPORunSpec:
         validation.integer(training["keep_checkpoints"], "training.keep_checkpoints", minimum=0)
         if training["keep_checkpoints"] != 0:
             raise InputError("Megatron GRPO retains all checkpoints; training.keep_checkpoints must be 0")
+        validation.integer(training["initial_rollout"], "training.initial_rollout", minimum=0)
+        if training["initial_rollout"]:
+            if training["initial_rollout"] >= training["num_rollouts"]:
+                raise InputError("training.initial_rollout must be below training.num_rollouts")
+            if not training["resume"] or training["eval_only"]:
+                raise InputError("training.initial_rollout continues a seeded checkpoint; it requires training.resume")
         if training["optimizer_steps_per_rollout"] != 1 or type(training["optimizer_steps_per_rollout"]) is not int:
             raise InputError("Megatron GRPO requires one optimizer step per rollout")
         validation.choice(training["loss_aggregation"], "training.loss_aggregation", opd_config.LOSS_AGGREGATIONS)

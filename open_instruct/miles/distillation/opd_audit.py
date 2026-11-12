@@ -101,8 +101,12 @@ def audit_eopd(root, num_rollouts, settings, optimizer_steps):
     return {"settings": dataclasses.asdict(settings), "rollouts": records}
 
 
-def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1, *, require_positive_grad_norm=True):
+def audit_optimizer(
+    root, num_rollouts, optimizer_steps_per_rollout=1, *, require_positive_grad_norm=True, first_rollout=0
+):
     """Check every optimizer step logged finite metrics; OPD's reverse-KL signal also requires a nonzero gradient.
+
+    ``first_rollout`` skips the steps of rollouts another trainer ran before this run's root was seeded.
 
     Verifier GRPO passes ``require_positive_grad_norm=False``: a batch whose prompt groups all have
     equal rewards has zero advantages, so a zero gradient norm is legitimate there."""
@@ -113,7 +117,9 @@ def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1, *, requir
         values = ast.literal_eval(match[1])
         if "train/grad_norm" in values:
             steps[int(values["train/step"])] = values
-    if sorted(steps) != list(range(num_rollouts * optimizer_steps_per_rollout)):
+    if sorted(steps) != list(
+        range(first_rollout * optimizer_steps_per_rollout, num_rollouts * optimizer_steps_per_rollout)
+    ):
         raise ValueError("Missing optimizer step metrics")
     for values in steps.values():
         if not all(math.isfinite(v) for v in values.values() if isinstance(v, (int, float))):

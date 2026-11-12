@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from open_instruct.miles.distillation import opd_config, opd_runtime
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.megatron_grpo import grpo_config
 
 
@@ -33,6 +34,19 @@ def checkpointed_rollouts(spec):
     if not (spec.document["training"]["resume"] and marker.exists()):
         return 0
     return int(marker.read_text().strip()) + 1
+
+
+def require_seeded_state(spec):
+    """With ``training.initial_rollout`` the root must already hold the other trainer's checkpoint.
+
+    Without it MILES would start from the converted base with a fresh optimizer and data cursor,
+    silently replacing the handoff this run declares."""
+    initial = spec.document["training"]["initial_rollout"]
+    if initial and checkpointed_rollouts(spec) < initial:
+        raise InputError(
+            f"training.initial_rollout={initial} requires a seeded Megatron checkpoint at iteration {initial - 1} "
+            f"and its data cursor under {Path(spec.output['root']) / 'checkpoints'}; refusing a fresh start"
+        )
 
 
 def native_arguments(spec, prepared, checkpoint, architecture):

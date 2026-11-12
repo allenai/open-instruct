@@ -91,21 +91,23 @@ def rescore(scoring, records):
 def audit(spec, prepared):
     root = Path(spec.output["root"])
     count = spec.document["training"]["num_rollouts"]
+    # Rollouts before training.initial_rollout were trained by the seeding trainer, not audited here.
+    first = spec.document["training"]["initial_rollout"]
     # Zero reward variation in every group is a legitimate zero-gradient batch, not a failure.
-    steps = opd_audit.audit_optimizer(root, count, require_positive_grad_norm=False)
+    steps = opd_audit.audit_optimizer(root, count, require_positive_grad_norm=False, first_rollout=first)
     inference = spec.document["inference"]
     batch = inference["rollout_batch_size"] * inference["samples_per_prompt"]
     fanout = inference["samples_per_prompt"]
     records = [json.loads(line) for line in (root / grpo_hooks.EVIDENCE).read_text().splitlines()]
-    if len(records) != count * batch:
+    if len(records) != (count - first) * batch:
         raise ValueError("Verifier evidence does not cover every training response")
     scoring = grpo_hooks.scoring_args(
         environment=grpo_hooks.reward_environment(prepared["data"]["reward_config"], spec.document["reward"])
     )
     rescored = rescore(scoring, records)
     rollouts = []
-    for rollout_id in range(count):
-        rows = records[rollout_id * batch : (rollout_id + 1) * batch]
+    for rollout_id in range(first, count):
+        rows = records[(rollout_id - first) * batch : (rollout_id - first + 1) * batch]
         expected, mixed = expected_advantages(
             rows,
             fanout,

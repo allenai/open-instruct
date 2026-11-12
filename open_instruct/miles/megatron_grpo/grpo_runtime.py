@@ -163,6 +163,7 @@ def execute(spec):
                 "checkpoint_path": str(checkpoint),
             },
         )
+        grpo_args.require_seeded_state(spec)
         arguments = grpo_args.native_arguments(spec, prepared, checkpoint, architecture)
         workflow.write_json(root / "native-arguments.json", arguments)
         preflight = grpo_args.preflight_code(spec)
@@ -175,8 +176,11 @@ def execute(spec):
                 check=True,
                 timeout=180,
             )
+        # Verifier evidence starts at training.initial_rollout; earlier rollouts belong to the seeding trainer.
         replayed = grpo_hooks.reconcile_evidence(
-            root, grpo_args.checkpointed_rollouts(spec), inf["rollout_batch_size"] * inf["samples_per_prompt"]
+            root,
+            grpo_args.checkpointed_rollouts(spec) - training["initial_rollout"],
+            inf["rollout_batch_size"] * inf["samples_per_prompt"],
         )
         if replayed:
             logger.info("Moved %s verifier records of replayed rollouts to %s", replayed, root / grpo_hooks.REPLAYED)
