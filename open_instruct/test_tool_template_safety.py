@@ -121,3 +121,24 @@ def test_legacy_prepared_row_without_fingerprint_does_not_check_template():
     run_data._verify_row(row, tokenizer, 10, {"v"})
     assert row["input"] == "original Dolci prompt"
     assert "rendering_template_sha256" not in row["metadata"]
+
+
+@pytest.mark.parametrize("root_id", [None, "https://example.invalid/root"])
+@pytest.mark.parametrize("ref_key", ["$ref", "$dynamicRef"])
+def test_direct_parameter_enters_its_resource_scope(root_id, ref_key):
+    child = {"$id": "nested/child", "$defs": {"num": {"type": "integer"}}, ref_key: "#/$defs/num"}
+    schema = {"type": "object", "properties": {"n": child}, "required": ["n"]}
+    if root_id:
+        schema["$id"] = root_id
+        # A conflicting root definition must never override the child's.
+        schema["$defs"] = {"num": {"type": "string"}}
+    assert tool_call_parsing.parameter_value("3", child, schema) == 3
+    assert tool_call_parsing.property_value("3", "n", schema) == 3
+    raw = {
+        "agent_ref": {"name": "single_step_tool_use_with_argument_comparison_agent"},
+        "responses_create_params": {"tools": [{"type": "function", "name": "lookup", "parameters": schema}]},
+        "expected_action": {"type": "function_call", "name": "lookup", "arguments": '{"n":3}'},
+    }
+    target = nemo_tool_calls.target_for_row(raw, {"tool_format": "olmo_xml_v1"})
+    response = "<tool_call><function=lookup><parameter=n>3</parameter></function></tool_call>"
+    assert nemo_tool_calls.SingleStepToolVerifier()([], response, target).score == 1

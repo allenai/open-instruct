@@ -113,18 +113,22 @@ def parameter_value(value, schema, root_schema=None):
     # Unconstrained and plain string parameters retain the native unquoted spelling.
     if not schema or schema.get("type") == "string":
         return value
-    validator = validator.evolve(schema=schema)
+    resource = Resource.from_contents(root_schema, default_specification=DRAFT202012)
+    uri = resource.id() or ""
+    registry = Registry().with_resource(uri, resource).crawl()
+    scope = registry.resolver(uri)
+    if schema is not root_schema:
+        scope = scope.in_subresource(Resource.from_contents(schema, default_specification=DRAFT202012))
+
+    def is_valid(candidate):
+        # evolve(schema=...) alone retains the parent's resolver. Enter the
+        # property's resource first so its local references use its own $id.
+        return not any(validator.descend(candidate, schema, resolver=scope))
 
     def matches_type(candidate):
-        resource = Resource.from_contents(root_schema, default_specification=DRAFT202012)
-        uri = resource.id() or ""
-        registry = Registry().with_resource(uri, resource).crawl()
-        scope = registry.resolver(uri)
-        if schema is not root_schema:
-            scope = scope.in_subresource(Resource.from_contents(schema, default_specification=DRAFT202012))
         return _parameter_type_matches(candidate, schema, scope, validator.TYPE_CHECKER, set())
 
-    return _decode_parameter(value, validator.is_valid, matches_type)
+    return _decode_parameter(value, is_valid, matches_type)
 
 
 def _decode_parameter(value, is_valid, matches_type):

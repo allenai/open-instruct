@@ -641,3 +641,27 @@ def test_xml_typeless_numeric_constraints_remain_answerable(constraint):
     label["tool_payload_key"] = None
     response = "<tool_call><function=submit><parameter=n>1</parameter></function></tool_call>"
     assert structured.StructuredOutputVerifier()([], response, label).score == 1
+
+
+@pytest.mark.parametrize("root_id", [None, "https://example.invalid/root"])
+@pytest.mark.parametrize("schema_policy", ["as_declared", "nemo_strict_v1"])
+def test_xml_direct_property_local_reference_uses_child_resource(root_id, schema_policy):
+    schema = {
+        "type": "object",
+        "properties": {
+            "n": {"$id": "child", "$defs": {"num": {"type": "integer", "minimum": 1}}, "$ref": "#/$defs/num"}
+        },
+        "required": ["n"],
+    }
+    if root_id:
+        schema["$id"] = root_id
+        schema["$defs"] = {"num": {"type": "string"}}
+    label = tool_target(schema=schema, schema_policy=schema_policy)
+    label["tool_call_format"] = "olmo_xml_v1"
+    label["tool_payload_key"] = None
+    response = "<tool_call><function=submit><parameter=n>3</parameter></function></tool_call>"
+    verifier = structured.StructuredOutputVerifier()
+    assert verifier([], response, label).score == 1
+    assert asyncio.run(verifier.async_call([], response, label)).score == 1
+    assert verifier([], response.replace(">3<", ">0<"), label).score == 0
+    assert verifier([], response.replace(">3<", ">3.5<"), label).score == 0
