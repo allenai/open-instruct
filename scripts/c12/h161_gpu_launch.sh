@@ -17,7 +17,8 @@
 #          the qwen-c12 data job: same rows minus those without a Qwen answer, final assistant turn replaced). The
 #          other three C12 parquets, their weights and H182's replay dir are unchanged, and S_R is the control
 #          seed's own (18,410 for 34521), so the token budget matches H182. Its cache is QWEN_CACHE, built by
-#          MODE=tokenize. Uses chrisg_ secrets.
+#          MODE=tokenize. Uses chrisg_ secrets. QWEN_HYP (default qwenc12) names the run, e.g. qwenifc12 for the
+#          mix with Qwen answers only on the instruction-following, chat and safety sources.
 #   tokenize   (mode) 1 node, 0 GPUs: olmo_core_finetune.py --cache_dataset_only with the arm's exact tokenization
 #          arguments; prints the numpy cache dir to pass back as QWEN_CACHE.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
@@ -95,7 +96,7 @@ case "$ARM" in
              QP="${QWEN_PARQUET:?QWEN_PARQUET=<qwen-dolci-c12-*.parquet>}"
              MIXER="${MIXER/$P\/dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet/$QP}"
              [[ "$MIXER" == "$QP "* ]] || { echo "Dolci parquet not replaced in MIXER" >&2; exit 1; }
-             CACHE="${QWEN_CACHE:-}"; HYP=qwenc12; SECRETS=chrisg
+             CACHE="${QWEN_CACHE:-}"; HYP="${QWEN_HYP:-qwenc12}"; SECRETS=chrisg
              OUT_ROOT=/weka/olmo-3p5-post-checkpoints/chrisg/qwen-c12-gpu; DESC="qwen-c12 b1r (H182 recipe, Qwen Dolci)"; HOURS=16
          elif [[ -n "$SRC" ]]; then
              MIXER="$MIXER $ADD 1.0"; REPLAY=/weka/olmo-3p5-post-checkpoints/abhishekr/$HYP/replay-$SRC
