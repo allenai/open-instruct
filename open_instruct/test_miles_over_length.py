@@ -62,8 +62,9 @@ def test_default_still_fails(environment, tmp_path, policy):
     data = prepared_input(tmp_path, [row("short"), row("x" * 11)])
     if policy:
         data["over_length"] = policy
-    with pytest.raises(InputError, match="Prompt has 11 tokens"):
+    with pytest.raises(InputError, match="Prompt has 11 tokens") as error:
         prepare(environment, data)
+    assert 'data.over_length = "exclude"' in str(error.value)
     assert not environment[1].exists()
 
 
@@ -88,8 +89,9 @@ def test_evaluation_remains_strict(environment, tmp_path):
     evaluation = tmp_path / "eval.jsonl"
     evaluation.write_text(json.dumps(row("x" * 11)) + "\n")
     data["eval_prompt_data"] = ["heldout", str(evaluation)]
-    with pytest.raises(InputError, match="heldout row 1: Prompt has 11 tokens"):
+    with pytest.raises(InputError, match="heldout row 1: Prompt has 11 tokens") as error:
         prepare(environment, data)
+    assert "data.over_length" not in str(error.value)
 
 
 @pytest.mark.parametrize("mode", ["tasks", "adopt"])
@@ -302,3 +304,11 @@ def test_configured_source_name_takes_precedence_over_metadata(environment, tmp_
     result = prepare(environment, {"sources": [{"name": "configured", "fraction": 1.0, **source}]})
     counts = json.loads(Path(result["manifest"]).read_text())["prompt_length"]["sources"]
     assert counts == {"configured": {"original": 1, "excluded": 0, "retained": 1}}
+
+
+def test_zero_token_training_error_does_not_suggest_length_exclusion(environment, tmp_path, monkeypatch):
+    data = prepared_input(tmp_path, [row("nonempty")])
+    monkeypatch.setattr(environment[2], "encode", lambda *args, **kwargs: [])
+    with pytest.raises(InputError, match="Prompt has 0 tokens") as error:
+        prepare(environment, data)
+    assert "data.over_length" not in str(error.value)

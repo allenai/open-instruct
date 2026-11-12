@@ -305,7 +305,7 @@ def _render(messages, tokenizer, template):
     return tokenizer.apply_chat_template(messages, chat_template=template, tokenize=False, add_generation_prompt=True)
 
 
-def _verify_row(row, tokenizer, limit, known, *, exclude_over_length=False):
+def _verify_row(row, tokenizer, limit, known, *, exclude_over_length=False, training=False):
     if not isinstance(row.get("input"), str) or not row["input"]:
         raise InputError("Prepared row needs nonempty rendered input")
     metadata = row.get("metadata")
@@ -330,8 +330,14 @@ def _verify_row(row, tokenizer, limit, known, *, exclude_over_length=False):
     _verify_rendering_template(metadata, tokenizer)
     ids = tokenizer.encode(row["input"], add_special_tokens=False)
     if not ids or (len(ids) > limit and not exclude_over_length):
+        exclusion_hint = (
+            ' Alternatively, set data.over_length = "exclude" to skip over-limit training prompts.'
+            if training and len(ids) > limit
+            else ""
+        )
         raise InputError(
-            f"Prompt has {len(ids)} tokens, outside 1..{limit}; immutable input cannot be truncated. Increase inference.max_context_length/max_prompt_length or prepare shorter prompts."
+            f"Prompt has {len(ids)} tokens, outside 1..{limit}; immutable input cannot be truncated. "
+            "Increase inference.max_context_length/max_prompt_length or prepare shorter prompts." + exclusion_hint
         )
     expected = metadata.get("prompt_token_ids")
     if expected is not None and expected != ids:
@@ -784,6 +790,7 @@ def prepare_data(
                     max_prompt_length,
                     known,
                     exclude_over_length=exclude_over_length and split in training,
+                    training=split in training,
                 )
                 # Only _prepared returns _JsonlRows. Task/adopt rendering records
                 # its template in provenance rather than per-row metadata.
