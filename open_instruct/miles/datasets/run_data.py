@@ -835,8 +835,12 @@ def prepare_data(
                 counts["excluded"],
                 counts["retained"],
             )
-            if not counts["retained"]:
+            # Dataset labels in a single input describe provenance, not a
+            # configured sampling allocation. They may disappear at this budget.
+            if not counts["retained"] and (kind == "pool" or "sources" in data):
                 raise InputError(f"Training {kind} {name!r} has no rows after prompt-length exclusion")
+    if not any(partitions[split] for split in training):
+        raise InputError("Training data has no rows after prompt-length exclusion")
     if train_prompts & eval_prompts or train_ids & eval_ids:
         raise InputError("Training and held-out data overlap by prompt or source identity")
     if registry is None:

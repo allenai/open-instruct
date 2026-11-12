@@ -74,8 +74,10 @@ lock, or rebuild before submitting.
 All three examples explicitly set `data.over_length = "exclude"`, so preparation
 skips training prompts above the run's effective prompt limit and records
 original/excluded/retained counts per source in its manifest and logs. Source
-weights remain unchanged; an emptied source fails preparation. Held-out prompts
-still fail on excess length. The library default remains `"fail"`; remove this
+weights remain unchanged; an emptied configured source or previously populated
+pool fails preparation, as does an empty overall training input. Reporting-only
+`source_dataset` groups may disappear at a smaller budget. Held-out prompts still
+fail on excess length. The library default remains `"fail"`; remove this
 example override or set it to `"fail"` to reject over-limit training prompts too.
 
 `dev` retains its compatible tiny-checkpoint placeholder and short GSM8K workload.

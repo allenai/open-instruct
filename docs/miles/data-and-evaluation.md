@@ -455,9 +455,14 @@ overlap, still applies to all candidate rows, including excluded rows.
 integer prompt limit, training scope, and original/excluded/retained counts by
 configured source name (or `metadata.source_dataset`, falling back to `train`,
 for a single input). Pool counts are included when pools are configured. The same
-counts appear in preparation logs. Each source and each previously populated pool
-must retain at least one row; otherwise preparation fails before publishing data.
-Configured empty pools retain their existing behavior.
+counts appear in preparation logs. Each configured `data.sources` entry and each
+previously populated pool must retain at least one row to preserve its sampling
+allocation; otherwise preparation fails before publishing data. In single-input
+and named-task runs, `metadata.source_dataset` groups are reporting-only and may
+lose all their rows. This label is a dataset identifier, not a per-task allocation;
+tasks sharing a dataset share its reporting bucket. The overall training input
+must still retain at least one row. Configured empty pools retain their existing
+behavior.
 
 The mixture manifest's row counts and hashes describe the retained files, so the
 runtime sampler continues to enforce its row-count check. The source release

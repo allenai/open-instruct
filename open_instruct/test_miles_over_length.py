@@ -181,3 +181,84 @@ def test_optional_source_metadata_does_not_break_accounting(environment, tmp_pat
     result = prepare(environment, data)
     counts = json.loads(Path(result["manifest"]).read_text())["prompt_length"]["sources"]
     assert counts == {"train": {"original": 1, "excluded": 0, "retained": 1}}
+
+
+@pytest.mark.parametrize("mode", ["prompt_data", "rl_manifest"])
+def test_single_input_can_exclude_entire_dataset_label(environment, tmp_path, caplog, mode):
+    caplog.set_level("INFO", logger=run_data.logger.name)
+    if mode == "prompt_data":
+        data = prepared_input(
+            tmp_path, [row("short", source_dataset="short"), row("x" * 201, source_dataset="long-docs")]
+        )
+    else:
+        path = test_miles_run_data.source_manifest(tmp_path)
+        artifact = path.parent / "train.jsonl"
+        short = json.loads(artifact.read_text())
+        short["metadata"]["source_dataset"] = "short"
+        long = copy.deepcopy(short)
+        long["messages"][0]["content"] = "x" * 201
+        long["metadata"].update(source_dataset="long-docs", prepared_sample_id="long")
+        artifact.write_text(json.dumps(short) + "\n" + json.dumps(long) + "\n")
+        manifest = json.loads(path.read_text())
+        manifest["artifacts"]["train"].update(records=2, sha256=hashlib.sha256(artifact.read_bytes()).hexdigest())
+        path.write_text(json.dumps(manifest))
+        data = {"rl_manifest": str(path)}
+    data["over_length"] = "exclude"
+    result = prepare(environment, data, limit=100)
+    counts = json.loads(Path(result["manifest"]).read_text())["prompt_length"]["sources"]
+    assert counts == {
+        "short": {"original": 1, "excluded": 0, "retained": 1},
+        "long-docs": {"original": 1, "excluded": 1, "retained": 0},
+    }
+    assert "source=long-docs original=1 excluded=1 retained=0" in caplog.text
+    assert len(Path(result["prompt_data"]).read_text().splitlines()) == 1
+    assert prepare(environment, data, limit=100) == result
+
+
+@pytest.mark.parametrize("shared_dataset", [False, True])
+def test_task_dataset_labels_are_reporting_only(environment, monkeypatch, shared_dataset):
+    if shared_dataset:
+        monkeypatch.setitem(run_data.TASKS, "math", (*run_data.TASKS["gsm8k"][:2], "math"))
+    monkeypatch.setattr(
+        run_data,
+        "_source_rows",
+        lambda name: [{"question": "short" if name == "gsm8k" else "x" * 201, "ground_truth": "42"}],
+    )
+    data = {
+        "over_length": "exclude",
+        "tasks": [{"task": "gsm8k", "train_count": 1}, {"task": "math", "train_count": 1}],
+    }
+    result = prepare(environment, data, limit=100)
+    counts = json.loads(Path(result["manifest"]).read_text())["prompt_length"]["sources"]
+    if shared_dataset:
+        assert list(counts.values()) == [{"original": 2, "excluded": 1, "retained": 1}]
+    else:
+        assert counts[run_data.TASKS["math"][0]] == {"original": 1, "excluded": 1, "retained": 0}
+        assert counts[run_data.TASKS["gsm8k"][0]] == {"original": 1, "excluded": 0, "retained": 1}
+    assert len(Path(result["prompt_data"]).read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("mode", ["prompt_data", "rl_manifest", "tasks"])
+def test_exclusion_cannot_empty_overall_training_input(environment, tmp_path, monkeypatch, mode):
+    if mode == "prompt_data":
+        data = prepared_input(tmp_path, [row("x" * 201, source_dataset="long-docs")])
+        evaluation = tmp_path / "eval.jsonl"
+        evaluation.write_text(json.dumps(row("heldout")) + "\n")
+        data["eval_prompt_data"] = ["heldout", str(evaluation)]
+    elif mode == "rl_manifest":
+        path = test_miles_run_data.source_manifest(tmp_path)
+        artifact = path.parent / "train.jsonl"
+        record = json.loads(artifact.read_text())
+        record["messages"][0]["content"] = "x" * 201
+        record["metadata"]["source_dataset"] = "long-docs"
+        artifact.write_text(json.dumps(record) + "\n")
+        manifest = json.loads(path.read_text())
+        manifest["artifacts"]["train"]["sha256"] = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        path.write_text(json.dumps(manifest))
+        data = {"rl_manifest": str(path)}
+    else:
+        monkeypatch.setattr(run_data, "_source_rows", lambda name: [{"question": "x" * 201, "ground_truth": "42"}])
+        data = {"tasks": [{"task": "gsm8k", "train_count": 1}]}
+    with pytest.raises(InputError, match="Training data has no rows after prompt-length exclusion"):
+        prepare(environment, data | {"over_length": "exclude"}, limit=100)
+    assert not environment[1].exists()
