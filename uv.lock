@@ -2129,8 +2129,8 @@ name = "latex2sympy2-extended"
 version = "1.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "antlr4-python3-runtime" },
-    { name = "sympy" },
+    { name = "antlr4-python3-runtime", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "sympy", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/30/75/456da2da05f6380ea96e6ea804ab2c03e41fc3ed80052307fe8efe6ea20e/latex2sympy2_extended-1.11.0.tar.gz", hash = "sha256:9695657c81b50abba2636638638618db59f4663ed2a4a12d62cef74a40e28fec", size = 207023, upload-time = "2026-01-10T01:43:21.319Z" }
 wheels = [
@@ -2139,7 +2139,7 @@ wheels = [
 
 [package.optional-dependencies]
 antlr4-11-0 = [
-    { name = "antlr4-python3-runtime" },
+    { name = "antlr4-python3-runtime", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 
 [[package]]
@@ -2315,7 +2315,7 @@ name = "math-verify"
 version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "latex2sympy2-extended" },
+    { name = "latex2sympy2-extended", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4f/12/b8d13b581e110ac2f724a2351a8361a70fa36d057eb945d6379e8747c256/math_verify-0.9.0.tar.gz", hash = "sha256:45ac6c61344ba056b9e99a660a4bc8d044ed408f730aed68c60435aa5eec4645", size = 60329, upload-time = "2026-01-10T01:48:33.056Z" }
 wheels = [
@@ -2324,7 +2324,7 @@ wheels = [
 
 [package.optional-dependencies]
 antlr4-11-0 = [
-    { name = "latex2sympy2-extended", extra = ["antlr4-11-0"] },
+    { name = "latex2sympy2-extended", extra = ["antlr4-11-0"], marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 
 [[package]]
@@ -3126,13 +3126,14 @@ dependencies = [
     { name = "langdetect", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "liger-kernel", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "litellm", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
-    { name = "math-verify", extra = ["antlr4-11-0"] },
+    { name = "math-verify", extra = ["antlr4-11-0"], marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "matplotlib", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "mcp", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "multiprocess", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "nltk", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "numpy", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "nvitop", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "openapi-schema-validator", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "openenv-core", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "packaging", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "peft", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
@@ -3156,6 +3157,7 @@ dependencies = [
     { name = "vllm", version = "0.19.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda12') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "vllm", version = "0.19.1+cu130", source = { registry = "https://wheels.vllm.ai/0.19.1/cu130" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-13-open-instruct-cuda13') or (platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
     { name = "wandb", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
+    { name = "xmltodict", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 
 [package.optional-dependencies]
@@ -3227,6 +3229,7 @@ requires-dist = [
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "numpy", specifier = ">=2" },
     { name = "nvitop", specifier = ">=1.4.2" },
+    { name = "openapi-schema-validator", specifier = "==0.6.3" },
     { name = "openenv-core", specifier = ">=0.2.1" },
     { name = "packaging", specifier = ">=24.2" },
     { name = "peft", specifier = ">=0.13.2" },
@@ -3249,6 +3252,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.20.0" },
     { name = "vllm", marker = "sys_platform != 'darwin'", specifier = ">=0.19.1" },
     { name = "wandb", specifier = "==0.23.1" },
+    { name = "xmltodict", specifier = "==0.14.2" },
 ]
 provides-extras = ["code", "dr-tulu"]
 
@@ -4912,7 +4916,7 @@ name = "sympy"
 version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "mpmath" },
+    { name = "mpmath", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or sys_platform == 'darwin' or (sys_platform != 'linux' and extra == 'group-13-open-instruct-cuda12' and extra == 'group-13-open-instruct-cuda13')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
@@ -5850,6 +5854,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/79/29/3b0306800ccabce8f565123a5b97432dee43822c30142085d9b13b43f166/xgrammar-0.1.32-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f9a637d4e0c541149e0d409c24f4ec79cd74d87508ee6a17a7e64a9b9c0cf56f", size = 37680849, upload-time = "2026-03-04T12:00:46.712Z" },
     { url = "https://files.pythonhosted.org/packages/69/62/65e664d861cdadf2d788c03dd8fe67f1faaa7bd4bd2317a2ab850aebee20/xgrammar-0.1.32-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f96c7a4fcbd68e18b13cb3b6ed5d24b5326b256933f476bdaf2cc8e609c228db", size = 37711100, upload-time = "2026-03-04T12:00:50.188Z" },
     { url = "https://files.pythonhosted.org/packages/80/43/05f27a1739209eb590772f867f3f48e6db0a36f376d85db4e68f49aee799/xgrammar-0.1.32-cp312-cp312-win_amd64.whl", hash = "sha256:ba6e08c385cce53eda8e9b3bbfba63f100ba3dcb76fa0692a65921a36b20ad0a", size = 6632259, upload-time = "2026-03-04T12:00:53.184Z" },
+]
+
+[[package]]
+name = "xmltodict"
+version = "0.14.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/50/05/51dcca9a9bf5e1bce52582683ce50980bcadbc4fa5143b9f2b19ab99958f/xmltodict-0.14.2.tar.gz", hash = "sha256:201e7c28bb210e374999d1dde6382923ab0ed1a8a5faeece48ab525b7810a553", size = 51942, upload-time = "2024-10-16T06:10:29.683Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/45/fc303eb433e8a2a271739c98e953728422fa61a3c1f36077a49e395c972e/xmltodict-0.14.2-py2.py3-none-any.whl", hash = "sha256:20cc7d723ed729276e808f26fb6b3599f786cbc37e06c65e192ba77c40f20aac", size = 9981, upload-time = "2024-10-16T06:10:27.649Z" },
 ]
 
 [[package]]
