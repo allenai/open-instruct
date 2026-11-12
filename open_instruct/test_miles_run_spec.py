@@ -211,6 +211,22 @@ def test_section_translation_and_consistent_direct_overrides(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("tracking", "expected_group"),
+    [
+        ({"wandb_mode": "offline"}, "researcher-trial"),
+        ({"wandb_mode": "online", "wandb_run_name": "named-trial"}, "named-trial"),
+        ({"wandb_mode": "offline", "wandb_group": "comparison"}, "comparison"),
+        ({"wandb_mode": "offline", "comparison_id": "paired-trials"}, "paired-trials"),
+    ],
+)
+def test_tracking_supplies_a_group_for_native_random_suffix(tmp_path, tracking, expected_group):
+    config = spec(tmp_path, tracking=tracking).compile()
+    assert config.miles["use_wandb"] is True
+    assert config.miles["wandb_group"] == expected_group
+    assert "--wandb-group" in config.arguments()
+
+
+@pytest.mark.parametrize(
     "sections",
     [
         {"optimizer": {"learning_rate": 1e-6}, "miles": {"lr": 2e-6}},

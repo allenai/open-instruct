@@ -724,6 +724,7 @@ class RunSpec:
             "sglang_attention_backend": "triton",
             "use_wandb": False,
             "wandb_run_name": self.name,
+            "wandb_group": miles.get("wandb_run_name", self.name),
             "save": str(root / "checkpoints"),
             "save_debug_rollout_data": str(root / "rollouts" / "{rollout_id}.pt"),
             "rollout_sample_rate": 0.0,
