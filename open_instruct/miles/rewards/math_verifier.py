@@ -14,7 +14,8 @@ from typing import Any
 
 import math_verify
 from math_verify import errors
-from sympy import Eq
+from sympy import Eq, Expr, MatrixBase
+from sympy.core import relational
 
 from open_instruct import ground_truth_utils, logger_utils, math_utils
 from open_instruct.miles.rewards import rewards
@@ -91,7 +92,7 @@ def _requires_legacy_verifier(reference: str) -> bool:
     """Cache whether this reference accepts a known-wrong equation.
 
     Math-Verify 0.9.0 can match unrelated equations when its solver returns two
-    empty lists. Such references use legacy comparison rules and the literal-string path.
+    empty lists. Such references guard equation comparison while retaining assignment values.
     Probe equation candidates only: a scalar 8 legitimately matches an equation
     with RHS 8 under the library's answer-extraction rules.
     Cache only the decision, not parsed references; exceptions are never cached.
@@ -114,11 +115,15 @@ def _legacy_compare(answer: str, reference: str, diagnostics: dict[str, int]) ->
     answer_parts = answer.split("=")
     if len(expected_parts) != len(answer_parts):
         return False
-    return all(
-        math_utils.is_equiv(actual, expected, diagnostics=diagnostics)
-        or math_utils.hendrycks_is_equiv(actual, expected)
-        for actual, expected in zip(answer_parts, expected_parts)
-    )
+
+    def same_sides(actual_parts: list[str]) -> bool:
+        return all(
+            math_utils.is_equiv(actual, expected, diagnostics=diagnostics)
+            or math_utils.hendrycks_is_equiv(actual, expected)
+            for actual, expected in zip(actual_parts, expected_parts)
+        )
+
+    return same_sides(answer_parts) or (len(expected_parts) == 2 and same_sides(answer_parts[::-1]))
 
 
 def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
@@ -145,33 +150,39 @@ def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
     )
     if not target:
         return 0.0
-    use_legacy = False
+    guarded = False
     try:
         if any(isinstance(value, Eq) for value in gold):
-            use_legacy = _requires_legacy_verifier(reference)
-        string_only = use_legacy
+            guarded = _requires_legacy_verifier(reference)
     except errors.TimeoutException:
         _record_timeout(diagnostics)
-        string_only = True
+        guarded = True
     except Exception:
-        logger.debug("Math-Verify reference probe failed; using literal-string comparison")
-        string_only = True
-    if use_legacy:
+        logger.debug("Math-Verify reference probe failed; guarding equation comparison")
+        guarded = True
+    if guarded:
         # Reuse the old comparison rules on already-anchored candidates. The old
         # extractor/normalizer can discard equation LHSs (e.g. 1=0 -> 0), so do
         # not rerun it on the full response or compare whole equations at once.
         for answer in target:
             if isinstance(answer, str) and _legacy_compare(answer, reference, diagnostics):
                 return 1.0
-    if string_only:
-        # A failed probe cannot certify symbolic comparison either. Preserve
-        # exact extracted-string matches; Math-Verify symbolic matches are disabled.
-        gold = [value for value in gold if isinstance(value, str)]
-        target = [value for value in target if isinstance(value, str)]
     # Reproduce verify(list, list)'s candidate order and exception recovery, but
     # expose timeout counts. The library also supplies literal-string candidates;
     # those may still agree after a symbolic comparison times out.
     for expected, answer in product(gold, target):
+        if guarded:
+            # The empty-solver bug is in equation-to-equation comparison. Keep
+            # literal matches and the library's ordinary assignment-to-value
+            # rule (i=0 vs 0, B=matrix vs matrix); neither invokes that solver.
+            literal_pair = isinstance(expected, str) and isinstance(answer, str)
+            assignment_value = (
+                isinstance(expected, Eq)
+                and isinstance(answer, (Expr, MatrixBase))
+                and not answer.has(relational.Relational)
+            )
+            if not (literal_pair or assignment_value):
+                continue
         try:
             if math_verify.verify(expected, answer, timeout_seconds=_TIMEOUT_SECONDS, raise_on_error=True):
                 return 1.0

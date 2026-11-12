@@ -55,6 +55,17 @@ def test_false_equation_probe_guards_symbolic_matches(label, prediction, expecte
     assert math_verifier.MathVerifier()([], prediction, label).score == expected
 
 
+@pytest.mark.parametrize(
+    "label,prediction,expected",
+    [("360 / 72 = 5", r"\boxed{5}", 1), (r"10\times6-(9-3)\times2=48", r"\boxed{48=48}", 0)],
+)
+@pytest.mark.xfail(strict=True, reason="Numeric equation references need task-aware value/construction grading")
+def test_numeric_equation_reference_limitations(label, prediction, expected):
+    # The first is a value question; the second asks for an arithmetic construction.
+    # Equation-side equivalence alone cannot enforce these different task contracts.
+    assert math_verifier.MathVerifier()([], prediction, label).score == expected
+
+
 @pytest.mark.parametrize("reference,expected,probe_calls", [("f(1)=1", True, 1), ("0.5", False, 0), ("8", False, 0)])
 def test_reference_probe_is_reused_for_different_predictions(reference, expected, probe_calls):
     with mock.patch.object(math_verifier.math_verify, "verify", wraps=math_verifier.math_verify.verify) as verify:
@@ -73,19 +84,36 @@ def test_failed_reference_probe_is_not_cached(error):
 
 
 @pytest.mark.parametrize("error", [errors.TimeoutException, ValueError])
-@pytest.mark.parametrize("prediction,expected", [(r"\boxed{f(1)=1}", 1), (r"\boxed{f(1)=0}", 0)])
-def test_probe_failure_allows_only_literal_string_comparison(error, prediction, expected):
-    with (
-        mock.patch.object(math_verifier, "_requires_legacy_verifier", side_effect=error),
-        mock.patch.object(math_verifier.math_verify, "verify", wraps=math_verifier.math_verify.verify) as verify,
-        mock.patch.object(math_verifier, "_legacy_compare") as legacy,
-    ):
-        result = math_verifier.MathVerifier()([], prediction, "f(1)=1")
+@pytest.mark.parametrize(
+    "label,prediction,expected",
+    [
+        ("f(1)=1", r"\boxed{f(1)=2-1}", 1),
+        ("f(1)=1", r"\boxed{f(1)=0}", 0),
+        ("i=0", r"\boxed{0}", 1),
+        ("i=0", r"\boxed{1=0}", 0),
+        (r"y=\frac{x^2}{2}+C\sqrt{x}", r"\boxed{y=\frac{1}{2}x^2+C\sqrt{x}}", 1),
+        (r"Ae^{100kt}=\frac{N}{100-N}", r"\boxed{\frac{N}{100-N}=Ae^{100kt}}", 1),
+    ],
+)
+def test_probe_failure_preserves_safe_comparisons(error, label, prediction, expected):
+    with mock.patch.object(math_verifier, "_requires_legacy_verifier", side_effect=error):
+        result = math_verifier.MathVerifier()([], prediction, label)
     assert result.score == expected
-    assert verify.call_count == 1
-    assert all(isinstance(value, str) for value in verify.call_args.args)
     assert result.diagnostics["symbolic_timeouts"] == int(error is errors.TimeoutException)
-    legacy.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "label,prediction,expected",
+    [
+        ("i=0", r"\boxed{0}", 1),
+        ("i=4", r"\boxed{4}", 1),
+        ("i=4", r"\boxed{5}", 0),
+        (r"B=\begin{pmatrix}2c&c\\c&2c\end{pmatrix}", r"\boxed{\begin{pmatrix}2c&c\\c&2c\end{pmatrix}}", 1),
+        (r"\gcd(m,n)=1", r"\boxed{1=1}", 0),
+    ],
+)
+def test_guard_preserves_assignment_values_without_comparing_parsed_equations(label, prediction, expected):
+    assert math_verifier.MathVerifier()([], prediction, label).score == expected
 
 
 @pytest.mark.parametrize("prediction", ["f(1)=1", "$f(1)=1$", "We need to calculate f(1)=1 and then", r"\boxed{}"])
