@@ -5,15 +5,15 @@ missing results and infrastructure failures propagate rather than inventing a gr
 """
 
 import dataclasses
-import importlib
 import math
 import re
 from functools import lru_cache
 from urllib.parse import urlsplit
 
+from open_instruct.code_utils.execution_client import livecodebench
+from open_instruct.code_utils.execution_client import verifier as execution_verifier
 from open_instruct.miles.rewards import deterministic_verifiers as common
 
-CLIENT_REVISION = "103ca279b35e8e81d118947f82b72c22676c6540"
 _SUITE_LIMIT = 2000
 
 
@@ -78,10 +78,9 @@ def livecodebench_target(unit_tests):
     inputs, outputs = unit_tests.get("inputs"), unit_tests.get("outputs")
     if not isinstance(inputs, list) or not inputs or not isinstance(outputs, list) or len(inputs) != len(outputs):
         raise ValueError("LiveCodeBench requires nonempty, aligned inputs and outputs")
-    helper = importlib.import_module("code_execution_client.livecodebench")
     all_tests = []
     for start in range(0, len(inputs), _SUITE_LIMIT):
-        mode, tests = helper.prepare_nemotron_tests(
+        mode, tests = livecodebench.prepare_nemotron_tests(
             inputs[start : start + _SUITE_LIMIT], outputs[start : start + _SUITE_LIMIT], unit_tests.get("fn_name")
         )
         all_tests.extend(tests)
@@ -99,9 +98,8 @@ class CompleteCodeVerifier:
 
     async def async_call(self, tokens, prediction, label, **kwargs):
         validate_target(label)
-        external = importlib.import_module("code_execution_client.verifier")
-        verifier = external.CodeVerifier(
-            external.ServiceConfig(
+        verifier = execution_verifier.CodeVerifier(
+            execution_verifier.ServiceConfig(
                 **dataclasses.asdict(self.config),
                 stdio=label["mode"] == "stdio",
                 pass_rate_reward_threshold=1.0,

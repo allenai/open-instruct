@@ -372,8 +372,10 @@ number of rows.
 `test_cases` assertion. `livecodebench_v1` reads
 `verifier_metadata.unit_tests` (`inputs`, `outputs`, optional `fn_name`). It retains
 all aligned pairs and distinguishes stdio from module/Solution function calls.
-The readiness requirements pin the maintained execution client to commit
-`103ca279b35e8e81d118947f82b72c22676c6540`.
+The maintained execution client is shipped in
+`open_instruct.code_utils.execution_client`; no private service package is needed.
+It was ported from client revision `103ca279b35e8e81d118947f82b72c22676c6540`.
+The executor implementation is not part of this client.
 
 Each source plan must supply trusted service configuration, outside raw rows:
 
@@ -386,8 +388,15 @@ Each source plan must supply trusted service configuration, outside raw rows:
 }
 ```
 
-Inject `CODE_EXECUTION_TOKEN` at runtime from the authorized Beaker secret;
-credentials never belong in plans, rows or qualification reports. Reward is one
+Configure only the Beaker secret **name** in the launch configuration:
+
+```toml
+[launch.secrets]
+CODE_EXECUTION_TOKEN = "your-code-execution-beaker-secret"
+```
+
+Beaker injects `CODE_EXECUTION_TOKEN` at runtime. Its value never belongs in
+plans, rows, qualification reports, `launch.env` or the image. Reward is one
 only when **every** test passes. All tests execute, including after a failure;
 suites above 2,000 tests are partitioned without truncation. Each partition uses
 the configured total client deadline, and each test uses a fresh interpreter.

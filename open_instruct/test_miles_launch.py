@@ -183,15 +183,16 @@ def test_every_weka_input_and_output_requires_mount_coverage(tmp_path, section):
     assert len(launch.specification(IMAGE_ID, run)["tasks"][0]["datasets"]) == 2
 
 
-def test_credentials_are_secret_references_and_never_inherited_plaintext(tmp_path, monkeypatch):
-    monkeypatch.setenv("HF_TOKEN", "PRIVATE-VALUE-SENTINEL")
-    run = spec(tmp_path, launch={"secrets": {"HF_TOKEN": "test_hf_secret"}, "env": {"DEBUG_LABEL": "visible"}})
+@pytest.mark.parametrize("variable", ["HF_TOKEN", "CODE_EXECUTION_TOKEN"])
+def test_credentials_are_secret_references_and_never_inherited_plaintext(tmp_path, monkeypatch, variable):
+    monkeypatch.setenv(variable, "PRIVATE-VALUE-SENTINEL")
+    run = spec(tmp_path, launch={"secrets": {variable: "test_beaker_secret"}, "env": {"DEBUG_LABEL": "visible"}})
     document = launch.specification(IMAGE_ID, run)
     env = document["tasks"][0]["envVars"]
-    assert {"name": "HF_TOKEN", "secret": "test_hf_secret"} in env
-    assert not any(value["name"] == "HF_TOKEN" and "value" in value for value in env)
+    assert {"name": variable, "secret": "test_beaker_secret"} in env
+    assert not any(value["name"] == variable and "value" in value for value in env)
     assert "PRIVATE-VALUE-SENTINEL" not in json.dumps(document)
-    run.launch["env"]["WANDB_API_KEY"] = "should-not-print"
+    run.launch["env"][variable] = "should-not-print"
     with pytest.raises(ValueError, match="launch.secrets") as error:
         launch.specification(IMAGE_ID, run)
     assert "should-not-print" not in str(error.value)

@@ -21,16 +21,10 @@ FROM runtime-base AS application
 COPY runtime/miles/verifier-requirements.txt /opt/core-rl/runtime/miles/verifier-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     UV_LINK_MODE=copy uv pip install --system --no-deps -r /opt/core-rl/runtime/miles/verifier-requirements.txt
-# Keep optional task libraries in the application layer, including when reusing
-# the pinned binary base. The private client credential is a BuildKit secret.
+# Task-grader libraries reach application builds reusing the pinned binary base.
 COPY runtime/miles/task-verifier-requirements.txt /opt/core-rl/runtime/miles/task-verifier-requirements.txt
-RUN --mount=type=secret,id=github_token,required=true \
-    --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    UV_LINK_MODE=copy \
-    GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0=credential.https://github.com.helper \
-    GIT_CONFIG_VALUE_0='!f() { echo username=x-access-token; printf "password="; cat /run/secrets/github_token; echo; }; f' \
-    uv pip install --system --no-deps -r /opt/core-rl/runtime/miles/task-verifier-requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    UV_LINK_MODE=copy uv pip install --system --no-deps -r /opt/core-rl/runtime/miles/task-verifier-requirements.txt
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 RUN printf '%s\n' "$SOURCE_REVISION" > /opt/core-rl/source-revision

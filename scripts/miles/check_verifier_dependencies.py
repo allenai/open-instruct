@@ -1,14 +1,16 @@
 """Offline build-time checks for task graders shipped in the MILES image."""
 
-from importlib import metadata
+from importlib import metadata, util
 
-from code_execution_client import livecodebench, verifier
 from rdkit import Chem
 
+from open_instruct.code_utils.execution_client import livecodebench, verifier
 from open_instruct.miles.rewards import reasoning_gym, structured_outputs
 
 
 def main():
+    assert util.find_spec("code_execution_service") is None, "Private executor package must not be in the image"
+    assert util.find_spec("code_execution_client") is None, "Use the client shipped in open-instruct"
     assert metadata.version("reasoning-gym") == "0.1.25"
     assert metadata.version("rdkit") == "2025.9.3"
     assert Chem.MolFromSmiles("CCO") is not None
