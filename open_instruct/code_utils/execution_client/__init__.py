@@ -237,6 +237,8 @@ class CodeExecutionClient:
                     time.sleep(delay)
                 elif self.cancel_event.wait(delay):
                     self._check_cancelled(attempt, request_id)
+        # Nonnegative retries guarantee an attempt; every failed attempt sets an error.
+        assert last_error is not None
         raise last_error
 
     def _batches(self, mode, program, tests, seconds, version, language="python", fresh_process_per_test=False):
