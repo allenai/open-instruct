@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "SCT/SCMC benchmark overlay; BF16 H066 baseline and SCMC32 array training each passed 20 updates on Jupiter. NVFP4 qualification pending.",
+  "status": "Experimental IcePop overlay: 53 CPU loss/configuration/regression tests passed in the pinned runtime with the new MILES source. IcePop GPU training is unqualified; prior score-centering results do not qualify this loss.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/goncalorafaria/miles-olmo-core.git",
-      "revision": "a55a38ac224fd82c369cdb0689012851dadbdfc7"
+      "revision": "5572e631566f7142ea7c1041a31f5f0747bb0ec9"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",

@@ -61,6 +61,60 @@ synchronous mechanics runs retain zero lag. Six is a starting point, not an
 optimum for every workload. See [policy lag and TIS](async-pipeline.md#policy-lag-and-tis)
 and [development defaults](development-defaults.md).
 
+## Experimental IcePop branch
+
+The `goncalof/icepop` branch adds an opt-in Core custom loss on top of the
+score-centering branch. Use an image built from this branch's runtime lock;
+the earlier score-centering image does not contain these entry points.
+Copy an existing run into ignored `runs/` and set:
+
+```toml
+[miles]
+loss_type = "custom_loss"
+custom_loss_function_path = "miles.backends.core_utils.icepop.icepop_loss_function"
+score_centering_is = "mis"
+score_centering_mis_low = 0.2
+score_centering_mis_high = 5.0
+use_tis = false
+use_rollout_logprobs = true
+rollout_top_logprobs_num = 0
+rollout_score_mode = "topk"
+rollout_score_transport = "nested"
+rollout_top_k = -1
+rollout_top_p = 1.0
+```
+
+The sampled-token objective is `-advantage * (p / q)` inside the inclusive
+ratio band, and zero outside it. `q` is the recorded rollout probability.
+The band is detached, and rejected ratios are masked before exponentiation.
+The existing MIS options specify the band; ordinary TIS/PPO clipping is not
+applied. The default advantage multiplier is one, as in the reference IcePop
+configuration. Existing Core loss masking, reductions, entropy and reference-KL
+controls still apply. This initial integration requires group-centered GRPO
+advantages and unfiltered sampling.
+
+For IcePop with MC32 score centering, change the following fields in the same
+`[miles]` table:
+
+```toml
+custom_loss_function_path = "miles.backends.core_utils.icepop.icepop_scmc_loss_function"
+rollout_top_logprobs_num = 32  # also supports 64 and 128
+rollout_score_mode = "mc"
+rollout_score_transport = "array"
+use_miles_router = true
+```
+
+The correction uses independent rollout-policy probes with replacement and
+detached weights `keep(p/q) * p/q`, retaining duplicate draws. It also applies
+when the sampled action is rejected. This has the same policy gradient as
+the existing SCMC MIS surrogate with the same band. Unlike the reference's
+zero-valued correction, the reported loss includes the correction value;
+the gradients agree. No straight-through sampled-token expression is used.
+SCT/top-k centering is not implemented by these experimental IcePop entry points.
+
+CPU gradient and integration tests qualify the loss code; a full IcePop GPU
+training run is still required before claiming training or performance results.
+
 ## Router auxiliary losses in the examples
 
 The three maintained examples set both router balancing and z-loss coefficients
