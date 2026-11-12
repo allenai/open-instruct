@@ -203,9 +203,13 @@ exit \$RC"
 elif [[ "$MODE" == tokenize ]]; then
     # A resume with every sample already collected calls select(range(N, N)), which datasets rejects;
     # select([]) gives the empty dataset the loop expects. Patched in the container, checked by grep.
+    # scripts/c12/tok_stats_patch.py: _aggregate_stats sums trainable tokens in chunks instead of casting the whole
+    # label mask to int64 (8x its size; the 400 GiB job was killed there), so the job fits a 1 TiB node.
+    STATS_PATCH=$(gzip -9c "$HERE/tok_stats_patch.py" | base64 | tr -d '\n')
     CMD="F=open_instruct/numpy_dataset_conversion.py
 sed -i 's/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples)) if start_idx < total_samples else train_dataset.select([])/' \$F
 grep -q 'else train_dataset.select(\[\])' \$F || { echo H161-PATCH-FAILED; exit 2; }
+printf %s '$STATS_PATCH' | base64 -d | gunzip > /tmp/tok_stats_patch.py && python /tmp/tok_stats_patch.py \$F || { echo H161-STATS-PATCH-FAILED; exit 2; }
 echo H161-TOKENIZE-START \$(date -u +%FT%TZ); python $ENTRY $ARGS --cache_dataset_only; RC=\$?
 ls -la /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/ | tail -5
 echo H161-TOKENIZE-EXIT \$RC \$(date -u +%FT%TZ); exit \$RC"
@@ -262,7 +266,7 @@ if int("${MAX_RETRIES:-0}"):
 if "$MODE" == "tokenize":
     for k in ("replicas", "leaderSelection", "hostNetworking", "propagateFailure", "propagatePreemption", "synchronizedStartTimeout"):
         task.pop(k)
-    task["resources"] = {"cpuCount": 64, "memory": "${TOK_MEMORY:-1000GiB}"}
+    task["resources"] = {"cpuCount": 64, "memory": "${TOK_MEMORY:-300GiB}"}
     task["constraints"] = {"cluster": ["ai2/hammond", "ai2/phobos", "ai2/saturn", "ai2/neptune", "ai2/jupiter"]}
 json.dump(spec, open(sys.argv[1], "w"), indent=1)
 EOF
