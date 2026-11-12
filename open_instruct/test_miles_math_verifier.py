@@ -18,10 +18,10 @@ from open_instruct.miles.rewards import math_verifier, rewards
 
 @pytest.fixture(autouse=True)
 def clear_reference_probe_cache():
-    math_verifier._requires_string_comparison.cache_clear()
+    math_verifier._requires_legacy_verifier.cache_clear()
     math_verifier._false_equation.cache_clear()
     yield
-    math_verifier._requires_string_comparison.cache_clear()
+    math_verifier._requires_legacy_verifier.cache_clear()
     math_verifier._false_equation.cache_clear()
 
 
@@ -33,9 +33,17 @@ def clear_reference_probe_cache():
         ("2+2=4", r"\boxed{2+2=5}", 0),
         ("360 / 72 = 5", r"\boxed{1+2=8}", 0),
         ("P(0) = 7", r"\boxed{P(0)=8}", 0),
+        ("i=0", r"\boxed{1=0}", 0),
+        ("I = 0", r"\boxed{1=0}", 0),
+        ("i=0", r"\boxed{j=0}", 0),
         ("f(1)=1", r"\boxed{f(1)=1}", 1),
+        ("f(1)=1", r"\boxed{f(1)=2-1}", 1),
         ("2+2=4", r"\boxed{2+2=4}", 1),
         ("360 / 72 = 5", r"\boxed{360 / 72 = 5}", 1),
+        ("360 / 72 = 5", r"\boxed{360/72=5}", 1),
+        (r"\gcd(m,n) = 1", r"\boxed{\gcd(m, n) = 1}", 1),
+        (r"10\times6-(9-3)\times2=48", r"\boxed{10 \times 6 - (9 - 3) \times 2 = 48}", 1),
+        (r"10\times6-(9-3)\times2=48", r"\boxed{10 + 6 \times (9 - 3) + 2 = 48}", 1),
         ("x+2=4", r"\boxed{x=2}", 1),
         ("x+2=4", r"\boxed{x=3}", 0),
         (r"\emptyset", r"\boxed{\emptyset}", 1),
@@ -50,32 +58,62 @@ def test_false_equation_probe_guards_symbolic_matches(label, prediction, expecte
 @pytest.mark.parametrize("reference,expected,probe_calls", [("f(1)=1", True, 1), ("0.5", False, 0), ("8", False, 0)])
 def test_reference_probe_is_reused_for_different_predictions(reference, expected, probe_calls):
     with mock.patch.object(math_verifier.math_verify, "verify", wraps=math_verifier.math_verify.verify) as verify:
-        assert math_verifier._requires_string_comparison(reference) is expected
-        assert math_verifier._requires_string_comparison(reference) is expected
+        assert math_verifier._requires_legacy_verifier(reference) is expected
+        assert math_verifier._requires_legacy_verifier(reference) is expected
         assert verify.call_count == probe_calls
-    assert math_verifier._requires_string_comparison.cache_info().maxsize == 4096
+    assert math_verifier._requires_legacy_verifier.cache_info().maxsize == 4096
 
 
 @pytest.mark.parametrize("error", [errors.TimeoutException, ValueError])
 def test_failed_reference_probe_is_not_cached(error):
     with mock.patch.object(math_verifier.math_verify, "verify", side_effect=error), pytest.raises(error):
-        math_verifier._requires_string_comparison("f(1)=1")
-    assert math_verifier._requires_string_comparison.cache_info().currsize == 0
-    assert math_verifier._requires_string_comparison("f(1)=1") is True
+        math_verifier._requires_legacy_verifier("f(1)=1")
+    assert math_verifier._requires_legacy_verifier.cache_info().currsize == 0
+    assert math_verifier._requires_legacy_verifier("f(1)=1") is True
 
 
 @pytest.mark.parametrize("error", [errors.TimeoutException, ValueError])
 @pytest.mark.parametrize("prediction,expected", [(r"\boxed{f(1)=1}", 1), (r"\boxed{f(1)=0}", 0)])
 def test_probe_failure_allows_only_literal_string_comparison(error, prediction, expected):
     with (
-        mock.patch.object(math_verifier, "_requires_string_comparison", side_effect=error),
+        mock.patch.object(math_verifier, "_requires_legacy_verifier", side_effect=error),
         mock.patch.object(math_verifier.math_verify, "verify", wraps=math_verifier.math_verify.verify) as verify,
+        mock.patch.object(math_verifier, "_legacy_compare") as legacy,
     ):
         result = math_verifier.MathVerifier()([], prediction, "f(1)=1")
     assert result.score == expected
     assert verify.call_count == 1
     assert all(isinstance(value, str) for value in verify.call_args.args)
     assert result.diagnostics["symbolic_timeouts"] == int(error is errors.TimeoutException)
+    legacy.assert_not_called()
+
+
+@pytest.mark.parametrize("prediction", ["f(1)=1", "$f(1)=1$", "We need to calculate f(1)=1 and then", r"\boxed{}"])
+def test_legacy_fallback_preserves_answer_anchor_requirement(prediction):
+    with mock.patch.object(math_verifier, "_legacy_compare") as legacy:
+        assert math_verifier.MathVerifier()([], prediction, "f(1)=1").score == 0
+    legacy.assert_not_called()
+
+
+def test_legacy_fallback_is_limited_to_flagged_references():
+    with mock.patch.object(math_verifier, "_legacy_compare") as legacy:
+        assert math_verifier.MathVerifier()([], r"\boxed{3,-2}", "-2,3").score == 1
+        assert math_verifier.MathVerifier()([], r"\boxed{-2}", "-2,3").score == 0
+    legacy.assert_not_called()
+
+
+def test_legacy_fallback_preserves_literal_match_and_timeout_diagnostics():
+    with (
+        mock.patch.object(
+            math_verifier.math_utils,
+            "is_equiv",
+            side_effect=lambda *args, diagnostics: diagnostics.update(symbolic_timeouts=2) or False,
+        ),
+        mock.patch.object(math_verifier.math_utils, "hendrycks_is_equiv", return_value=False),
+    ):
+        result = math_verifier.MathVerifier()([], r"\boxed{f(1)=1}", r"\(f(1)=1\)")
+    assert result.score == 1
+    assert result.diagnostics == {"symbolic_timeouts": 2}
 
 
 def test_false_equation_guard_runs_inside_isolated_worker():
@@ -256,7 +294,7 @@ def test_parse_timeout_is_counted_and_resets():
 
 def test_each_timed_out_candidate_pair_is_counted():
     with (
-        mock.patch.object(math_verifier, "_requires_string_comparison", return_value=False),
+        mock.patch.object(math_verifier, "_requires_legacy_verifier", return_value=False),
         mock.patch.object(math_verifier.math_verify, "verify", side_effect=errors.TimeoutException),
     ):
         result = math_verifier.MathVerifier()([], r"\boxed{4}", "4")

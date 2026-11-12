@@ -16,7 +16,7 @@ import math_verify
 from math_verify import errors
 from sympy import Eq
 
-from open_instruct import ground_truth_utils, logger_utils
+from open_instruct import ground_truth_utils, logger_utils, math_utils
 from open_instruct.miles.rewards import rewards
 
 logger = logger_utils.setup_logger(__name__)
@@ -81,16 +81,17 @@ def _false_equation():
         raise_on_error=True,
     )
     if not sentinel:
+        logger.warning("Math-Verify could not parse the fixed false-equation sentinel")
         raise ValueError("Math-Verify could not parse the false-equation sentinel")
     return sentinel
 
 
 @functools.lru_cache(maxsize=4096)
-def _requires_string_comparison(reference: str) -> bool:
+def _requires_legacy_verifier(reference: str) -> bool:
     """Cache whether this reference accepts a known-wrong equation.
 
     Math-Verify 0.9.0 can match unrelated equations when its solver returns two
-    empty lists. Such references may only use the existing literal-string path.
+    empty lists. Such references use legacy comparison rules and the literal-string path.
     Probe equation candidates only: a scalar 8 legitimately matches an equation
     with RHS 8 under the library's answer-extraction rules.
     Cache only the decision, not parsed references; exceptions are never cached.
@@ -104,6 +105,19 @@ def _requires_string_comparison(reference: str) -> bool:
     equations = [value for value in gold if isinstance(value, Eq)]
     return bool(equations) and math_verify.verify(
         equations, _false_equation(), timeout_seconds=_TIMEOUT_SECONDS, raise_on_error=True
+    )
+
+
+def _legacy_compare(answer: str, reference: str, diagnostics: dict[str, int]) -> bool:
+    """Use legacy expression comparison while preserving every equation side."""
+    expected_parts = reference.split("=")
+    answer_parts = answer.split("=")
+    if len(expected_parts) != len(answer_parts):
+        return False
+    return all(
+        math_utils.is_equiv(actual, expected, diagnostics=diagnostics)
+        or math_utils.hendrycks_is_equiv(actual, expected)
+        for actual, expected in zip(answer_parts, expected_parts)
     )
 
 
@@ -129,17 +143,29 @@ def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
         ),
         diagnostics,
     )
+    if not target:
+        return 0.0
+    use_legacy = False
     try:
-        string_only = _requires_string_comparison(reference)
+        if any(isinstance(value, Eq) for value in gold):
+            use_legacy = _requires_legacy_verifier(reference)
+        string_only = use_legacy
     except errors.TimeoutException:
         _record_timeout(diagnostics)
         string_only = True
     except Exception:
         logger.debug("Math-Verify reference probe failed; using literal-string comparison")
         string_only = True
+    if use_legacy:
+        # Reuse the old comparison rules on already-anchored candidates. The old
+        # extractor/normalizer can discard equation LHSs (e.g. 1=0 -> 0), so do
+        # not rerun it on the full response or compare whole equations at once.
+        for answer in target:
+            if isinstance(answer, str) and _legacy_compare(answer, reference, diagnostics):
+                return 1.0
     if string_only:
         # A failed probe cannot certify symbolic comparison either. Preserve
-        # exact extracted-string matches, never a symbolic match on this path.
+        # exact extracted-string matches; Math-Verify symbolic matches are disabled.
         gold = [value for value in gold if isinstance(value, str)]
         target = [value for value in target if isinstance(value, str)]
     # Reproduce verify(list, list)'s candidate order and exception recovery, but
