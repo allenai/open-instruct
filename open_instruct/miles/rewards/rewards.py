@@ -41,6 +41,7 @@ _MATH_FACTORIES = {
 _POOLS = weakref.WeakKeyDictionary()
 _CHILDREN = set()
 _FAILURE_CAPTURED = set()
+_RANGE_WARNED = set()
 _RESPONSE_PREFIX = b"MILES_VERIFIER_RESULT "
 
 
@@ -396,23 +397,26 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
             reason = "missing_final_answer"
     if reason:
         metadata["reward_gate"] = reason
-        metadata["reward_components"] = [
-            {"name": spec["name"], "score": 0.0, "weight": spec.get("weight", 1.0), "cost": 0.0}
-            for spec in metadata["verifiers"]
-        ]
-        return 0.0
     components = []
     total = 0.0
     for spec, weight in weighted_specs:
         name = spec["name"]
-        # response_length includes tool observations. Their tokens remain in the
-        # trajectory, while the policy loss uses the separate MILES loss mask.
-        tokens = sample.tokens[-sample.response_length :] if sample.response_length else []
-        if args.olmo_core.reward_final_answer_only:
-            # Text math verifiers do not use token IDs. Never pass the hidden
-            # reasoning's tokens alongside an extracted final-answer string.
-            tokens = []
         try:
+            if reason:
+                # Gate at the verifier's floor, including its target-dependent range.
+                # Resolve it inside the same failure policy as normal grading.
+                floor = getattr(registry[name], "score_floor", None)
+                score = _finite(floor(copy.deepcopy(spec["target"])), "verifier score floor") if floor else 0.0
+                total = _finite(total + weight * score, "combined reward")
+                components.append({"name": name, "score": score, "weight": weight, "cost": 0.0})
+                continue
+            # response_length includes tool observations. Their tokens remain in the
+            # trajectory, while the policy loss uses the separate MILES loss mask.
+            tokens = sample.tokens[-sample.response_length :] if sample.response_length else []
+            if args.olmo_core.reward_final_answer_only:
+                # Text math verifiers do not use token IDs. Never pass the hidden
+                # reasoning's tokens alongside an extracted final-answer string.
+                tokens = []
             if judge_registry.bound(name):
                 score = await general_judge.general_judge_score(
                     args, sample, name=name, target=copy.deepcopy(spec["target"]), prediction=response
@@ -449,6 +453,16 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                 )
                 score = 0.0
             score = _finite(score, "verifier score")
+            if not 0.0 <= score <= 1.0 and name not in _RANGE_WARNED:
+                # Without group std normalization, reward scale can change relative
+                # training weight in a mixture. Warn once per verifier.
+                _RANGE_WARNED.add(name)
+                logger.warning(
+                    "Verifier %s returned score %s outside [0, 1]; reward scale may change "
+                    "relative training weight without grpo_std_normalization",
+                    name,
+                    score,
+                )
             total = _finite(total + weight * score, "combined reward")
         except Exception as error:
             _capture_verifier_failure(args, sample, spec, response, error)

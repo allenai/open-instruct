@@ -1,4 +1,15 @@
-"""MILES bindings for ToolRL's offline reference-call reward."""
+"""MILES bindings for ToolRL's offline reference-call reward.
+
+ToolRL's published reward runs from -3 to 4 on rows that expect calls and from 0
+to 1 on rows that expect none. MILES rewards are otherwise in [0, 1]. Without
+``grpo_std_normalization``, a group's advantages scale with its reward range, so
+this binding maps both row kinds onto [0, 1] by default. With group std
+normalization, this affine rescaling leaves advantages unchanged apart from
+numerical stabilization. Within one prompt group this is a positive rescaling:
+it keeps the ordering and relative spacing of the responses. ``unit_scale=False`` keeps the
+published scale; ``score_floor`` then tells the reward gates that the worst score
+on a call row is -3, not 0.
+"""
 
 import dataclasses
 
@@ -9,6 +20,7 @@ from open_instruct import toolrl_utils
 class ToolRLConfig:
     think_prefix_in_prompt: bool = False
     all_calls_required: bool = False
+    unit_scale: bool = True
 
 
 @dataclasses.dataclass
@@ -26,6 +38,10 @@ class ToolRLVerifier:
     def get_config_class(cls):
         return ToolRLConfig
 
+    def score_floor(self, label):
+        """The lowest score this verifier can return for a target."""
+        return 0.0 if self.config.unit_scale or not toolrl_utils.validate_target(label) else -3.0
+
     async def async_call(self, tokens, prediction, label, **kwargs):
         result = toolrl_utils.score_response(
             prediction,
@@ -34,10 +50,13 @@ class ToolRLVerifier:
         )
         has_calls = bool(toolrl_utils.validate_target(label))
         full_success = has_calls and result.score == 4.0
-        # Keep the original [-3, 4] range; no-call format grading is unchanged.
+        # Diagnostics keep the published [-3, 4] range; no-call format grading is unchanged.
         binary_score = (4.0 if full_success else -3.0) if has_calls else result.score
+        score = binary_score if self.config.all_calls_required else result.score
+        if self.config.unit_scale and has_calls:
+            score = (score + 3.0) / 7.0
         return ToolRLResult(
-            binary_score if self.config.all_calls_required else result.score,
+            score,
             diagnostics={
                 "kind": "toolrl",
                 "status": "completed",
@@ -49,5 +68,6 @@ class ToolRLVerifier:
                 "partial_score": result.score,
                 "binary_score": binary_score,
                 "all_calls_required": self.config.all_calls_required,
+                "unit_scale": self.config.unit_scale,
             },
         )

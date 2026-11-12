@@ -61,7 +61,7 @@ and are recorded as omissions rather than moved across conversation turns.
 | `mcqa_v1` | Displayed options and expected answer, final-choice parser with the row's own answer regex when present; no science-only filtering |
 | `math_v1` | Explicit symbolic-math source contract; proof requests are reported as requiring judged support |
 | `deterministic_v1` | Existing numeric, exact-text/JSON, countdown and knights contracts in `target` |
-| `toolrl_v1` | Canonical ToolRL messages, tools and reference calls; original partial-credit reward and format-only answer rows |
+| `toolrl_v1` | Canonical ToolRL messages, tools and reference calls; original partial-credit reward (mapped onto 0 to 1 for training) and format-only answer rows |
 | `single_step_tool_v1` | NeMo offline next-action routes with native conversational, function-calling or SWE-pivot comparison rules |
 
 New registries use
@@ -112,15 +112,28 @@ digits or parentheses: they remain unchanged and are parsed without executing
 Python. Keep `core.reward_final_answer_only: false`, since ToolRL grades the
 reasoning/answer boundary as well as the calls.
 
-| Target | Preserved reward |
-|---|---|
-| One or more reference calls | Format credit 0 or 1, plus native multiset-name overlap and greedy argument matching from −3 to 3; total −3 to 4 |
-| No reference calls | Plain response format only, from 0 to 1; no factual correctness check |
+| Target | Published reward | Training reward (default) |
+|---|---|---|
+| One or more reference calls | Format credit 0 or 1, plus native multiset-name overlap and greedy argument matching from −3 to 3; total −3 to 4 | The published total mapped linearly onto 0 to 1 |
+| No reference calls | Plain response format only, from 0 to 1; no factual correctness check | Unchanged |
 
-The reward factory is `open_instruct.miles.rewards.toolrl.ToolRLVerifier`.
-Qualification recognizes this native scale; it does not rescale training rewards
-to fit a generic binary control. Training's configured truncated-response gate
-still returns zero. Account for the reward scale when designing mixtures.
+The reward factory is `open_instruct.miles.rewards.toolrl.ToolRLVerifier`. It
+returns the training reward on 0 to 1 by default. Without
+`grpo_std_normalization`, a prompt group's advantages scale with its reward range;
+every other MILES verifier is on 0 to 1. Structured run files default this
+normalization to off; the raw MILES parser defaults it to on. With normalization
+on, the affine rescaling leaves advantages unchanged apart from numerical
+stabilization; the floor gate still fixes the truncation incentive on the
+published scale. Diagnostics keep the published values (`partial_score`,
+`binary_score`). The mapping is one positive rescaling per row, so the ordering
+and relative spacing of responses within a group are those of the published
+reward. Set the verifier
+config `unit_scale: false` to train on the published scale. When resuming a run
+started on the published scale, set this explicitly to avoid changing reward
+scales mid-run. The truncated-response gate gives a response the verifier's lowest score for that row (0 by default, −3
+for a call row on the published scale), so a truncated response never outranks a
+completed wrong answer. Any verifier score outside 0 to 1 is logged once per
+verifier as a warning.
 
 The 2026-11-06 local first-pass check reproduced the prior 3,506 training rows
 and 80 held-out rows exactly; the converter reports 414 malformed or unsupported
