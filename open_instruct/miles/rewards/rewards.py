@@ -28,7 +28,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from open_instruct import logger_utils
-from open_instruct.miles.rewards import general_judge, judge_registry
+from open_instruct.miles.rewards import general_judge, judge_registry, response_text
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -388,7 +388,10 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
         weighted_specs.append((spec, _finite(spec.get("weight", 1.0), "weight")))
     status = getattr(sample.status, "value", sample.status) if hasattr(sample, "status") else None
     reason = None
-    response = sample.response
+    # Preserve the original rollout text and token trajectory for training/records.
+    response = response_text.strip_terminal_special_tokens(
+        sample.response, stripped_special_tokens=response_text.STRIPPED_SPECIAL_TOKENS
+    )
     if args.olmo_core.reward_zero_truncated and status == "truncated":
         reason = "truncated"
     elif args.olmo_core.reward_final_answer_only:
