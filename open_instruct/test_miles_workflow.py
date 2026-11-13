@@ -132,7 +132,7 @@ def test_changed_run_spec_cannot_resume(spec):
         pytest.fail("changed spec accepted")
 
 
-@pytest.mark.parametrize("completion", ("updates", "deadline", "exhausted", "empty_exhausted"))
+@pytest.mark.parametrize("completion", ("updates", "deadline", "exhausted", "empty_exhausted", "epochs"))
 def test_execute_failure_then_resume_uses_checkpoint_and_same_preparation(spec, monkeypatch, completion):
     root = Path(spec.output["root"])
     preparation_calls = []
@@ -159,6 +159,7 @@ def test_execute_failure_then_resume_uses_checkpoint_and_same_preparation(spec, 
             raise RuntimeError("interrupted after durable save")
         return {
             "updates": {"updates": 2},
+            "epochs": {"completed_rollout_ids": [0, 1], "num_rollout": 2},
             "deadline": {"completed_rollout_ids": [0], "stopped_for_time": True},
             "exhausted": {"completed_rollout_ids": [0], "pools_exhausted": True},
             "empty_exhausted": {"completed_rollout_ids": [], "start_rollout_id": 1, "pools_exhausted": True},

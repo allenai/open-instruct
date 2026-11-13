@@ -69,6 +69,8 @@ class CoreConfig:
     checkpoint_compact_storage: bool = True
     checkpoint_dedup_save_to_lowest_rank: bool = False
     checkpoint_constant_memory_planning: bool = True
+    # Driver policy for epoch-derived budgets without a periodic save cadence.
+    save_final_checkpoint: bool = False
     # Committed native checkpoints to retain after each commit: the newest
     # checkpoint_keep_last plus every checkpoint_keep_every-th completed update.
     # None keeps every checkpoint.
@@ -114,6 +116,9 @@ class CoreConfig:
     # Prompt selection; ReMind uses scored outcomes from inference records.
     prompt_provider: str = "shuffle"
     prompt_mixture: str | None = None
+    prompt_priority_field: str | None = None
+    prompt_priority_source_field: str | None = None
+    prompt_priority_source_weights: dict[str, float] | None = None
     remind_review_fraction: float = 0.02
     remind_enqueue_probability: float = 0.25
     # Optional history/replay layer over the ordinary shuffle or mixture provider.
@@ -140,7 +145,23 @@ class CoreConfig:
         validation.choice(
             self.prompt_replay_truncation, "core.prompt_replay_truncation", ("none", "any", "half", "all")
         )
-        validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture", "pools"))
+        validation.choice(
+            self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture", "pools", "priority")
+        )
+        if self.prompt_priority_field is not None:
+            validation.text(self.prompt_priority_field, "core.prompt_priority_field")
+        if self.prompt_priority_source_field is not None:
+            validation.text(self.prompt_priority_source_field, "core.prompt_priority_source_field")
+        if self.prompt_priority_source_weights is not None:
+            weights = self.prompt_priority_source_weights
+            if not isinstance(weights, dict) or not weights:
+                raise constraints.error(
+                    "core.prompt_priority_source_weights must be a nonempty source-to-weight table"
+                )
+            for name, weight in weights.items():
+                validation.text(name, "core.prompt_priority_source_weights source")
+                validation.number(weight, "core.prompt_priority_source_weights entry", exclusive_min=True)
+            validation.number(sum(weights.values()), "core.prompt_priority_source_weights total", exclusive_min=True)
         validation.number(self.remind_review_fraction, "core.remind_review_fraction", maximum=1, exclusive_min=True)
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
@@ -207,6 +228,7 @@ class CoreConfig:
             "reward_final_answer_only",
             "exclude_ungraded",
             "filter_zero_std_groups",
+            "save_final_checkpoint",
             "compiler_cache",
             "compiler_cache_restore",
             "compiler_cache_diagnostics",
@@ -495,6 +517,23 @@ class RunConfig:
                 "Mixtures cannot yet be combined with a frozen prompt-exclusion table; "
                 "remove [selection]. Exclusions must be applied within each source to preserve its allocation."
             )
+        if self.core.prompt_provider != "priority" and (
+            self.core.prompt_priority_field is not None
+            or self.core.prompt_priority_source_field is not None
+            or self.core.prompt_priority_source_weights is not None
+        ):
+            raise constraints.error("Priority settings require core.prompt_provider=priority")
+        if self.core.prompt_provider == "priority":
+            if (self.core.prompt_priority_source_field is None) != (self.core.prompt_priority_source_weights is None):
+                raise constraints.error(
+                    "Priority source weighting requires both core.prompt_priority_source_field and core.prompt_priority_source_weights"
+                )
+            if self.core.prompt_priority_field is None:
+                raise constraints.error("Priority sampling requires core.prompt_priority_field")
+            if not options.get("rollout_global_dataset", True):
+                raise constraints.error("Priority sampling requires rollout_global_dataset=true")
+            if self.core.selection_table is not None or self.core.prompt_replay_enabled:
+                raise constraints.error("Priority sampling cannot yet be combined with exclusions or prompt replay")
         if self.core.prompt_provider == "pools":
             if not options.get("fully_async", False) or self.core.records_root is None:
                 raise constraints.error("Named pools require fully_async=true and inference records")
@@ -593,7 +632,7 @@ class RunConfig:
                 raise constraints.error(
                     f"Core RL has no implementation for miles.{name}", constraints.Category.NOT_IMPLEMENTED
                 )
-        for name in ("rollout_batch_size", "n_samples_per_prompt", "num_rollout"):
+        for name in ("rollout_batch_size", "n_samples_per_prompt", "num_rollout", "num_epoch"):
             if name in options and (type(options[name]) is not int or options[name] < 1):
                 raise constraints.error(f"miles.{name} must be a positive integer")
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)

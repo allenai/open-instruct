@@ -7,7 +7,13 @@ import torch
 from miles.utils.types import Sample
 
 from miles.rollout.data_source import RolloutDataSourceWithBuffer, compute_global_dataset_state_path
-from open_instruct.miles.rollout import mixture_provider, prompt_provider, remind_provider, replay_provider
+from open_instruct.miles.rollout import (
+    mixture_provider,
+    priority_provider,
+    prompt_provider,
+    remind_provider,
+    replay_provider,
+)
 
 
 class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
@@ -20,10 +26,15 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
 
     def __init__(self, args, *, provider: prompt_provider.PromptProvider | None = None):
         core = getattr(args, "olmo_core", None)
-        if provider is None and getattr(core, "prompt_provider", "shuffle") == "pools":
-            # Initialize upstream buffering without eagerly loading the first source.
+        if provider is None and getattr(core, "prompt_provider", "shuffle") in ("pools", "priority"):
             loader_args = copy.copy(args)
-            loader_args.rollout_global_dataset = False
+            if core.prompt_provider == "pools":
+                # Initialize upstream buffering without eagerly loading the first source.
+                loader_args.rollout_global_dataset = False
+            else:
+                # Priority owns its within-group shuffle; a global permutation is
+                # unused and costs another full inventory traversal at startup.
+                loader_args.rollout_shuffle = False
             super().__init__(loader_args)
             self.args = args
         else:
@@ -32,6 +43,15 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             self.provider = provider
         elif getattr(core, "prompt_provider", "shuffle") in ("mixture", "pools"):
             self.provider, self.dataset = mixture_provider.load(args, self.dataset)
+        elif getattr(core, "prompt_provider", "shuffle") == "priority":
+            self.provider = priority_provider.PriorityPromptProvider(
+                self.dataset,
+                field=core.prompt_priority_field,
+                source_field=core.prompt_priority_source_field,
+                source_weights=core.prompt_priority_source_weights,
+                seed=args.rollout_seed,
+                shuffle=bool(args.rollout_shuffle),
+            )
         elif getattr(core, "prompt_provider", "shuffle") == "remind":
             self.provider = remind_provider.ReMindPromptProvider(
                 lambda: self.dataset,
@@ -78,7 +98,7 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
         provider = self.provider
         while isinstance(provider, (remind_provider.ReMindPromptProvider, replay_provider.ReplayPromptProvider)):
             provider = provider.base
-        if isinstance(provider, prompt_provider.ShuffledPromptProvider):
+        if isinstance(provider, (prompt_provider.ShuffledPromptProvider, priority_provider.PriorityPromptProvider)):
             self.epoch_id = provider.epoch_id
             self.sample_offset = provider.sample_offset
 
