@@ -92,6 +92,7 @@ def test_prompt_prefilled_closed_thinking_is_already_final(monkeypatch):
         {"scope": "typo"},
         {"require_response": 0},
         {"scope": "response", "require_response": False},
+        {"require_response": False},
         {"unknown": True},
         "full",
     ],

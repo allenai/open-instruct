@@ -137,8 +137,8 @@ class GradingPolicy:
         required = value.get("require_response", True)
         if scope not in SCOPES or type(required) is not bool:
             raise ValueError("grading requires scope=response|thinking|full and boolean require_response")
-        if scope == "response" and not required:
-            raise ValueError("response grading cannot bypass the completed-response requirement")
+        if not required and value.get("scope") not in ("thinking", "full"):
+            raise ValueError("grading.require_response=false requires explicit scope=thinking|full")
         return cls(scope, required)
 
     def gate(self, parts: ResponseParts, *, zero_truncated: bool) -> str | None:

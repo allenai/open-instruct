@@ -42,7 +42,7 @@ Only the trusted reward registry can select another grading view:
 | `require_response=true` | Default for every scope: a missing/empty/unfinished delivered response gates this component at its verifier floor. |
 | `require_response=false` | Explicitly allow thinking/full objectives to grade without a completed delivered response. Cannot be used with `scope="response"`. |
 
-Full-text access does not itself bypass eligibility. `reward_zero_truncated` still gates **every** component, including explicit thinking/full exceptions. It is independent of response selection. Gates retain each verifier's target-dependent floor and weight; they are neither verifier failures nor ungraded-response omissions.
+Full-text access does not itself bypass eligibility. Setting `require_response=false` requires an explicit `scope="thinking"` or `scope="full"`, even when a factory defaults to full scope; preparation and runtime enforce the same declaration. `reward_zero_truncated` still gates **every** component, including explicit thinking/full exceptions. It is independent of response selection. Gates retain each verifier's target-dependent floor and weight; they are neither verifier failures nor ungraded-response omissions.
 
 Do not add `grading` to per-row verifier metadata: targets and weights do not authorize a different input policy. A malformed registry policy fails registry loading/prepared-data validation. Token-based verifiers reject scopes other than `full` at registry load. ToolRL supports `response` and `full`, not `thinking`. Its native format objective requires reasoning; final mode rejects ToolRL or a thinking-scope objective combined with `reward_reasoning_mode="none"` before grading/gating.
 
