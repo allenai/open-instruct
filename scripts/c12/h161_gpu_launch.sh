@@ -90,7 +90,7 @@ case "$ARM" in
          CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=100; SMOKE_HOURS=2; REF_TRANSFORMERS=5.15.1
          # <think> and </think> promoted into slots 100256 and 100266, seeded from their dolma2 pieces.
          SEED_ROWS='[[100256, [14023, 771, 29]], [100266, [524, 27963, 29]]]'
-         LR=7.3e-5; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8 --loss_implementation fused_linear"
+         LR="${A4B_LR:-7.3e-5}"; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8 --loss_implementation fused_linear"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-gpu; DESC="ledger A4B half-epoch C12r (descriptive)"
          STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=72 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
@@ -101,6 +101,8 @@ SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == b1r ]] && RUN_NAME="h182gpu-s${SEED}"
 [[ "$ARM" == a4b ]] && RUN_NAME="a4bgpu-s${SEED}"
+# An LR arm (A4B_LR set) gets its own run name and output dir, so it can never resume from H203's a4bgpu-s<seed>.
+[[ "$ARM" == a4b && -n "${A4B_LR:-}" ]] && RUN_NAME="a4bgpu-lr${A4B_LR}-s${SEED}"
 case "$MODE" in
     smoke) STEPS=$SMOKE_STEPS; CKPT=1000000; SAVE_EVERY=1024; HOURS=$SMOKE_HOURS; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
@@ -187,6 +189,15 @@ exit \$RC"
 else
     CMD="$WAIT
 $TORCHRUN"
+    # An LR arm must start from the base: its first attempt requires an output dir with no stepN and leaves a
+    # marker, so a later auto-resume (marker present) continues from its own checkpoints.
+    if [[ "$ARM" == a4b && -n "${A4B_LR:-}" ]]; then
+        CMD="if [ ! -e $OUTPUT_DIR/.a4b_fresh_start ]; then
+  if ls -d $OUTPUT_DIR/step* >/dev/null 2>&1; then echo A4B-NOT-FRESH $OUTPUT_DIR; ls -d $OUTPUT_DIR/step*; exit 6; fi
+  mkdir -p $OUTPUT_DIR && touch $OUTPUT_DIR/.a4b_fresh_start; echo A4B-FRESH-START $OUTPUT_DIR \$(date -u +%FT%TZ)
+else echo A4B-RESUME $OUTPUT_DIR; ls -d $OUTPUT_DIR/step* 2>/dev/null; fi
+$CMD"
+    fi
     EXTRA_ENV=""
 fi
 
