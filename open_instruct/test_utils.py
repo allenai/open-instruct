@@ -283,6 +283,30 @@ class TestBeakerDescription(unittest.TestCase):
     @mock.patch("os.environ.get")
     @mock.patch("beaker.Beaker.from_env")
     @mock.patch("open_instruct.utils.is_beaker_job")
+    def test_description_eta_after_resume(self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get):
+        """Test that a resumed run's ETA uses only the steps run since start_time, not the restored step count."""
+        env_values = {"BEAKER_WORKLOAD_ID": "test-id-123", "GIT_COMMIT": "abc123", "GIT_BRANCH": "main"}
+        mock_environ_get.side_effect = lambda key, default=None: env_values.get(key, default)
+
+        mock_client, mock_spec, description_history = setup_beaker_mocks(
+            mock_beaker_from_env, mock_is_beaker_job, "Resumed job."
+        )
+
+        # Resumed at step 1000; 10 steps in 100 s since the restart, so 10 s/step and 990 steps left.
+        utils.maybe_update_beaker_description(
+            current_step=1010,
+            total_steps=2000,
+            start_time=time.perf_counter() - 100,
+            original_descriptions={},
+            start_step=1000,
+        )
+
+        self.assertEqual(len(description_history), 1)
+        self.assertIn("(step 1010/2000), eta 2h 45m]", description_history[0])
+
+    @mock.patch("os.environ.get")
+    @mock.patch("beaker.Beaker.from_env")
+    @mock.patch("open_instruct.utils.is_beaker_job")
     def test_description_without_progress(self, mock_is_beaker_job, mock_beaker_from_env, mock_environ_get):
         """Test description updates without progress information."""
         # Configure os.environ.get mock

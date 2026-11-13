@@ -45,6 +45,7 @@ class BeakerCallbackV2(Callback):
     _url: str | None = field(default=None, repr=False)
     _last_update: float | None = field(default=None, repr=False)
     _start_time: float | None = field(default=None, repr=False)
+    _start_step: int = field(default=0, repr=False)
 
     def post_attach(self) -> None:
         if self.enabled is None and BEAKER_WORKLOAD_ID_ENV_VAR in os.environ:
@@ -59,6 +60,7 @@ class BeakerCallbackV2(Callback):
                 return
 
             self._start_time = time.perf_counter()
+            self._start_step = self.trainer.global_step
             logger.info(f"Running in Beaker workload {workload_id}")
 
             result_dir = Path(self.result_dir) / "olmo-core"
@@ -116,6 +118,7 @@ class BeakerCallbackV2(Callback):
             total_steps=progress.total_steps,
             start_time=self._start_time,
             wandb_url=self._url,
+            start_step=self._start_step,
         )
 
 

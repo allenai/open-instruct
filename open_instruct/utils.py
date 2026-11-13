@@ -1110,6 +1110,7 @@ def maybe_update_beaker_description(
     start_time: float | None = None,
     wandb_url: str | None = None,
     original_descriptions: dict[str, str] = {},  # noqa: B006
+    start_step: int = 0,
 ) -> None:
     """Update Beaker experiment description with training progress and/or wandb URL.
 
@@ -1119,6 +1120,8 @@ def maybe_update_beaker_description(
         start_time: Training start time (from time.time()) (for progress tracking)
         wandb_url: Optional wandb URL to include
         original_descriptions: Cache of original descriptions for progress updates
+        start_step: Step this process started from (non-zero after a resume), so the ETA uses only the steps
+            run since start_time
     """
     if not is_beaker_job():
         return
@@ -1172,8 +1175,9 @@ def maybe_update_beaker_description(
             time_str = format_eta(elapsed_time)
             time_label = "finished in"
         else:
-            if current_step > 0:
-                time_per_step = elapsed_time / current_step
+            steps_done = current_step - start_step
+            if steps_done > 0:
+                time_per_step = elapsed_time / steps_done
                 remaining_steps = total_steps - current_step
                 eta_seconds = time_per_step * remaining_steps
                 time_str = format_eta(eta_seconds)
