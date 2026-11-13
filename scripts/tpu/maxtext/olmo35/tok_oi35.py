@@ -1,5 +1,5 @@
 """open-instruct SFT tokenization of Dolci-Think-SFT rows with H045's tokenizer and template
-(allenai/dolma2-tokenizer-olmo35 @8b971706, chat_template_name olmo35). Keeps N rows from a shuffled stream,
+(allenai/dolma2-tokenizer-olmo35 @03c29652, chat_template_name olmo35). Keeps N rows from a shuffled stream,
 stratified to include multi-turn and tool rows; saves the tokenizer for MaxText.
   tok_oi35.py <N> <out.jsonl> <tokenizer save dir>"""
 
@@ -13,7 +13,7 @@ from open_instruct import dataset_transformation as dt
 N, out, tokdir = int(sys.argv[1]), sys.argv[2], sys.argv[3]
 tc = dt.TokenizerConfig(
     tokenizer_name_or_path="allenai/dolma2-tokenizer-olmo35",
-    tokenizer_revision="8b9717061fae09d5be814373d189919a62a9a00d",
+    tokenizer_revision="03c29652a9d74902fe9d39bc0ad211748c7e7ae6",
     chat_template_name="olmo35",
 )
 tok = tc.tokenizer
