@@ -101,7 +101,11 @@ def audit_eopd(root, num_rollouts, settings, optimizer_steps):
     return {"settings": dataclasses.asdict(settings), "rollouts": records}
 
 
-def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1):
+def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1, *, require_positive_grad_norm=True):
+    """Check every optimizer step logged finite metrics; OPD's reverse-KL signal also requires a nonzero gradient.
+
+    Verifier GRPO passes ``require_positive_grad_norm=False``: a batch whose prompt groups all have
+    equal rewards has zero advantages, so a zero gradient norm is legitimate there."""
     steps = {}
     for match in re.finditer(r"step \d+: (\{[^\n]+\})", (root / "training.log").read_text()):
         values = ast.literal_eval(match[1])
@@ -112,7 +116,7 @@ def audit_optimizer(root, num_rollouts, optimizer_steps_per_rollout=1):
     for values in steps.values():
         if not all(math.isfinite(v) for v in values.values() if isinstance(v, (int, float))):
             raise ValueError("Nonfinite optimizer metric")
-        if values["train/grad_norm"] <= 0:
+        if require_positive_grad_norm and values["train/grad_norm"] <= 0:
             raise ValueError("OPD update has zero gradient norm")
     return list(steps.values())
 
