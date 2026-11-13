@@ -41,8 +41,16 @@ def load_rows(cache_dir):
         with gzip.open(meta, "rt") as f:
             for line in csv.reader(f):
                 rows.append((pi, int(line[0]), int(line[1])))
-    tokens = [np.load(tf, mmap_mode="r") for tf in token_files]
-    labels = [np.load(tf.replace("token_ids_part_", "labels_mask_part_"), mmap_mode="r") for tf in token_files]
+    # The parts are headerless memmaps (numpy_dataset_conversion writes np.memmap files, not .npy archives):
+    # labels are one uint8 per token, so the token dtype's width is the size ratio of the two files.
+    tokens, labels = [], []
+    for tf in token_files:
+        lf = tf.replace("token_ids_part_", "labels_mask_part_")
+        n = os.path.getsize(lf)
+        width = os.path.getsize(tf) // n
+        dtype = {1: np.uint8, 2: np.uint16, 4: np.uint32, 8: np.uint64}[width]
+        tokens.append(np.memmap(tf, dtype=dtype, mode="r", shape=(n,)))
+        labels.append(np.memmap(lf, dtype=np.uint8, mode="r", shape=(n,)))
     return stats, rows, tokens, labels
 
 
