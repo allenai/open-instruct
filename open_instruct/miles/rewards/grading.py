@@ -13,11 +13,13 @@ from open_instruct.miles.rewards import response_text
 
 Scope = Literal["response", "thinking", "full"]
 ReasoningMode = Literal["required", "none"]
+Objective = Literal["answer", "process", "format", "composite"]
 SCOPES = ("response", "thinking", "full")
 REASONING_MODES = ("required", "none")
+OBJECTIVES = ("answer", "process", "format", "composite")
 # Also identifies the effective grading contract in persisted evidence. Version
-# 2 sends selected judge inputs intact, including answer tags and whitespace.
-SCHEMA_VERSION = 2
+# 3 declares objective types and prevents consumers from reselecting thinking.
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -119,21 +121,71 @@ class GradingPolicy:
 
     scope: Scope = "response"
     require_response: bool = True
+    objective: Objective = "answer"
+
+    def __post_init__(self):
+        if self.objective not in OBJECTIVES or self.scope not in SCOPES or type(self.require_response) is not bool:
+            raise ValueError("grading requires a known objective, scope and boolean require_response")
+        if self.objective in ("answer", "composite") and self.scope != "response":
+            raise ValueError("grading answer/composite objectives require scope=response; declare process or format")
+        if self.objective == "process" and self.scope not in ("thinking", "full"):
+            raise ValueError("grading process objectives require scope=thinking|full")
+        if not self.require_response and self.scope not in ("thinking", "full"):
+            raise ValueError("grading.require_response=false requires explicit scope=thinking|full")
+
+    def summary(self):
+        return {"objective": self.objective, "scope": self.scope, "require_response": self.require_response}
 
     @classmethod
-    def from_spec(cls, spec: dict, *, default_scope: Scope = "response"):
+    def from_spec(cls, spec: dict, *, default_scope: Scope | None = None, default_objective: Objective = "answer"):
         value = spec.get("grading", {})
-        if not isinstance(value, dict) or set(value) - {"scope", "require_response"}:
-            raise ValueError("grading accepts only scope and require_response")
-        scope = value.get("scope", default_scope)
+        if not isinstance(value, dict) or set(value) - {"objective", "scope", "require_response"}:
+            raise ValueError("grading accepts only objective, scope and require_response")
+        objective = value.get("objective", default_objective)
+        scope = value.get("scope", default_scope or ("thinking" if objective == "process" else "response"))
         required = value.get("require_response", True)
         if scope not in SCOPES or type(required) is not bool:
             raise ValueError("grading requires scope=response|thinking|full and boolean require_response")
         if not required and value.get("scope") not in ("thinking", "full"):
             raise ValueError("grading.require_response=false requires explicit scope=thinking|full")
-        return cls(scope, required)
+        return cls(scope, required, objective)
 
     def gate(self, parts: ResponseParts, *, zero_truncated: bool) -> str | None:
         if zero_truncated and parts.completion_status == "truncated":
             return "truncated"
         return parts.gate if self.require_response else None
+
+
+def verifier_policy(verifier, spec=None):
+    """Resolve trusted objective declarations, never dataset-row overrides."""
+    return GradingPolicy.from_spec(
+        spec or {},
+        default_scope=getattr(verifier, "grading_scope", None),
+        default_objective=getattr(verifier, "grading_objective", "answer"),
+    )
+
+
+def component_policies(verifier, policy):
+    """Composite consumers declare each sub-objective's input contract."""
+    if getattr(verifier, "grading_objective", None) == "composite" and policy.objective != "composite":
+        raise ValueError("grading composite consumers cannot be relabeled as a single objective")
+    if policy.objective != "composite":
+        return {}
+    declarations = getattr(verifier, "grading_components", None)
+    if (
+        not isinstance(declarations, dict)
+        or not declarations
+        or not callable(getattr(verifier, "async_call_parts", None))
+    ):
+        raise ValueError("grading composite objectives require declared grading_components and async_call_parts")
+    result = {}
+    for name, value in declarations.items():
+        if not isinstance(name, str) or not name or not isinstance(value, dict) or "objective" not in value:
+            raise ValueError("grading composite components require names and explicit objective types")
+        if set(value) - {"objective", "scope"}:
+            raise ValueError("grading composite input declarations accept only objective and scope; gates are joint")
+        component = GradingPolicy.from_spec({"grading": value})
+        if component.objective == "composite":
+            raise ValueError("grading composite objectives cannot contain nested composites")
+        result[name] = component
+    return result

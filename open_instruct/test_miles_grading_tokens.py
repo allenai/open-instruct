@@ -22,7 +22,7 @@ def test_token_based_verifiers_keep_full_tokens_and_reject_selected_scope(tmp_pa
     sample = shared.item("work</think>answer", target="3")
     args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(path), reward_final_answer_only=True))
     assert asyncio.run(rewards.registered_reward(args, sample)) == 1
-    spec["grading"] = {"scope": "response"}
+    spec["grading"] = {"objective": "answer", "scope": "response"}
     invalid = tmp_path / "bad-length.json"
     invalid.write_text(json.dumps({"test": spec}))
     with pytest.raises(ValueError, match="Token-based"):
@@ -33,7 +33,7 @@ def test_symbolic_isolation_preserves_declared_token_requirements(tmp_path, monk
     factory = type(
         "TokenAwareMath",
         (ground_truth_utils.StrictMathVerifier,),
-        {"grading_scope": "full", "grading_uses_tokens": True},
+        {"grading_objective": "process", "grading_scope": "full", "grading_uses_tokens": True},
     )
     monkeypatch.setattr(ground_truth_utils, "TokenAwareMath", factory, raising=False)
     path = tmp_path / "token-math.json"
@@ -44,7 +44,12 @@ def test_symbolic_isolation_preserves_declared_token_requirements(tmp_path, monk
     invalid = tmp_path / "bad-token-math.json"
     invalid.write_text(
         json.dumps(
-            {"test": {"factory": "open_instruct.ground_truth_utils.TokenAwareMath", "grading": {"scope": "response"}}}
+            {
+                "test": {
+                    "factory": "open_instruct.ground_truth_utils.TokenAwareMath",
+                    "grading": {"objective": "answer", "scope": "response"},
+                }
+            }
         )
     )
     with pytest.raises(ValueError, match="Token-based"):

@@ -163,6 +163,7 @@ def instance_error_result(error, start):
 
 
 class StructuredOutputVerifier:
+    grading_accepts_selected_input = True
     get_config_class = staticmethod(lambda: StructuredConfig)
 
     def __init__(self, verifier_config=None):
@@ -201,7 +202,7 @@ class StructuredOutputVerifier:
         try:
             try:
                 schema = validate_target(label)  # Configuration errors must not become wrong answers.
-                text = common.answer_text(prediction)
+                text = common.answer_text(prediction, selected_input=kwargs.get("selected_input", False))
                 try:
                     if label.get("response_mode") == "tool_call":
                         value = structured_tool_calls.parse_payload(text, label)

@@ -42,7 +42,7 @@ def sample():
     value.weight_versions = []
     value.metadata["grading"] = {
         **grading.split_response(value.response).summary(),
-        "components": {"test": {"scope": "response", "require_response": True, "gate": None}},
+        "components": {"test": {"objective": "answer", "scope": "response", "require_response": True, "gate": None}},
     }
     return value
 
@@ -112,7 +112,7 @@ def test_feedback_and_persisted_rows_share_the_grading_identity(native, tmp_path
 
 def test_intact_judge_contract_cannot_pool_with_previous_extraction_contract(native, tmp_path, monkeypatch):
     keys = []
-    for version in (1, 2):
+    for version in (2, 3):
         monkeypatch.setattr(grading, "SCHEMA_VERSION", version)
         row = read_record(native.create_recorder(arguments(tmp_path)), sample())
         assert row["grading_policy"]["schema_version"] == version

@@ -143,10 +143,11 @@ def score_response(
         prediction = "<think>" + prediction
     match = re.fullmatch(r"<think>.*?</think>\s*(.*)", prediction, re.DOTALL)
     formatted = match is not None and prediction.count("<think>") == prediction.count("</think>") == 1
+    selected_action = action is not None
     if action is None:
         action = prediction.split("</think>", 1)[1] if "</think>" in prediction else prediction
     action = action.strip()
-    if "<think>" in action:
+    if not selected_action and "<think>" in action:
         action = ""
     if expected:
         try:

@@ -228,7 +228,9 @@ class _IsolatedVerifier:
     def __init__(self, spec, factory=None):
         self.spec = spec
         # Isolation must not hide a factory's declared input requirements.
-        self.grading_scope = getattr(factory, "grading_scope", "response")
+        self.grading_scope = getattr(factory, "grading_scope", None)
+        self.grading_objective = getattr(factory, "grading_objective", "answer")
+        self.grading_accepts_selected_input = getattr(factory, "grading_accepts_selected_input", False)
         self.grading_uses_tokens = getattr(factory, "grading_uses_tokens", False)
         self.grading_scopes = getattr(factory, "grading_scopes", grading.SCOPES)
         self.grading_requires_reasoning = getattr(factory, "grading_requires_reasoning", False)
@@ -329,7 +331,8 @@ def _registry(path):
     registry = _VerifierRegistry()
     for name, spec in document.items():
         verifier = _resolve_verifier(spec, isolate_symbolic=True)
-        policy = grading.GradingPolicy.from_spec(spec, default_scope=getattr(verifier, "grading_scope", "response"))
+        policy = grading.verifier_policy(verifier, spec)
+        grading.component_policies(verifier, policy)
         if getattr(verifier, "grading_uses_tokens", False) and policy.scope != "full":
             raise ValueError(f"Token-based verifier {name!r} requires grading.scope=full")
         if policy.scope not in getattr(verifier, "grading_scopes", grading.SCOPES):
@@ -469,20 +472,19 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
         verifier = registry[name]
         policy = None
         if parts is not None:
-            policy = getattr(registry, "grading_policies", {}).get(name) or grading.GradingPolicy(
-                scope=getattr(verifier, "grading_scope", "response")
-            )
+            policy = getattr(registry, "grading_policies", {}).get(name) or grading.verifier_policy(verifier)
+            subpolicies = grading.component_policies(verifier, policy)
             if parts.reasoning_mode == "none" and (
                 policy.scope == "thinking" or getattr(verifier, "grading_requires_reasoning", False)
             ):
                 raise ValueError(f"Verifier {name!r} requires reward_reasoning_mode=required")
             reason = policy.gate(parts, zero_truncated=args.olmo_core.reward_zero_truncated)
             response = parts.text(policy.scope)
-            metadata["grading"]["components"][name] = {
-                "scope": policy.scope,
-                "require_response": policy.require_response,
-                "gate": reason,
-            }
+            metadata["grading"]["components"][name] = {**policy.summary(), "gate": reason}
+            if subpolicies:
+                metadata["grading"]["components"][name]["inputs"] = {
+                    key: value.summary() for key, value in subpolicies.items()
+                }
             if reason:
                 metadata.setdefault("reward_gate", reason)
         try:
@@ -520,6 +522,10 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                     score_response = getattr(verifier, "async_call_final_answer", score_response)
                 structured_call = getattr(verifier, "async_call_parts", None) if parts is not None else None
                 extra = {}
+                if policy is not None and getattr(verifier, "grading_accepts_selected_input", False):
+                    extra["selected_input"] = True
+                if policy is not None and subpolicies:
+                    extra["component_inputs"] = {key: parts.text(value.scope) for key, value in subpolicies.items()}
                 if structured_call is None and getattr(verifier, "reads_prompt_reasoning", False):
                     extra["prompt_opens_reasoning"] = _prompt_opens_reasoning(
                         sample.prompt, final_answer_only=policy is not None and policy.scope != "full"

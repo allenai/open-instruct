@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from transformers.utils import chat_template_utils
 
+from open_instruct import test_miles_grading as grading_tests
 from open_instruct.miles.datasets import run_data, source_preparation
 from open_instruct.miles.rewards import nemo_tool_calls as tools
 from open_instruct.miles.rewards import rewards
@@ -353,3 +354,15 @@ def test_existing_xml_target_with_bad_schema_scores_zero(schema):
     verifier = tools.SingleStepToolVerifier()
     assert verifier([], response, target).score == 0
     assert asyncio.run(verifier.async_call([], response, target)).score == 0
+
+
+def test_selected_message_uses_shared_gate_instead_of_reparsing_literal_opener(monkeypatch):
+    text = "The literal <think> token belongs to this message."
+    target = thinking_target({"type": "message", "content": text})
+    verifier = tools.SingleStepToolVerifier()
+    sample = grading_tests.item("work</think>" + text, target=target)
+    assert grading_tests.score(monkeypatch, sample, verifier) == 1
+    assert verifier([], text, target).score == 0  # Preserve direct-call normalization.
+    sample.response = "work</think><think>unfinished"
+    assert grading_tests.score(monkeypatch, sample, verifier) == 0
+    assert sample.metadata["reward_gate"] == "unfinished_reasoning"

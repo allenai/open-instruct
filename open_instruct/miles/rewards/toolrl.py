@@ -31,7 +31,12 @@ class ToolRLResult:
 
 
 class ToolRLVerifier:
-    grading_scopes = ("response", "full")
+    grading_objective = "composite"
+    grading_scopes = ("response",)
+    grading_components = {
+        "correctness": {"objective": "answer", "scope": "response"},
+        "format": {"objective": "format", "scope": "full"},
+    }
     grading_requires_reasoning = True
 
     def __init__(self, verifier_config=None):
@@ -52,15 +57,15 @@ class ToolRLVerifier:
             think_prefix_in_prompt=label.get("think_prefix_in_prompt", self.config.think_prefix_in_prompt),
         )
 
-    async def async_call_parts(self, tokens, parts, label, *, scope, **kwargs):
+    async def async_call_parts(self, tokens, parts, label, *, scope, component_inputs, **kwargs):
         # Format examines the original boundary; correctness sees the same
-        # delivered action selected for other graders. A full-scope override
-        # deliberately retains the legacy first-marker action parser.
+        # delivered action selected for other graders. The shared dispatcher
+        # resolves each declared sub-objective; this method never splits text.
         return self._grade(
-            parts.full,
+            component_inputs["format"],
             label,
             think_prefix_in_prompt=parts.prompt_opens_reasoning,
-            action=parts.response if scope == "response" else None,
+            action=component_inputs["correctness"],
         )
 
     def _grade(self, prediction, label, *, think_prefix_in_prompt, action=None):

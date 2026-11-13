@@ -150,7 +150,11 @@ def test_declared_view_and_original_tokens(monkeypatch, scope, final):
     original = copy.deepcopy(sample)
     assert (
         score(
-            monkeypatch, sample, SimpleNamespace(async_call=verify), final=final, policy=grading.GradingPolicy(scope)
+            monkeypatch,
+            sample,
+            SimpleNamespace(async_call=verify),
+            final=final,
+            policy=grading.GradingPolicy(scope, objective="answer" if scope == "response" else "process"),
         )
         == 1
     )
@@ -162,6 +166,7 @@ def test_declared_view_and_original_tokens(monkeypatch, scope, final):
     if final:
         assert sample.metadata["grading"]["components"]["test"] == {
             "scope": scope,
+            "objective": "answer" if scope == "response" else "process",
             "require_response": True,
             "gate": None,
         }
@@ -178,7 +183,7 @@ def test_parts_protocol_delivers_both_pieces_once(monkeypatch):
 
     sample = item("work</think>answer<|im_end|>", target="work")
     verifier = SimpleNamespace(async_call_parts=verify_parts, reads_prompt_reasoning=True)
-    assert score(monkeypatch, sample, verifier, policy=grading.GradingPolicy("thinking")) == 1
+    assert score(monkeypatch, sample, verifier, policy=grading.GradingPolicy("thinking", objective="process")) == 1
     assert seen == [([], "work", "answer", "thinking", sample.response)]
 
 
@@ -197,7 +202,7 @@ def test_nonthinking_mode_rejects_incompatible_objectives(monkeypatch):
             sample,
             task_verifiers.MultiplicationVerifier(),
             reasoning="none",
-            policy=grading.GradingPolicy("thinking"),
+            policy=grading.GradingPolicy("thinking", objective="process"),
         )
     with pytest.raises(ValueError, match="requires reward_reasoning_mode=required"):
         score(monkeypatch, sample, SimpleNamespace(grading_requires_reasoning=True), reasoning="none")
@@ -213,14 +218,22 @@ def test_missing_response_exception_is_separate_from_scope(monkeypatch, scope):
 
     sample = item("unfinished work")
     verifier = SimpleNamespace(async_call=verify, score_floor=lambda label: -3.0)
-    assert score(monkeypatch, sample, verifier, policy=grading.GradingPolicy(scope)) == -3
+    assert (
+        score(
+            monkeypatch,
+            sample,
+            verifier,
+            policy=grading.GradingPolicy(scope, objective="answer" if scope == "response" else "process"),
+        )
+        == -3
+    )
     assert seen == []
-    assert score(monkeypatch, sample, verifier, policy=grading.GradingPolicy(scope, False)) == 0.75
+    assert score(monkeypatch, sample, verifier, policy=grading.GradingPolicy(scope, False, "process")) == 0.75
     assert seen == ["unfinished work"]
     assert "reward_gate" not in sample.metadata
     assert sample.metadata["grading"]["components"]["test"]["gate"] is None
     sample.status = "truncated"
-    assert score(monkeypatch, sample, verifier, policy=grading.GradingPolicy(scope, False)) == -3
+    assert score(monkeypatch, sample, verifier, policy=grading.GradingPolicy(scope, False, "process")) == -3
     assert seen == ["unfinished work"]
 
 
@@ -237,7 +250,7 @@ def test_mixed_grader_scopes_gate_each_component(monkeypatch):
         {"answer": SimpleNamespace(async_call=should_not_run), "process": SimpleNamespace(async_call=process)}
     )
     registry.grading_policies.update(
-        {"answer": grading.GradingPolicy(), "process": grading.GradingPolicy("full", False)}
+        {"answer": grading.GradingPolicy(), "process": grading.GradingPolicy("full", False, "process")}
     )
     monkeypatch.setattr(rewards, "_registry", lambda path: registry)
     monkeypatch.setattr(rewards.judge_registry, "bound", lambda name: False)
@@ -283,7 +296,7 @@ def test_external_verifier_requires_a_declared_contract_before_gating(tmp_path, 
     with pytest.raises(ValueError, match="must declare registry grading policy"):
         asyncio.run(rewards.registered_reward(args, sample))
     explicit = tmp_path / "explicit.json"
-    spec["grading"] = {"scope": "full"}
+    spec["grading"] = {"objective": "process", "scope": "full"}
     explicit.write_text(json.dumps({"test": spec}))
     args.olmo_core = CoreConfig(reward_config=str(explicit), reward_final_answer_only=True)
     sample.response = "work</think>answer"
@@ -311,7 +324,9 @@ def test_literal_opener_in_delivered_prose_is_not_a_reopened_section():
 def test_judge_payload_respects_declared_view(monkeypatch, scope, final, name):
     registry = rewards._VerifierRegistry()
     registry[name] = SimpleNamespace()
-    registry.grading_policies[name] = grading.GradingPolicy(scope)
+    registry.grading_policies[name] = grading.GradingPolicy(
+        scope, objective="answer" if scope == "response" else "process"
+    )
     monkeypatch.setattr(rewards, "_registry", lambda path: registry)
     monkeypatch.setattr(rewards.judge_registry, "bound", lambda name: True)
     monkeypatch.setattr(rewards.judge_registry, "resolve_request", lambda *args, **kwargs: None)

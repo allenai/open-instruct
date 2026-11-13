@@ -58,6 +58,8 @@ class MultiplicationVerifier:
 
 
 class R1FormatVerifier(MultiplicationVerifier):
+    grading_objective = "format"
+
     async def async_call(self, tokens, prediction, label, **kwargs):
         return RewardResult(float(re.match(r".*?</think>\s*<answer>.*?</answer>", prediction, re.DOTALL) is not None))
 
@@ -69,6 +71,8 @@ class R1FormatVerifier(MultiplicationVerifier):
 
 class ManifestIFVerifier(MultiplicationVerifier):
     """Translate canonical baseline constraint targets to OI's legacy list wrapper."""
+
+    grading_accepts_selected_input = True
 
     async def async_call(self, tokens, prediction, label, **kwargs):
         target = label
