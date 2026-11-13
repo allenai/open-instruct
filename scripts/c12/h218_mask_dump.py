@@ -99,8 +99,8 @@ def main():
     }
     print("H218-CACHE", json.dumps(receipt), flush=True)
 
-    # Rows with the most tool turns: count <|im_start|>tool openings.
-    tool_id = tok.encode(f"{IM_START}tool", add_special_tokens=False)
+    # Rows with the most tool turns: count <|im_start|>environment openings.
+    tool_id = tok.encode(f"{IM_START}environment", add_special_tokens=False)  # olmo35's tool-result role
     counts = []
     for ri, (pi, s, e) in enumerate(rows):
         ids = np.asarray(tokens[pi][s:e])
