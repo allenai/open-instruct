@@ -683,6 +683,26 @@ def _sources(data, tokenizer, template, inputs, seed):
     return partitions, provenance, registry, training
 
 
+def _inherit_grading_policies(registry, overrides):
+    """Replacing an implementation must not replace its trusted grading objective.
+
+    Named-judge bindings replace factories/configuration, not input policies.
+    An explicitly supplied override policy still takes precedence.
+    """
+    if not isinstance(registry, dict):
+        return copy.deepcopy(overrides)
+    result = {}
+    for name, override in overrides.items():
+        previous = registry.get(name, {})
+        inherited = (
+            {"grading": copy.deepcopy(previous["grading"])}
+            if isinstance(previous, dict) and "grading" in previous
+            else {}
+        )
+        result[name] = inherited | copy.deepcopy(override)
+    return result
+
+
 def prepare_data(
     data: dict,
     hf_checkpoint: Path,
@@ -715,6 +735,12 @@ def prepare_data(
             path.suffix in (".json", ".jinja", ".model", ".txt", ".tiktoken") or path.name.startswith("tokenizer")
         ):
             _read(path, inputs)
+    if registry_overrides and data.get("reward_config"):
+        # Include inherited policies in the preparation contract. This rejects
+        # reuse of older preparations whose binding overrides discarded them,
+        # without invalidating ordinary preparations with no policy declaration.
+        original = _read_json_object(data["reward_config"], {})
+        registry_overrides = _inherit_grading_policies(original, registry_overrides)
     contract = {
         "data": data,
         "hf_checkpoint": str(hf_checkpoint),
@@ -757,7 +783,8 @@ def prepare_data(
     if registry_overrides:
         registry = (
             {name: {"factory": factory} for name, factory in FACTORIES.items()} if registry is None else registry
-        ) | registry_overrides
+        )
+        registry = registry | _inherit_grading_policies(registry, registry_overrides)
     known = registry if registry is not None else FACTORIES
     if_verifiers = _if_verifier_names(known)
     if not all(partitions.get(split) for split in training):
