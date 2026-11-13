@@ -246,5 +246,132 @@ class TestMaskTruncatedCompletions(unittest.TestCase):
         self.assertEqual([record["ground_truth"] for record in records], original_ground_truths)
 
 
+def _make_packs(packs: list[list[tuple[int, int]]]) -> tuple[rl_utils.PackedSequences, list[tuple[int, int]]]:
+    """Build packs of (query length, response length) documents in the layout `pack_sequences` produces.
+
+    Tokens, logprobs and advantages of document d all hold d (tokens hold d + 1).
+    """
+    fields = ("query_responses", "attention_masks", "position_ids", "advantages", "response_masks", "vllm_logprobs")
+    columns = {name: [] for name in fields}
+    doc_lens = []
+    for pack in packs:
+        pieces = {name: [] for name in fields}
+        for doc_id, (query_len, response_len) in enumerate(pack, start=1):
+            d = len(doc_lens)
+            doc_lens.append((query_len, response_len))
+            length = query_len + response_len
+            response_mask = torch.arange(length) >= query_len
+            pieces["query_responses"].append(torch.full((length,), d + 1))
+            pieces["attention_masks"].append(torch.full((length,), doc_id))
+            pieces["position_ids"].append(torch.arange(length))
+            pieces["advantages"].append(response_mask.float() * d)
+            pieces["response_masks"].append(response_mask)
+            pieces["vllm_logprobs"].append(torch.where(response_mask, float(d), float("nan")))
+        for name in fields:
+            columns[name].append(torch.cat(pieces[name]))
+    return rl_utils.PackedSequences(original_responses=[], **columns), doc_lens
+
+
+def _pack_sequences_with_doc_ids(doc_lens: list[tuple[int, int]], pack_length: int, dp_world_size: int):
+    """Pack documents with `pack_sequences`; tokens, logprobs and advantages hold the document index."""
+    queries = [[d + 1] * query_len for d, (query_len, _) in enumerate(doc_lens)]
+    responses = [[d + 1] * response_len for d, (_, response_len) in enumerate(doc_lens)]
+    packed = rl_utils.pack_sequences(
+        queries=queries,
+        responses=responses,
+        masks=[[1] * len(response) for response in responses],
+        pack_length=pack_length,
+        pad_token_id=0,
+        vllm_logprobs=[[float(d)] * len(response) for d, response in enumerate(responses)],
+        min_num_batches=dp_world_size,
+    )
+    # Same advantage lookup and mask conversion as DataPreparationActor.
+    lookup_advantages = np.arange(-1, len(doc_lens), dtype=np.float32)
+    lookup_advantages[0] = 0.0
+    packed.advantages = [torch.tensor(lookup_advantages[mask]) for mask in packed.response_masks]
+    packed.response_masks = [mask.bool() for mask in packed.response_masks]
+    return packed
+
+
+class TestPrepareCollatedDataLeftoverPacks(unittest.TestCase):
+    def _collated_docs(self, collated: list[data_types.CollatedBatchData], doc_lens: list[tuple[int, int]]):
+        """Return {document index: packed length} after checking that every field of each document is intact."""
+        docs = {}
+        for worker in collated:
+            for micro_batch in range(len(worker.query_responses)):
+                tokens = worker.query_responses[micro_batch][0]
+                doc_ids, counts = torch.unique_consecutive(worker.attention_masks[micro_batch][0], return_counts=True)
+                self.assertEqual(doc_ids.tolist(), list(range(1, len(doc_ids) + 1)))
+                start = 0
+                for length in counts.tolist():
+                    end = start + length
+                    d = int(tokens[start]) - 1
+                    query_len, response_len = doc_lens[d]
+                    self.assertNotIn(d, docs)
+                    self.assertEqual(length, query_len + response_len)
+                    self.assertTrue(torch.all(tokens[start:end] == d + 1))
+                    position_ids = worker.position_ids[micro_batch][0][start:end]
+                    self.assertEqual(position_ids.tolist(), list(range(length)))
+                    response_mask = worker.response_masks[micro_batch][0][start:end]
+                    self.assertEqual(response_mask.tolist(), [False] * query_len + [True] * response_len)
+                    advantages = worker.advantages[micro_batch][0][start:end]
+                    self.assertTrue(torch.all(advantages[response_mask] == d))
+                    self.assertTrue(torch.all(advantages[~response_mask] == 0))
+                    logprobs = worker.vllm_logprobs[micro_batch][0][start:end]
+                    self.assertTrue(torch.all(logprobs[response_mask] == d))
+                    self.assertTrue(torch.all(torch.isnan(logprobs[~response_mask])))
+                    docs[d] = length
+                    start = end
+        return docs
+
+    def test_leftover_documents_are_moved_into_shorter_packs(self):
+        # Packs of 10, 7, 7, 3 and 3 tokens for 3 ranks: the last two packs fit into the first three.
+        packed, doc_lens = _make_packs(
+            [[(1, 5), (1, 3)], [(1, 4), (1, 1)], [(1, 3), (1, 2)], [(1, 1), (1, 0)], [(1, 2)]]
+        )
+
+        collated = data_loader.prepare_collated_data_for_workers(packed, 3, 1, pad_token_id=0, pin_memory=False)
+
+        self.assertEqual([len(worker.query_responses) for worker in collated], [1, 1, 1])
+        self.assertEqual([worker.query_responses[0].shape[1] for worker in collated], [10, 10, 10])
+        docs = self._collated_docs(collated, doc_lens)
+        self.assertEqual(sorted(docs), list(range(len(doc_lens))))
+
+    def test_leftover_document_that_fits_nowhere_is_dropped(self):
+        # Packs of 6, 5 and 5 (4 + 1) tokens for 2 ranks: only the 1-token document fits.
+        packed, doc_lens = _make_packs([[(1, 5)], [(1, 4)], [(1, 3), (1, 0)]])
+
+        with self.assertLogs(data_loader.logger, level="WARNING") as logs:
+            collated = data_loader.prepare_collated_data_for_workers(packed, 2, 1, pad_token_id=0, pin_memory=False)
+
+        self.assertIn("Dropping 1 responses", logs.output[0])
+        self.assertEqual([worker.query_responses[0].shape[1] for worker in collated], [6, 6])
+        self.assertEqual(sorted(self._collated_docs(collated, doc_lens)), [0, 1, 3])
+
+    @parameterized.parameterized.expand([(2,), (3,), (4,), (8,)])
+    def test_ranks_get_equal_packs_of_whole_documents(self, dp_world_size):
+        recovered = 0
+        for seed in range(10):
+            rng = np.random.default_rng(seed)
+            doc_lens = [(int(q), int(r)) for q, r in zip(rng.integers(1, 64, 96), rng.integers(0, 448, 96))]
+            packed = _pack_sequences_with_doc_ids(doc_lens, pack_length=1024, dp_world_size=dp_world_size)
+            num_packs = len(packed.query_responses) // dp_world_size
+            kept_docs = sum(
+                len(torch.unique_consecutive(m)) for m in packed.attention_masks[: num_packs * dp_world_size]
+            )
+            max_len = max(len(pack) for pack in packed.query_responses[: num_packs * dp_world_size])
+
+            collated = data_loader.prepare_collated_data_for_workers(
+                packed, dp_world_size, 1, pad_token_id=0, pin_memory=False
+            )
+
+            self.assertEqual([len(worker.query_responses) for worker in collated], [num_packs] * dp_world_size)
+            self.assertLessEqual(max(qr.shape[1] for worker in collated for qr in worker.query_responses), max_len)
+            num_docs = len(self._collated_docs(collated, doc_lens))
+            self.assertGreaterEqual(num_docs, kept_docs)
+            recovered += num_docs > kept_docs
+        self.assertGreater(recovered, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
