@@ -40,16 +40,22 @@ async def train(args, *, export_hf=None):
     if getattr(args, "cluster_backend", "ray") != "ray":
         raise ValueError("Core currently requires the Ray cluster backend")
     pooled = getattr(args.olmo_core, "prompt_provider", "shuffle") == "pools"
+    finite = pooled or getattr(args.olmo_core, "prompt_provider", "shuffle") == "priority"
     exhaustion_type = None
-    if pooled:
+    if finite:
         exhaustion_type = getattr(rollout_errors, "PromptPoolExhausted", None)
         supported = getattr(rollout_errors, "FINITE_POOL_PROVIDERS", ())
         if (
             exhaustion_type is None
-            or args.olmo_core.prompt_provider not in supported
+            or args.olmo_core.prompt_provider
+            not in (
+                supported
+                if getattr(args, "fully_async", True)
+                else getattr(rollout_errors, "FINITE_SYNC_PROVIDERS", ())
+            )
             or not getattr(rollout_errors, "EXPLICIT_DISCARD_FEEDBACK", False)
         ):
-            raise RuntimeError("Named pools require the companion MILES runtime with trained-exposure callbacks")
+            raise RuntimeError("Finite prompt providers require the companion MILES runtime with exhaustion support")
     budget = getattr(args.olmo_core, "max_run_seconds", None)
     deadline = time.monotonic() + budget if budget is not None else None
     # A time stop saves and leaves the run open, like a debug exit: no final export
@@ -244,9 +250,9 @@ async def train(args, *, export_hf=None):
                 # Ray wraps application errors; preserve unrelated failures.
                 unwrap = getattr(error, "as_instanceof_cause", None)
                 cause = unwrap() if callable(unwrap) else error
-                if not pooled or exhaustion_type is None or not isinstance(cause, exhaustion_type):
+                if not finite or exhaustion_type is None or not isinstance(cause, exhaustion_type):
                     raise
-                logger.info("Named prompt pools exhausted after %s completed collections", len(completed))
+                logger.info("Finite prompt inventory exhausted after %s completed collections", len(completed))
                 exhausted = final_stop = True
                 if completed and getattr(args, "save", None) and last_saved_rollout != completed[-1]:
                     await manager.save(completed[-1])
@@ -428,7 +434,8 @@ async def train(args, *, export_hf=None):
             raise cleanup_error
     return {
         "completed_rollout_ids": completed,
-        "pools_exhausted": exhausted,
+        "pools_exhausted": exhausted if pooled else False,
+        "prompts_exhausted": exhausted,
         "start_rollout_id": args.start_rollout_id,
         "export_hf": export_hf,
         "stopped_for_time": stopped_for_time,

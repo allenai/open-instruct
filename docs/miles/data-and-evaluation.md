@@ -230,16 +230,15 @@ turning off adaptation.
 ### Historical priority groups
 
 Tagliere v6 annotates each row with a model-specific historical reward priority.
-The opt-in priority provider uses these annotations to favor useful prompts while
-keeping exposure to unknown and lower-priority rows explicit. For the hero SFT
-history exported by v6, an example allocation is:
+The opt-in priority provider visits every row in group 1 before group 2, then 3,
+then 4. It makes one pass and stops when no complete training batch remains.
+This allows a short training run to focus first on prompts with mixed historical
+rewards, while keeping one dataset artifact for different run budgets.
 
 ```toml
 [core]
 prompt_provider = "priority"
 prompt_priority_field = "reward_priority_olmo35_sft_hero"
-# Draw probabilities for groups 1, 2, 3, 4; this is an example, not a tuned default.
-prompt_priority_weights = [0.50, 0.35, 0.10, 0.05]
 ```
 
 | Group | Historical evidence |
@@ -249,24 +248,56 @@ prompt_priority_weights = [0.50, 0.35, 0.10, 0.05]
 | 3 | All fully scored groups were zero and at least half of scored responses hit the token cap. |
 | 4 | Other constant rewards, including all-zero groups without frequent truncation. |
 
-Each fresh draw chooses a group with the configured probability, independently
-of its row count, then takes the next row from that group's seeded shuffle.
-Groups cycle independently; a small preferred group can repeat before a large
-group completes its first pass. `data.shuffle = false` preserves original row
-order within each group. Weights must be four nonnegative finite probabilities
-summing to one. Zero disables a group. A positive-weight group with no rows fails
-startup; set its weight to zero and explicitly reallocate its probability.
-Missing, noninteger, or out-of-range labels also fail startup rather than silently
-becoming group 2. Startup logs record the field, group counts, and probabilities.
+All fresh draws come from the active group until it is exhausted. Groups have no
+sampling weights and never repeat. `data.seed` fixes an independent shuffle within
+each group, making the selection order deterministic across batch sizes and
+resume. `data.shuffle = false` keeps original row order within each group.
+A request may cross a group boundary; empty groups are skipped. Priorities control
+prompt selection; asynchronous generation can complete prompts in a different order.
 
-Use this with one `data.rl_manifest` or prepared `data.prompt_data` input. The
-field must match the exported history; choosing a different model's history is a
-run decision. Priorities stay fixed as training progresses, and do not change
-grades or the online zero-variance filter. Named source mixtures/pools, frozen
-exclusion tables, and prompt replay cannot be combined with this provider.
-The default remains ordinary shuffle. Checkpoints preserve group-draw RNG and
-independent group cursors alongside pending prompts, and reject changes to the
-field, weights, seed, shuffle mode, or group assignments on resume.
+Optionally weight row sources **within the active priority group**, including
+sources inside a single Tagliere artifact:
+
+```toml
+[core]
+prompt_provider = "priority"
+prompt_priority_field = "reward_priority_olmo35_sft_hero"
+prompt_priority_source_field = "workbench.source.candidate_id"
+# Illustrative source labels/weights: use the actual values in your export and
+# provide a positive weight for every source that has rows.
+prompt_priority_source_weights = { C036 = 1.0, C046 = 2.0 }
+```
+
+The selected metadata path identifies the source. Tagliere exports its canonical
+Workbench source ID at `workbench.source.candidate_id`; flat fields such as
+`source_name` or `source_dataset` can also be selected. Relative weights control the next source draw while that source
+has rows in the active group; they are independent of its remaining row count.
+An exhausted or absent source is skipped and the remaining weights are
+renormalized. The whole priority group must finish before moving to the next.
+Rows still appear once only: weights affect their order and early-budget exposure,
+not their total count after a complete pass. Without source weights, each priority
+group is one ordinary shuffled row list. With weights, `data.shuffle = false`
+preserves row order within each source, while the seed still fixes source draws.
+All observed source labels need positive finite weights; missing labels or weights
+fail startup. Configured labels absent from the input are harmless. Changing the
+source field or weights rejects checkpoint resume.
+
+Missing, noninteger, or out-of-range labels fail startup. Logs record the metadata
+field, group counts, seed, and shuffle mode. The selected field must match the
+exported history: choosing a different model's history is a run decision.
+Historical groups stay fixed as training progresses and do not change grades or
+the online zero-variance filter. Filtered rows are not drawn again; if too few
+usable rows remain for a full training batch, the final incomplete batch is
+reported and discarded. The run ends cleanly and saves its last completed update.
+A configured rollout budget can end the run earlier.
+
+Use this with one `data.rl_manifest` or prepared `data.prompt_data` input. Named
+source mixtures/pools, frozen exclusion tables, and replay cannot be combined
+with this provider. Ordinary shuffle remains the default. Checkpoints save the
+priority cursor alongside pending prompts, and reject changes to the field,
+seed, shuffle mode, or group assignments on resume. Old weighted-priority
+checkpoints are incompatible. Priority mode requires the companion finite-drain
+MILES runtime pinned by this change.
 
 ### ReMind review provider
 

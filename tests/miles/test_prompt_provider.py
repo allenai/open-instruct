@@ -313,14 +313,10 @@ def test_priority_provider_uses_labels_and_restores_pending_groups_before_fresh_
         row["metadata"]["reward_priority_olmo35_sft_hero"] = 1 + i % 4
     Path(args.prompt_data).write_text("".join(json.dumps(row) + "\n" for row in rows))
     args.fully_async = fully_async
-    args.olmo_core = CoreConfig(
-        prompt_provider="priority",
-        prompt_priority_field="reward_priority_olmo35_sft_hero",
-        prompt_priority_weights=[1, 0, 0, 0],
-    )
+    args.olmo_core = CoreConfig(prompt_provider="priority", prompt_priority_field="reward_priority_olmo35_sft_hero")
     source = DashboardDrainingRolloutDataSource(args)
-    groups = source.get_samples(8)
-    assert all(s.metadata[args.olmo_core.prompt_priority_field] == 1 for g in groups for s in g)
+    groups = source.get_samples(5)
+    assert [g[0].metadata[args.olmo_core.prompt_priority_field] for g in groups] == [1, 1, 1, 2, 2]
     groups[-1][0].metadata["nested"].append("mutated response")
     groups[-1][0].response = "partial"
     if fully_async:
@@ -336,3 +332,30 @@ def test_priority_provider_uses_labels_and_restores_pending_groups_before_fresh_
     assert pending[0].group_index == groups[-1][0].group_index
     assert all(not s.response and "mutated response" not in s.metadata["nested"] for s in pending)
     assert payload(following) == fresh
+
+
+def test_priority_finite_delivery_takes_short_tail_then_stops(args, monkeypatch):
+    rows = [json.loads(line) for line in Path(args.prompt_data).read_text().splitlines()]
+    for i, row in enumerate(rows):
+        row["metadata"]["priority_fixture"] = 1 + i % 4
+    Path(args.prompt_data).write_text("".join(json.dumps(row) + "\n" for row in rows))
+    args.olmo_core = CoreConfig(prompt_provider="priority", prompt_priority_field="priority_fixture")
+
+    def redundant_global_shuffle(*a):
+        raise AssertionError("Priority must not build an unused global permutation")
+
+    monkeypatch.setattr(miles_data_source.Dataset, "shuffle", redundant_global_shuffle)
+    source = DashboardDrainingRolloutDataSource(args)
+    groups = source.get_samples(8)
+    groups += source.get_samples(8)
+    assert len(groups) == 11
+    assert [g[0].metadata["priority_fixture"] for g in groups] == [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4]
+    assert len({g[0].prompt for g in groups}) == 11
+    assert source.pool_exhausted()
+    with pytest.raises(StopIteration):
+        source.get_samples(1)
+    assert source.get_samples(0) == []
+    # Outstanding retry identities remain deliverable after fresh rows are exhausted.
+    source.add_samples([groups[-1]])
+    assert not source.pool_exhausted()
+    assert source.get_samples(3)[0][0].group_index == groups[-1][0].group_index

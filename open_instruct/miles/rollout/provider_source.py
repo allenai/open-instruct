@@ -26,10 +26,15 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
 
     def __init__(self, args, *, provider: prompt_provider.PromptProvider | None = None):
         core = getattr(args, "olmo_core", None)
-        if provider is None and getattr(core, "prompt_provider", "shuffle") == "pools":
-            # Initialize upstream buffering without eagerly loading the first source.
+        if provider is None and getattr(core, "prompt_provider", "shuffle") in ("pools", "priority"):
             loader_args = copy.copy(args)
-            loader_args.rollout_global_dataset = False
+            if core.prompt_provider == "pools":
+                # Initialize upstream buffering without eagerly loading the first source.
+                loader_args.rollout_global_dataset = False
+            else:
+                # Priority owns its within-group shuffle; a global permutation is
+                # unused and costs another full inventory traversal at startup.
+                loader_args.rollout_shuffle = False
             super().__init__(loader_args)
             self.args = args
         else:
@@ -42,7 +47,8 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             self.provider = priority_provider.PriorityPromptProvider(
                 self.dataset,
                 field=core.prompt_priority_field,
-                weights=core.prompt_priority_weights,
+                source_field=core.prompt_priority_source_field,
+                source_weights=core.prompt_priority_source_weights,
                 seed=args.rollout_seed,
                 shuffle=bool(args.rollout_shuffle),
             )
@@ -99,6 +105,12 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
     def get_samples(self, num_samples: int) -> list[list[Sample]]:
         if type(num_samples) is not int or num_samples < 0:
             raise ValueError("num_samples must be a nonnegative integer")
+        if isinstance(self.provider, priority_provider.PriorityPromptProvider) and num_samples:
+            # Finite inventories may deliver a short final request. The provider
+            # itself still receives an exact count; the collector drains it once.
+            num_samples = min(num_samples, len(self.buffer) + len(self.provider.order) - self.provider.offset)
+            if not num_samples:
+                raise StopIteration("Historical priority inventory exhausted")
         buffered = self.buffer.copy()
         counters = self.sample_group_index, self.sample_index
         provider_state = None
