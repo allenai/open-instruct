@@ -69,6 +69,8 @@ class CoreConfig:
     checkpoint_compact_storage: bool = True
     checkpoint_dedup_save_to_lowest_rank: bool = False
     checkpoint_constant_memory_planning: bool = True
+    # Driver policy for epoch-derived budgets without a periodic save cadence.
+    save_final_checkpoint: bool = False
     # Committed native checkpoints to retain after each commit: the newest
     # checkpoint_keep_last plus every checkpoint_keep_every-th completed update.
     # None keeps every checkpoint.
@@ -226,6 +228,7 @@ class CoreConfig:
             "reward_final_answer_only",
             "exclude_ungraded",
             "filter_zero_std_groups",
+            "save_final_checkpoint",
             "compiler_cache",
             "compiler_cache_restore",
             "compiler_cache_diagnostics",
@@ -629,7 +632,7 @@ class RunConfig:
                 raise constraints.error(
                     f"Core RL has no implementation for miles.{name}", constraints.Category.NOT_IMPLEMENTED
                 )
-        for name in ("rollout_batch_size", "n_samples_per_prompt", "num_rollout"):
+        for name in ("rollout_batch_size", "n_samples_per_prompt", "num_rollout", "num_epoch"):
             if name in options and (type(options[name]) is not int or options[name] < 1):
                 raise constraints.error(f"miles.{name} must be a positive integer")
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)

@@ -307,6 +307,7 @@ async def train(args, *, export_hf=None):
             if (
                 (stopped_for_time and getattr(args, "save", None))
                 or sentinel
+                or (getattr(args.olmo_core, "save_final_checkpoint", False) and rollout_id == args.num_rollout - 1)
                 or should_run_periodic_action(rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout)
             ):
                 # The async data source snapshots its cursor and pristine pending
@@ -434,6 +435,7 @@ async def train(args, *, export_hf=None):
             raise cleanup_error
     return {
         "completed_rollout_ids": completed,
+        "num_rollout": args.num_rollout,
         "pools_exhausted": exhausted if pooled else False,
         "prompts_exhausted": exhausted,
         "start_rollout_id": args.start_rollout_id,

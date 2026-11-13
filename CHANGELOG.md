@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed
+- Honor native MILES num_epoch budgets without injecting a conflicting rollout default; save epoch-run final checkpoints and recognize the runtime-resolved completion limit (https://github.com/allenai/open-instruct/pull/2251).
 - Include the qualified ReasoningGym/RDKit libraries and an in-tree complete-code HTTP client in MILES application images, with offline build-time grader checks, external install caches, and runtime Beaker secret references (https://github.com/allenai/open-instruct/pull/2248).
 - Default structured MILES runs' W&B group to the run name when omitted, preventing tracking startup from failing when the native random suffix is enabled; explicit groups remain unchanged (https://github.com/allenai/open-instruct/pull/2243).
 - Guard MILES Math-Verify equation references with a cached false-equation probe; references accepting `1 + 2 = 8` use equation-side comparison while retaining scalar and matrix assignment answers, including after probe timeouts, preserving answer anchors while blocking the unsafe Math-Verify path (https://github.com/allenai/open-instruct/pull/2243).
