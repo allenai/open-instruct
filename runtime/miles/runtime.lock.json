@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Merged pool exposure, explicit discard feedback and terminal serving-startup failure propagation integrated with main masked REINFORCE++ returns; strict scoring tolerance restored after eager-scoring validation. SwiGLU int64 offsets and source-bundle IDs retained. Weighted-pool GPU runs qualified at application 55703fbbf/runtime bbcb01d; current runtime revision CPU-validated.",
+  "status": "Core main plus reviewed PR #951 at c4086c82, with MILES and Olmo-SGLang main revisions captured 2026-11-09. Includes int64 SwiGLU offsets, eager no-gradient scoring, prepared refresh prompts and asynchronous observation I/O. Binary base and upstream SGLang pins unchanged; prefix caching remains disabled by default.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -8,15 +8,15 @@
   "sources": {
     "olmo-core": {
       "repository": "https://github.com/allenai/Olmo-core.git",
-      "revision": "903e57d46cc2c62cb5611e49c4d0e2052eb798d2"
+      "revision": "c4086c82c7dd059b7b2cb6781fe6a129b5c1501b"
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "6b78328406a42d41d5dce260779655f685dc4524"
+      "revision": "0ed633cb31a708512f5ef151bcb36418901d36f2"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
-      "revision": "069dc0a3cf0e28bd9f03d035aa98fc2bd5e8896a"
+      "revision": "9ea8d156f7dd35974d5b5ac274300898c49bc285"
     },
     "sglang": {
       "repository": "https://github.com/sgl-project/sglang.git",
