@@ -1,3 +1,4 @@
+# Small-family starting copy of tiny/dev.toml; larger-model topology qualification is pending.
 # Tiny-model colocation check: one GPU.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
@@ -50,6 +51,8 @@ placement_mode = "colocated"
 gpus = 1
 rollout_batch_size = 4
 samples_per_prompt = 2
+eval_temperature = 1.0
+eval_top_p = 0.95
 max_response_length = 256
 max_context_length = 512
 # Small pools and eight running requests for colocated tiny-model mechanics.

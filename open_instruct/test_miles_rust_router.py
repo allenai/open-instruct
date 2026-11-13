@@ -54,7 +54,7 @@ def test_explicit_routing_policy_is_preserved(key):
 
 
 def test_three_node_template_keeps_admission_and_selects_rust():
-    path = Path(__file__).resolve().parents[1] / "configs/miles/examples/three-node.toml"
+    path = Path(__file__).resolve().parents[1] / "configs/miles/examples/tiny/three-node.toml"
     config = RunSpec.load(path).compile()
     options = config.resolved_miles()
     assert options["async_max_concurrent_samples"] == 3840

@@ -1,10 +1,18 @@
-# Three MILES starting points
+# MILES starting points by model family
+
+These templates provide reviewable starting points for MILES training and policy
+evaluation. Choose a model-family directory, then adapt its paths and topology
+before launching. The `small` family currently contains only a copied dev starter.
 
 | Config | Purpose |
 |---|---|
-| [dev.toml](dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
-| [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
-| [three-node.toml](three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+| [tiny/dev.toml](tiny/dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
+| [tiny/node.toml](tiny/node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
+| [tiny/three-node.toml](tiny/three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+
+`tiny/` holds the existing recipes. `small/dev.toml` currently copies the settings
+of `tiny/dev.toml`, providing a starting file for upcoming model/topology work;
+it does not qualify a larger model on the one-GPU smoke-test layout.
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from
@@ -40,7 +48,7 @@ Copy a starter before editing it:
 
 ```bash
 mkdir -p runs
-cp configs/miles/examples/dev.toml runs/my-run.toml
+cp configs/miles/examples/tiny/dev.toml runs/my-run.toml
 # Replace model/output paths and YOUR_USERNAME; select an appropriate tiny model.
 python -m open_instruct.miles plan runs/my-run.toml
 python -m open_instruct.miles validate runs/my-run.toml
@@ -290,3 +298,19 @@ explicit because evaluation changes independently of training topology.
 `plan` reports copied configurations with no request headroom, forced rescoring,
 weight qualification, periodic scoring audits, or other diagnostic overhead.
 Review those warnings instead of inheriting settings from an old experiment.
+
+## Candidate evaluation sampling
+
+Policy evaluation uses temperature 1.0 and top-p 0.95. Background tasks explicitly
+request 32,768 response tokens, independent of the serving context size; the math
+tasks retain 32 draws. Shared in-loop evaluation defaults to the same sampling
+and caps its inherited response budget at 32K; short smoke tests keep their
+smaller budgets. Explicit run overrides still win. Judge sampling and training
+rollout sampling are independent. This candidate protocol awaits the paired
+control evaluation results.
+
+SciCode explicitly sets temperature 1.0 and 32K responses, but the pinned
+evaluator does not expose top-p for that external task. Full nucleus-sampling
+alignment requires an evaluator update. Keep benchmark-specific protocols such
+as greedy RULER and BFCL explicit when adding them; do not override every task
+in a suite globally.

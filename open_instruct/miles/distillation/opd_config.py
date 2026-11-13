@@ -149,10 +149,10 @@ DEFAULTS = {
         "max_running_requests": 8,
         "temperature": 1.0,
         "top_p": 1.0,
-        "eval_temperature": 0.0,
-        "eval_top_p": 1.0,
+        "eval_temperature": 1.0,
+        "eval_top_p": 0.95,
         "eval_samples_per_prompt": 1,
-        # 0 evaluates with max_response_length; a larger cap needs a matching max_context_length.
+        # 0 inherits max_response_length up to 32K; an explicit larger cap needs matching context.
         "eval_max_response_length": 0,
     },
     "distillation": {

@@ -44,7 +44,7 @@ runs reuse their recorded data unchanged. For named source datasets, the `train`
 component in `prepared_sample_id` identifies the source split, including when the
 row is assigned to this run's held-out partition; it is not a training assignment.
 
-The [single-node example](../../configs/miles/examples/node.toml) takes prepared
+The [single-node example](../../configs/miles/examples/tiny/node.toml) takes prepared
 math, instruction-following and code JSONL with a verifier registry, without
 judge-dependent tasks; its placeholder paths do not identify the complete published Olmo 3 mixture.
 Use manifest adoption when starting from dataset manifests. Unsupported task/verifier contracts fail

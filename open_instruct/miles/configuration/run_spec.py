@@ -855,9 +855,10 @@ class RunSpec:
                 put("miles.eval_prompt_data", eval_data, "data.eval_prompt_data")
                 miles.setdefault("eval_interval", 20)
                 miles.setdefault("skip_eval_before_train", False)
-                miles.setdefault("eval_temperature", 0.0)
+                miles.setdefault("eval_temperature", 1.0)
+                miles.setdefault("eval_top_p", 0.95)
                 miles.setdefault("n_samples_per_eval_prompt", 1)
-                miles.setdefault("eval_max_response_len", response)
+                miles.setdefault("eval_max_response_len", min(response, 32768))
             elif miles.get("eval_interval") is not None:
                 raise InputError(
                     "eval_interval requires prepared held-out data; set data.tasks[].eval_count or data.eval_prompt_data, or remove eval_interval."

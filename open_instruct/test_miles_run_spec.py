@@ -401,8 +401,13 @@ def test_explicit_prepared_input_and_tracking_disable(tmp_path):
 
 def test_all_researcher_examples_compile_to_native_arguments():
     root = Path(__file__).parents[1] / "configs" / "miles"
-    paths = sorted((root / "examples").glob("*.toml"))
-    assert {path.stem for path in paths} == {"dev", "node", "three-node"}
+    paths = sorted((root / "examples").rglob("*.toml"))
+    assert {str(path.relative_to(root / "examples")) for path in paths} == {
+        "tiny/dev.toml",
+        "tiny/node.toml",
+        "tiny/three-node.toml",
+        "small/dev.toml",
+    }
     for path in paths:
         run = RunSpec.load(path)
         config = run.compile()
@@ -528,3 +533,18 @@ def test_wall_clock_stop_is_final_without_checkpoint_saving(tmp_path, save):
     run = spec(tmp_path, core={"max_run_seconds": 60}, training={"save_checkpoints": save})
     assert run.compile().core.max_run_final is not save
     assert any("cannot be resumed" in warning for warning in run.plan()["launch_warnings"]) is not save
+
+
+@pytest.mark.parametrize("response,context", [(256, 512), (32768, 34816), (65536, 67584)])
+def test_shared_eval_sampling_defaults_and_explicit_overrides(tmp_path, response, context):
+    run = spec(tmp_path, inference={"max_response_length": response, "max_context_length": context})
+    defaults = run.compile().miles
+    assert defaults["eval_temperature"] == 1.0
+    assert defaults["eval_top_p"] == 0.95
+    assert defaults["eval_max_response_len"] == min(defaults["rollout_max_response_len"], 32768)
+    document = run.to_dict()
+    document.setdefault("miles", {}).update(eval_temperature=0.0, eval_top_p=1.0, eval_max_response_len=128)
+    overridden = RunSpec.from_dict(document).compile().miles
+    assert overridden["eval_temperature"] == 0.0
+    assert overridden["eval_top_p"] == 1.0
+    assert overridden["eval_max_response_len"] == 128

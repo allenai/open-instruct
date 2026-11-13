@@ -23,27 +23,38 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def three_node():
-    return RunSpec.load(ROOT / "configs/miles/examples/three-node.toml")
+    return RunSpec.load(ROOT / "configs/miles/examples/tiny/three-node.toml")
 
 
 def test_node_uses_periodic_native_background_evaluation():
-    node = RunSpec.load(ROOT / "configs/miles/examples/node.toml")
+    node = RunSpec.load(ROOT / "configs/miles/examples/tiny/node.toml")
     assert node.evaluation["mode"] == "background"
     assert [p["update"] for p in node.plan()["evaluation"]["milestones"]] == [0, 50, 100, 150, 200]
     assert {t["task"] for t in node.evaluation["tasks"]} == {"gsm8k", "gsm8k:platinum", "ifeval_ood"}
     assert "eval_prompt_data" not in node.compile().miles
     assert "eval_interval" not in node.compile().miles
     assert node.launch["secrets"]["BEAKER_TOKEN"]
+    for task in node.evaluation["tasks"]:
+        assert task["generation"]["temperature"] == 1.0
+        assert task["generation"]["top_p"] == 0.95
+        assert task["generation"]["max_tokens"] == 32768
 
 
 def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_node):
     tasks = three_node.evaluation["tasks"]
     assert len(tasks) == len({task["task"] for task in tasks}) == 25
     assert all(not task["scoring"] for task in tasks)
-    assert {t["task"]: t["generation"] for t in tasks if t["generation"]} == {
-        "omega_500:hillclimb": {"max_tokens": "null"},
-        "omega_500_out": {"max_tokens": "null"},
-    }
+    for task in tasks:
+        if task.get("kind") == "external":
+            assert task["arguments"]["temperature"] == 1.0
+            assert task["arguments"]["max_tokens"] == 32768
+        else:
+            assert task["generation"] == {
+                "temperature": 1.0,
+                "top_p": 0.95,
+                "max_tokens": 32768,
+                "num_samples": 32 if ":pass_at_32" in task["task"] else 1,
+            }
     milestones = three_node.plan()["evaluation"]["milestones"]
     assert [point["update"] for point in milestones] == [0, 200]
     assert all(sum(map(len, point["groups"])) == 25 for point in milestones)
@@ -130,7 +141,7 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
 
 def test_panel_groups_keep_execution_requirements_separate(three_node):
     groups = evaluation.groups(three_node.evaluation, 0, 200)
-    assert sorted(map(len, groups)) == [1, 1, 1, 2, 5, 15]
+    assert sorted(map(len, groups)) == [1, 1, 1, 5, 7, 10]
     for group in groups:
         for task in group:
             assert task.get("harness", {}) == group[0].get("harness", {})
