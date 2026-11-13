@@ -14,6 +14,8 @@
 #   sct    ledger H196 (s-c): b1r on B2 tmax (step22320), two passes over the union (--num_epochs 2), seed 34521;
 #   scn    the same on B2 noag (step21159). S_R=<steps> from H196 R4'; permanent checkpoint at the end of epoch 1.
 #   scb    the same on B1 (step20000, b1r's base and HF reference): S-C on B1, the owner's 2026-11-06 order.
+#   nh     scn at half an epoch (b1r's form: --num_epochs 1, S_R=<steps> from H182 R4'), its own output dir: the noag
+#          65K control for H194's c12r-long-noag.
 #   c14f   ledger H202 (c14f-b1): b1r with the fixed C14 add-on cache as a second extra dir, before the replay
 #          (C14F_ADDONS, the cache c14f_tok.sh wrote, then H202's 10% replay dir); S_R=<steps> from H202 R4'.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
@@ -84,7 +86,7 @@ case "$ARM" in
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs ${C14F_ADDONS:-$C/cache/numpy_sft/7ea1dfa878-6068a350-rowaligned} $C/replay"
          OUT_ROOT=$C; DESC="ledger H202 c14f-b1"
          STEPS="${S_R:?S_R=<steps from H202 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=18 ;;
-    sct|scn|scb) B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
+    sct|scn|scb|nh) B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
          if [[ "$ARM" == scb ]]; then
              MODEL=$B/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
              HF_REF=$B/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed
@@ -110,6 +112,10 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == scn ]] && RUN_NAME="s-c-noag-s${SEED}"
 [[ "$ARM" == scb ]] && RUN_NAME="s-c-b1-s${SEED}"
 [[ "$ARM" == c14f ]] && RUN_NAME="c14f-s${SEED}"
+if [[ "$ARM" == nh ]]; then
+    EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14; OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/noag-half-gpu
+    DESC="ledger noag 65K control (H182's recipe on noag, half an epoch)"; RUN_NAME="noag-c12r-half-s${SEED}"
+fi
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
