@@ -25,6 +25,25 @@ MARKER = "workflow-model.json"
 _FEEDBACK_SOURCES = weakref.WeakValueDictionary()
 
 
+def grading_policy(args):
+    """Shared record/selection identity; unversioned legacy inputs keep their keys."""
+    core = args.olmo_core
+    if not getattr(core, "reward_final_answer_only", False):
+        return None
+    return {
+        "schema_version": grading.SCHEMA_VERSION,
+        "reward_final_answer_only": True,
+        "reward_reasoning_mode": getattr(core, "reward_reasoning_mode", "required"),
+        "reward_zero_truncated": core.reward_zero_truncated,
+    }
+
+
+def grading_input_key(input_key, policy):
+    if policy is None:
+        return input_key
+    return inference_records.sha256({"input_key": input_key, "grading_policy": policy})
+
+
 def bind_feedback(core, source):
     if id(core) in _FEEDBACK_SOURCES:
         raise ValueError("A prompt feedback source is already bound to this configuration")
@@ -40,17 +59,7 @@ class GradingRecorder(inference_records.Recorder):
     """Keep the reviewed grading policy in saved records and evidence identity."""
 
     def __init__(self, args, **kwargs):
-        core = args.olmo_core
-        self._grading_policy = (
-            {
-                "schema_version": grading.SCHEMA_VERSION,
-                "reward_final_answer_only": True,
-                "reward_reasoning_mode": getattr(core, "reward_reasoning_mode", "required"),
-                "reward_zero_truncated": core.reward_zero_truncated,
-            }
-            if getattr(core, "reward_final_answer_only", False)
-            else None
-        )
+        self._grading_policy = grading_policy(args)
         self._grading_inputs = []
         super().__init__(args, **kwargs)
 
@@ -69,9 +78,7 @@ class GradingRecorder(inference_records.Recorder):
             # The pinned base protocol hashes the registry but not global grading
             # flags. Keep new-contract evidence separate without changing the
             # legacy recorder's manifest or default-off pooling identity.
-            row["input_key"] = inference_records.sha256(
-                {"input_key": row["input_key"], "grading_policy": self._grading_policy}
-            )
+            row["input_key"] = grading_input_key(row["input_key"], self._grading_policy)
             for response, selection in zip(row["responses"], self._grading_inputs, strict=True):
                 if selection is not None:
                     response["grading"] = copy.deepcopy(selection)

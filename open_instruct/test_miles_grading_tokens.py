@@ -15,13 +15,15 @@ from open_instruct.miles.rewards import rewards
 @pytest.mark.parametrize("factory", ["MaxLenVerifier", "UpToMaxLenVerifier"])
 def test_token_based_verifiers_keep_full_tokens_and_reject_selected_scope(tmp_path, factory):
     path = tmp_path / "length.json"
-    spec = {"factory": "open_instruct.ground_truth_utils." + factory}
+    spec = {"factory": "open_instruct.ground_truth_utils." + factory, "config": {"max_length_verifier_max_length": 4}}
     path.write_text(json.dumps({"test": spec}))
     registry = rewards._registry(str(path))
     assert registry.grading_policies["test"].scope == "full"
-    sample = shared.item("work</think>answer", target="3")
+    sample = shared.item("work</think>answer", target="2")
     args = SimpleNamespace(olmo_core=CoreConfig(reward_config=str(path), reward_final_answer_only=True))
-    assert asyncio.run(rewards.registered_reward(args, sample)) == 1
+    # Three actual response tokens give 0.75. Empty tokens instead give 0.5
+    # (MaxLen) or 1.0 (UpToMaxLen), so both cases detect lost token inputs.
+    assert asyncio.run(rewards.registered_reward(args, sample)) == 0.75
     spec["grading"] = {"objective": "answer", "scope": "response"}
     invalid = tmp_path / "bad-length.json"
     invalid.write_text(json.dumps({"test": spec}))

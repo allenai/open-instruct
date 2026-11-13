@@ -234,6 +234,7 @@ class _IsolatedVerifier:
         self.grading_uses_tokens = getattr(factory, "grading_uses_tokens", False)
         self.grading_scopes = getattr(factory, "grading_scopes", grading.SCOPES)
         self.grading_requires_reasoning = getattr(factory, "grading_requires_reasoning", False)
+        self.grading_requires_reasoning_scopes = getattr(factory, "grading_requires_reasoning_scopes", ())
 
     async def async_call(self, *args, **kwargs):
         start = time.monotonic()
@@ -359,6 +360,34 @@ class _VerifierRegistry(dict):
         self.undeclared_grading = set()
 
 
+def _validate_grading_context(core, registry, names):
+    if not core.reward_final_answer_only:
+        return
+    undeclared = getattr(registry, "undeclared_grading", set()) & set(names)
+    if undeclared:
+        raise ValueError(
+            f"External verifiers {sorted(undeclared)} must declare registry grading policy "
+            "or implement async_call_parts before final-answer grading"
+        )
+    if getattr(core, "reward_reasoning_mode", "required") == "none":
+        for name in names:
+            verifier = registry[name]
+            policy = getattr(registry, "grading_policies", {}).get(name) or grading.verifier_policy(verifier)
+            if (
+                policy.scope == "thinking"
+                or getattr(verifier, "grading_requires_reasoning", False)
+                or policy.scope in getattr(verifier, "grading_requires_reasoning_scopes", ())
+            ):
+                raise ValueError(f"Verifier {name!r} requires reward_reasoning_mode=required for scope={policy.scope}")
+
+
+def validate_registry(args):
+    """Resolve trusted factories and reject incompatible contracts before workers start."""
+    registry = _registry(args.olmo_core.reward_config)
+    _validate_grading_context(args.olmo_core, registry, registry)
+    return registry
+
+
 @functools.lru_cache(maxsize=8)
 def _masks_ungraded_path(path):
     module, _, symbol = path.rpartition(".")
@@ -435,13 +464,7 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
         if spec["name"] not in registry:
             raise ValueError(f"Verifier {spec['name']!r} is absent from the trusted reward registry")
         weighted_specs.append((spec, _finite(spec.get("weight", 1.0), "weight")))
-    if args.olmo_core.reward_final_answer_only:
-        undeclared = getattr(registry, "undeclared_grading", set()) & {spec["name"] for spec, _ in weighted_specs}
-        if undeclared:
-            raise ValueError(
-                f"External verifiers {sorted(undeclared)} must declare registry grading policy "
-                "or implement async_call_parts before final-answer grading"
-            )
+    _validate_grading_context(args.olmo_core, registry, [spec["name"] for spec, _ in weighted_specs])
     status = getattr(sample.status, "value", sample.status) if hasattr(sample, "status") else None
     reason = None
     # Preserve the original rollout text and token trajectory for training/records.
@@ -474,10 +497,6 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
         if parts is not None:
             policy = getattr(registry, "grading_policies", {}).get(name) or grading.verifier_policy(verifier)
             subpolicies = grading.component_policies(verifier, policy)
-            if parts.reasoning_mode == "none" and (
-                policy.scope == "thinking" or getattr(verifier, "grading_requires_reasoning", False)
-            ):
-                raise ValueError(f"Verifier {name!r} requires reward_reasoning_mode=required")
             reason = policy.gate(parts, zero_truncated=args.olmo_core.reward_zero_truncated)
             response = parts.text(policy.scope)
             metadata["grading"]["components"][name] = {**policy.summary(), "gate": reason}

@@ -68,3 +68,16 @@ def test_toolrl_call_credit_and_gate_floor_through_dispatch(monkeypatch, unit_sc
 def test_toolrl_nonthinking_mode_is_an_explicit_incompatibility(monkeypatch):
     with pytest.raises(ValueError, match="requires reward_reasoning_mode=required"):
         shared.score(monkeypatch, shared.item("answer", prompt="question"), toolrl.ToolRLVerifier(), reasoning="none")
+
+
+@pytest.mark.parametrize("prompt_prefilled", [False, True])
+def test_actual_prompt_overrides_both_label_and_registry_prefix_flags(monkeypatch, prompt_prefilled):
+    raw = "work</think>delivered" if prompt_prefilled else "<think>work</think>delivered"
+    sample = shared.item(
+        raw,
+        target={"format": "olmo-toolrl-v1", "tools": [], "calls": [], "think_prefix_in_prompt": not prompt_prefilled},
+        prompt="question<think>" if prompt_prefilled else "question",
+    )
+    verifier = toolrl.ToolRLVerifier(toolrl.ToolRLConfig(think_prefix_in_prompt=not prompt_prefilled))
+    assert shared.score(monkeypatch, sample, verifier) == 1
+    assert sample.metadata["verifier_diagnostics"]["test"]["format_score"] == 1

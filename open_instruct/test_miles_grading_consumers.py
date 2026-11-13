@@ -153,3 +153,42 @@ def test_toolrl_records_separate_format_and_correctness_views(monkeypatch):
     assert contract["inputs"]["correctness"]["scope"] == "response"
     assert contract["inputs"]["format"]["objective"] == "format"
     assert contract["inputs"]["format"]["scope"] == "full"
+
+
+@pytest.mark.parametrize(
+    "factory,declaration", [("task_verifiers.R1FormatVerifier", {"scope": "full"}), ("toolrl.ToolRLVerifier", {})]
+)
+def test_registry_preflight_rejects_reasoning_objectives_before_any_sample(tmp_path, factory, declaration):
+    path = tmp_path / "registry.json"
+    path.write_text(
+        json.dumps({"test": {"factory": "open_instruct.miles.rewards." + factory, "grading": declaration}})
+    )
+    args = SimpleNamespace(
+        olmo_core=shared.CoreConfig(
+            reward_config=str(path), reward_final_answer_only=True, reward_reasoning_mode="none"
+        )
+    )
+    with pytest.raises(ValueError, match="requires reward_reasoning_mode=required"):
+        rewards.validate_registry(args)
+    # Historical dispatch ignores the new reasoning convention.
+    args.olmo_core = shared.CoreConfig(reward_config=str(path), reward_reasoning_mode="none")
+    assert "test" in rewards.validate_registry(args)
+
+
+def test_registry_preflight_rejects_undeclared_external_contract(tmp_path, monkeypatch):
+    monkeypatch.setattr(rewards, "_resolve_verifier", lambda *a, **kw: SimpleNamespace())
+    path = tmp_path / "registry.json"
+    path.write_text(json.dumps({"test": {"factory": "external.Factory"}}))
+    args = SimpleNamespace(olmo_core=shared.CoreConfig(reward_config=str(path), reward_final_answer_only=True))
+    with pytest.raises(ValueError, match="must declare registry grading policy"):
+        rewards.validate_registry(args)
+
+
+def test_r1_response_format_remains_usable_without_thinking(monkeypatch):
+    sample = shared.item("<answer>42</answer>", prompt="question")
+    verifier = task_verifiers.R1FormatVerifier()
+    assert shared.score(monkeypatch, sample, verifier, reasoning="none") == 1
+    with pytest.raises(ValueError, match="requires reward_reasoning_mode=required"):
+        shared.score(
+            monkeypatch, sample, verifier, reasoning="none", policy=grading.GradingPolicy("full", objective="format")
+        )

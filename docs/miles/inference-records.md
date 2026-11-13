@@ -224,6 +224,7 @@ afterwards.
 |---|---|---|
 | `--skip` | required | `all_zero`, `all_full` (reward equals `--full-reward`, default 1.0), or `zero_variance` (any constant value); repeatable |
 | `--lineage`, `--protocol` | the only one present | Required when the store holds several |
+| `--grading-policy` | the only one present | Grading-policy digest or `legacy`; required when a lineage/protocol holds multiple grading contracts |
 | `--scope` | `start_checkpoint` | Adding `run_version` or `mixed` marks the table `approximate_policy`: later versions belong to one run's trajectory |
 | `--min-observations` | 16 | Valid responses required |
 | `--min-units` | 2 | Independent attempts required. With deterministic inference, attempts sharing a rollout seed count once |
@@ -253,16 +254,24 @@ This global selection table cannot be combined with the mixture or ReMind
 providers. Mixtures would need exclusions within each source's eligible pool to
 preserve allocation; per-source exclusion files are not implemented yet.
 
-At startup the data source checks three things and fails the run on any mismatch:
+At startup the data source checks four things and fails the run on any mismatch:
 
 - the file's SHA-256 against the pinned digest;
 - the table's lineage against this run's starting checkpoint;
 - the table's protocol digest against this run's protocol, computed with the
-  recorder's own code.
+  recorder's own code;
+- the table's grading contract against this run's final-answer flag, reasoning
+  convention, truncation policy and selector version.
 
 These checks reject changes to the recorded sampling settings, template files
-and reward-config file. They do not cover verifier implementation changes,
-`reward_final_answer_only`, or the judge registry/model. Loading a table warns
+and reward-config file. New tables use schema 2 and carry a grading contract;
+versioned final-mode records cannot be mixed with legacy evidence or another
+grading convention. Schema-1 tables without a contract remain usable in legacy
+mode only. Rebuild old final-mode tables from matching versioned records. If the
+records themselves lack a grading contract, collect fresh matching evidence;
+their historical grading flags cannot be reconstructed. These checks do not
+cover verifier implementation changes or the judge registry/model; historical
+unversioned records also cannot certify grading flags. Loading a table warns
 about these limits. Reuse is intentional: confirm that the evidence still reflects
 the reward semantics you want, or collect fresh records and build a new table.
 
