@@ -6,7 +6,7 @@ See the [scheduling contract](launching.md#distributed-scheduling-contract)
 before submitting a multi-node run. Short execution checks do not establish
 mixture learning quality.
 
-Start from [three-node.toml](../../configs/miles/examples/three-node.toml), copying it to
+Start from [three-node.toml](../../configs/miles/examples/tiny/three-node.toml), copying it to
 `runs/` before changing policy, dataset, verifier and judge inputs. Run `plan` and
 `validate` on that personal file, inspect the rendered replica group, then submit
 through the [committed-image launcher](launching.md). The example paths are

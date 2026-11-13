@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize("tier", ["dev", "node", "three-node"])
 def test_cli_without_runtime_dependencies(command, tier):
     result = subprocess.run(
-        [sys.executable, "-S", "-m", "open_instruct.miles", command, f"configs/miles/examples/{tier}.toml"],
+        [sys.executable, "-S", "-m", "open_instruct.miles", command, f"configs/miles/examples/tiny/{tier}.toml"],
         cwd=ROOT,
         capture_output=True,
         text=True,

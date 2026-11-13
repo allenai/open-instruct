@@ -9,7 +9,7 @@ from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import cluster
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "configs/miles/examples/three-node.toml"
+EXAMPLE = Path(__file__).resolve().parents[1] / "configs/miles/examples/tiny/three-node.toml"
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "1.5", "", "true", " 64", "nan"])

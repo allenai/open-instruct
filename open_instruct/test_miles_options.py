@@ -171,7 +171,7 @@ def test_option_strings_are_preserved():
 
 def test_all_starting_profiles_compile():
     root = Path(__file__).parents[1]
-    paths = sorted((root / "configs/miles/examples").glob("*.toml"))
+    paths = sorted((root / "configs/miles/examples").rglob("*.toml"))
     assert {p.stem for p in paths} == {"dev", "node", "three-node"}
     assert set((root / "configs/miles").rglob("*.toml")) == set(paths)
     for path in paths:

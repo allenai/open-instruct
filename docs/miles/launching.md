@@ -35,7 +35,7 @@ replace checkpoint/output paths, usernames and image placeholders.
 
 ```bash
 mkdir -p runs
-cp configs/miles/examples/dev.toml runs/my-grpo.toml
+cp configs/miles/examples/tiny/dev.toml runs/my-grpo.toml
 # Edit name/output.root to use your username and a fresh run path.
 # Select a tiny checkpoint that fits on one trainer GPU; this starter uses two GPUs.
 python -m open_instruct.miles plan runs/my-grpo.toml

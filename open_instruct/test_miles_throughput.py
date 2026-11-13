@@ -65,7 +65,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
     [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("three-node", 24, 3, 8, 15, 1)],
 )
 def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rollout_gpus, judge_gpus):
-    spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
+    spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/tiny/{profile}.toml")
     assert spec.data.get("prompt_data") or spec.data["tasks"][0]["task"] == "gsm8k-less-noise"
     layout = spec.plan()["allocation"]
     assert layout["allocated_gpus"] == gpus
@@ -80,7 +80,7 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
 
 @pytest.mark.parametrize("profile,producer_budget", [("node", 1024), ("three-node", 3840)])
 def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
-    spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
+    spec = RunSpec.load(f"configs/miles/examples/tiny/{profile}.toml")
     pending = spec.compile()
     assert pending.inference_profile["model_metadata_available"] is False
     assert pending.miles["pause_generation_mode"] == "in_place"
@@ -111,15 +111,15 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
 
 
 def test_dev_retains_weight_qualification():
-    config = RunSpec.load("configs/miles/examples/dev.toml").compile()
+    config = RunSpec.load("configs/miles/examples/tiny/dev.toml").compile()
     assert config.miles["check_weight_update_equal"] is True
 
 
 def test_learning_template_still_requires_scores_for_multiple_optimizer_steps():
     with pytest.raises(ValueError, match="refresh currently requires one optimizer step"):
-        RunSpec.load("configs/miles/examples/node.toml", ["inference.global_batch_size=128"])
+        RunSpec.load("configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=128"])
     config = RunSpec.load(
-        "configs/miles/examples/node.toml", ["inference.global_batch_size=128", 'core.publication_mode="barrier"']
+        "configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=128", 'core.publication_mode="barrier"']
     ).compile()
     decision = config.plan()["scoring_pass"]
     assert decision["standalone"] is True

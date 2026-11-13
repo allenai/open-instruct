@@ -12,11 +12,11 @@ and [development defaults](development-defaults.md) for starting settings.
 1. Check [model and topology support](models-and-checkpoints.md), check out the
    intended Open Instruct revision, then follow the
    [laptop/session setup](launching.md). Sibling development worktrees are unnecessary.
-2. Copy [dev.toml](../../configs/miles/examples/dev.toml) to ignored
+2. Copy [dev.toml](../../configs/miles/examples/tiny/dev.toml) to ignored
    `runs/my-grpo.toml`. Set a run name, fresh output path and compatible tiny
    checkpoint for a single-GPU colocated mechanics check. Keep barrier publication
    and offline W&B for this first exercise unless requested otherwise.
-   Use [node.toml](../../configs/miles/examples/node.toml)
+   Use [node.toml](../../configs/miles/examples/tiny/node.toml)
    for single-node math, instruction-following and code training, after preparing
    its policy, data and code-verifier service. It allocates no judge GPU.
 3. Check Beaker resource access and supply credentials for the selected inputs

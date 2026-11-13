@@ -66,19 +66,19 @@ provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
 
 [[evaluation.tasks]]
 task = "gsm8k"
-# Independent 8K evaluation budget; training still uses 32K responses.
+# Fixed 32K evaluation responses, independent of the served context capacity.
 # Clear GSM8K's default blank-line stop so it does not truncate reasoning there.
-generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
 task = "gsm8k:platinum"
-generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
 task = "ifeval_ood" # IFBench; distinct from IFEval.
-generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128 }
 
 [trainer]
