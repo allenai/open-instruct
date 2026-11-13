@@ -334,7 +334,7 @@ def test_priority_provider_uses_labels_and_restores_pending_groups_before_fresh_
     assert payload(following) == fresh
 
 
-def test_priority_finite_delivery_takes_short_tail_then_stops(args, monkeypatch):
+def test_priority_epoch_cursor_and_pending_groups_resume(args, monkeypatch):
     rows = [json.loads(line) for line in Path(args.prompt_data).read_text().splitlines()]
     for i, row in enumerate(rows):
         row["metadata"]["priority_fixture"] = 1 + i % 4
@@ -346,16 +346,17 @@ def test_priority_finite_delivery_takes_short_tail_then_stops(args, monkeypatch)
 
     monkeypatch.setattr(miles_data_source.Dataset, "shuffle", redundant_global_shuffle)
     source = DashboardDrainingRolloutDataSource(args)
-    groups = source.get_samples(8)
-    groups += source.get_samples(8)
-    assert len(groups) == 11
-    assert [g[0].metadata["priority_fixture"] for g in groups] == [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4]
-    assert len({g[0].prompt for g in groups}) == 11
-    assert source.pool_exhausted()
-    with pytest.raises(StopIteration):
-        source.get_samples(1)
-    assert source.get_samples(0) == []
-    # Outstanding retry identities remain deliverable after fresh rows are exhausted.
-    source.add_samples([groups[-1]])
-    assert not source.pool_exhausted()
-    assert source.get_samples(3)[0][0].group_index == groups[-1][0].group_index
+    groups = source.get_samples(8) + source.get_samples(8)
+    assert len(groups) == 16
+    assert [g[0].metadata["priority_fixture"] for g in groups] == [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 1, 1, 1, 2, 2]
+    assert len({g[0].prompt for g in groups[:11]}) == 11
+    assert source.epoch_id == 1 and source.sample_offset == 5
+    source.acknowledge_groups(groups[:-1])
+    source.save(0)
+    expected = source.get_samples(7)
+    args.load, args.start_rollout_id = args.save, 1
+    restored = DashboardDrainingRolloutDataSource(args)
+    restored.load(0)
+    resumed = restored.get_samples(8)
+    assert payload(resumed[:1]) == payload(groups[-1:])
+    assert payload(resumed[1:]) == payload(expected)

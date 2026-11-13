@@ -22,10 +22,9 @@ def _metadata_value(metadata, path):
 
 
 class PriorityPromptProvider:
-    """Visit each row once: all of group 1, then 2, then 3, then 4.
+    """Visit groups 1, 2, 3, 4 in order within each epoch.
 
-    A seeded permutation within each group fixes the complete traversal before
-    training begins. No reward feedback or group probabilities affect selection.
+    A seeded permutation within each group fixes each epoch's traversal. No reward feedback or group probabilities affect selection.
     """
 
     requires_feedback = False
@@ -72,20 +71,13 @@ class PriorityPromptProvider:
                 digest.update(len(encoded).to_bytes(8, "little"))
                 digest.update(encoded)
         self.counts = [sum(map(len, members.values())) for members in rows]
-        self.order = array("Q")
+        self.seed, self.shuffle = seed, shuffle
+        self.source_field, self.source_weights = source_field, source_weights
+        self.epoch_id = 0
+        self.order = self._make_order(0, rows=rows)
         self.source_counts = [{name: len(indices) for name, indices in members.items()} for members in rows]
-        for group, members in enumerate(rows, 1):
-            for source, indices in members.items():
-                if shuffle:
-                    random.Random(
-                        f"{seed}:priority:{group}:{source}" if source_field else f"{seed}:priority:{group}"
-                    ).shuffle(indices)
-            if source_weights is None:
-                self.order.extend(members.get("", ()))
-            else:
-                self._merge_sources(members, source_weights, seed=f"{seed}:priority-sources:{group}")
         self.identity = {
-            "kind": "priority/v2",
+            "kind": "priority/v3",
             "field": field,
             "source_field": source_field,
             "source_weights": dict(source_weights) if source_weights is not None else None,
@@ -110,7 +102,32 @@ class PriorityPromptProvider:
             shuffle,
         )
 
-    def _merge_sources(self, members, weights, *, seed):
+    @property
+    def sample_offset(self):
+        return self.offset
+
+    def _make_order(self, epoch, *, rows=None):
+        if rows is None:
+            rows = [{} for _ in range(4)]
+            for index, sample in enumerate(self.samples):
+                group = sample.metadata[self.identity["field"]]
+                source = _metadata_value(sample.metadata, self.source_field) if self.source_field else ""
+                rows[group - 1].setdefault(source, array("Q")).append(index)
+        seed = self.seed if epoch == 0 else f"{self.seed}:epoch:{epoch}"
+        order = array("Q")
+        for group, members in enumerate(rows, 1):
+            for source, indices in members.items():
+                if self.shuffle:
+                    random.Random(
+                        f"{seed}:priority:{group}:{source}" if self.source_field else f"{seed}:priority:{group}"
+                    ).shuffle(indices)
+            if self.source_weights is None:
+                order.extend(members.get("", ()))
+            else:
+                self._merge_sources(order, members, self.source_weights, seed=f"{seed}:priority-sources:{group}")
+        return order
+
+    def _merge_sources(self, order, members, weights, *, seed):
         # Build the weighted merge once, so training-time selection remains a
         # slice and checkpoints need only one offset. Each source keeps its own
         # permutation; only exhausted sources change the active probabilities.
@@ -122,35 +139,42 @@ class PriorityPromptProvider:
             index = bisect.bisect_right(cumulative, rng.random() * cumulative[-1]) if len(names) > 1 else 0
             name = names[index]
             offset = offsets[name]
-            self.order.append(members[name][offset])
+            order.append(members[name][offset])
             offsets[name] = offset + 1
             if offsets[name] == len(members[name]):
                 names.pop(index)
                 cumulative = list(itertools.accumulate(weights[name] for name in names))
 
-    def available(self):
-        return self.offset < len(self.order)
-
     def next_samples(self, n):
         if type(n) is not int or n < 0:
             raise ValueError("n must be a nonnegative integer")
-        if n > len(self.order) - self.offset:
-            raise StopIteration("Historical priority inventory exhausted")
-        result = [self.samples[index] for index in self.order[self.offset : self.offset + n]]
-        self.offset += n
+        result = []
+        while n:
+            if self.offset == len(self.order):
+                epoch = self.epoch_id + 1
+                order = self._make_order(epoch)
+                self.order, self.epoch_id, self.offset = order, epoch, 0
+            take = min(n, len(self.order) - self.offset)
+            result.extend(self.samples[index] for index in self.order[self.offset : self.offset + take])
+            self.offset += take
+            n -= take
         return result
 
     def feedback(self, records):
         """Historical priority remains fixed throughout the run."""
 
     def state_dict(self):
-        return {**self.identity, "offset": self.offset}
+        return {**self.identity, "epoch_id": self.epoch_id, "offset": self.offset}
 
     def load_state_dict(self, state):
         for key, expected in self.identity.items():
             if state.get(key) != expected:
                 raise ValueError(f"Priority checkpoint configuration mismatch for {key}")
+        epoch = state.get("epoch_id")
+        if type(epoch) is not int or epoch < 0:
+            raise ValueError("Invalid priority checkpoint epoch")
         offset = state.get("offset")
         if type(offset) is not int or not 0 <= offset <= len(self.order):
             raise ValueError("Invalid priority checkpoint cursor")
-        self.offset = offset
+        order = self._make_order(epoch) if epoch != self.epoch_id else self.order
+        self.order, self.epoch_id, self.offset = order, epoch, offset

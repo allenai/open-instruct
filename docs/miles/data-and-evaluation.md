@@ -231,7 +231,8 @@ turning off adaptation.
 
 Tagliere v6 annotates each row with a model-specific historical reward priority.
 The opt-in priority provider visits every row in group 1 before group 2, then 3,
-then 4. It makes one pass and stops when no complete training batch remains.
+then 4 in each dataset traversal. Run duration uses the ordinary MILES epoch or
+rollout budget; priority does not impose a one-pass stop.
 This allows a short training run to focus first on prompts with mixed historical
 rewards, while keeping one dataset artifact for different run budgets.
 
@@ -249,7 +250,8 @@ prompt_priority_field = "reward_priority_olmo35_sft_hero"
 | 4 | Other constant rewards, including all-zero groups without frequent truncation. |
 
 All fresh draws come from the active group until it is exhausted. Groups have no
-sampling weights and never repeat. `data.seed` fixes an independent shuffle within
+sampling weights. Each row appears once per sampler epoch; the next epoch starts
+at group 1 with a new deterministic within-group shuffle. `data.seed` fixes an independent shuffle within
 each group, making the selection order deterministic across batch sizes and
 resume. `data.shuffle = false` keeps original row order within each group.
 A request may cross a group boundary; empty groups are skipped. Priorities control
@@ -274,8 +276,8 @@ Workbench source ID at `workbench.source.candidate_id`; flat fields such as
 has rows in the active group; they are independent of its remaining row count.
 An exhausted or absent source is skipped and the remaining weights are
 renormalized. The whole priority group must finish before moving to the next.
-Rows still appear once only: weights affect their order and early-budget exposure,
-not their total count after a complete pass. Without source weights, each priority
+Rows appear once per sampler epoch: weights affect their order and early-budget
+exposure, not their total count after a complete pass. Without source weights, each priority
 group is one ordinary shuffled row list. With weights, `data.shuffle = false`
 preserves row order within each source, while the seed still fixes source draws.
 All observed source labels need positive finite weights; missing labels or weights
@@ -286,18 +288,34 @@ Missing, noninteger, or out-of-range labels fail startup. Logs record the metada
 field, group counts, seed, and shuffle mode. The selected field must match the
 exported history: choosing a different model's history is a run decision.
 Historical groups stay fixed as training progresses and do not change grades or
-the online zero-variance filter. Filtered rows are not drawn again; if too few
-usable rows remain for a full training batch, the final incomplete batch is
-reported and discarded. The run ends cleanly and saves its last completed update.
-A configured rollout budget can end the run earlier.
+the online zero-variance filter. A filtered row is not revisited until the next
+sampler epoch.
+
+Set the ordinary native MILES budget in the run file, for either priority or
+shuffle:
+
+```toml
+[training]
+num_epoch = 2
+```
+
+Alternatively, set `training.num_rollouts` for a fixed collection budget. Choose
+one; structured runs reject both rather than silently ignoring `num_epoch`.
+With neither set, the existing default of 100 rollouts remains. MILES resolves
+`num_epoch` after loading the prepared data as
+`num_rollout = num_epoch * (dataset_size // rollout_batch_size)`.
+Batch rounding, online filtering/refill, and async prefetch mean this native
+training-budget estimate need not equal exact fresh-prompt traversals. A rollout
+can contain several optimizer steps if its collection exceeds the global batch.
+Epoch-budget runs save the final completed update by default; an explicit
+`training.save_interval` still enables periodic checkpoints.
 
 Use this with one `data.rl_manifest` or prepared `data.prompt_data` input. Named
 source mixtures/pools, frozen exclusion tables, and replay cannot be combined
 with this provider. Ordinary shuffle remains the default. Checkpoints save the
-priority cursor alongside pending prompts, and reject changes to the field,
-seed, shuffle mode, or group assignments on resume. Old weighted-priority
-checkpoints are incompatible. Priority mode requires the companion finite-drain
-MILES runtime pinned by this change.
+sampler epoch and cursor alongside pending prompts, and reject changes to the
+field, source weights, seed, shuffle mode, or group/source assignments on resume.
+The existing MILES runtime pin is unchanged.
 
 ### ReMind review provider
 

@@ -42,11 +42,9 @@ def test_exhaust_groups_in_order_without_replacement_across_batch_boundaries():
     samples = p.next_samples(9) + p.next_samples(124) + p.next_samples(25)
     assert [s.metadata[FIELD] for s in samples] == [1] * 11 + [2] * 120 + [3] * 7 + [4] * 20
     assert len({s.prompt for s in samples}) == 158
-    assert not p.available()
-    state = p.state_dict()
-    with pytest.raises(StopIteration):
-        p.next_samples(1)
-    assert p.state_dict() == state
+    assert p.epoch_id == 0 and p.offset == 158
+    assert p.next_samples(1)[0].metadata[FIELD] == 1
+    assert p.epoch_id == 1 and p.offset == 1
 
 
 @pytest.mark.parametrize("shuffle", [False, True])
@@ -117,10 +115,11 @@ def test_changed_group_membership_and_bad_cursors_are_rejected_atomically():
         with pytest.raises(ValueError):
             p.next_samples(n)
     prompts(p, 150)
-    before = p.state_dict()
-    with pytest.raises(StopIteration):
-        p.next_samples(9)
-    assert p.state_dict() == before
+    assert len(p.next_samples(9)) == 9
+    assert p.epoch_id == 1 and p.offset == 1
+    for epoch in (-1, True):
+        with pytest.raises(ValueError, match="epoch"):
+            p.load_state_dict(p.state_dict() | {"epoch_id": epoch})
 
 
 def test_run_config_compiles_priority_and_preserves_default(tmp_path):
@@ -175,7 +174,7 @@ def test_source_weights_apply_only_within_the_active_group_and_never_repeat():
     all_rows = first + rest
     assert len({s.prompt for s in all_rows}) == 8000
     assert [s.metadata[FIELD] for s in all_rows] == sum(([g] * 2000 for g in range(1, 5)), [])
-    assert not p.available()
+    assert p.epoch_id == 0 and p.offset == 8000
 
 
 def test_source_depletion_renormalizes_and_missing_groups_are_skipped():
@@ -250,3 +249,21 @@ def test_workbench_canonical_source_path_selects_sources_inside_one_artifact():
     first = p.next_samples(400)
     assert all(s.metadata[FIELD] == 1 for s in first)
     assert abs(sum(s.metadata["workbench"]["source"]["candidate_id"] == "a" for s in first) / 400 - 0.75) < 0.06
+
+
+@pytest.mark.parametrize("use_weights", [False, True])
+def test_multiple_epochs_change_shuffle_reproducibly_and_resume_across_boundaries(use_weights):
+    make = weighted if use_weights else provider
+    p = make()
+    size = len(p.samples)
+    first = prompts(p, size)
+    second = prompts(p, size)
+    assert set(first) == set(second) and len(set(first)) == size
+    assert first != second
+    other = make()
+    assert prompts(other, size * 2) == first + second
+    saved = copy.deepcopy(p.state_dict())
+    expected = prompts(p, size + 5)
+    resumed = make()
+    resumed.load_state_dict(saved)
+    assert prompts(resumed, 4) + prompts(resumed, size + 1) == expected

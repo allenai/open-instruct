@@ -19,22 +19,21 @@ def test_old_runtime_is_rejected_before_startup(monkeypatch, capability):
         asyncio.run(driver.train(args))
 
 
-@pytest.mark.parametrize("provider,fully_async", [("pools", True), ("priority", True), ("priority", False)])
 @pytest.mark.parametrize("saved", [True, False])
 @pytest.mark.parametrize("completed_count,start", [(1, 0), (0, 0), (0, 2)])
 def test_exhaustion_preserves_last_complete_checkpoint_without_duplicate_save(
-    monkeypatch, saved, completed_count, start, provider, fully_async
+    monkeypatch, saved, completed_count, start
 ):
     args = SimpleNamespace(
         olmo_core=SimpleNamespace(
-            prompt_provider=provider,
+            prompt_provider="pools",
             publication_mode="barrier",
             max_run_seconds=None,
             diagnostic_interval=0,
             engine_update_timeout=1,
             engine_drain_timeout=1,
         ),
-        fully_async=fully_async,
+        fully_async=True,
         offload_rollout=False,
         check_weight_update_equal=False,
         start_rollout_id=start,
@@ -89,9 +88,7 @@ def test_exhaustion_preserves_last_complete_checkpoint_without_duplicate_save(
     monkeypatch.setattr(driver, "EvalDispatcher", lambda *_: SimpleNamespace(drain=AsyncMock(), dispatch=AsyncMock()))
     monkeypatch.setattr(driver, "should_run_periodic_action", lambda _i, interval, *_: interval is not None)
     result = asyncio.run(driver.train(args, export_hf="final"))
-    assert result["prompts_exhausted"]
-    assert result["pools_exhausted"] == (provider == "pools")
-    assert result["completed_rollout_ids"] == list(range(start, start + completed_count))
+    assert result["pools_exhausted"] and result["completed_rollout_ids"] == list(range(start, start + completed_count))
     if not completed_count:
         learner.train.assert_not_awaited()
         manager.core_commit_exposure.assert_not_awaited()
@@ -103,12 +100,9 @@ def test_exhaustion_preserves_last_complete_checkpoint_without_duplicate_save(
             learner.export_hf.assert_not_awaited()
         return
     learner.train.assert_awaited_once()
-    if provider == "pools":
-        manager.core_commit_exposure.assert_awaited_once_with(0)
-        driver.log.assert_called_once_with(args, {"pool/update": 1, "pool/trained/math": 1}, step_key="pool/update")
-        driver.define_step_key_metric_group.assert_any_call("pool", "pool/update")
-    else:
-        manager.core_commit_exposure.assert_not_awaited()
+    manager.core_commit_exposure.assert_awaited_once_with(0)
+    driver.log.assert_called_once_with(args, {"pool/update": 1, "pool/trained/math": 1}, step_key="pool/update")
+    driver.define_step_key_metric_group.assert_any_call("pool", "pool/update")
     manager.save.assert_awaited_once_with(0)
     learner.save_model.assert_awaited_once_with(0, force_sync=True)
     learner.finalize_checkpoint.assert_awaited_once_with(0)

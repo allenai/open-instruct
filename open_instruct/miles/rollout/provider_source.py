@@ -98,19 +98,13 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
         provider = self.provider
         while isinstance(provider, (remind_provider.ReMindPromptProvider, replay_provider.ReplayPromptProvider)):
             provider = provider.base
-        if isinstance(provider, prompt_provider.ShuffledPromptProvider):
+        if isinstance(provider, (prompt_provider.ShuffledPromptProvider, priority_provider.PriorityPromptProvider)):
             self.epoch_id = provider.epoch_id
             self.sample_offset = provider.sample_offset
 
     def get_samples(self, num_samples: int) -> list[list[Sample]]:
         if type(num_samples) is not int or num_samples < 0:
             raise ValueError("num_samples must be a nonnegative integer")
-        if isinstance(self.provider, priority_provider.PriorityPromptProvider) and num_samples:
-            # Finite inventories may deliver a short final request. The provider
-            # itself still receives an exact count; the collector drains it once.
-            num_samples = min(num_samples, len(self.buffer) + len(self.provider.order) - self.provider.offset)
-            if not num_samples:
-                raise StopIteration("Historical priority inventory exhausted")
         buffered = self.buffer.copy()
         counters = self.sample_group_index, self.sample_index
         provider_state = None

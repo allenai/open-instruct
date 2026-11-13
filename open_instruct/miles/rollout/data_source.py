@@ -138,8 +138,7 @@ class DashboardDrainingRolloutDataSource:
     def pool_exhausted(self):
         with self._cursor_lock:
             return (
-                getattr(getattr(self._delegate.args, "olmo_core", None), "prompt_provider", "")
-                in ("pools", "priority")
+                getattr(getattr(self._delegate.args, "olmo_core", None), "prompt_provider", "") == "pools"
                 and not self._delegate.buffer
                 and not self._delegate.provider.available()
             )
