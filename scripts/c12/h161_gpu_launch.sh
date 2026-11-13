@@ -20,6 +20,12 @@
 #          manifest's rows, plus 116 identity rows at 1.0, tokenizer revision 03c29652; RF_CACHE names it) in place of
 #          C12's, H182's replay dir, two passes, seed 34521, noag. S_R=<steps> from H210 R4'. Placement excludes
 #          holmes-cs-aus-544 (EXCLUDE_HOSTS, a hostname list of the live holmes nodes minus those).
+#   c15n   ledger H213 (c15-noag): rfn with four of H202's fixed parquets (Terminal, ToolMind, CP, Math-v4 with the
+#          suffix deleted) added at 1.0 to the mixer and cache (C15_CACHE names it, h213_cache.sh); everything else
+#          rfn's. S_R=<steps> from H213 R4'. Same image as rfn: in the container, olmo_core_utils.py's Beaker override of
+#          --local_cache_dir is patched to the post-checkpoints build dir (never oe-adapt), and before torchrun the job
+#          checks that dir/numpy_sft/C15_CACHE is built and its dataset_statistics.json has sha256 C15_STATS_SHA256
+#          (exit 7 otherwise); EXPECTED_NUMPY_CACHE then pins the name, so the trainer reads that cache, never tokenizes.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -120,6 +126,27 @@ $F/identity/identity.jsonl 1.0"
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/c12rf-gpu; DESC="ledger H210 c12rf"
          STEPS="${S_R:?S_R=<steps from H210 R4 prime>}"; EPOCHS=2; CKPT=$((STEPS / 2)); HOURS=48 ;;
+    c15n) B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
+         MODEL=$B/olmo35-small-mm-ckpt2-256k-noagentic/step21159-lm-olmocore/model_and_optim
+         HF_REF=$H/olmo35-small-mm-ckpt2-256k-noagentic-step21159-base-h149-c12seed
+         [[ "$SEED" == 34521 ]] || { echo "c15 runs seed 34521 only" >&2; exit 1; }
+         F=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/rf; A=/weka/olmo-3p5-post-checkpoints/abhishekr/c14f/addons-fixed
+         MIXER="$F/filtered/00000-dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet 1.0 \
+$F/filtered/00001-nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
+$F/filtered/00002-nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
+$F/filtered/00003-nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456 \
+$F/identity/identity.jsonl 1.0 \
+$A/terminal/c14f-terminal-79656c43.parquet 1.0 \
+$A/toolmind/c14f-toolmind-bf051c7f.parquet 1.0 \
+$A/cp/c14f-cp-27329ff0.parquet 1.0 \
+$A/math/c14f-math-d2da451e.parquet 1.0"
+         CACHE="${C15_CACHE:?C15_CACHE=<the c15 cache name from h213_cache.sh>}"; TOKREV=03c29652a9d74902fe9d39bc0ad211748c7e7ae6
+         CDIR=/weka/olmo-3p5-post-checkpoints/abhishekr/h213/build/cache
+         C15_STATS_SHA256="${C15_STATS_SHA256:?C15_STATS_SHA256=<sha256 of the cache dataset_statistics.json>}"
+         EXCLUDE_HOSTS="${EXCLUDE_HOSTS:-holmes-cs-aus-544}"
+         LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/c15-gpu; DESC="ledger H213 c15"
+         STEPS="${S_R:?S_R=<steps from H213 R4 prime>}"; EPOCHS=2; CKPT=$((STEPS / 2)); HOURS=48 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
@@ -132,6 +159,7 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == scb ]] && RUN_NAME="s-c-b1-s${SEED}"
 [[ "$ARM" == c14f ]] && RUN_NAME="c14f-s${SEED}"
 [[ "$ARM" == rfn ]] && RUN_NAME="c12rf-noag-s${SEED}"
+[[ "$ARM" == c15n ]] && RUN_NAME="c15-noag-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
@@ -167,6 +195,14 @@ if [[ "$ARM" == c14f ]]; then
     PATCH="sed -i 's/^        if int(tokens\[-1\]) != tokenizer.eos_token_id:/        if not require_metadata and int(tokens[-1]) != tokenizer.eos_token_id:/' open_instruct/olmo_core_finetune.py
 grep -c 'if not require_metadata and int(tokens' open_instruct/olmo_core_finetune.py || exit 6
 sha256sum open_instruct/olmo_core_finetune.py"
+fi
+if [[ "$ARM" == c15n ]]; then
+    PATCH="sed -i 's#^        dataset_config.local_cache_dir = \"/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache\"#        dataset_config.local_cache_dir = \"$CDIR\"#' open_instruct/olmo_core_utils.py
+grep -c 'local_cache_dir = \"$CDIR\"' open_instruct/olmo_core_utils.py || exit 7
+C=$CDIR/numpy_sft/$CACHE
+[ -s \$C/dataset_statistics.json ] && ls \$C/token_ids_part_*.npy >/dev/null || { echo NUMPY-CACHE-MISSING \$C; exit 7; }
+[ \"\$(sha256sum \$C/dataset_statistics.json | cut -d' ' -f1)\" = $C15_STATS_SHA256 ] || { echo NUMPY-CACHE-SHA-MISMATCH; exit 7; }
+echo NUMPY-CACHE-CHECK path=\$C stats_sha256=$C15_STATS_SHA256"
 fi
 WAIT="$PATCH
 for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
