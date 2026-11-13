@@ -219,7 +219,11 @@ class MathVerifier(ground_truth_utils.MathVerifier):
         label: Any,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> ground_truth_utils.VerificationResult:
+        # This math parser already operates on the supplied text, without any
+        # thinking-boundary selection; both input conventions use the same path.
         # SIGALRM requires a main thread. Reuse MILES's bounded subprocess pool
         # for direct async callers too; the worker invokes synchronous __call__.
         spec = {

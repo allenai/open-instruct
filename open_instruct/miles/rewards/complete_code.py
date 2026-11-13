@@ -90,6 +90,7 @@ def livecodebench_target(unit_tests):
 
 
 class CompleteCodeVerifier:
+    grading_accepts_selected_input = True
     get_config_class = staticmethod(lambda: Config)
 
     def __init__(self, verifier_config):
@@ -106,7 +107,7 @@ class CompleteCodeVerifier:
                 fresh_process_per_test=True,
             )
         )
-        final = common.answer_text(prediction)
+        final = common.answer_text(prediction, selected_input=kwargs.get("selected_input", False))
         score, partitions = 1.0, []
         # The client batches each partition within its gateway/payload limits.
         # Keep all tests, even beyond its per-suite limit and after a failed test.

@@ -316,6 +316,7 @@ def timeout_result(error):
 
 
 class ReasoningGymVerifier:
+    grading_accepts_selected_input = True
     get_config_class = staticmethod(lambda: ReasoningGymConfig)
 
     def __init__(self, verifier_config=None):
@@ -358,7 +359,7 @@ class ReasoningGymVerifier:
         start = time.monotonic()
         try:
             try:
-                result = self.score(prediction, label)
+                result = self.score(prediction, label, selected_input=kwargs.get("selected_input", False))
                 # Some native scorers use bare except, which can swallow the alarm.
                 if time.monotonic() - start >= self.config.timeout_seconds:
                     return timeout_result("Native scorer exceeded its verification budget")
@@ -372,10 +373,10 @@ class ReasoningGymVerifier:
         except VerificationTimeout as error:
             return timeout_result(error)
 
-    def score(self, prediction, label):
+    def score(self, prediction, label, *, selected_input=False):
         entry = copy.deepcopy(label)
         task = entry["metadata"]["source_dataset"]
-        final = deterministic_verifiers.answer_text(prediction)
+        final = deterministic_verifiers.answer_text(prediction, selected_input=selected_input)
         tagged = re.findall(r"<answer>(.*?)</answer>", final, re.S)
         boxes = re.findall(r"\\boxed\{([^{}]+)\}", final)
         # Multiple explicit answers cannot be resolved by picking the last one.

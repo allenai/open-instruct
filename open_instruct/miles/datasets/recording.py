@@ -5,6 +5,7 @@ for prompt selection. The identity records its basis explicitly: it describes an
 inventory rather than a hash of every weight tensor.
 """
 
+import copy
 import json
 import weakref
 from pathlib import Path
@@ -14,6 +15,7 @@ from miles.utils import inference_records
 from open_instruct import logger_utils
 from open_instruct.miles.datasets import replay_evidence
 from open_instruct.miles.execution import workflow
+from open_instruct.miles.rewards import grading
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -21,6 +23,25 @@ MARKER = "workflow-model.json"
 # Runtime argument copies are shallow; source and recorder share CoreConfig.
 # Keep this process-local: never put locks or callbacks into serialized args.
 _FEEDBACK_SOURCES = weakref.WeakValueDictionary()
+
+
+def grading_policy(args):
+    """Shared record/selection identity; unversioned legacy inputs keep their keys."""
+    core = args.olmo_core
+    if not getattr(core, "reward_final_answer_only", False):
+        return None
+    return {
+        "schema_version": grading.SCHEMA_VERSION,
+        "reward_final_answer_only": True,
+        "reward_reasoning_mode": getattr(core, "reward_reasoning_mode", "required"),
+        "reward_zero_truncated": core.reward_zero_truncated,
+    }
+
+
+def grading_input_key(input_key, policy):
+    if policy is None:
+        return input_key
+    return inference_records.sha256({"input_key": input_key, "grading_policy": policy})
 
 
 def bind_feedback(core, source):
@@ -34,7 +55,40 @@ def unbind_feedback(core, source):
         del _FEEDBACK_SOURCES[id(core)]
 
 
-class FeedbackRecorder(inference_records.Recorder):
+class GradingRecorder(inference_records.Recorder):
+    """Keep the reviewed grading policy in saved records and evidence identity."""
+
+    def __init__(self, args, **kwargs):
+        self._grading_policy = grading_policy(args)
+        self._grading_inputs = []
+        super().__init__(args, **kwargs)
+
+    def record_group(self, samples, *, decision, reason=None):
+        # The pinned recorder constructs and enqueues the row synchronously.
+        # Capture per-response metadata before its whitelist drops these fields.
+        self._grading_inputs = [(sample.metadata or {}).get("grading") for sample in samples]
+        try:
+            super().record_group(samples, decision=decision, reason=reason)
+        finally:
+            self._grading_inputs = []
+
+    def _annotate_grading(self, row):
+        if row.get("kind") == "group" and self._grading_policy is not None and "grading_policy" not in row:
+            row["grading_policy"] = dict(self._grading_policy)
+            # The pinned base protocol hashes the registry but not global grading
+            # flags. Keep new-contract evidence separate without changing the
+            # legacy recorder's manifest or default-off pooling identity.
+            row["input_key"] = grading_input_key(row["input_key"], self._grading_policy)
+            for response, selection in zip(row["responses"], self._grading_inputs, strict=True):
+                if selection is not None:
+                    response["grading"] = copy.deepcopy(selection)
+
+    def _enqueue(self, row):
+        self._annotate_grading(row)
+        super()._enqueue(row)
+
+
+class FeedbackRecorder(GradingRecorder):
     """Deliver scored groups before enqueueing; only feedback-dependent providers fail closed."""
 
     def __init__(self, args, source):
@@ -80,6 +134,7 @@ class FeedbackRecorder(inference_records.Recorder):
         super().record_disposition(samples, accepted=accepted, staleness=staleness)
 
     def _enqueue(self, row):
+        self._annotate_grading(row)
         if row.get("kind") == "group":
             try:
                 source = self._source()
@@ -137,4 +192,4 @@ def create_recorder(args):
         args.olmo_core, "prompt_replay_enabled", False
     ):
         raise RuntimeError("Feedback recorder has no bound prompt feedback source")
-    return inference_records.Recorder(args, lineage_factory=lineage_identity)
+    return GradingRecorder(args, lineage_factory=lineage_identity)

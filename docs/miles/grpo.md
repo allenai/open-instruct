@@ -101,10 +101,10 @@ reward_zero_truncated = true
 calculate_per_token_loss = false
 ```
 
-This works with every verifier, managed judges included; only
-`reward_final_answer_only` is restricted to text verifiers. It cannot be combined
+This works with every verifier, managed judges included. It cannot be combined
 with a `custom_reward_post_process_path` other than the default ungraded-response
-exclusion described below.
+exclusion described below. Final-answer selection and explicit verifier exceptions
+are described in [Grading inputs and changes](grading.md).
 
 ## Ungraded responses
 
@@ -160,20 +160,33 @@ before occupying training batch slots.
 ## Final-answer-only rewards
 
 Set `core.reward_final_answer_only=true` to grade only text after the last literal
-`</think>`. A missing closing marker or whitespace-only final answer receives zero
-without calling a verifier. This applies to text/code verifiers and named judges;
-judge rubrics retain their normal answer-tag extraction within that final region.
+`</think>` by default. A missing closing marker, whitespace-only final answer or
+reopened thinking receives each response-required verifier's floor without calling
+it. Set `core.reward_reasoning_mode="none"` for an explicitly non-thinking run.
+This applies to text/code verifiers and named judges; named judges receive the
+selected region intact, including answer tags and surrounding prose.
 The full response and its token IDs remain available for training and recording.
+
+The shared `ResponseParts` object separates thinking and the delivered answer or
+action. Trusted factory/registry declarations identify answer, process, format or
+composite objectives. Answer objectives use `response`; explicit process/format
+objectives may select `thinking` or `full` and separately permit a missing
+delivered response. ToolRL declares full context for boundary format and the
+presented response for action correctness; token-length graders retain full
+trajectory tokens. See the [configuration, interface and
+per-path behavior register](grading.md) before changing a run's grading policy.
 
 Verifiers can optionally implement
 `async_call_final_answer(tokens, prediction, label, **kwargs)`. In final-answer
-mode, the adapter uses this method when present; otherwise it calls `async_call`
-with the extracted suffix, preserving existing math and code verifier behavior.
-Both paths run after the missing/empty-final and truncation gates; `prediction`
-is the extracted suffix and `tokens` is empty. Verifiers that validate the raw
-thinking boundary need the optional method to grade an already extracted final
-answer. Raw-response mode always uses `async_call`. Named judges use their
-separate final-region dispatch.
+mode with a response view, the adapter uses this method when present; otherwise
+it calls `async_call` with the selected string. Migrated consumers receive
+`selected_input=True`, bypass their thinking-boundary logic and retain their
+task-specific answer parsing. All calls run after the component's eligibility
+and truncation gates. Response/thinking views receive empty token lists; full
+views retain actual trajectory tokens. A structured consumer can use
+`async_call_parts`; composites additionally receive separately selected component
+strings. Ordinary flag-off calls retain the historical `async_call` path,
+including any native thinking removal. Named judges use their sample-aware path.
 
 The built-in `R1FormatVerifier` implements this interface: after the outer gate
 selects the final section, it checks for optional leading whitespace followed by
@@ -193,12 +206,14 @@ For native IF grading, use the built-in adapter. A complete reward registry is:
 }
 ```
 
-The native adapter uses `IFEvalVerifier`, including its existing
-`remove_thinking_section` normalization in both modes. That removes answer tags,
-`<|assistant|>` and outer whitespace before grading IF constraints. R1 format
+The native adapter uses `IFEvalVerifier`, including its existing task
+normalization in both modes. Selected-input mode bypasses its thinking split
+while retaining removal of answer tags, `<|assistant|>` and outer whitespace
+before grading IF constraints. R1 format
 reward checks the tags themselves; IF reward grades the normalized answer.
 
-This option defaults to false and assumes the Olmo thinking format. It permits
+The library option defaults to false; the maintained examples explicitly enable it
+with the Olmo thinking convention. It permits
 multiple closing markers, so it is not an exactly-one-tag format validator.
 
 ## Runtime images

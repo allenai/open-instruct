@@ -10,6 +10,11 @@ stated; document deviations in each experiment, including objective changes.
 
 ## Objective and data
 
+The maintained examples enable final-answer grading with
+`core.reward_final_answer_only=true` and `reward_reasoning_mode="required"`.
+Use `"none"` explicitly for a non-thinking policy/template. The library default
+remains false for compatibility with existing runs; see [grading contracts](grading.md).
+
 - **Policy lag** (12 in both `node` and `three-node`): a higher limit discards fewer slow groups but trains on older samples; reconsider it when learning rate, group size or response length changes.
 - **Loss weighting** (per response, `miles.calculate_per_token_loss = false`): keep the demo objective in throughput trials; token-weighted loss is an explicit learning-policy experiment.
 - **Off-policy correction** (TIS on, `use_rollout_logprobs = false`): TIS reweights samples toward the current policy; turning it off assumes inference and training probabilities agree closely.

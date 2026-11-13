@@ -44,9 +44,18 @@ class Result:
     diagnostics: dict = field(default_factory=lambda: {"kind": "deterministic_local_v1", "status": "ok"})
 
 
-def answer_text(text):
-    """Use an explicit final region when present; support non-thinking policies."""
-    return response_text.strip_terminal_special_tokens(text.rsplit("</think>", 1)[-1]).strip()
+def answer_text(text, *, selected_input=False):
+    """Legacy consumer normalization, separate from shared view selection.
+
+    Migrated selected-input callers use only task whitespace normalization.
+    Historical direct/flag-off callers retain suffix discovery and can accept
+    unfinished thinking; that fallback must never decide shared eligibility.
+    """
+    if selected_input:
+        # Retain task-level whitespace normalization, never reselect a view.
+        return text.strip()
+    text = response_text.strip_terminal_special_tokens(text)
+    return text.rsplit("</think>", 1)[-1].strip()
 
 
 def strict_json(text):
@@ -312,9 +321,9 @@ def _final_choice_score(final, target):
     return float(re.fullmatch(r"\**\(?" + re.escape(value) + r"\)?\**[.\s]*", final) is not None)
 
 
-def score(text, target):
+def score(text, target, *, selected_input=False):
     kind = validate_target(target)  # Broken targets must not become model failures.
-    final = answer_text(text)
+    final = answer_text(text, selected_input=selected_input)
     value = target["value"]
     if kind == "mcqa_final_choice":
         return _final_choice_score(final, target)
@@ -355,6 +364,7 @@ def score(text, target):
 
 
 class DeterministicVerifier:
+    grading_accepts_selected_input = True
     get_config_class = staticmethod(lambda: task_verifiers.RewardConfig)
 
     def __init__(self, verifier_config=None):
@@ -363,7 +373,7 @@ class DeterministicVerifier:
     async def async_call(self, tokens, prediction, label, **kwargs):
         start = time.monotonic()
         try:
-            result = score(prediction, label)
+            result = score(prediction, label, selected_input=kwargs.get("selected_input", False))
         except FormattingVerifierTimeout as error:
             logger.warning("Formatting verifier timeout; assigning fallback zero reward: %s", error)
             return Result(

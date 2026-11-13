@@ -36,7 +36,12 @@ RECORD_RESPONSE_MODES = ("off", "all", "sample")
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
     reward_zero_truncated: bool = True
+    # False: historical consumer dispatch on full text. True: shared selection
+    # of the text after thinking; trusted per-verifier process exceptions apply.
+    # Selection preserves answer whitespace and does not extract answer wrappers.
     reward_final_answer_only: bool = False
+    # Only used by final-answer grading. Non-thinking runs must opt into none.
+    reward_reasoning_mode: str = "required"
     exclude_ungraded: bool = True
     max_run_seconds: float | None = None
     max_run_final: bool = False
@@ -134,6 +139,7 @@ class CoreConfig:
     selection_sha256: str | None = None
 
     def __post_init__(self):
+        validation.choice(self.reward_reasoning_mode, "core.reward_reasoning_mode", ("required", "none"))
         validation.boolean(self.prompt_replay_enabled, "core.prompt_replay_enabled")
         validation.boolean(self.prompt_replay_answer_probe, "core.prompt_replay_answer_probe")
         validation.number(self.prompt_replay_fraction, "core.prompt_replay_fraction", maximum=1)

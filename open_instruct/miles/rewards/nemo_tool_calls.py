@@ -88,7 +88,7 @@ def target_for_row(raw, options):
     return target
 
 
-def action_text(prediction, prompt_opens_reasoning=False):
+def action_text(prediction, prompt_opens_reasoning=False, *, selected_input=False):
     """Return the response's action region, or None while its reasoning is still open.
 
     NeMo Gym receives reasoning as a separate output item (vLLM's Nemotron V3 and
@@ -97,6 +97,8 @@ def action_text(prediction, prompt_opens_reasoning=False):
     closes therefore contains no action, and prose or calls written inside it never
     count. When the prompt ends with the opening tag, the response does not repeat it.
     """
+    if selected_input:
+        return common.answer_text(prediction, selected_input=True)
     if "</think>" in prediction:
         final = prediction.rsplit("</think>", 1)[1]
     elif prompt_opens_reasoning or "<think>" in prediction:
@@ -189,6 +191,7 @@ def validate_xml_reference(target):
 
 
 class SingleStepToolVerifier(nvidia_constraints._IsolatedAdapter):
+    grading_accepts_selected_input = True
     kind = "nemo_single_step_tool_v1"
     # The reward step tells this verifier whether the rendered prompt opened reasoning.
     reads_prompt_reasoning = True
@@ -201,7 +204,7 @@ class SingleStepToolVerifier(nvidia_constraints._IsolatedAdapter):
         registered_reward supplies the state automatically for string prompts.
         """
         target, expected, config = contract(json.dumps(label, allow_nan=False))
-        text = action_text(prediction, prompt_opens_reasoning)
+        text = action_text(prediction, prompt_opens_reasoning, selected_input=kwargs.get("selected_input", False))
         if text is None:
             return self.result(0.0, category="unclosed_thinking")
         try:

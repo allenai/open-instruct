@@ -73,6 +73,7 @@ def validate_target(target):
 
 
 class LitmusVerifier:
+    grading_accepts_selected_input = True
     get_config_class = staticmethod(lambda: task_verifiers.RewardConfig)
 
     def __init__(self, verifier_config=None):
@@ -83,7 +84,9 @@ class LitmusVerifier:
         start = time.monotonic()
         try:
             # Preserve the row's final-match convention with one bounded search.
-            matches = pattern.findall(common.answer_text(prediction), timeout=0.1)
+            matches = pattern.findall(
+                common.answer_text(prediction, selected_input=kwargs.get("selected_input", False)), timeout=0.1
+            )
         except TimeoutError as error:
             logger.warning("Litmus verifier timeout; assigning fallback zero reward: %s", error)
             return common.Result(

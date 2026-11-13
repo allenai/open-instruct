@@ -11,7 +11,7 @@ import pytest
 
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import task_verifiers
+from open_instruct.miles.rewards import grading, task_verifiers
 
 
 class Tokenizer:
@@ -234,6 +234,88 @@ def test_prepared_mode_never_applies_template(environment, tmp_path):
     result = prepare(environment, {"prompt_data": str(prompt), "reward_config": str(registry)})
     assert json.loads(Path(result["prompt_data"]).read_text())["input"] == original["input"]
     assert not environment[2].rendered
+
+
+@pytest.mark.parametrize("factory", ["MaxLenVerifier", "UpToMaxLenVerifier"])
+def test_prepared_grading_syntax_does_not_override_factory_defaults(environment, tmp_path, factory):
+    prompt = tmp_path / "input.jsonl"
+    prompt.write_text(
+        json.dumps(
+            {"input": "already rendered", "label": "3", "metadata": {"verifiers": [{"name": "length", "target": "3"}]}}
+        )
+        + "\n"
+    )
+    spec = {"factory": "open_instruct.ground_truth_utils." + factory, "grading": {"scope": "full"}}
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({"length": spec}))
+    prepared = prepare(environment, {"prompt_data": str(prompt), "reward_config": str(registry)})
+    assert json.loads(Path(prepared["reward_config"]).read_text())["length"] == spec
+    # Runtime resolves the factory's process/full defaults; lightweight data
+    # preparation must not assume every factory declares an answer objective.
+    declared = SimpleNamespace(grading_objective="process", grading_scope="full")
+    assert grading.verifier_policy(declared, spec) == grading.GradingPolicy("full", objective="process")
+
+
+@pytest.mark.parametrize("value", [{"scope": "bad"}, {"objective": "bad"}, {"require_response": 1}, {"extra": True}])
+def test_preparation_still_rejects_bad_grading_syntax(value):
+    with pytest.raises(ValueError, match="grading"):
+        grading.validate_spec({"grading": value})
+
+
+@pytest.mark.parametrize("objective,scope", [("process", "thinking"), ("process", "full"), ("format", "full")])
+def test_judge_binding_retains_grading_policy_and_refuses_old_dropped_policy_cache(
+    environment, tmp_path, objective, scope
+):
+    prompt = tmp_path / "input.jsonl"
+    prompt.write_text(
+        json.dumps(
+            {
+                "input": "already rendered",
+                "label": "3",
+                "metadata": {"verifiers": [{"name": "trusted", "target": "3"}]},
+            }
+        )
+        + "\n"
+    )
+    policy = {"objective": objective, "scope": scope, "require_response": False}
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps({"trusted": {"factory": "legacy.module.Factory", "config": {"old": True}, "grading": policy}})
+    )
+    overrides = {
+        "trusted": {
+            "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
+            "config": {"name": "trusted"},
+        }
+    }
+    data = {"prompt_data": str(prompt), "reward_config": str(registry)}
+    hf, output, _ = environment
+
+    def run():
+        return run_data.prepare_data(data, hf, output, max_prompt_length=2000, seed=17, registry_overrides=overrides)
+
+    result = run()
+    assert json.loads(Path(result["reward_config"]).read_text())["trusted"] == {
+        **overrides["trusted"],
+        "grading": policy,
+    }
+    assert "grading" not in overrides["trusted"]  # Do not mutate caller-owned declarations.
+    assert run() == result
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["contract"]["registry_overrides"]["trusted"]["grading"] == policy
+    # Simulate the old contract: an implementation override with no inherited
+    # policy. Refuse this cache rather than silently reusing its wrong objective.
+    manifest["contract"]["registry_overrides"] = overrides
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(InputError, match="Preparation contract changed"):
+        run()
+
+
+def test_explicit_override_policy_wins_over_inherited_policy():
+    original = {"test": {"grading": {"objective": "process", "scope": "full"}}}
+    override = {"test": {"factory": "new.Factory", "grading": {"objective": "answer", "scope": "response"}}}
+    assert run_data._inherit_grading_policies(original, override) == override
 
 
 def test_prepared_mode_rejects_holdout_overlap(environment, tmp_path):

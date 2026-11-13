@@ -106,6 +106,10 @@ wandb_project = "open-instruct-miles"
 wandb_group = "node"
 
 [core]
+# Grade the presented response; process/format exceptions must be explicitly declared.
+reward_final_answer_only = true
+# Set to "none" only when using an explicitly non-thinking policy/template.
+reward_reasoning_mode = "required"
 max_policy_lag = 12
 # A response cut off at max_response_length scores 0 (capped = wrong).
 reward_zero_truncated = true

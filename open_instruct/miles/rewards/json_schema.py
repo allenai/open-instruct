@@ -36,6 +36,7 @@ def validate_schema(schema):
 
 
 class JSONSchemaVerifier:
+    grading_accepts_selected_input = True
     get_config_class = staticmethod(lambda: task_verifiers.RewardConfig)
 
     def __init__(self, verifier_config=None):
@@ -44,7 +45,9 @@ class JSONSchemaVerifier:
     async def async_call(self, tokens, prediction, label, **kwargs):
         validator = validate_schema(label)
         try:
-            value = deterministic_verifiers.strict_json(deterministic_verifiers.answer_text(prediction))
+            value = deterministic_verifiers.strict_json(
+                deterministic_verifiers.answer_text(prediction, selected_input=kwargs.get("selected_input", False))
+            )
         except (ValueError, RecursionError):
             return deterministic_verifiers.Result(
                 0.0, diagnostics={"kind": "json_schema_v1", "status": "invalid_json"}
