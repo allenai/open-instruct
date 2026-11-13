@@ -37,6 +37,10 @@ case "$BASE" in
                MODEL=$ROOT/starts/olmo35-sft-h181-b2${BASE}-c12r-step18083-olmocore/model_and_optim ;;
     *) echo "unknown base $BASE" >&2; exit 1 ;;
 esac
+# Diagnostics may point the smoke at another start and reference (e.g. the midtraining base DCP and its HF copy,
+# the pair H194's G2 matched, as a control for the converted start); never for train.
+MODEL="${MODEL_OVERRIDE:-$MODEL}"; HF_REF="${HF_REF_OVERRIDE:-$HF_REF}"
+[[ "$MODE" == train && -n "${MODEL_OVERRIDE:-}" ]] && { echo "MODEL_OVERRIDE is for smoke only" >&2; exit 1; }
 DATA=/weka/oe-adapt-default/pradeepd/h218/data/redsearcher-sft-10k-browsecomp-tools-954cf9d8.parquet
 MIXER="$DATA 1.0"
 ROOTC=$ROOT/cache
