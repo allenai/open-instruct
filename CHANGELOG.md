@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Organize MILES examples by model family and explicitly configure candidate policy evaluation sampling, including shared and OPD in-loop defaults (https://github.com/allenai/open-instruct/pull/2255).
-- Add the native Nemotron abstention QA adapter and named three-tier judge profile, preserving NVIDIA's rubric and answer extraction while keeping judge failures ungraded (PR URL pending).
+- Add the native Nemotron abstention QA adapter and named three-tier judge profile, preserving NVIDIA's rubric and answer extraction while keeping judge failures ungraded (https://github.com/allenai/open-instruct/pull/2252).
 - Honor native MILES num_epoch budgets without injecting a conflicting rollout default; save epoch-run final checkpoints and recognize the runtime-resolved completion limit (https://github.com/allenai/open-instruct/pull/2251).
 - Enable final-answer grading in the three maintained MILES examples while preserving the library default. Keep exclusion tables aligned with grading-aware record keys, reject cross-contract evidence, and validate native reward contracts before worker startup (https://github.com/allenai/open-instruct/pull/2250).
 - Give MILES final-answer grading shared thinking/response views, explicit per-verifier input and eligibility policies, non-thinking and prompt-prefilled-closure support, per-component selection provenance and distinct evidence identities. Preserve default-off scoring; document every path in `docs/miles/grading.md` with validation evidence in the PR (https://github.com/allenai/open-instruct/pull/2250).
