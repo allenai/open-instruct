@@ -856,6 +856,12 @@ def prepare_data(
                     counts = pool_counts.setdefault(pool, {"original": 0, "excluded": 0, "retained": 0})
                     counts["original"] += 1
                     counts["excluded" if over_limit else "retained"] += 1
+                    priority = data.get("sampling", {}).get("priority")
+                    if priority and not over_limit:
+                        try:
+                            pool_sampling.priority_value(row["metadata"], priority["field"])
+                        except InputError as error:
+                            raise InputError(f"{split} row {index}: {error}") from error
                 if over_limit:
                     excluded.add(index)
             if isinstance(rows, _JsonlRows) and index not in excluded:

@@ -790,6 +790,8 @@ class RunSpec:
         elif core.get("max_run_seconds") is not None:
             # Nothing to resume from, so a wall-clock stop is final; launch_warnings says so.
             core["max_run_final"] = True
+        if self.data.get("sampling", {}).get("priority") and core.get("prompt_replay_enabled", False):
+            raise InputError("Pool priority ordering does not support replay")
         if "sources" in self.data:
             put("core.prompt_provider", "pools" if pools.resolve(self.data) else "mixture", "data.sources")
             put(

@@ -22,16 +22,23 @@ RECEIPT_FIELDS = (
     "sample_id",
     "pool_id",
     "sampling_pool",
+    "sampling_priority_group",
 )
 
 
 class FinitePrompts:
     requires_feedback = False
 
-    def __init__(self, samples, *, seed, shuffle):
-        self.samples = samples.ordered(seed, shuffle) if isinstance(samples, indexed_samples.View) else list(samples)
+    def __init__(self, samples, *, seed, shuffle, priority_field=None):
+        self.samples = (
+            samples.ordered(seed, shuffle, priority_field=priority_field)
+            if isinstance(samples, indexed_samples.View)
+            else list(samples)
+        )
         if shuffle and not isinstance(samples, indexed_samples.View):
             random.Random(seed).shuffle(self.samples)
+        if priority_field and not isinstance(samples, indexed_samples.View):
+            self.samples.sort(key=lambda sample: pool_sampling.priority_value(sample.metadata, priority_field))
         self.offset = 0
         if isinstance(self.samples, indexed_samples.View):
             self.samples.prefetch(0)
@@ -65,6 +72,9 @@ class PoolPromptProvider:
 
     def __init__(self, samples, *, pools, seed, shuffle, identity, replay=None, sampling=None):
         self.sampling = pool_sampling.validate({} if sampling is None else sampling, pools)
+        priority = self.sampling.get("priority")
+        if priority and replay is not None:
+            raise ValueError("Pool priority ordering does not support replay")
         self.identity = copy.deepcopy(
             {
                 "version": 4,
@@ -94,7 +104,10 @@ class PoolPromptProvider:
         for name in pools:
             members = pool_members[name]
             base = FinitePrompts(
-                members, seed=f"{seed}:{name}", shuffle=shuffle and self.sampling["policy"] != "shuffle"
+                members,
+                seed=f"{seed}:{name}",
+                shuffle=shuffle and self.sampling["policy"] != "shuffle",
+                priority_field=priority["field"] if priority else None,
             )
             self.providers[name] = (
                 replay_provider.ReplayPromptProvider(base, members, **replay) if replay and members else base
@@ -146,6 +159,10 @@ class PoolPromptProvider:
             name = self._choose_pool(active)
             sample = copy.copy(self.providers[name].next_samples(1)[0])
             sample.metadata = sample.metadata | {SELECTION_ID: self.draws}
+            if priority := self.sampling.get("priority"):
+                sample.metadata["sampling_priority_group"] = pool_sampling.priority_value(
+                    sample.metadata, priority["field"]
+                )
             # Pending accounting must not retain or deepcopy verifier payloads.
             metadata = {
                 key: sample.metadata[key]

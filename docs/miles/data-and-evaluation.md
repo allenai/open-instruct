@@ -939,6 +939,35 @@ differ in order, not membership. With a shorter budget, their coverage can diffe
 uses its seeded RNG. Existing non-pool shuffle/source-mixture epoch behavior is
 unchanged.
 
+Priority can modify `uniform` or `exposure` allocation without becoming a separate
+pool-selection policy:
+
+```toml
+[data.sampling]
+policy = "exposure" # or uniform
+
+[data.sampling.priority]
+field = "reward_priority_olmo35_sft_hero"
+```
+
+Allocation chooses the pool; priority chooses its next fresh prompt. Each pool
+consumes priority 1, then 2, then 3, then 4 independently. Every retained training
+row must carry an integer label in that range in the specified metadata field.
+With `data.shuffle=true`, order within each stratum is seeded and shuffled;
+otherwise it follows input order. Labels are fixed for the prepared inventory.
+Disk-backed inventories scan labels once at startup and retain one byte per row,
+without retaining prompt or verifier payloads. Checkpoints preserve progress,
+pending selections and exposure accounting; changing the modifier invalidates
+sampler resume identity. Committed exposure receipts include
+`sampling_priority_group` for per-stratum accounting.
+
+This modifier does not support replay, `shuffle` or `weighted` allocation. The
+standalone `core.prompt_provider="priority"` remains available with its existing
+semantics. Exhausting a priority stratum advances within the same pool; exhausting
+an entire pool still redistributes allocation among available pools. Exposure
+balances cumulative trained groups, not strict per-update quotas. Monitor whole-pool
+supply and consumed shares when comparing mixtures.
+
 Exposure counts groups, not draws or tokens: a prompt with eight responses counts
 as one unit only after the optimizer update using it succeeds. If Math delivers a
 trained group on 25% of draws and IF on 50%, equal exposure needs approximately
