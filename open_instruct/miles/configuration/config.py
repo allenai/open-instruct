@@ -114,6 +114,8 @@ class CoreConfig:
     # Prompt selection; ReMind uses scored outcomes from inference records.
     prompt_provider: str = "shuffle"
     prompt_mixture: str | None = None
+    prompt_priority_field: str | None = None
+    prompt_priority_weights: list[float] | None = None
     remind_review_fraction: float = 0.02
     remind_enqueue_probability: float = 0.25
     # Optional history/replay layer over the ordinary shuffle or mixture provider.
@@ -140,7 +142,18 @@ class CoreConfig:
         validation.choice(
             self.prompt_replay_truncation, "core.prompt_replay_truncation", ("none", "any", "half", "all")
         )
-        validation.choice(self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture", "pools"))
+        validation.choice(
+            self.prompt_provider, "core.prompt_provider", ("shuffle", "remind", "mixture", "pools", "priority")
+        )
+        if self.prompt_priority_field is not None:
+            validation.text(self.prompt_priority_field, "core.prompt_priority_field")
+        if self.prompt_priority_weights is not None:
+            if not isinstance(self.prompt_priority_weights, list) or len(self.prompt_priority_weights) != 4:
+                raise constraints.error("core.prompt_priority_weights must contain four group probabilities")
+            for weight in self.prompt_priority_weights:
+                validation.number(weight, "core.prompt_priority_weights entry", maximum=1)
+            if abs(sum(self.prompt_priority_weights) - 1) > 1e-9:
+                raise constraints.error("core.prompt_priority_weights must sum to 1")
         validation.number(self.remind_review_fraction, "core.remind_review_fraction", maximum=1, exclusive_min=True)
         validation.number(self.remind_enqueue_probability, "core.remind_enqueue_probability", maximum=1)
         if self.max_run_seconds is not None:
@@ -495,6 +508,19 @@ class RunConfig:
                 "Mixtures cannot yet be combined with a frozen prompt-exclusion table; "
                 "remove [selection]. Exclusions must be applied within each source to preserve its allocation."
             )
+        if self.core.prompt_provider != "priority" and (
+            self.core.prompt_priority_field is not None or self.core.prompt_priority_weights is not None
+        ):
+            raise constraints.error("Priority settings require core.prompt_provider=priority")
+        if self.core.prompt_provider == "priority":
+            if self.core.prompt_priority_field is None or self.core.prompt_priority_weights is None:
+                raise constraints.error(
+                    "Priority sampling requires core.prompt_priority_field and core.prompt_priority_weights"
+                )
+            if not options.get("rollout_global_dataset", True):
+                raise constraints.error("Priority sampling requires rollout_global_dataset=true")
+            if self.core.selection_table is not None or self.core.prompt_replay_enabled:
+                raise constraints.error("Priority sampling cannot yet be combined with exclusions or prompt replay")
         if self.core.prompt_provider == "pools":
             if not options.get("fully_async", False) or self.core.records_root is None:
                 raise constraints.error("Named pools require fully_async=true and inference records")

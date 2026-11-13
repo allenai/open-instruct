@@ -2,6 +2,7 @@
 
 import copy
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ import torch
 from miles.utils.types import Sample
 
 from miles.rollout import data_source as miles_data_source
+from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.rollout import prompt_provider
 from open_instruct.miles.rollout.data_source import DashboardDrainingRolloutDataSource
 from open_instruct.miles.rollout.provider_source import ProviderRolloutDataSource
@@ -302,3 +304,35 @@ def test_blank_prompt_mode_and_empty_dataset(args):
     assert provider.next_samples(0) == []
     with pytest.raises(ValueError, match="empty dataset"):
         provider.next_samples(1)
+
+
+@pytest.mark.parametrize("fully_async", [False, True])
+def test_priority_provider_uses_labels_and_restores_pending_groups_before_fresh_draws(args, fully_async):
+    rows = [json.loads(line) for line in Path(args.prompt_data).read_text().splitlines()]
+    for i, row in enumerate(rows):
+        row["metadata"]["reward_priority_olmo35_sft_hero"] = 1 + i % 4
+    Path(args.prompt_data).write_text("".join(json.dumps(row) + "\n" for row in rows))
+    args.fully_async = fully_async
+    args.olmo_core = CoreConfig(
+        prompt_provider="priority",
+        prompt_priority_field="reward_priority_olmo35_sft_hero",
+        prompt_priority_weights=[1, 0, 0, 0],
+    )
+    source = DashboardDrainingRolloutDataSource(args)
+    groups = source.get_samples(8)
+    assert all(s.metadata[args.olmo_core.prompt_priority_field] == 1 for g in groups for s in g)
+    groups[-1][0].metadata["nested"].append("mutated response")
+    groups[-1][0].response = "partial"
+    if fully_async:
+        source.acknowledge_groups(groups[:-1])
+    source.add_samples([groups[-1]])
+    source.save(0)
+    source._delegate.buffer.clear()
+    fresh = payload(source.get_samples(5))
+    args.load, args.start_rollout_id = args.save, 1
+    restored = DashboardDrainingRolloutDataSource(args)
+    restored.load(0)
+    pending, *following = restored.get_samples(6)
+    assert pending[0].group_index == groups[-1][0].group_index
+    assert all(not s.response and "mutated response" not in s.metadata["nested"] for s in pending)
+    assert payload(following) == fresh

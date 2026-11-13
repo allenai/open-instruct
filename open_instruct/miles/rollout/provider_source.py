@@ -7,7 +7,13 @@ import torch
 from miles.utils.types import Sample
 
 from miles.rollout.data_source import RolloutDataSourceWithBuffer, compute_global_dataset_state_path
-from open_instruct.miles.rollout import mixture_provider, prompt_provider, remind_provider, replay_provider
+from open_instruct.miles.rollout import (
+    mixture_provider,
+    priority_provider,
+    prompt_provider,
+    remind_provider,
+    replay_provider,
+)
 
 
 class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
@@ -32,6 +38,14 @@ class ProviderRolloutDataSource(RolloutDataSourceWithBuffer):
             self.provider = provider
         elif getattr(core, "prompt_provider", "shuffle") in ("mixture", "pools"):
             self.provider, self.dataset = mixture_provider.load(args, self.dataset)
+        elif getattr(core, "prompt_provider", "shuffle") == "priority":
+            self.provider = priority_provider.PriorityPromptProvider(
+                self.dataset,
+                field=core.prompt_priority_field,
+                weights=core.prompt_priority_weights,
+                seed=args.rollout_seed,
+                shuffle=bool(args.rollout_shuffle),
+            )
         elif getattr(core, "prompt_provider", "shuffle") == "remind":
             self.provider = remind_provider.ReMindPromptProvider(
                 lambda: self.dataset,

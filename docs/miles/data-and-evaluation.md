@@ -211,7 +211,7 @@ It also handles requests crossing multiple complete epochs. A provider implement
 `requires_feedback`; the provider itself
 does not require an epoch or source-mixture abstraction. Alternate implementations
 can be supplied through the data source's Python `provider=` argument. The built-in
-choices are `core.prompt_provider = "shuffle"` (default), `"remind"`, and `"mixture"`.
+choices are `core.prompt_provider = "shuffle"` (default), `"remind"`, `"mixture"`, `"pools"`, and `"priority"`.
 Structured `data.sources` selects `"mixture"` automatically.
 
 Provider state is saved atomically alongside the existing pending-group ledger.
@@ -226,6 +226,47 @@ recorder delivers every scored group before its best-effort disk queue, includin
 all-1 and all-0 groups dropped by the unchanged reward filter. A lost disk row does
 not lose feedback; an unavailable recorder fails the run rather than silently
 turning off adaptation.
+
+### Historical priority groups
+
+Tagliere v6 annotates each row with a model-specific historical reward priority.
+The opt-in priority provider uses these annotations to favor useful prompts while
+keeping exposure to unknown and lower-priority rows explicit. For the hero SFT
+history exported by v6, an example allocation is:
+
+```toml
+[core]
+prompt_provider = "priority"
+prompt_priority_field = "reward_priority_olmo35_sft_hero"
+# Draw probabilities for groups 1, 2, 3, 4; this is an example, not a tuned default.
+prompt_priority_weights = [0.50, 0.35, 0.10, 0.05]
+```
+
+| Group | Historical evidence |
+| --- | --- |
+| 1 | At least one fully scored response group had differing rewards. |
+| 2 | Unknown: no matching history or no fully scored response group. |
+| 3 | All fully scored groups were zero and at least half of scored responses hit the token cap. |
+| 4 | Other constant rewards, including all-zero groups without frequent truncation. |
+
+Each fresh draw chooses a group with the configured probability, independently
+of its row count, then takes the next row from that group's seeded shuffle.
+Groups cycle independently; a small preferred group can repeat before a large
+group completes its first pass. `data.shuffle = false` preserves original row
+order within each group. Weights must be four nonnegative finite probabilities
+summing to one. Zero disables a group. A positive-weight group with no rows fails
+startup; set its weight to zero and explicitly reallocate its probability.
+Missing, noninteger, or out-of-range labels also fail startup rather than silently
+becoming group 2. Startup logs record the field, group counts, and probabilities.
+
+Use this with one `data.rl_manifest` or prepared `data.prompt_data` input. The
+field must match the exported history; choosing a different model's history is a
+run decision. Priorities stay fixed as training progresses, and do not change
+grades or the online zero-variance filter. Named source mixtures/pools, frozen
+exclusion tables, and prompt replay cannot be combined with this provider.
+The default remains ordinary shuffle. Checkpoints preserve group-draw RNG and
+independent group cursors alongside pending prompts, and reject changes to the
+field, weights, seed, shuffle mode, or group assignments on resume.
 
 ### ReMind review provider
 
