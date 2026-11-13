@@ -8,11 +8,11 @@ distribution, and the rows at exactly max_seq_length (truncated by the tokenizer
 Gate (2), label-mask dump: the ``--rows`` rows with the most tool turns are decoded span by span, where a span is a
 maximal run of tokens with one label state (trained or masked), and each span is classified by the chat-template
 markers it starts with. The dump prints every span (state, length, first 90 characters) for the owner to read, and
-checks the rules the registration states: every system, user and tool turn is masked; every assistant turn has a
-trained span that ends at its ``<|im_end|>``; the ``<think>`` that the template puts in the generation prompt before
-an assistant turn is masked (prefix labels, as H194), so each trained span starts at the reasoning text; every
-trained span ends at ``<|im_end|>`` (tool-call turns) or the eos token (final answers); no trained span starts inside
-a user or environment (tool-result) turn.
+checks the rules the registration states: no trained span contains a turn header (so every system, user and
+environment/tool turn is masked); every trained span is preceded by the generation prompt ``<|im_start|>assistant\n
+<think>``, whose ``<think>`` is masked (prefix labels, as H194), so each trained span starts at the reasoning text;
+every trained span ends at ``<|im_end|>`` (tool-call turns) or the eos token (final answers); the number of trained
+spans equals the number of assistant headers.
 ``--check-tokenizer`` re-tokenizes each dumped row's decoded text with another tokenizer (the start checkpoint's own
 tokenizer.json, promoted-think) and requires identical ids, so the cache's tokenization is the one the start was
 trained with. Exit 0 iff every check passes; the JSON holds everything printed.
@@ -61,19 +61,6 @@ def spans(mask):
             out.append((bool(mask[start]), start, i))
             start = i
     return out
-
-
-def classify(text):
-    """The olmo35 template: <|im_start|>{system,user,assistant,environment}; tool results are 'environment'."""
-    t = text.lstrip("\n")
-    for role, kind in (("system", "system"), ("user", "user"), ("assistant", "assistant"), ("environment", "tool")):
-        if t.startswith(f"{IM_START}{role}"):
-            return kind
-    if text.startswith("<think>") or text.strip() == "<think>":
-        return "gen-think"
-    if text.startswith("<tool_response>"):
-        return "tool-body"
-    return "-"
 
 
 def main():
@@ -130,49 +117,44 @@ def main():
     chosen = [ri for _, ri in sorted(counts, reverse=True)[: a.rows]]
 
     failures, dump = [], []
+    gen_prompt = f"{IM_START}assistant\n<think>"
     for ri in chosen:
         pi, s, e = rows[ri]
         ids = np.asarray(tokens[pi][s:e]).astype(np.int64)
         lm = np.asarray(labels[pi][s:e]).astype(bool)
         sp = spans(lm)
         entries, turns = [], {"system": 0, "user": 0, "assistant": 0, "tool": 0}
-        prev_role = None
         for trained, b, en in sp:
             text = tok.decode(ids[b:en])
-            kind = classify(text)
-            if kind in turns:
-                turns[kind] += 1
+            # A masked span runs from one trained span to the next, so it holds every header in between
+            # (e.g. system + user + the assistant header, or a tool result + the next assistant header).
+            inside = {kind: text.count(f"{IM_START}{role}") for role, kind in
+                      (("system", "system"), ("user", "user"), ("assistant", "assistant"), ("environment", "tool"))}
+            for kind, n in inside.items():
+                turns[kind] += n
+            kind = "+".join(k for k, n in inside.items() if n) or "-"
             entries.append({"trained": trained, "start": int(b), "end": int(en), "kind": kind, "head": text[:90]})
-            # rules
-            if trained and kind in ("system", "user", "tool", "tool-body"):
-                failures.append(f"row {ri}: trained span starts a {kind} turn at {b}")
-            if trained and kind == "gen-think":
-                failures.append(f"row {ri}: generation-prompt <think> trained at {b}")
-            if (not trained) and kind == "assistant":
-                # masked assistant header must be followed by a trained span (the turn's content)
-                pass
-            prev_role = kind if kind in turns else prev_role
-        # every assistant turn: a masked header span followed by a trained span ending with <|im_end|>
-        for i, en in enumerate(entries):
-            if en["kind"] == "assistant":
-                if en["trained"]:
-                    failures.append(f"row {ri}: assistant header trained at {en['start']}")
-                nxt = entries[i + 1] if i + 1 < len(entries) else None
-                if nxt is None or not nxt["trained"]:
-                    failures.append(f"row {ri}: assistant turn at {en['start']} has no trained span")
+            if trained:
+                if IM_START in text:
+                    failures.append(f"row {ri}: trained span at {b} contains a turn header ({kind})")
+                last = int(ids[en - 1])
+                if last not in (im_end_id, tok.eos_token_id):
+                    failures.append(f"row {ri}: trained span at {b} ends with {tok.decode(ids[en - 3:en])!r}, not {IM_END}/eos")
+                if b == 0:
+                    failures.append(f"row {ri}: row starts trained")
                 else:
-                    # tool-call turns end with <|im_end|>, final answers with the eos token (olmo35 template)
-                    last = int(ids[nxt["end"] - 1])
-                    if last not in (im_end_id, tok.eos_token_id):
-                        tail = tok.decode(ids[nxt["end"] - 3: nxt["end"]])
-                        failures.append(f"row {ri}: trained span at {nxt['start']} ends with {tail!r}, not {IM_END}/eos")
-                    # the masked header must end with the generation prompt's <think> (prefix labels, as H194):
-                    # the trained span then starts with the reasoning text, not with <think>.
-                    head_tail = tok.decode(ids[en["end"] - 1: en["end"]])
-                    if head_tail != "<think>":
-                        failures.append(f"row {ri}: assistant header at {en['start']} ends with {head_tail!r}, not <think>")
-        if not any(en["kind"] == "assistant" for en in entries):
+                    head_tail = tok.decode(ids[max(0, b - 8):b])
+                    if not head_tail.endswith(gen_prompt):
+                        failures.append(f"row {ri}: trained span at {b} is not preceded by the generation prompt: {head_tail!r}")
+            elif text.startswith("<think>") or text.strip() == "<think>":
+                pass
+        n_trained = sum(1 for en in entries if en["trained"])
+        if n_trained != turns["assistant"]:
+            failures.append(f"row {ri}: {turns['assistant']} assistant headers but {n_trained} trained spans")
+        if turns["assistant"] == 0:
             failures.append(f"row {ri}: no assistant turn found")
+        if lm[0]:
+            failures.append(f"row {ri}: first token trained")
         tok_check = None
         if other is not None:
             text = tok.decode(ids)
@@ -185,7 +167,7 @@ def main():
         print(f"H218-ROW {ri} len {len(ids)} loss {int(lm.sum())} turns {turns} spans {len(entries)} tok_check {tok_check}",
               flush=True)
         for en in entries:
-            print(f"   {'T' if en['trained'] else '.'} {en['end'] - en['start']:>6} {en['kind']:<9} {en['head']!r}")
+            print(f"   {'T' if en['trained'] else '.'} {en['end'] - en['start']:>6} {en['kind']:<22} {en['head']!r}")
 
     result = {"receipt": receipt, "rows_dumped": chosen, "dump": dump, "failures": failures,
               "pass": not failures}
