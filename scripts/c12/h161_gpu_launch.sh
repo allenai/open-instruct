@@ -111,6 +111,15 @@ case "$MODE" in
            MIN_RUNTIME="${MIN_RUNTIME:-5m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-1}"
            MAX_RETRIES="${MAX_RETRIES:-1}" ;;
     train) MIN_RUNTIME="${MIN_RUNTIME:-1h}"; ENTRY=open_instruct/olmo_core_finetune.py; AUTO_RESUME="${AUTO_RESUME:-1}" ;;
+    # mem131: A4B memory smoke at one 131,072-token instance per rank (ledger-manager item D, 2026-11-12). MEM_STEPS
+    # steps (15), no saves, H194's 131K view of the frozen C12 cache (h194_wrap.py) and H194's 64K-128K replay.
+    # MEM_EP sets --expert_parallel_degree (8); MEM_AC=blocks checkpoints every whole block on top of the config's
+    # in-block recompute. Each rank prints its peak memory at exit (C12R-PEAK).
+    mem131) [[ "$ARM" == a4b ]] || { echo "mem131 is for arm a4b" >&2; exit 1; }
+           STEPS="${MEM_STEPS:-15}"; CKPT=1000000; SAVE_EVERY=1000000; HOURS=2
+           OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-131k-smoke
+           RUN_NAME="a4b131k-ep${MEM_EP:-8}-ac${MEM_AC:-config}"
+           MIN_RUNTIME="${MIN_RUNTIME:-30m}"; ENTRY=/tmp/h194_wrap.py; AUTO_RESUME=0 ;;
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
 esac
 TIMEOUT="${TIMEOUT:-${HOURS}h}"
@@ -129,6 +138,13 @@ ARGS="--model_name_or_path $MODEL --config_name $CONFIG \
 --local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR $EXTRA_ARGS"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
+if [[ "$MODE" == mem131 ]]; then
+    CACHE=bf82a8fab8-0a2e7a2c-rowaligned   # h194_wrap.py's name for the frozen cache read at 131,072
+    ARGS=${ARGS/--max_seq_length 65536/--max_seq_length 131072}
+    ARGS=${ARGS//\/weka\/olmo-3p5-post-checkpoints\/abhishekr\/h182\/replay-b1c12r/\/weka\/olmo-3p5-post-checkpoints\/abhishekr\/c12r-long\/replay}
+    ARGS=${ARGS/--expert_parallel_degree 8/--expert_parallel_degree ${MEM_EP:-8}}
+    [[ "${MEM_AC:-}" == blocks ]] && ARGS=${ARGS/--activation_checkpointing_mode budget --activation_memory_budget 1/--activation_checkpointing_mode selected_modules --activation_checkpointing_modules 'blocks.[0-9]' 'blocks.[0-9][0-9]'}
+fi
 
 BASE_RECEIPT="$(dirname "$MODEL")/RECEIPT.json"
 WAIT="for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
@@ -149,6 +165,20 @@ echo H161-TRAIN-EXIT \$RC \$(date -u +%FT%TZ)
 exit \$RC"
     EXTRA_ENV='{"name": "H161_BATCH_HASH", "value": "1"}, {"name": "H161_HOLD_AT_STEP", "value": "'"$HOLD_AT"'"},
     {"name": "H161_NO_FINAL_SAVE", "value": "1"},'
+elif [[ "$MODE" == mem131 ]]; then
+    WRAP=$(gzip -9c "$HERE/h161_smoke_wrap.py" | base64 | tr -d '\n')
+    W194=$(gzip -9c "$HERE/h194_wrap.py" | base64 | tr -d '\n')
+    CMD="set -uo pipefail
+printf %s '$WRAP' | base64 -d | gunzip > /tmp/h161_smoke_wrap.py
+printf %s '$W194' | base64 -d | gunzip > /tmp/h194_wrap.py
+sha256sum /tmp/h161_smoke_wrap.py /tmp/h194_wrap.py
+echo H161-JOB-START \$(date -u +%FT%TZ) job \$BEAKER_JOB_ID replica \$BEAKER_REPLICA_RANK
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1
+$WAIT
+$TORCHRUN; RC=\$?
+echo H161-TRAIN-EXIT \$RC \$(date -u +%FT%TZ)
+exit \$RC"
+    EXTRA_ENV='{"name": "H161_NO_FINAL_SAVE", "value": "1"}, {"name": "C12R_CACHE_ROOT", "value": "/weka/olmo-3p5-post-checkpoints/abhishekr/c12r-long/cache"},'
 elif [[ "$MODE" == smoke ]]; then
     WRAP=$(gzip -9c "$HERE/h161_smoke_wrap.py" | base64 | tr -d '\n')
     REFCE=$(gzip -9c "$HERE/h161_refce.py" | base64 | tr -d '\n')
@@ -206,7 +236,12 @@ fi
 # backward needing 7.79 GiB with 7.57 GiB free and 31 GiB reserved but unallocated.
 [[ "$ARM" == a4b ]] && EXTRA_ENV="$EXTRA_ENV {\"name\": \"PYTORCH_CUDA_ALLOC_CONF\", \"value\": \"expandable_segments:True\"},"
 SPEC=$(mktemp -t h161spec.XXXXXX)
-CMD="$CMD" python3 - "$SPEC" <<EOF
+CONSTRAINTS=""
+if [[ "$MODE" == mem131 ]]; then
+    # Live, uncordoned holmes nodes minus holmes-cs-aus-544; hostname and cluster cannot be combined.
+    CONSTRAINTS=$(beaker cluster nodes ai2/holmes --format json | python3 -c 'import json,sys; print(json.dumps({"hostname": sorted(n["hostname"] for n in json.load(sys.stdin) if not n.get("cordoned") and not n["hostname"].startswith("holmes-cs-aus-544."))}))')
+fi
+CMD="$CMD" CONSTRAINTS="$CONSTRAINTS" python3 - "$SPEC" <<EOF
 import json, os, sys
 env = [
     {"name": "OLMO_SHARED_FS", "value": "1"},
@@ -233,7 +268,7 @@ task = {
     "result": {"path": "/output"},
     "resources": {"gpuCount": 8, "sharedMemory": "10GiB"},
     "context": {"priority": "${PRIORITY:-high}", "minRuntime": "$MIN_RUNTIME", "autoResume": "$AUTO_RESUME" == "1"},
-    "constraints": {"cluster": ["ai2/holmes"]},
+    "constraints": json.loads(os.environ.get("CONSTRAINTS") or '{"cluster": ["ai2/holmes"]}'),
     "replicas": 2,
     "leaderSelection": True,
     "hostNetworking": True,
@@ -243,7 +278,7 @@ task = {
     "timeout": "$TIMEOUT",
 }
 spec = {"version": "v2", "budget": "ai2/oe-other",
-        "description": "$DESC: $RUN_NAME, $STEPS steps, 2x8 B300, seq 65536, lr $LR",
+        "description": "$DESC: $RUN_NAME, $STEPS steps, 2x8 B300, seq $([[ "$MODE" == mem131 ]] && echo 131072 || echo 65536), lr $LR",
         "tasks": [task]}
 if int("${MAX_RETRIES:-0}"):
     spec["retry"] = {"allowedTaskRetries": int("${MAX_RETRIES:-0}")}
