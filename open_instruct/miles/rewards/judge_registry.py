@@ -32,7 +32,7 @@ def bound(name):
     return value is not None and name in value["bindings"]
 
 
-def resolve_request(args, name, query, prediction, target):
+def resolve_request(args, name, query, prediction, target, *, extract_answer=True):
     value = registry()
     if value is None:
         return None
@@ -41,7 +41,9 @@ def resolve_request(args, name, query, prediction, target):
     kind = judging.PROFILES[rubric["profile"]]
     if kind != "general-quality" and (target is None or target == ""):
         raise ValueError(f"{name} requires a reference target")
-    prompt, digest = general_judge.build_judge_prompt(kind, query=query, prediction=prediction, target=target)
+    prompt, digest = general_judge.build_judge_prompt(
+        kind, query=query, prediction=prediction, target=target, extract_answer=extract_answer
+    )
     config = general_judge.GeneralJudgeConfig(
         api_url=service["endpoint"].rstrip("/") + "/chat/completions",
         api_key="EMPTY",

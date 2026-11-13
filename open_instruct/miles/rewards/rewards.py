@@ -28,7 +28,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from open_instruct import logger_utils
-from open_instruct.miles.rewards import general_judge, judge_registry, response_text
+from open_instruct.miles.rewards import general_judge, grading, judge_registry, response_text
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -225,8 +225,13 @@ async def isolated_verifier_call(
 
 
 class _IsolatedVerifier:
-    def __init__(self, spec):
+    def __init__(self, spec, factory=None):
         self.spec = spec
+        # Isolation must not hide a factory's declared input requirements.
+        self.grading_scope = getattr(factory, "grading_scope", "response")
+        self.grading_uses_tokens = getattr(factory, "grading_uses_tokens", False)
+        self.grading_scopes = getattr(factory, "grading_scopes", grading.SCOPES)
+        self.grading_requires_reasoning = getattr(factory, "grading_requires_reasoning", False)
 
     async def async_call(self, *args, **kwargs):
         start = time.monotonic()
@@ -270,7 +275,7 @@ def _resolve_verifier(spec: dict, *, isolate_symbolic=False):
     factory = getattr(importlib.import_module(module), symbol)
     config = factory.get_config_class()(**spec.get("config", {}))
     if isolate_symbolic and any(f"{base.__module__}.{base.__name__}" in _MATH_FACTORIES for base in factory.__mro__):
-        return _IsolatedVerifier(spec)
+        return _IsolatedVerifier(spec, factory)
     return factory(verifier_config=config, **spec.get("kwargs", {}))
 
 
@@ -321,7 +326,34 @@ def _registry(path):
     document = json.loads(Path(path).read_text())
     if not isinstance(document, dict) or not document:
         raise ValueError("reward_config must map verifier names to factory/config objects")
-    return {name: _resolve_verifier(spec, isolate_symbolic=True) for name, spec in document.items()}
+    registry = _VerifierRegistry()
+    for name, spec in document.items():
+        verifier = _resolve_verifier(spec, isolate_symbolic=True)
+        policy = grading.GradingPolicy.from_spec(spec, default_scope=getattr(verifier, "grading_scope", "response"))
+        if getattr(verifier, "grading_uses_tokens", False) and policy.scope != "full":
+            raise ValueError(f"Token-based verifier {name!r} requires grading.scope=full")
+        if policy.scope not in getattr(verifier, "grading_scopes", grading.SCOPES):
+            raise ValueError(f"Verifier {name!r} does not support grading.scope={policy.scope}")
+        registry[name] = verifier
+        registry.grading_policies[name] = policy
+        # In-repository text graders have known selected-input behavior. An
+        # external grader must declare its input contract or implement the parts
+        # protocol; otherwise final-only mode could silently strip its boundary
+        # twice (the historical qualified-IF all-zero failure).
+        if (
+            not spec["factory"].startswith("open_instruct.")
+            and "grading" not in spec
+            and not callable(getattr(verifier, "async_call_parts", None))
+        ):
+            registry.undeclared_grading.add(name)
+    return registry
+
+
+class _VerifierRegistry(dict):
+    def __init__(self):
+        super().__init__()
+        self.grading_policies = {}
+        self.undeclared_grading = set()
 
 
 @functools.lru_cache(maxsize=8)
@@ -400,6 +432,13 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
         if spec["name"] not in registry:
             raise ValueError(f"Verifier {spec['name']!r} is absent from the trusted reward registry")
         weighted_specs.append((spec, _finite(spec.get("weight", 1.0), "weight")))
+    if args.olmo_core.reward_final_answer_only:
+        undeclared = getattr(registry, "undeclared_grading", set()) & {spec["name"] for spec, _ in weighted_specs}
+        if undeclared:
+            raise ValueError(
+                f"External verifiers {sorted(undeclared)} must declare registry grading policy "
+                "or implement async_call_parts before final-answer grading"
+            )
     status = getattr(sample.status, "value", sample.status) if hasattr(sample, "status") else None
     reason = None
     # Preserve the original rollout text and token trajectory for training/records.
@@ -408,16 +447,44 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
     )
     if args.olmo_core.reward_zero_truncated and status == "truncated":
         reason = "truncated"
-    elif args.olmo_core.reward_final_answer_only:
-        _, separator, response = response.rpartition("</think>")
-        if not separator or not response.strip():
-            reason = "missing_final_answer"
-    if reason:
+    parts = None
+    if args.olmo_core.reward_final_answer_only:
+        parts = grading.split_response(
+            sample.response,
+            reasoning_mode=getattr(args.olmo_core, "reward_reasoning_mode", "required"),
+            prompt=getattr(sample, "prompt", None),
+            completion_status=status,
+        )
+        # This provenance describes selection, not verifier success. Per-component
+        # scopes and gates below make exceptions visible in ordinary run records.
+        metadata["grading"] = {**parts.summary(), "components": {}}
+        metadata.pop("reward_gate", None)
+        reason = reason or parts.gate
+    if reason and parts is None:
         metadata["reward_gate"] = reason
     components = []
     total = 0.0
     for spec, weight in weighted_specs:
         name = spec["name"]
+        verifier = registry[name]
+        policy = None
+        if parts is not None:
+            policy = getattr(registry, "grading_policies", {}).get(name) or grading.GradingPolicy(
+                scope=getattr(verifier, "grading_scope", "response")
+            )
+            if parts.reasoning_mode == "none" and (
+                policy.scope == "thinking" or getattr(verifier, "grading_requires_reasoning", False)
+            ):
+                raise ValueError(f"Verifier {name!r} requires reward_reasoning_mode=required")
+            reason = policy.gate(parts, zero_truncated=args.olmo_core.reward_zero_truncated)
+            response = parts.text(policy.scope)
+            metadata["grading"]["components"][name] = {
+                "scope": policy.scope,
+                "require_response": policy.require_response,
+                "gate": reason,
+            }
+            if reason:
+                metadata.setdefault("reward_gate", reason)
         try:
             if reason:
                 # Gate at the verifier's floor, including its target-dependent range.
@@ -430,37 +497,45 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
             # response_length includes tool observations. Their tokens remain in the
             # trajectory, while the policy loss uses the separate MILES loss mask.
             tokens = sample.tokens[-sample.response_length :] if sample.response_length else []
-            if args.olmo_core.reward_final_answer_only:
-                # Text math verifiers do not use token IDs. Never pass the hidden
-                # reasoning's tokens alongside an extracted final-answer string.
+            if policy is not None and policy.scope != "full":
+                # There is no reliable decoded-character -> token alignment in a
+                # generic sample. Only explicitly full-trajectory consumers get
+                # the original tokens; token scorers require that scope at load.
                 tokens = []
             if judge_registry.bound(name):
+                # A trusted process/whole-response rubric must see its declared
+                # view intact, without the answer-task wrapper extractor.
+                judge_options = {"extract_answer": False} if policy and policy.scope != "response" else {}
                 score = await general_judge.general_judge_score(
-                    args, sample, name=name, target=copy.deepcopy(spec["target"]), prediction=response
+                    args, sample, name=name, target=copy.deepcopy(spec["target"]), prediction=response, **judge_options
                 )
                 diagnostics = metadata.get("verifier_diagnostics", {}).get(name, {})
                 cost = 0.0
             else:
                 # Verifiers may opt into final-answer handling; existing math/code
                 # verifiers continue to grade the suffix through their normal method.
-                verifier = registry[name]
-                score_response = verifier.async_call
-                if args.olmo_core.reward_final_answer_only:
+                score_response = getattr(verifier, "async_call", None)
+                if policy is not None and policy.scope == "response":
                     score_response = getattr(verifier, "async_call_final_answer", score_response)
+                structured_call = getattr(verifier, "async_call_parts", None) if parts is not None else None
                 extra = {}
-                if getattr(verifier, "reads_prompt_reasoning", False):
+                if structured_call is None and getattr(verifier, "reads_prompt_reasoning", False):
                     extra["prompt_opens_reasoning"] = _prompt_opens_reasoning(
-                        sample.prompt, final_answer_only=args.olmo_core.reward_final_answer_only
+                        sample.prompt, final_answer_only=policy is not None and policy.scope != "full"
                     )
-                result = await score_response(
-                    tokens,
-                    response,
-                    # Verifiers may consume dictionary labels; preserve the original targets.
-                    copy.deepcopy(spec["target"]),
-                    query=metadata.get("query", sample.prompt),
-                    rollout_state=metadata.get("rollout_state"),
+                call_kwargs = {
+                    "query": metadata.get("query", sample.prompt),
+                    "rollout_state": metadata.get("rollout_state"),
                     **extra,
-                )
+                }
+                if structured_call is not None:
+                    result = await structured_call(
+                        tokens, parts, copy.deepcopy(spec["target"]), scope=policy.scope, **call_kwargs
+                    )
+                else:
+                    if score_response is None:
+                        raise ValueError(f"Verifier {name!r} must implement async_call or async_call_parts")
+                    result = await score_response(tokens, response, copy.deepcopy(spec["target"]), **call_kwargs)
                 diagnostics = getattr(result, "diagnostics", None)
                 if isinstance(diagnostics, dict) and diagnostics.get("status") == "timeout":
                     error = TimeoutError(diagnostics.get("error") or "Verifier timed out without an error message")

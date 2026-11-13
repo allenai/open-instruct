@@ -18,7 +18,7 @@ from fractions import Fraction
 import regex
 
 from open_instruct import logger_utils
-from open_instruct.miles.rewards import response_text, task_verifiers
+from open_instruct.miles.rewards import grading, task_verifiers
 
 _QUOTED_PAIR_PATTERN = r'".+":\s*".+"'
 _FORMAT_SEARCH_TIMEOUT_SECONDS = 0.1
@@ -46,7 +46,7 @@ class Result:
 
 def answer_text(text):
     """Use an explicit final region when present; support non-thinking policies."""
-    return response_text.strip_terminal_special_tokens(text.rsplit("</think>", 1)[-1]).strip()
+    return grading.legacy_response_text(text)
 
 
 def strict_json(text):

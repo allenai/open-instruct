@@ -22,7 +22,7 @@ from open_instruct import ifeval_constraints, logger_utils
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.datasets import mixture, pools, synlogic
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import judging, task_verifiers
+from open_instruct.miles.rewards import grading, judging, task_verifiers
 from open_instruct.miles.rollout import pool_sampling
 
 logger = logger_utils.setup_logger(__name__)
@@ -519,6 +519,10 @@ def _prepared(data, inputs):
             or "." not in spec["factory"]
         ):
             raise InputError("Trusted registry entries require explicit factory paths")
+        try:
+            grading.GradingPolicy.from_spec(spec)
+        except ValueError as error:
+            raise InputError(f"Verifier {name!r}: {error}") from error
     evaluation = data.get("eval_prompt_data", [])
     if not isinstance(evaluation, list) or len(evaluation) % 2:
         raise InputError("eval_prompt_data must alternate dataset names and paths")
