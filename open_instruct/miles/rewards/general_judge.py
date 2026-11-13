@@ -38,7 +38,7 @@ import requests
 from open_instruct import judge_utils, logger_utils
 from open_instruct.answer_utils import extract_final_answer
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.rewards import judge_registry, judging, service
+from open_instruct.miles.rewards import abstention, judge_registry, judging, service
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -311,7 +311,21 @@ async def general_judge_score(
         )
         config = general_judge_config(args)
         parser = "yes-no" if name == "general-web_instruct_general_verifier" else "score-1-to-10"
+    if parser == abstention.KIND and abstention.is_abstention(prediction):
+        metadata.setdefault("verifier_diagnostics", {})[name] = {
+            "kind": abstention.KIND,
+            "status": "ok",
+            "verdict": "abstain",
+            "score": 0.5,
+            "judge_called": False,
+            "binding": binding,
+            "rubric_sha256": rubric_sha256,
+        }
+        return 0.5
     policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
+    if parser == abstention.KIND:
+        # A failed correctness judge must never be recorded as an incorrect answer.
+        policy = "raise"
     if policy not in {"zero", "raise"}:
         raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
     started = time.monotonic()
@@ -324,6 +338,11 @@ async def general_judge_score(
             content = await asyncio.get_running_loop().run_in_executor(executor, _request, config, prompt)
             if parser == "yes-no":
                 reasoning, score = parse_web_instruct_judge_response(content)
+            elif parser == abstention.KIND:
+                try:
+                    reasoning, score = abstention.grade(content)
+                except ValueError as error:
+                    raise JudgeResponseError(str(error)) from error
             else:
                 reasoning, score = parse_judge_response(content)
             break
@@ -381,4 +400,8 @@ async def general_judge_score(
         "seed": config.seed,
         "temperature": config.temperature,
     }
+    if parser == abstention.KIND:
+        metadata["verifier_diagnostics"][name].update(
+            kind=abstention.KIND, verdict=reasoning, judge_called=True, score=score
+        )
     return score

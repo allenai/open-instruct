@@ -18,6 +18,7 @@ PROFILES = {
     "open-instruct/" + name: name
     for name in ("general-quality", "general-quality_ref", "general-web_instruct_general_verifier")
 }
+PROFILES["nvidia/qa-abstention-v1"] = "nemo_abstention_v1"
 
 
 def require_binding(name, bindings, verifier_spec=None):
@@ -108,7 +109,7 @@ def parse(document):
         validation.mapping(rubric, f"rubrics.{name}")
         validation.fields(rubric, f"rubrics.{name}", constraints.STRUCTURED_FIELDS["rubrics.NAME"])
         if rubric.get("profile") not in PROFILES:
-            raise InputError("rubric requires a supported open-instruct/general-* profile")
+            raise InputError("rubric requires a supported judge profile")
         rubric.setdefault("max_response_tokens", 2048)
         rubric.setdefault("temperature", 1.0)
         validation.integer(rubric["max_response_tokens"], f"rubrics.{name}.max_response_tokens")

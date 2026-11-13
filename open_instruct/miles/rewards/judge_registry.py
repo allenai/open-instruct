@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from urllib import request
 
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import general_judge, judging
+from open_instruct.miles.rewards import abstention, general_judge, judging
 
 
 def registry():
@@ -41,9 +41,16 @@ def resolve_request(args, name, query, prediction, target, *, extract_answer=Tru
     kind = judging.PROFILES[rubric["profile"]]
     if kind != "general-quality" and (target is None or target == ""):
         raise ValueError(f"{name} requires a reference target")
-    prompt, digest = general_judge.build_judge_prompt(
-        kind, query=query, prediction=prediction, target=target, extract_answer=extract_answer
-    )
+    if kind == abstention.KIND:
+        prompt, digest = abstention.build_prompt(prediction, target)
+        parser = abstention.KIND
+    else:
+        if isinstance(target, dict) and target.get("kind") == abstention.KIND:
+            raise ValueError("Abstention targets require the nvidia/qa-abstention-v1 rubric")
+        prompt, digest = general_judge.build_judge_prompt(
+            kind, query=query, prediction=prediction, target=target, extract_answer=extract_answer
+        )
+        parser = "yes-no" if kind.endswith("general_verifier") else "score-1-to-10"
     config = general_judge.GeneralJudgeConfig(
         api_url=service["endpoint"].rstrip("/") + "/chat/completions",
         api_key="EMPTY",
@@ -56,7 +63,7 @@ def resolve_request(args, name, query, prediction, target, *, extract_answer=Tru
         max_concurrent_calls=service["max_concurrent_calls"],
         check_context=service["mode"] == "managed",
     )
-    return config, prompt, digest, "yes-no" if kind.endswith("general_verifier") else "score-1-to-10", binding, digest
+    return config, prompt, digest, parser, binding, digest
 
 
 def validate_data(prepared, value):
@@ -77,6 +84,12 @@ def validate_data(prepared, value):
                     if not isinstance(metadata.get("judge_query"), str) or not metadata["judge_query"]:
                         raise InputError("Judged data requires the preserved full metadata.judge_query")
                     profile = value["rubrics"][value["bindings"][name]["rubric"]]["profile"]
+                    target = verifier.get("target")
+                    is_abstention = isinstance(target, dict) and target.get("kind") == abstention.KIND
+                    if (profile == abstention.PROFILE) != is_abstention:
+                        raise InputError("Abstention target and rubric must be bound together")
+                    if is_abstention:
+                        abstention.validate_target(target)
                     if profile != "open-instruct/general-quality" and verifier.get("target") in (None, ""):
                         raise InputError(f"{name} requires reference targets")
     if unused := set(value["bindings"]) - seen:
@@ -98,10 +111,19 @@ async def probe(output):
         if service["model"] not in {m["id"] for m in advertised["data"]}:
             raise RuntimeError("Judge endpoint advertises the wrong model")
         scores = []
-        for response in ("The capital of France is Paris.", "The capital of France is Saturn, a type of sandwich."):
+        profile = value["rubrics"][binding["rubric"]]["profile"]
+        target = (
+            {"kind": abstention.KIND, "question": "What is the capital of France?", "answer": "Paris."}
+            if profile == abstention.PROFILE
+            else "Paris."
+        )
+        responses = ["The capital of France is Paris.", "The capital of France is Saturn, a type of sandwich."]
+        if profile == abstention.PROFILE:
+            responses.append(r"\boxed{[IDK]}")
+        for response in responses:
             sample = SimpleNamespace(response=response, metadata={"judge_query": "What is the capital of France?"})
             score = await general_judge.general_judge_score(
-                SimpleNamespace(seed=1, llm_judge_failure_policy="raise"), sample, name=name, target="Paris."
+                SimpleNamespace(seed=1, llm_judge_failure_policy="raise"), sample, name=name, target=target
             )
             scores.append(score)
             reports.append(
@@ -116,6 +138,8 @@ async def probe(output):
         Path(output).write_text(json.dumps(reports, indent=2))
         if scores[0] <= scores[1]:
             raise RuntimeError(f"Judge known-answer contrast failed for {name}")
+        if profile == abstention.PROFILE and scores != [1.0, 0.0, 0.5]:
+            raise RuntimeError(f"Abstention three-tier reward contrast failed for {name}")
     return reports
 
 
