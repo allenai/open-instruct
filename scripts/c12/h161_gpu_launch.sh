@@ -54,6 +54,11 @@
 # was killed there). (3) tok_count_patch.py: backport of #1904, Arrow-batch token counting (the per-row count map took
 # ~6.6 h). (4) tok_collect_patch.py: the collect loop reads Arrow batches on worker threads instead of a one-thread loop
 # over rows (2h31m at 438 rows/s); test_tok_collect_patch.py proves its partial files byte-identical to the original's.
+# (5) tok_row_cache_patch.py: a row-level tokenization cache on WEKA, on by default. get_dataset_v1's tokenize map
+# serves rows tokenized by an earlier build (keyed by a hash of each row's messages and tools, under a digest of the
+# tokenizer, template, transform and versions) and tokenizes only the rest; test_tok_row_cache.py proves the output
+# byte-identical. TOK_ROW_CACHE=<dir> moves the store (default /weka/olmo-3p5-post-checkpoints/chrisg/token-row-cache),
+# TOK_ROW_CACHE=off turns it off. Job log lines TOK-ROW-CACHE show hits, misses and the store size.
 # The cache directory name hashes the arguments, not the code, so every patch here must keep the output byte-identical.
 # Notes: dev/projects/2026-11-05--dolci-qwen38-distillation/tokenization.md.
 #
@@ -223,6 +228,12 @@ elif [[ "$MODE" == tokenize ]]; then
     # threads, 32 batches ahead, in place of a one-thread Python loop over rows (250-440 rows/s, 2.5 h). Byte-identical
     # partial files, checked by scripts/c12/test_tok_collect_patch.py, so resume and the cache are unchanged.
     COLLECT_PATCH=$(gzip -9c "$HERE/tok_collect_patch.py" | base64 | tr -d '\n')
+    # scripts/c12/tok_row_cache_patch.py: copies itself to open_instruct/token_row_cache.py and routes the tokenize map
+    # through it. Rows whose content was tokenized before (same tokenizer, template, transform and arguments) come from
+    # the store on WEKA; only new rows are tokenized, by the original function, and stored. Byte-identical output,
+    # checked by scripts/c12/test_tok_row_cache.py. Any store problem falls back to tokenizing.
+    ROWCACHE_PATCH=$(gzip -9c "$HERE/tok_row_cache_patch.py" | base64 | tr -d '\n')
+    ROWCACHE_ROOT="${TOK_ROW_CACHE:-/weka/olmo-3p5-post-checkpoints/chrisg/token-row-cache}"
     # TOK_CPU_COUNT pins BEAKER_ASSIGNED_CPU_COUNT, which open-instruct uses as num_proc for the tokenize maps. The
     # Hugging Face map cache names its shards by num_proc, so pinning it to an earlier build's value (90 for H216's)
     # lets unchanged sources reuse their tokenized shards (ledger H210's execution notes). One thread per process
@@ -238,10 +249,12 @@ grep -q 'else train_dataset.select(\[\])' \$F || { echo H161-PATCH-FAILED; exit 
 printf %s '$STATS_PATCH' | base64 -d | gunzip > /tmp/tok_stats_patch.py && python /tmp/tok_stats_patch.py \$F || { echo H161-STATS-PATCH-FAILED; exit 2; }
 printf %s '$COUNT_PATCH' | base64 -d | gunzip > /tmp/tok_count_patch.py && python /tmp/tok_count_patch.py . || { echo H161-COUNT-PATCH-FAILED; exit 2; }
 printf %s '$COLLECT_PATCH' | base64 -d | gunzip > /tmp/tok_collect_patch.py && python /tmp/tok_collect_patch.py \$F && grep -q '_prepare_arrow_batch(' \$F || { echo H161-COLLECT-PATCH-FAILED; exit 2; }
+printf %s '$ROWCACHE_PATCH' | base64 -d | gunzip > /tmp/tok_row_cache_patch.py && python /tmp/tok_row_cache_patch.py . && grep -q 'token_row_cache.cached_map(' open_instruct/dataset_transformation.py && python -c 'import sys; sys.exit(open(sys.argv[1], \"rb\").read() != open(sys.argv[2], \"rb\").read())' /tmp/tok_row_cache_patch.py open_instruct/token_row_cache.py || { echo H161-ROWCACHE-PATCH-FAILED; exit 2; }
+echo H161-ROWCACHE TOK_ROW_CACHE=\$TOK_ROW_CACHE
 echo H161-TOKENIZE-START \$(date -u +%FT%TZ); python $ENTRY $ARGS --cache_dataset_only; RC=\$?
 ls -la /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/ | tail -5
 echo H161-TOKENIZE-EXIT \$RC \$(date -u +%FT%TZ); exit \$RC"
-    EXTRA_ENV=""
+    EXTRA_ENV='{"name": "TOK_ROW_CACHE", "value": "'"$ROWCACHE_ROOT"'"},'
 else
     CMD="$WAIT
 $TORCHRUN"
