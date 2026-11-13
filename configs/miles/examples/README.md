@@ -14,7 +14,11 @@ these TOMLs. Run `plan` on your copy to inspect the resolved settings and unused
 stated.** Start a validation run from the applicable demo and record intentional
 differences. In particular, keep per-response loss weighting
 (`miles.calculate_per_token_loss=false`) and zero reward for truncated responses
-(`core.reward_zero_truncated=true`). A throughput experiment must not silently
+(`core.reward_zero_truncated=true`) and presented-response grading
+(`core.reward_final_answer_only=true`). The examples declare
+`core.reward_reasoning_mode="required"`; use `"none"` explicitly for a non-thinking
+policy/template. Process and boundary-format rewards require declared exceptions;
+see [grading contracts](../../../docs/miles/grading.md). A throughput experiment must not silently
 change either learning-policy setting. The one-node and three-node demos share
 training hyperparameters, including batch size and policy lag; their datasets,
 judges, evaluation panels and topology-specific performance budgets differ.

@@ -212,7 +212,8 @@ while retaining removal of answer tags, `<|assistant|>` and outer whitespace
 before grading IF constraints. R1 format
 reward checks the tags themselves; IF reward grades the normalized answer.
 
-This option defaults to false and assumes the Olmo thinking format. It permits
+The library option defaults to false; the maintained examples explicitly enable it
+with the Olmo thinking convention. It permits
 multiple closing markers, so it is not an exactly-one-tag format validator.
 
 ## Runtime images
