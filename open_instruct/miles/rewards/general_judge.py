@@ -38,7 +38,7 @@ import requests
 from open_instruct import judge_utils, logger_utils
 from open_instruct.answer_utils import extract_final_answer
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.rewards import judge_registry, judging, service
+from open_instruct.miles.rewards import abstention, judge_registry, judging, service
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -314,6 +314,20 @@ async def general_judge_score(
     policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
     if policy not in {"zero", "raise"}:
         raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
+    # Explicit abstention makes no judge request, so it is deliberately excluded
+    # from general_judge request/error metrics. rubric_profile links both paths.
+    if parser == abstention.KIND and abstention.is_abstention(prediction):
+        metadata.setdefault("verifier_diagnostics", {})[name] = {
+            "kind": abstention.KIND,
+            "status": "ok",
+            "verdict": "abstain",
+            "score": 0.5,
+            "judge_called": False,
+            "binding": binding,
+            "rubric_sha256": rubric_sha256,
+            "rubric_profile": abstention.PROFILE,
+        }
+        return 0.5
     started = time.monotonic()
     last_error: RuntimeError | None = None
     failed_attempts = []
@@ -324,6 +338,11 @@ async def general_judge_score(
             content = await asyncio.get_running_loop().run_in_executor(executor, _request, config, prompt)
             if parser == "yes-no":
                 reasoning, score = parse_web_instruct_judge_response(content)
+            elif parser == abstention.KIND:
+                try:
+                    reasoning, score = abstention.grade(content)
+                except ValueError as error:
+                    raise JudgeResponseError(str(error)) from error
             else:
                 reasoning, score = parse_judge_response(content)
             break
@@ -343,6 +362,7 @@ async def general_judge_score(
                 "elapsed_seconds": time.monotonic() - started,
                 "verdict": "failed",
                 "kind": "general_judge",
+                **({"rubric_profile": abstention.PROFILE, "judge_called": True} if parser == abstention.KIND else {}),
                 "failure_policy": policy,
                 "attempts": list(failed_attempts),
             }
@@ -381,4 +401,8 @@ async def general_judge_score(
         "seed": config.seed,
         "temperature": config.temperature,
     }
+    if parser == abstention.KIND:
+        metadata["verifier_diagnostics"][name].update(
+            rubric_profile=abstention.PROFILE, verdict=reasoning, judge_called=True, score=score
+        )
     return score

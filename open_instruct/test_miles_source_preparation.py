@@ -702,3 +702,23 @@ def test_named_judge_preserves_reference_and_requires_explicit_route():
     assert messages == [{"role": "user", "content": "Prove the claim"}]
     with pytest.raises(ValueError, match="unmapped"):
         sources.adapt(raw, "routed_v1", {**route, "routes": {}})
+
+
+def test_abstention_preserves_original_messages_and_factual_target():
+    raw = {
+        "question": "Which city?",
+        "answer": "Paris",
+        "domain": "Law",
+        "tools": [],
+        "responses_create_params": {
+            "input": [{"role": "system", "content": "Abstain if unsure"}, {"role": "user", "content": "Which city?"}]
+        },
+    }
+    ms, target, name, stratum = sources.adapt(raw, "nemo_abstention_v1")
+    assert ms == raw["responses_create_params"]["input"]
+    assert target == {"kind": "nemo_abstention_v1", "question": "Which city?", "answer": "Paris"}
+    assert (name, stratum) == ("abstention", "Law")
+    assert sources.FACTORIES[name].endswith("NamedJudgeVerifier")
+    raw["question"] = "Different question"
+    with pytest.raises(ValueError, match="original system/user"):
+        sources.adapt(raw, "nemo_abstention_v1")
