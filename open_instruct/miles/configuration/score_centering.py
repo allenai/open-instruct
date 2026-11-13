@@ -14,8 +14,7 @@ def validate(options, *, fp32_lm_head):
         return
     if not fp32_lm_head:
         raise InputError(
-            "Score centering requires trainer.fp32_lm_head=true "
-            "(core.fp32_lm_head=true in the low-level API)"
+            "Score centering requires trainer.fp32_lm_head=true (core.fp32_lm_head=true in the low-level API)"
         )
     validation.integer(options.get("rollout_top_logprobs_num", 0), "miles.rollout_top_logprobs_num")
     validation.choice(options.get("score_centering_is", "none"), "miles.score_centering_is", ("none", "tis", "mis"))

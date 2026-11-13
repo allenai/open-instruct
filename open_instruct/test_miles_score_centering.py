@@ -83,5 +83,5 @@ def test_score_centering_requires_explicit_core_fp32_head(tmp_path, trainer):
         "trainer": trainer,
         "miles": {"loss_type": "score_centering", "rollout_top_logprobs_num": 20, "sglang_enable_fp32_lm_head": True},
     }
-    with pytest.raises(ValueError, match="requires core.fp32_lm_head=true"):
+    with pytest.raises(ValueError, match=r"requires trainer\.fp32_lm_head=true \(core\.fp32_lm_head=true"):
         RunSpec.from_dict(data, config_path=tmp_path / "run.toml").compile()
