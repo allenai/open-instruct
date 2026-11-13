@@ -2,13 +2,16 @@
 
 import asyncio
 import hashlib
+import io
 import json
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-from open_instruct.miles.rewards import abstention, general_judge, judge_registry, judging
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.rewards import abstention, general_judge, judge_registry, judging, rewards
 
 TARGET = {"kind": abstention.KIND, "question": "What is the capital of France?", "answer": "Paris"}
 
@@ -30,10 +33,12 @@ def binding(monkeypatch):
     return value
 
 
-def score(response):
+def score(response, failure_policy=None):
     sample = SimpleNamespace(response=response, metadata={"judge_query": TARGET["question"]})
     reward = asyncio.run(
-        general_judge.general_judge_score(SimpleNamespace(), sample, name="abstention", target=TARGET)
+        general_judge.general_judge_score(
+            SimpleNamespace(llm_judge_failure_policy=failure_policy), sample, name="abstention", target=TARGET
+        )
     )
     return reward, sample.metadata["verifier_diagnostics"]["abstention"]
 
@@ -65,10 +70,13 @@ def test_native_judge_rewards(monkeypatch, binding, reply, expected, verdict):
 
 
 @pytest.mark.parametrize("reply", ["", "<think>reasoning</think>"])
-def test_empty_judge_is_unknown_even_with_default_zero_policy(monkeypatch, binding, reply):
+def test_empty_judge_is_not_an_incorrect_grade(monkeypatch, binding, reply):
     monkeypatch.setattr(general_judge, "_request", lambda *args: reply)
+    reward, diagnostics = score("Paris")
+    assert reward == 0 and diagnostics["status"] == "judge_error"
+    assert diagnostics["kind"] == abstention.KIND
     with pytest.raises(general_judge.JudgeResponseError, match="empty"):
-        score("Paris")
+        score("Paris", "raise")
 
 
 def test_unavailable_judge_is_unknown(monkeypatch, binding):
@@ -77,7 +85,7 @@ def test_unavailable_judge_is_unknown(monkeypatch, binding):
 
     monkeypatch.setattr(general_judge, "_request", unavailable)
     with pytest.raises(general_judge.JudgeResponseError, match="service unavailable"):
-        score("Paris")
+        score("Paris", "raise")
 
 
 def test_nested_braces_and_last_box_match_native_extraction():
@@ -109,3 +117,47 @@ def test_pinned_rubric_drift_fails(monkeypatch):
     monkeypatch.setattr(abstention, "_DEFAULT_JUDGE_PROMPT_TEMPLATE", "changed")
     with pytest.raises(RuntimeError, match="rubric drift"):
         abstention.build_prompt("Paris", TARGET)
+
+
+def test_probe_checks_judge_recognized_abstention(monkeypatch, binding, tmp_path):
+    monkeypatch.setattr(
+        judge_registry.request, "urlopen", lambda *a, **kw: nullcontext(io.BytesIO(b'{"data":[{"id":"judge"}]}'))
+    )
+    request = Mock(side_effect=["A", "B", "C"])
+    monkeypatch.setattr(general_judge, "_request", request)
+    result = asyncio.run(judge_registry.probe(tmp_path / "probe.json"))
+    assert [r["score"] for r in result] == [1, 0, 0.5, 0.5]
+    assert request.call_count == 3
+    assert result[-1]["diagnostics"]["abstention"]["judge_called"] is True
+
+
+@pytest.mark.parametrize("training", [False, True])
+def test_bridge_excludes_failed_training_grades_and_continues_eval(monkeypatch, binding, tmp_path, training):
+    config = tmp_path / "verifiers.json"
+    config.write_text(
+        json.dumps(
+            {
+                "abstention": {
+                    "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
+                    "config": {"name": "abstention"},
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(general_judge, "_request", lambda *args: "")
+    sample = SimpleNamespace(
+        response="Paris",
+        prompt="Question",
+        tokens=[1],
+        response_length=1,
+        status="completed",
+        metadata={"judge_query": TARGET["question"], "verifiers": [{"name": "abstention", "target": TARGET}]},
+    )
+    if training:
+        sample.group_index = 0
+    result = asyncio.run(
+        rewards.rollout_reward(SimpleNamespace(olmo_core=CoreConfig(reward_config=str(config))), sample)
+    )
+    assert result is None if training else result == 0
+    assert ("reward_omission" in sample.metadata) == training
+    assert sample.metadata["verifier_diagnostics"]["abstention"]["status"] == "judge_error"

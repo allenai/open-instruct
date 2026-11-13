@@ -323,9 +323,6 @@ async def general_judge_score(
         }
         return 0.5
     policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
-    if parser == abstention.KIND:
-        # A failed correctness judge must never be recorded as an incorrect answer.
-        policy = "raise"
     if policy not in {"zero", "raise"}:
         raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
     started = time.monotonic()
@@ -361,7 +358,7 @@ async def general_judge_score(
                 "temperature": config.temperature,
                 "elapsed_seconds": time.monotonic() - started,
                 "verdict": "failed",
-                "kind": "general_judge",
+                "kind": abstention.KIND if parser == abstention.KIND else "general_judge",
                 "failure_policy": policy,
                 "attempts": list(failed_attempts),
             }

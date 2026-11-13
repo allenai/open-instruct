@@ -42,6 +42,8 @@ def resolve_request(args, name, query, prediction, target, *, extract_answer=Tru
     if kind != "general-quality" and (target is None or target == ""):
         raise ValueError(f"{name} requires a reference target")
     if kind == abstention.KIND:
+        # The native profile owns extraction even when shared grading has
+        # already selected the response view.
         prompt, digest = abstention.build_prompt(prediction, target)
         parser = abstention.KIND
     else:
@@ -119,7 +121,7 @@ async def probe(output):
         )
         responses = ["The capital of France is Paris.", "The capital of France is Saturn, a type of sandwich."]
         if profile == abstention.PROFILE:
-            responses.append(r"\boxed{[IDK]}")
+            responses.extend([r"\boxed{[IDK]}", "I do not know the answer; I need more context or tools."])
         for response in responses:
             sample = SimpleNamespace(response=response, metadata={"judge_query": "What is the capital of France?"})
             score = await general_judge.general_judge_score(
@@ -138,7 +140,7 @@ async def probe(output):
         Path(output).write_text(json.dumps(reports, indent=2))
         if scores[0] <= scores[1]:
             raise RuntimeError(f"Judge known-answer contrast failed for {name}")
-        if profile == abstention.PROFILE and scores != [1.0, 0.0, 0.5]:
+        if profile == abstention.PROFILE and scores != [1.0, 0.0, 0.5, 0.5]:
             raise RuntimeError(f"Abstention three-tier reward contrast failed for {name}")
     return reports
 

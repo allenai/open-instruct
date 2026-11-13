@@ -208,7 +208,7 @@ def build_prompt(prediction, target):
         raise RuntimeError("Pinned abstention rubric drift")
     return _DEFAULT_JUDGE_PROMPT_TEMPLATE.format(
         question=target["question"], target=target["answer"], predicted_answer=extracted_answer(prediction)
-    ), hashlib.sha256(_DEFAULT_JUDGE_PROMPT_TEMPLATE.encode()).hexdigest()
+    ), RUBRIC_SHA256
 
 
 def grade(content):

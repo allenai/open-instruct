@@ -360,9 +360,12 @@ def adapt(raw, kind, options=None):
         abstention.validate_target(target)
         if [m["role"] for m in ms] != ["system", "user"] or ms[-1]["content"] != target["question"]:
             raise ValueError("Abstention requires the original system/user question")
-        if raw.get("tools") or raw.get("responses_create_params", {}).get("tools"):
+        if raw.get("tools") or (raw.get("responses_create_params") or {}).get("tools"):
             raise ValueError("Abstention is a closed-book QA contract")
-        name, stratum = "abstention", raw.get("domain", "HotpotQA")
+        # The published HotpotQA component omits domain and source; infer it only
+        # for its known hexadecimal source IDs, not every future missing domain.
+        inferred = "HotpotQA" if re.fullmatch(r"[a-f0-9]{24}", str(raw.get("id", ""))) else "Unknown"
+        name, stratum = "abstention", raw.get("domain") or inferred
     elif kind == "reference_judge_v1":
         target = raw[options.get("reference_field", "expected_answer")]
         if not isinstance(target, str) or not target.strip():
