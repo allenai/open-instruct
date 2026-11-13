@@ -379,6 +379,9 @@ def test_saved_selection_replay_reports_gate_changes_without_score_claims(tmp_pa
         + "\n"
     )
     report = replay_grading_selection.replay(path)
+    assert report["input"] == "draws.jsonl"
+    assert str(tmp_path) not in json.dumps(report)
+    assert report["comparison_revision"] == "46d2dbbb5bc13baa7c821afb82cd16a95be52e41"
     assert report["input_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
     assert report["counts"] == {
         "rows": 5,
@@ -388,3 +391,34 @@ def test_saved_selection_replay_reports_gate_changes_without_score_claims(tmp_pa
         "multiple_closing_markers": 1,
     }
     assert report["new_gates"] == {"eligible": 3, "missing_final_answer": 1, "unfinished_reasoning": 1}
+
+
+@pytest.mark.parametrize("mutation", ["legacy_helper", "terminal_cleanup"])
+def test_saved_selection_replay_detects_candidate_regressions(tmp_path, monkeypatch, mutation):
+    path = tmp_path / "draws.jsonl"
+    path.write_text(json.dumps({"full": "work</think> answer <|im_end|>"}) + "\n")
+    assert replay_grading_selection.replay(path)["counts"]["legacy_input_changes"] == 0
+    if mutation == "legacy_helper":
+        monkeypatch.setattr(replay_grading_selection.deterministic_verifiers, "answer_text", lambda text: text)
+    else:
+        # Changing the candidate's shared cleanup must not also change the
+        # reference. Otherwise a shared regression still reports zero changes.
+        monkeypatch.setattr(grading.response_text, "strip_terminal_special_tokens", lambda text, **kwargs: text)
+    report = replay_grading_selection.replay(path)
+    assert report["counts"]["legacy_input_changes"] == 1
+    if mutation == "terminal_cleanup":
+        assert report["counts"]["eligible_input_changes"] == 1
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("  plain answer  ", "plain answer"),
+        ("work</think> first</think>  last  ", "last"),
+        ("work</think> answer <|im_end|>  <|endoftext|>  ", "answer"),
+        ("work</think> <|im_end|> ", ""),
+        ("literal <|im_end|> inside", "literal <|im_end|> inside"),
+    ],
+)
+def test_saved_selection_replay_frozen_baseline(raw, expected):
+    assert replay_grading_selection._baseline_legacy_input(raw) == expected

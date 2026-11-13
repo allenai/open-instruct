@@ -80,7 +80,7 @@ The Open Instruct recorder integration retains this summary in each saved respon
 
 ## Consumer migration: selection versus task parsing
 
-The shared selector owns thinking boundaries and eligibility. Consumers may still extract mathematical answers, code, JSON or answer wrappers from the supplied string, but migrated paths never look for `</think>` again. They retain their existing task-level whitespace normalization; this step does not change every formatting rubric. Contract version **3** identifies typed components and this migration, separating its evidence from versions 1 and 2 of this branch.
+The shared selector owns thinking boundaries and eligibility. Consumers may still extract mathematical answers, code, JSON or answer wrappers from the supplied string, but migrated paths never look for `</think>` again. They retain their existing task-level whitespace normalization; this step does not change every formatting rubric. Grading contract schema **3** identifies typed components and authoritative selected inputs; records with another schema identify a different grading contract.
 
 The 16 entry points below previously interpreted thinking boundaries after shared selection. They now accept the selected-input contract. The count includes Manifest IF separately from its native IFEval delegate; NeMo's extra parser is already included among the ten common-helper consumers.
 
@@ -94,7 +94,7 @@ The 16 entry points below previously interpreted thinking boundaries after share
 
 | Other consumers | Objective / decision |
 |---|---|
-| Named quality/reference/WebInstruct judges | Answer by default; explicitly declared process/format views are possible. Their selected input stays intact, as in version 2. |
+| Named quality/reference/WebInstruct judges | Answer by default; explicitly declared process/format views are possible. Their selected input stays intact, including whitespace, answer wrappers and surrounding prose. |
 | ToolRL | Composite: full context for native boundary-format credit, selected response for action correctness. No local reasoning split or blanket opener rejection in selected-action correctness. Native format rules, scaling, partial credit and joint missing-response floor remain. |
 | R1 format | Declares format/response; retains its answer-presentation check. An explicit format/full declaration retains the native raw-boundary check. |
 | Math, strict math, GSM8K, legacy code, rubric judge, multiplication, Sudoku, Flan, string/search | No explicit thinking split to migrate in these consumers. Keep their downstream mathematical/program/wrapper/phrase parsing. |
