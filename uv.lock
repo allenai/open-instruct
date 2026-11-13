@@ -3210,7 +3210,7 @@ requires-dist = [
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.44.1" },
     { name = "datasets", specifier = ">=4.8.4,<5" },
     { name = "debugpy", specifier = ">=1.8.13" },
-    { name = "deepspeed", specifier = ">=0.18.3" },
+    { name = "deepspeed", specifier = ">=0.18.4" },
     { name = "docker", specifier = ">=7.0.0" },
     { name = "dr-agent", marker = "extra == 'dr-tulu'" },
     { name = "fastapi", specifier = ">=0.100.0" },
