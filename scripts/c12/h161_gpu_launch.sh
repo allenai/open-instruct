@@ -223,7 +223,16 @@ elif [[ "$MODE" == tokenize ]]; then
     # threads, 32 batches ahead, in place of a one-thread Python loop over rows (250-440 rows/s, 2.5 h). Byte-identical
     # partial files, checked by scripts/c12/test_tok_collect_patch.py, so resume and the cache are unchanged.
     COLLECT_PATCH=$(gzip -9c "$HERE/tok_collect_patch.py" | base64 | tr -d '\n')
-    CMD="F=open_instruct/numpy_dataset_conversion.py
+    # TOK_CPU_COUNT pins BEAKER_ASSIGNED_CPU_COUNT, which open-instruct uses as num_proc for the tokenize maps. The
+    # Hugging Face map cache names its shards by num_proc, so pinning it to an earlier build's value (90 for H216's)
+    # lets unchanged sources reuse their tokenized shards (ledger H210's execution notes). One thread per process
+    # (ledger H202's c14f_tok.sh) avoids oversubscription. Neither changes the cache name or its contents.
+    PIN=""
+    if [[ -n "${TOK_CPU_COUNT:-}" ]]; then
+        PIN="export BEAKER_ASSIGNED_CPU_COUNT=$TOK_CPU_COUNT RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1; echo H161-PINNED-CPU \$BEAKER_ASSIGNED_CPU_COUNT
+"
+    fi
+    CMD="${PIN}F=open_instruct/numpy_dataset_conversion.py
 sed -i 's/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples)) if start_idx < total_samples else train_dataset.select([])/' \$F
 grep -q 'else train_dataset.select(\[\])' \$F || { echo H161-PATCH-FAILED; exit 2; }
 printf %s '$STATS_PATCH' | base64 -d | gunzip > /tmp/tok_stats_patch.py && python /tmp/tok_stats_patch.py \$F || { echo H161-STATS-PATCH-FAILED; exit 2; }
