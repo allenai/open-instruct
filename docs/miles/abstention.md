@@ -4,19 +4,16 @@ The Nemotron-RL-QA-Abstention-v1 dataset supplies factoid questions and factual 
 
 The `nvidia/qa-abstention-v1` rubric ports NVIDIA-NeMo/Gym's abstention environment at `cf7f71a57dde0a69b14a2e919b60a01b17cc7abd`. It strips thinking traces, extracts the last balanced boxed answer (including nested braces), and falls back to the remaining output when no complete box exists. Normalized `[IDK]` receives 0.5 without contacting the judge. Other outputs use the original OMNISCIENCE_GRADER prompt and A/B/C parser: correct receives 1, incorrect 0, and NOT_ATTEMPTED 0.5. This version fixes the abstention reward at NVIDIA's default 0.5; it does not implement dynamic calibration.
 
-```toml
-[judges.qa]
-mode = "external"
-model = "YOUR_REVIEWED_JUDGE_MODEL"
-endpoint = "http://YOUR_JUDGE_HOST:8000/v1"
+Reuse the existing `judges.general` Qwen/Qwen3-32B service from the maintained three-node example (model revision `9216db5781bf21249d130ec9da846c4624c16137`). Add a rubric and binding to that same service; no additional judge GPU or model load is needed:
 
+```toml
 [rubrics.abstention]
 profile = "nvidia/qa-abstention-v1"
 max_response_tokens = 64
 temperature = 0.0
 
 [judging.bindings.abstention]
-judge = "qa"
+judge = "general"
 rubric = "abstention"
 ```
 

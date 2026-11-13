@@ -63,6 +63,8 @@ def test_native_judge_rewards(monkeypatch, binding, reply, expected, verdict):
     monkeypatch.setattr(general_judge, "_request", request)
     reward, diagnostic = score(r"\boxed{Paris}")
     assert reward == expected and diagnostic["verdict"] == verdict
+    assert diagnostic["kind"] == "general_judge"
+    assert diagnostic["rubric_profile"] == abstention.PROFILE
     assert diagnostic["judge_called"] is True
     prompt = request.call_args.args[1]
     assert "Predicted answer: Paris" in prompt
@@ -74,7 +76,8 @@ def test_empty_judge_is_not_an_incorrect_grade(monkeypatch, binding, reply):
     monkeypatch.setattr(general_judge, "_request", lambda *args: reply)
     reward, diagnostics = score("Paris")
     assert reward == 0 and diagnostics["status"] == "judge_error"
-    assert diagnostics["kind"] == abstention.KIND
+    assert diagnostics["kind"] == "general_judge"
+    assert diagnostics["rubric_profile"] == abstention.PROFILE
     with pytest.raises(general_judge.JudgeResponseError, match="empty"):
         score("Paris", "raise")
 

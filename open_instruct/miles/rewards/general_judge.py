@@ -311,6 +311,9 @@ async def general_judge_score(
         )
         config = general_judge_config(args)
         parser = "yes-no" if name == "general-web_instruct_general_verifier" else "score-1-to-10"
+    policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
+    if policy not in {"zero", "raise"}:
+        raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
     if parser == abstention.KIND and abstention.is_abstention(prediction):
         metadata.setdefault("verifier_diagnostics", {})[name] = {
             "kind": abstention.KIND,
@@ -320,11 +323,9 @@ async def general_judge_score(
             "judge_called": False,
             "binding": binding,
             "rubric_sha256": rubric_sha256,
+            "rubric_profile": abstention.PROFILE,
         }
         return 0.5
-    policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
-    if policy not in {"zero", "raise"}:
-        raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
     started = time.monotonic()
     last_error: RuntimeError | None = None
     failed_attempts = []
@@ -358,7 +359,8 @@ async def general_judge_score(
                 "temperature": config.temperature,
                 "elapsed_seconds": time.monotonic() - started,
                 "verdict": "failed",
-                "kind": abstention.KIND if parser == abstention.KIND else "general_judge",
+                "kind": "general_judge",
+                **({"rubric_profile": abstention.PROFILE, "judge_called": True} if parser == abstention.KIND else {}),
                 "failure_policy": policy,
                 "attempts": list(failed_attempts),
             }
@@ -399,6 +401,6 @@ async def general_judge_score(
     }
     if parser == abstention.KIND:
         metadata["verifier_diagnostics"][name].update(
-            kind=abstention.KIND, verdict=reasoning, judge_called=True, score=score
+            rubric_profile=abstention.PROFILE, verdict=reasoning, judge_called=True, score=score
         )
     return score
