@@ -1,4 +1,4 @@
-"""Native extraction, scoring transport, and data-binding controls for C033."""
+"""Native extraction, scoring transport, and data-binding controls for abstention QA."""
 
 import asyncio
 import hashlib
@@ -82,7 +82,7 @@ def test_empty_judge_is_not_an_incorrect_grade(monkeypatch, binding, reply):
         score("Paris", "raise")
 
 
-def test_unavailable_judge_is_unknown(monkeypatch, binding):
+def test_unavailable_judge_raises_in_strict_mode(monkeypatch, binding):
     def unavailable(*args):
         raise general_judge.JudgeResponseError("service unavailable")
 

@@ -314,6 +314,8 @@ async def general_judge_score(
     policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
     if policy not in {"zero", "raise"}:
         raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
+    # Explicit abstention makes no judge request, so it is deliberately excluded
+    # from general_judge request/error metrics. rubric_profile links both paths.
     if parser == abstention.KIND and abstention.is_abstention(prediction):
         metadata.setdefault("verifier_diagnostics", {})[name] = {
             "kind": abstention.KIND,
