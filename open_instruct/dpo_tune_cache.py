@@ -540,6 +540,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
 
     # Only show the progress bar once on each machine.
     start_time = time.perf_counter()
+    start_step = completed_steps
     progress_bar = tqdm(
         range(args.max_train_steps), disable=not accelerator.is_local_main_process, bar_format="{l_bar}{bar}{r_bar}\n"
     )
@@ -683,6 +684,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
                             total_steps=args.max_train_steps,
                             start_time=start_time,
                             wandb_url=None if wandb_tracker is None else wandb_tracker.run.url,
+                            start_step=start_step,
                         )
                     # Reset the local metrics
                     local_metrics.metrics.zero_()
