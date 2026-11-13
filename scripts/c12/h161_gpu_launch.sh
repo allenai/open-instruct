@@ -116,7 +116,7 @@ case "$MODE" in
     # MEM_EP sets --expert_parallel_degree (8); MEM_AC=blocks checkpoints every whole block on top of the config's
     # in-block recompute. Each rank prints its peak memory at exit (C12R-PEAK).
     mem131) [[ "$ARM" == a4b ]] || { echo "mem131 is for arm a4b" >&2; exit 1; }
-           STEPS="${MEM_STEPS:-15}"; CKPT=1000000; SAVE_EVERY=1000000; HOURS=2
+           STEPS="${MEM_STEPS:-15}"; CKPT=1000000; SAVE_EVERY=1024; HOURS=2
            OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-131k-smoke
            RUN_NAME="a4b131k-ep${MEM_EP:-8}-ac${MEM_AC:-config}"
            MIN_RUNTIME="${MIN_RUNTIME:-30m}"; ENTRY=/tmp/h194_wrap.py; AUTO_RESUME=0 ;;
