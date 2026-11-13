@@ -17,7 +17,10 @@
 #          name to set as EXPECTED_NUMPY_CACHE for smoke and train.
 #   smoke  gate (3)+(4): SMOKE_STEPS (20) steps at the production size and LR; every rank dumps its step-1 batch and
 #          logs batch hashes; then h161_refce.py on GPU 0 forwards the dumped batch through the HF export (step-1 CE
-#          within 1e-3). Timeout 2 h. Needs EXPECTED_NUMPY_CACHE.
+#          within 1e-3). Timeout 2 h. Needs EXPECTED_NUMPY_CACHE. The reference runs under transformers 5.4.0
+#          (REFCE_TRANSFORMERS), the version the export's bundled olmo3moe code was written for: under 4.57.6
+#          (H194's choice) the same code gave CE 0.815 against the trainer's 0.7371 on H218's noag batch, while
+#          5.4.0 and 5.14.1 both gave 0.737083 (ledger H218 issue, allenai/open-instruct#2253).
 #   train  the run: S_R steps (= 2 x floor(I / 8) from the cache receipt, two epochs), permanent checkpoint half
 #          way, ephemeral every SAVE_EVERY (200), keep 2, final save at S_R. Needs EXPECTED_NUMPY_CACHE and S_R.
 #
@@ -118,7 +121,7 @@ if [ \"\$N\" = 8 ]; then
   for c in /usr/local/cuda/bin/ptxas /usr/local/cuda-13*/bin/ptxas; do [ -x \"\$c\" ] && \"\$c\" --help 2>&1 | grep -q sm_103a && { PX=\$c; break; }; done
   if [ -z \"\$PX\" ]; then uv venv -q --python 3.12 /tmp/nvcc13 && uv pip install -q --python /tmp/nvcc13/bin/python 'nvidia-cuda-nvcc==13.0.*'; PX=\$(find /tmp/nvcc13 -name ptxas -type f | head -1); chmod +x \"\$PX\"; fi
   echo PTXAS \$PX; export TRITON_PTXAS_PATH=\$PX
-  cd /tmp && CUDA_VISIBLE_DEVICES=0 uv run --no-project --python 3.12 --index https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match --with torch==2.9.1 --with transformers==${REFCE_TRANSFORMERS:-4.57.6} --with numpy --with accelerate --with flash-linear-attention python /tmp/h161_refce.py $DUMP_DIR $HF_REF $DUMP_DIR/refce.json
+  cd /tmp && CUDA_VISIBLE_DEVICES=0 uv run --no-project --python 3.12 --index https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match --with torch==2.9.1 --with transformers==${REFCE_TRANSFORMERS:-5.4.0} --with numpy --with accelerate --with flash-linear-attention python /tmp/h161_refce.py $DUMP_DIR $HF_REF $DUMP_DIR/refce.json
   RR=\$?; echo H218-REFCE-EXIT \$RR
   [ \"\$RC\" = 0 ] && [ \"\$RR\" != 0 ] && RC=4
 else
