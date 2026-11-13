@@ -103,6 +103,7 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == a4b ]] && RUN_NAME="a4bgpu-s${SEED}"
 # An LR arm (A4B_LR set) gets its own run name and output dir, so it can never resume from H203's a4bgpu-s<seed>.
 [[ "$ARM" == a4b && -n "${A4B_LR:-}" ]] && RUN_NAME="a4bgpu-lr${A4B_LR}-s${SEED}"
+[[ "$ARM" == a4b && -n "${A4B_LR:-}" && -n "${RESUME_FROM:-}" ]] && { echo "an LR arm starts from the base: RESUME_FROM is refused" >&2; exit 1; }
 case "$MODE" in
     smoke) STEPS=$SMOKE_STEPS; CKPT=1000000; SAVE_EVERY=1024; HOURS=$SMOKE_HOURS; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
