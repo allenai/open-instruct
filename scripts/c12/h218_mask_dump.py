@@ -11,7 +11,8 @@ markers it starts with. The dump prints every span (state, length, first 90 char
 checks the rules the registration states: no trained span contains a turn header (so every system, user and
 environment/tool turn is masked); every trained span is preceded by the generation prompt ``<|im_start|>assistant\n
 <think>``, whose ``<think>`` is masked (prefix labels, as H194), so each trained span starts at the reasoning text;
-every trained span ends at ``<|im_end|>`` (tool-call turns) or the eos token (final answers); the number of trained
+every trained span ends at ``<|im_end|>`` plus the template's newline (tool-call turns) or the eos token (final
+answers); the number of trained
 spans equals the number of assistant headers.
 ``--check-tokenizer`` re-tokenizes each dumped row's decoded text with another tokenizer (the start checkpoint's own
 tokenizer.json, promoted-think) and requires identical ids, so the cache's tokenization is the one the start was
@@ -137,9 +138,14 @@ def main():
             if trained:
                 if IM_START in text:
                     failures.append(f"row {ri}: trained span at {b} contains a turn header ({kind})")
-                last = int(ids[en - 1])
-                if last not in (im_end_id, tok.eos_token_id):
-                    failures.append(f"row {ri}: trained span at {b} ends with {tok.decode(ids[en - 3:en])!r}, not {IM_END}/eos")
+                # Prefix labels run to the end of the turn's render: a tool-call turn ends '<|im_end|>' + '\n'
+                # (the template's newline after the terminator is trained too, as in H194's tool rows), a final
+                # answer ends with the eos token.
+                tail_ids = [int(x) for x in ids[max(0, en - 2):en]]
+                ok = tail_ids[-1] == tok.eos_token_id or tail_ids[-1] == im_end_id or (
+                    len(tail_ids) == 2 and tail_ids[0] == im_end_id and tok.decode(tail_ids[1:]) == "\n")
+                if not ok:
+                    failures.append(f"row {ri}: trained span at {b} ends with {tok.decode(ids[en - 3:en])!r}, not {IM_END}(+newline)/eos")
                 if b == 0:
                     failures.append(f"row {ri}: row starts trained")
                 else:
