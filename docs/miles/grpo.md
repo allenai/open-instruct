@@ -163,13 +163,13 @@ Set `core.reward_final_answer_only=true` to grade only text after the last liter
 `</think>` by default. A missing closing marker, whitespace-only final answer or
 reopened thinking receives each verifier's floor without calling it. Set
 `core.reward_reasoning_mode="none"` for an explicitly non-thinking run. This applies to text/code verifiers and named judges;
-judge rubrics retain their normal answer-tag extraction within that final region.
+named judges receive the selected region intact, including answer tags and surrounding prose.
 The full response and its token IDs remain available for training and recording.
 
 The shared `ResponseParts` object separates thinking and the delivered answer or
-action. Trusted registry `grading` policies can select `response`, `thinking` or
-`full` text and separately permit a missing delivered response for process
-objectives. ToolRL uses both the raw boundary and the selected action; token-length
+action. Trusted factory/registry declarations identify answer, process, format or
+composite objectives. Answer objectives use `response`; explicit process/format
+objectives may select `thinking` or `full` and separately permit a missing delivered response. ToolRL uses both the raw boundary and the selected action; token-length
 graders retain full trajectory tokens. See the [configuration, interface and
 per-path behavior register](grading.md) before changing a run's grading policy.
 
@@ -202,7 +202,7 @@ For native IF grading, use the built-in adapter. A complete reward registry is:
 ```
 
 The native adapter uses `IFEvalVerifier`, including its existing
-`remove_thinking_section` normalization in both modes. That removes answer tags,
+task normalization in both modes. Selected-input mode bypasses its thinking split while retaining removal of answer tags,
 `<|assistant|>` and outer whitespace before grading IF constraints. R1 format
 reward checks the tags themselves; IF reward grades the normalized answer.
 

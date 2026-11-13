@@ -22,6 +22,24 @@ OBJECTIVES = ("answer", "process", "format", "composite")
 SCHEMA_VERSION = 3
 
 
+def validate_spec(spec):
+    """Check registry syntax without importing a factory or assuming its defaults.
+
+    Preparation deliberately stays lightweight. Objective/view combinations
+    depend on factory declarations and are checked by verifier_policy at load.
+    """
+    value = spec.get("grading", {})
+    if not isinstance(value, dict) or set(value) - {"objective", "scope", "require_response"}:
+        raise ValueError("grading accepts only objective, scope and require_response")
+    if "objective" in value and value["objective"] not in OBJECTIVES:
+        raise ValueError("grading requires objective=answer|process|format|composite")
+    if "scope" in value and value["scope"] not in SCOPES:
+        raise ValueError("grading requires scope=response|thinking|full")
+    if "require_response" in value and type(value["require_response"]) is not bool:
+        raise ValueError("grading.require_response must be boolean")
+    return value
+
+
 @dataclass(frozen=True)
 class ResponseParts:
     """One immutable view of a generated assistant response.
@@ -138,9 +156,7 @@ class GradingPolicy:
 
     @classmethod
     def from_spec(cls, spec: dict, *, default_scope: Scope | None = None, default_objective: Objective = "answer"):
-        value = spec.get("grading", {})
-        if not isinstance(value, dict) or set(value) - {"objective", "scope", "require_response"}:
-            raise ValueError("grading accepts only objective, scope and require_response")
+        value = validate_spec(spec)
         objective = value.get("objective", default_objective)
         scope = value.get("scope", default_scope or ("thinking" if objective == "process" else "response"))
         required = value.get("require_response", True)

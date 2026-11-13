@@ -52,7 +52,7 @@ Factory declarations and the trusted reward registry determine objective types a
 
 Full-text access does not itself bypass eligibility. Setting `require_response=false` requires an explicit `scope="thinking"` or `scope="full"`, even when a factory defaults to full scope; preparation and runtime enforce the same declaration. `reward_zero_truncated` still gates **every** component, including explicit thinking/full exceptions. It is independent of response selection. Gates retain each verifier's target-dependent floor and weight; they are neither verifier failures nor ungraded-response omissions.
 
-Do not add `grading` to per-row verifier metadata: targets and weights do not authorize a different input policy. A malformed registry policy fails registry loading/prepared-data validation. Token-based verifiers reject scopes other than `full` at registry load. ToolRL declares a composite objective: correctness always uses `response`, and format uses `full`. A full/thinking override of the composite is rejected rather than letting correctness see thinking. Its native format objective requires reasoning; final mode rejects ToolRL or a thinking-scope objective combined with `reward_reasoning_mode="none"` before grading/gating.
+Do not add `grading` to per-row verifier metadata: targets and weights do not authorize a different input policy. Preparation validates grading keys, types and enum values without importing factories. Runtime registry loading resolves factory defaults and validates objective/view combinations, token requirements and composite declarations. Token-based verifiers reject scopes other than `full` at registry load. ToolRL declares a composite objective: correctness always uses `response`, and format uses `full`. A full/thinking override of the composite is rejected rather than letting correctness see thinking. Its native format objective requires reasoning; final mode rejects ToolRL or a thinking-scope objective combined with `reward_reasoning_mode="none"` before grading/gating.
 
 ## Verifier interface
 
@@ -101,9 +101,7 @@ The 16 entry points below previously interpreted thinking boundaries after share
 
 Flag-off behavior is intentionally unchanged, including consumers that historically stripped thinking despite receiving full text. Making flag-off mean that every consumer actually grades full text would be a separate objective migration, reviewed per path rather than hidden in this change.
 
-The version-3 local replay used the same 1,365 stored responses as version 2 (`15b28700f`): 1,344 stratified responses across 30 observed paths plus 21 targeted math examples. Across both flag settings it produced 2,070 numeric outcomes and 660 captured service inputs, with no errors/timeouts and no additional score, gate or captured-input changes. No programs were executed and no live judge verdicts requested. This panel does not cover every typed exception or the newly accepted literal-opener examples. Focused controls cover those cases, full-view consumers that must not reselect a suffix, legacy async forwarding, retained answer wrappers, and ToolRL's separate input declarations. The original 39,535-response replay below measures shared selection only.
-
-Validation for this migration passed 1,468 distinct CPU cases: the broad consumer/configuration panel passed 1,280, the actual pinned MILES runtime passed 187 (including seven recorder cases and 180 reward-processing cases skipped without MILES), and one additional composite-access guard passed in the final focused run. Thirteen other optional cases remained skipped and five existing cases were expected failures. Ruff, type checking with the supported Beaker SDK stubs, compileall and the documentation build passed. This validates grading contracts and compatibility, not training efficacy or live service qualification.
+Validation results and saved-response measurements are recorded in [PR #2250](https://github.com/allenai/open-instruct/pull/2250); this page describes the grading contract and effective behavior changes.
 
 ## Effective grading change register
 
@@ -147,17 +145,3 @@ Bad targets can still be hidden by an eligibility gate if that verifier has no i
 The pinned recorder's original protocol omission also affects historical/default-off evidence under different truncation settings. That existing upstream issue is not retrospectively repaired here; old records must not be assumed comparable merely because their old input keys match. New per-row grading identity supplements the base manifest, and runtime/verifier revision provenance is still required. The selector schema version must change if a later implementation changes its grading semantics.
 
 H180 found mixed accuracy and termination changes and retained an IF normalization confound even after reward flow was restored. It does not establish that the cleaner objective improves stopping. These code changes introduce no format bonus, new training run, sampling change or production-default change. Saved-response replay and a controlled training comparison remain separate evidence from CPU regression tests; passing input-contract tests does not establish training quality.
-
-## Saved-text selection replay
-
-The [compact replay receipt](grading-selection-replay.json) covers the retained November 8 export of 39,535 math draws from 27 sources (screen and historical Dolci). Compared with the baseline revision, legacy helper text changes **0/39,535** times. Text is identical for all responses eligible under both final-selection policies. The shared leading-reopen gate newly excludes **35** archived responses; missing-final counts remain **249**, and **110** responses contain multiple closing markers. The gate changes were inspected: an earlier broad substring rule also caught an explanatory mention of `<think>`, so the implemented rule is anchored to the beginning of the selected response.
-
-This is an input/eligibility replay, not executed verifier scores, false-positive adjudication or a population error rate. Historical archived text may be shortened, and this export does not provide prompt-prefill or finish-state evidence. No truncation status is inferred, no missing text is reconstructed, and no measured training effect is claimed. ToolRL/judge/length behavior is covered by actual dispatch regressions, not this math-only corpus.
-
-Reproduce on the retained export, or another JSONL export with the same fields:
-
-```bash
-python -m scripts.test.replay_grading_selection draws.jsonl --output selection.json
-```
-
-The script streams the input and records its SHA-256, source counts and a bounded set of changed coordinates without copying raw responses. The original export is a local audit artifact; its preparation script is retained under `outputs/math-verify-false-credit-20261108/scripts/export.py` in the original workspace. The receipt binds the exact available bytes but does not establish durable archival availability.

@@ -520,7 +520,7 @@ def _prepared(data, inputs):
         ):
             raise InputError("Trusted registry entries require explicit factory paths")
         try:
-            grading.GradingPolicy.from_spec(spec)
+            grading.validate_spec(spec)
         except ValueError as error:
             raise InputError(f"Verifier {name!r}: {error}") from error
     evaluation = data.get("eval_prompt_data", [])
