@@ -18,12 +18,14 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from open_instruct import ifeval_constraints
+from open_instruct import ifeval_constraints, logger_utils
 from open_instruct.miles.configuration import validation
 from open_instruct.miles.datasets import mixture, pools, synlogic
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import judging, task_verifiers
+from open_instruct.miles.rewards import grading, judging, task_verifiers
 from open_instruct.miles.rollout import pool_sampling
+
+logger = logger_utils.setup_logger(__name__)
 
 # Preserve factory paths in existing prepared datasets and reward registries.
 RewardConfig = task_verifiers.RewardConfig
@@ -93,6 +95,7 @@ class _JsonlRows:
     def __init__(self, path, inputs):
         self.path = Path(path).resolve()
         self.annotations = {}
+        self.excluded = set()
         self.pool_assignment = None
         self.count = 0
         digest = hashlib.sha256()
@@ -113,7 +116,7 @@ class _JsonlRows:
         return gzip.open(self.path, "rb") if self.path.suffix == ".gz" else self.path.open("rb")
 
     def __len__(self):
-        return self.count
+        return self.count - len(self.excluded)
 
     def __iter__(self):
         index = 0
@@ -126,6 +129,8 @@ class _JsonlRows:
                     continue
                 row = parsed[0]
                 index += 1
+                if index in self.excluded:
+                    continue
                 if index in self.annotations:
                     row["metadata"].update(self.annotations[index])
                 if self.pool_assignment is not None:
@@ -189,6 +194,7 @@ def validate_data(data):
         "sources",
         "pools",
         "sampling",
+        "over_length",
         "recipe",
         "rl_manifest",
         "prompt_data",
@@ -199,6 +205,7 @@ def validate_data(data):
         raise InputError(
             f"Unknown data fields: {sorted(unknown)}; use data.tasks, data.rl_manifest, or prepared data.prompt_data."
         )
+    validation.choice(data.get("over_length", "fail"), "data.over_length", ("fail", "exclude"))
     modes = [
         name for name in ("tasks", "sources", "recipe", "rl_manifest", "prompt_data") if data.get(name) is not None
     ]
@@ -220,8 +227,8 @@ def validate_data(data):
     if "sources" in modes:
         mixture.validate_sources(data["sources"], pooled=bool(resolved_pools))
         for source in data["sources"]:
-            if set(source) & {"sources", "seed", "shuffle"}:
-                raise InputError("Mixture sources cannot nest sources or override data.seed/shuffle")
+            if set(source) & {"sources", "seed", "shuffle", "over_length"}:
+                raise InputError("Mixture sources cannot nest sources or override data.seed/shuffle/over_length")
             validate_data(mixture.source_data(source, data))
     if "tasks" in modes:
         tasks = data["tasks"]
@@ -298,7 +305,7 @@ def _render(messages, tokenizer, template):
     return tokenizer.apply_chat_template(messages, chat_template=template, tokenize=False, add_generation_prompt=True)
 
 
-def _verify_row(row, tokenizer, limit, known):
+def _verify_row(row, tokenizer, limit, known, *, exclude_over_length=False, training=False):
     if not isinstance(row.get("input"), str) or not row["input"]:
         raise InputError("Prepared row needs nonempty rendered input")
     metadata = row.get("metadata")
@@ -320,10 +327,17 @@ def _verify_row(row, tokenizer, limit, known):
         weight = spec.get("weight", 1.0)
         if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight):
             raise InputError("Verifier weight must be finite")
+    _verify_rendering_template(metadata, tokenizer)
     ids = tokenizer.encode(row["input"], add_special_tokens=False)
-    if not 0 < len(ids) <= limit:
+    if not ids or (len(ids) > limit and not exclude_over_length):
+        exclusion_hint = (
+            ' Alternatively, set data.over_length = "exclude" to skip over-limit training prompts.'
+            if training and len(ids) > limit
+            else ""
+        )
         raise InputError(
-            f"Prompt has {len(ids)} tokens, outside 1..{limit}; immutable input cannot be truncated. Increase inference.max_context_length/max_prompt_length or prepare shorter prompts."
+            f"Prompt has {len(ids)} tokens, outside 1..{limit}; immutable input cannot be truncated. "
+            "Increase inference.max_context_length/max_prompt_length or prepare shorter prompts." + exclusion_hint
         )
     expected = metadata.get("prompt_token_ids")
     if expected is not None and expected != ids:
@@ -367,20 +381,77 @@ def _verify_if_training_row(row, names):
             )
 
 
-def _verify_resumed_if_training_data(result):
+def _verify_rendering_template(metadata, tokenizer):
+    template_hash = metadata.get("rendering_template_sha256")
+    if template_hash is not None:
+        template = tokenizer.chat_template
+        if not isinstance(template, str) or template_hash != hashlib.sha256(template.encode()).hexdigest():
+            raise InputError(
+                "Prepared rendering template hash differs from the checkpoint chat template; re-render inputs"
+            )
+
+
+def _warn_missing_rendering_template(source):
+    logger.warning(
+        "Prepared dataset %s has rows without metadata.rendering_template_sha256; "
+        "template compatibility cannot be verified. Continuing with existing inputs.",
+        str(source),
+    )
+
+
+def _prepared_warning_sources(data, result):
+    """Map cached partitions to original pre-rendered inputs, excluding task/adopt modes."""
+    output = Path(result["manifest"]).parent
+    sources = data.get("sources", [{**data, "name": None}])
+    paths = {}
+    for source in sources:
+        if source.get("prompt_data") is None:
+            continue
+        name = source.get("name")
+        split = f"source-{name}" if name is not None else "train"
+        paths[str(output / f"{split}.jsonl")] = str(Path(source["prompt_data"]).resolve())
+        evaluation = source.get("eval_prompt_data", [])
+        for label, path in zip(evaluation[::2], evaluation[1::2], strict=True):
+            split = f"eval-{name}-{label}" if name is not None else label
+            paths[str(output / f"{split}.jsonl")] = str(Path(path).resolve())
+    return paths
+
+
+def _verify_resumed_data(result, hf_checkpoint, data):
+    # One JSON parse per row: training gets IF + template checks; evaluation gets
+    # template checks only. Old caches are validated without editing/retokenizing.
     registry = _read_json_object(result["reward_config"], {})
     names = _if_verifier_names(registry)
-    if not names:
-        return
-    for path in result.get("train_sources", [result["prompt_data"]]):
+    training = set(result.get("train_sources", [result["prompt_data"]]))
+    paths = list(result.get("train_sources", [result["prompt_data"]]))
+    paths.extend(result["eval_prompt_data"][1::2])
+    warning_sources = _prepared_warning_sources(data, result)
+    warned = set()
+    tokenizer = None
+    for path in dict.fromkeys(paths):
         with Path(path).open(encoding="utf-8") as stream:
             for index, line in enumerate(stream, 1):
                 if not line.strip():
                     continue
+                row = json.loads(line)
+                if path in training and names:
+                    try:
+                        _verify_if_training_row(row, names)
+                    except InputError as error:
+                        raise InputError(f"{path}: training row {index}: {error}") from error
+                metadata = row.get("metadata", {})
+                if metadata.get("rendering_template_sha256") is None:
+                    source = warning_sources.get(path)
+                    if source is not None and source not in warned:
+                        _warn_missing_rendering_template(source)
+                        warned.add(source)
+                    continue
+                if tokenizer is None:
+                    tokenizer = _tokenizer(hf_checkpoint)
                 try:
-                    _verify_if_training_row(json.loads(line), names)
+                    _verify_rendering_template(metadata, tokenizer)
                 except InputError as error:
-                    raise InputError(f"{path}: training row {index}: {error}") from error
+                    raise InputError(f"{path}: row {index}: {error}") from error
 
 
 def _adopt(data, tokenizer, template, inputs):
@@ -448,6 +519,10 @@ def _prepared(data, inputs):
             or "." not in spec["factory"]
         ):
             raise InputError("Trusted registry entries require explicit factory paths")
+        try:
+            grading.validate_spec(spec)
+        except ValueError as error:
+            raise InputError(f"Verifier {name!r}: {error}") from error
     evaluation = data.get("eval_prompt_data", [])
     if not isinstance(evaluation, list) or len(evaluation) % 2:
         raise InputError("eval_prompt_data must alternate dataset names and paths")
@@ -608,6 +683,26 @@ def _sources(data, tokenizer, template, inputs, seed):
     return partitions, provenance, registry, training
 
 
+def _inherit_grading_policies(registry, overrides):
+    """Replacing an implementation must not replace its trusted grading objective.
+
+    Named-judge bindings replace factories/configuration, not input policies.
+    An explicitly supplied override policy still takes precedence.
+    """
+    if not isinstance(registry, dict):
+        return copy.deepcopy(overrides)
+    result = {}
+    for name, override in overrides.items():
+        previous = registry.get(name, {})
+        inherited = (
+            {"grading": copy.deepcopy(previous["grading"])}
+            if isinstance(previous, dict) and "grading" in previous
+            else {}
+        )
+        result[name] = inherited | copy.deepcopy(override)
+    return result
+
+
 def prepare_data(
     data: dict,
     hf_checkpoint: Path,
@@ -640,6 +735,12 @@ def prepare_data(
             path.suffix in (".json", ".jinja", ".model", ".txt", ".tiktoken") or path.name.startswith("tokenizer")
         ):
             _read(path, inputs)
+    if registry_overrides and data.get("reward_config"):
+        # Include inherited policies in the preparation contract. This rejects
+        # reuse of older preparations whose binding overrides discarded them,
+        # without invalidating ordinary preparations with no policy declaration.
+        original = _read_json_object(data["reward_config"], {})
+        registry_overrides = _inherit_grading_policies(original, registry_overrides)
     contract = {
         "data": data,
         "hf_checkpoint": str(hf_checkpoint),
@@ -670,7 +771,7 @@ def prepare_data(
         )
         # Older preparations may predate the constraint screen. Keep their bytes
         # immutable, but do not silently bypass validation on resume.
-        _verify_resumed_if_training_data(result)
+        _verify_resumed_data(result, hf_checkpoint, data)
         return result
     tokenizer = _tokenizer(hf_checkpoint)
     template = tokenizer.chat_template
@@ -682,16 +783,23 @@ def prepare_data(
     if registry_overrides:
         registry = (
             {name: {"factory": factory} for name, factory in FACTORIES.items()} if registry is None else registry
-        ) | registry_overrides
+        )
+        registry = registry | _inherit_grading_policies(registry, registry_overrides)
     known = registry if registry is not None else FACTORIES
     if_verifiers = _if_verifier_names(known)
     if not all(partitions.get(split) for split in training):
         raise InputError("Preparation requires nonempty training data")
     source_pools = {f"source-{source['name']}": source.get("pool") for source in data.get("sources", [])}
     pool_labels = {spec["label"]: name for name, spec in resolved_pools.items()}
+    length_counts = {}
+    pool_counts = {}
+    exclude_over_length = data.get("over_length", "fail") == "exclude"
+    source_names = {f"source-{source['name']}": source["name"] for source in data.get("sources", [])}
     train_prompts, eval_prompts = set(), set()
     train_ids, eval_ids = set(), set()
     for split, rows in partitions.items():
+        excluded = set()
+        warned_missing = False
         if isinstance(rows, _JsonlRows) and resolved_pools and split in training:
             # Streaming rows are recreated for validation and output. Apply the
             # same pool assignment on every pass, keeping held-out rows unchanged.
@@ -707,17 +815,78 @@ def prepare_data(
                                 judging.require_binding(name, registry_overrides, known.get(name))
                 if resolved_pools and split in training and not isinstance(rows, _JsonlRows):
                     pools.annotate(row, resolved_pools, source_pool=source_pools.get(split), labels=pool_labels)
-                _verify_row(row, tokenizer, max_prompt_length, known)
+                _verify_row(
+                    row,
+                    tokenizer,
+                    max_prompt_length,
+                    known,
+                    exclude_over_length=exclude_over_length and split in training,
+                    training=split in training,
+                )
+                # Only _prepared returns _JsonlRows. Task/adopt rendering records
+                # its template in provenance rather than per-row metadata.
+                if (
+                    isinstance(rows, _JsonlRows)
+                    and row["metadata"].get("rendering_template_sha256") is None
+                    and not warned_missing
+                ):
+                    _warn_missing_rendering_template(rows.path)
+                    warned_missing = True
                 if split in training:
                     _verify_if_training_row(row, if_verifiers)
             except InputError as error:
                 raise InputError(f"{split} row {index}: {error}") from error
-            if isinstance(rows, _JsonlRows):
+            if split in training:
+                over_limit = row["metadata"]["run_prompt_tokens"] > max_prompt_length
+                name = source_names.get(split)
+                if name is None:
+                    name = next(
+                        (
+                            label
+                            for key in ("source_dataset", "source_name")
+                            if isinstance(label := row["metadata"].get(key), str) and label
+                        ),
+                        split,
+                    )
+                counts = length_counts.setdefault(name, {"original": 0, "excluded": 0, "retained": 0})
+                counts["original"] += 1
+                counts["excluded" if over_limit else "retained"] += 1
+                if resolved_pools:
+                    pool = row["metadata"]["sampling_pool"]
+                    counts = pool_counts.setdefault(pool, {"original": 0, "excluded": 0, "retained": 0})
+                    counts["original"] += 1
+                    counts["excluded" if over_limit else "retained"] += 1
+                if over_limit:
+                    excluded.add(index)
+            if isinstance(rows, _JsonlRows) and index not in excluded:
                 rows.remember_validation(index, row)
             (train_prompts if split in training else eval_prompts).add(_sha(row["input"].encode()))
             identity = row["metadata"].get("prepared_sample_id")
             if identity:
                 (train_ids if split in training else eval_ids).add(identity)
+        if excluded:
+            if isinstance(rows, _JsonlRows):
+                rows.excluded = excluded
+            else:
+                partitions[split] = [row for index, row in enumerate(rows, 1) if index not in excluded]
+    for kind, groups in (("source", length_counts), ("pool", pool_counts)):
+        for name, counts in groups.items():
+            logger.info(
+                "Prompt length policy=%s limit=%d %s=%s original=%d excluded=%d retained=%d",
+                data.get("over_length", "fail"),
+                max_prompt_length,
+                kind,
+                name,
+                counts["original"],
+                counts["excluded"],
+                counts["retained"],
+            )
+            # Dataset labels in a single input describe provenance, not a
+            # configured sampling allocation. They may disappear at this budget.
+            if not counts["retained"] and (kind == "pool" or "sources" in data):
+                raise InputError(f"Training {kind} {name!r} has no rows after prompt-length exclusion")
+    if not any(partitions[split] for split in training):
+        raise InputError("Training data has no rows after prompt-length exclusion")
     if train_prompts & eval_prompts or train_ids & eval_ids:
         raise InputError("Training and held-out data overlap by prompt or source identity")
     if registry is None:
@@ -798,6 +967,13 @@ def prepare_data(
             "inputs": inputs,
             "outputs": outputs,
             "provenance": provenance,
+            "prompt_length": {
+                "policy": data.get("over_length", "fail"),
+                "max_prompt_length": max_prompt_length,
+                "scope": "training",
+                "sources": length_counts,
+                **({"pools": pool_counts} if resolved_pools else {}),
+            },
             "result": result,
         }
         (staging / "manifest.json").write_bytes(_encoded(manifest))

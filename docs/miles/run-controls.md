@@ -106,6 +106,17 @@ All names below are under `[miles]` unless prefixed `core.`.
 | Off-policy correction | `use_tis`, `tis_clip`, `tis_clip_low`; alternative corrections use `custom_tis_function_path` (no ICEPOP helper is bundled); explicitly choose the policy-ratio anchor. Structured async defaults to trainer-scored old logprobs with TIS; these are algorithm changes, not just async throughput controls. |
 | Router behavior | `core.router_aux_loss_weight`, `core.router_z_loss_weight`; `use_rollout_routing_replay=true` works with the default Rust router; `use_miles_router=true` selects the Python router explicitly. Trainer-side `use_routing_replay` is a different Megatron feature and is rejected. `core.replay_diagnostics=true` opts into per-layer returned-route and recomputation checks (adds synchronization overhead). |
 
+Despite its compatibility name, `core.reward_zero_truncated=true` assigns each
+verifier's floor rather than necessarily zero. The registered reward adapter
+uses an optional synchronous `score_floor(target)` method, falling back to 0
+when absent. Authors of verifiers with negative reward ranges should implement
+this method so truncation cannot beat a completed wrong answer. For example,
+ToolRL call rows with `unit_scale: false` receive −3. The
+`core.reward_final_answer_only` gate uses the same floor when the final answer is
+missing. Exceptions while resolving a floor follow the normal verifier failure
+policy: training omits the group, or masks the ungraded response when configured;
+evaluation raises on invalid targets.
+
 ## Checkpoints, reporting and operational controls
 
 | Dial | open-instruct control and semantics |

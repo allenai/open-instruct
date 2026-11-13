@@ -18,7 +18,7 @@ from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 
 ROOT = Path(__file__).resolve().parents[1]
-DEV = ROOT / "configs/miles/examples/dev.toml"
+DEV = ROOT / "configs/miles/examples/tiny/dev.toml"
 
 
 @pytest.mark.parametrize(

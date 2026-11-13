@@ -38,7 +38,7 @@ import requests
 from open_instruct import judge_utils, logger_utils
 from open_instruct.answer_utils import extract_final_answer
 from open_instruct.miles.infrastructure import infra_timeouts
-from open_instruct.miles.rewards import judge_registry, judging, service
+from open_instruct.miles.rewards import abstention, judge_registry, judging, service
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -170,8 +170,15 @@ def parse_web_instruct_judge_response(content: str) -> tuple[str, float]:
     return cleaned, float(decisions == {"yes"})
 
 
-def build_judge_prompt(name: str, *, query: str, prediction: str, target: Any) -> tuple[str, str]:
-    """Build an oracle-validated general-quality judge prompt."""
+def build_judge_prompt(
+    name: str, *, query: str, prediction: str, target: Any, extract_answer: bool = True
+) -> tuple[str, str]:
+    """Build an oracle-validated general-quality judge prompt.
+
+    ``extract_answer`` preserves the historical direct-call/flag-off contract.
+    Shared grading views must pass False: a quality judge should see the chosen
+    text intact, rather than implicitly accepting an answer-wrapper convention.
+    """
     try:
         template, expected_sha256 = _PROMPTS[name]
     except KeyError as error:
@@ -179,7 +186,8 @@ def build_judge_prompt(name: str, *, query: str, prediction: str, target: Any) -
     actual_sha256 = hashlib.sha256(template.encode()).hexdigest()
     if actual_sha256 != expected_sha256:
         raise RuntimeError(f"general judge prompt drift for {name}: {actual_sha256} != {expected_sha256}")
-    return template.format(input=query, output=extract_final_answer(prediction), label=target), actual_sha256
+    output = extract_final_answer(prediction) if extract_answer else prediction
+    return template.format(input=query, output=output, label=target), actual_sha256
 
 
 def _get_session() -> Any:
@@ -280,7 +288,7 @@ def _request(config: GeneralJudgeConfig, prompt: str) -> str:
 
 
 async def general_judge_score(
-    args: Any, sample: Any, *, name: str, target: Any, prediction: str | None = None
+    args: Any, sample: Any, *, name: str, target: Any, prediction: str | None = None, extract_answer: bool = True
 ) -> float:
     """Score one response with the configured OpenAI-compatible general judge."""
     metadata = getattr(sample, "metadata", None)
@@ -291,18 +299,35 @@ async def general_judge_score(
         raise ValueError("general-quality samples require metadata.judge_query")
     # Keep the original sample for training/records while grading the selected answer.
     prediction = str(sample.response) if prediction is None else prediction
-    resolved = judge_registry.resolve_request(args, name, query, prediction, target)
+    prompt_options = {} if extract_answer else {"extract_answer": False}
+    resolved = judge_registry.resolve_request(args, name, query, prediction, target, **prompt_options)
     binding = None
     rubric_sha256 = None
     if resolved:
         config, prompt, prompt_sha256, parser, binding, rubric_sha256 = resolved
     else:
-        prompt, prompt_sha256 = build_judge_prompt(name, query=query, prediction=prediction, target=target)
+        prompt, prompt_sha256 = build_judge_prompt(
+            name, query=query, prediction=prediction, target=target, **prompt_options
+        )
         config = general_judge_config(args)
         parser = "yes-no" if name == "general-web_instruct_general_verifier" else "score-1-to-10"
     policy = getattr(args, "llm_judge_failure_policy", None) or os.environ.get("OI_MILES_JUDGE_FAILURE_POLICY", "zero")
     if policy not in {"zero", "raise"}:
         raise ValueError("OI_MILES_JUDGE_FAILURE_POLICY must be 'zero' or 'raise'")
+    # Explicit abstention makes no judge request, so it is deliberately excluded
+    # from general_judge request/error metrics. rubric_profile links both paths.
+    if parser == abstention.KIND and abstention.is_abstention(prediction):
+        metadata.setdefault("verifier_diagnostics", {})[name] = {
+            "kind": abstention.KIND,
+            "status": "ok",
+            "verdict": "abstain",
+            "score": 0.5,
+            "judge_called": False,
+            "binding": binding,
+            "rubric_sha256": rubric_sha256,
+            "rubric_profile": abstention.PROFILE,
+        }
+        return 0.5
     started = time.monotonic()
     last_error: RuntimeError | None = None
     failed_attempts = []
@@ -313,6 +338,11 @@ async def general_judge_score(
             content = await asyncio.get_running_loop().run_in_executor(executor, _request, config, prompt)
             if parser == "yes-no":
                 reasoning, score = parse_web_instruct_judge_response(content)
+            elif parser == abstention.KIND:
+                try:
+                    reasoning, score = abstention.grade(content)
+                except ValueError as error:
+                    raise JudgeResponseError(str(error)) from error
             else:
                 reasoning, score = parse_judge_response(content)
             break
@@ -332,6 +362,7 @@ async def general_judge_score(
                 "elapsed_seconds": time.monotonic() - started,
                 "verdict": "failed",
                 "kind": "general_judge",
+                **({"rubric_profile": abstention.PROFILE, "judge_called": True} if parser == abstention.KIND else {}),
                 "failure_policy": policy,
                 "attempts": list(failed_attempts),
             }
@@ -370,4 +401,8 @@ async def general_judge_score(
         "seed": config.seed,
         "temperature": config.temperature,
     }
+    if parser == abstention.KIND:
+        metadata["verifier_diagnostics"][name].update(
+            rubric_profile=abstention.PROFILE, verdict=reasoning, judge_called=True, score=score
+        )
     return score

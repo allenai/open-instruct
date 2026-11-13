@@ -55,11 +55,11 @@ def choice_format(text):
     return re.sub(r"\$\s*(\([A-Za-z]\))\s*\$|\\\(\s*(\([A-Za-z]\))\s*\\\)", lambda match: match[1] or match[2], text)
 
 
-def extract(text, mode):
-    final = common.answer_text(text)
+def extract(text, mode, *, selected_input=False):
+    final = common.answer_text(text, selected_input=selected_input)
     # Unclosed explicit thinking is not a final answer. Olmo's opener can also
     # live in the prompt; core.reward_final_answer_only handles that case.
-    if "<think>" in final:
+    if not selected_input and "<think>" in final:
         return ""
     if mode == "answer_marker":
         markers = [(final.rfind(m), m) for m in ("[Answer]", "[答案]")]
@@ -93,9 +93,9 @@ def extract(text, mode):
     return final
 
 
-def score(prediction, target):
+def score(prediction, target, *, selected_input=False):
     metric = validate_target(target)
-    final = extract(prediction, target["extraction"])
+    final = extract(prediction, target["extraction"], selected_input=selected_input)
     gold = target["answers"]
     if not final:
         return 0.0
@@ -137,13 +137,14 @@ def score(prediction, target):
 
 
 class LongContextVerifier:
+    grading_accepts_selected_input = True
     get_config_class = staticmethod(lambda: task_verifiers.RewardConfig)
 
     def __init__(self, verifier_config=None):
         pass
 
     async def async_call(self, tokens, prediction, label, **kwargs):
-        value = score(prediction, label)
+        value = score(prediction, label, selected_input=kwargs.get("selected_input", False))
         return common.Result(
             value,
             diagnostics={

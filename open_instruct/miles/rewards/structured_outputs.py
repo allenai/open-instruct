@@ -148,7 +148,22 @@ def timeout_result(error, start):
     )
 
 
+def instance_error_result(error, start):
+    return common.Result(
+        0.0,
+        diagnostics={
+            "kind": "structured_v1",
+            "status": "validation_error",
+            "error_type": type(error).__name__,
+            "error": str(error),
+            "failure_policy": "zero",
+            "elapsed_seconds": time.monotonic() - start,
+        },
+    )
+
+
 class StructuredOutputVerifier:
+    grading_accepts_selected_input = True
     get_config_class = staticmethod(lambda: StructuredConfig)
 
     def __init__(self, verifier_config=None):
@@ -187,20 +202,15 @@ class StructuredOutputVerifier:
         try:
             try:
                 schema = validate_target(label)  # Configuration errors must not become wrong answers.
-                text = common.answer_text(prediction)
+                text = common.answer_text(prediction, selected_input=kwargs.get("selected_input", False))
                 try:
                     if label.get("response_mode") == "tool_call":
                         value = structured_tool_calls.parse_payload(text, label)
                     else:
                         value = parse(text, label["format"], schema, label.get("coerce_types", False))
-                except (
-                    ValueError,
-                    TypeError,
-                    RecursionError,
-                    yaml.YAMLError,
-                    csv.Error,
-                    xmltodict.expat.ExpatError,
-                ) as error:
+                except (RecursionError, OverflowError) as error:
+                    return instance_error_result(error, start)
+                except (ValueError, TypeError, yaml.YAMLError, csv.Error, xmltodict.expat.ExpatError) as error:
                     return common.Result(
                         0.0, diagnostics={"kind": "structured_v1", "status": "parse_error", "error": str(error)}
                     )
@@ -213,17 +223,7 @@ class StructuredOutputVerifier:
                     # A parsed response can exceed the validator's recursion or
                     # numeric limits. Fail closed for this instance only; target
                     # checks and validator construction stay outside this guard.
-                    return common.Result(
-                        0.0,
-                        diagnostics={
-                            "kind": "structured_v1",
-                            "status": "validation_error",
-                            "error_type": type(error).__name__,
-                            "error": str(error),
-                            "failure_policy": "zero",
-                            "elapsed_seconds": time.monotonic() - start,
-                        },
-                    )
+                    return instance_error_result(error, start)
                 return common.Result(float(valid), diagnostics={"kind": "structured_v1", "status": "completed"})
             finally:
                 # Disarming can itself receive the pending alarm. Always restore

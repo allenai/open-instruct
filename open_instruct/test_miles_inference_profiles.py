@@ -581,7 +581,7 @@ def test_retained_preset_preserves_cached_geometry_and_requires_known_hardware()
 )
 def test_retained_state_rejects_unsafe_options_at_plan_time(example, overrides, message):
     with pytest.raises(InputError, match=message):
-        RunSpec.load(f"configs/miles/examples/{example}.toml", overrides=overrides).compile()
+        RunSpec.load(f"configs/miles/examples/tiny/{example}.toml", overrides=overrides).compile()
 
 
 @pytest.mark.parametrize("mode", ["retract", "in_place"])

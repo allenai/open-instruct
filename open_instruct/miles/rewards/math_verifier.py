@@ -6,6 +6,7 @@ permissive grader.
 """
 
 import dataclasses
+import functools
 import re
 import threading
 from itertools import product
@@ -13,8 +14,10 @@ from typing import Any
 
 import math_verify
 from math_verify import errors
+from sympy import Eq, Expr, MatrixBase
+from sympy.core import relational
 
-from open_instruct import ground_truth_utils, logger_utils
+from open_instruct import ground_truth_utils, logger_utils, math_utils
 from open_instruct.miles.rewards import rewards
 
 logger = logger_utils.setup_logger(__name__)
@@ -70,6 +73,59 @@ def _parse(text: str, configs: tuple, diagnostics: dict[str, int]) -> list:
     return []
 
 
+@functools.lru_cache(maxsize=1)
+def _false_equation():
+    sentinel = math_verify.parse(
+        r"\boxed{1 + 2 = 8}",
+        extraction_config=(math_verify.LatexExtractionConfig(),),
+        parsing_timeout=_TIMEOUT_SECONDS,
+        raise_on_error=True,
+    )
+    if not sentinel:
+        logger.warning("Math-Verify could not parse the fixed false-equation sentinel")
+        raise ValueError("Math-Verify could not parse the false-equation sentinel")
+    return sentinel
+
+
+@functools.lru_cache(maxsize=4096)
+def _requires_legacy_verifier(reference: str) -> bool:
+    """Cache whether this reference accepts a known-wrong equation.
+
+    Math-Verify 0.9.0 can match unrelated equations when its solver returns two
+    empty lists. Such references guard equation comparison while retaining assignment values.
+    Probe equation candidates only: a scalar 8 legitimately matches an equation
+    with RHS 8 under the library's answer-extraction rules.
+    Cache only the decision, not parsed references; exceptions are never cached.
+    """
+    gold = math_verify.parse(
+        r"\boxed{" + reference + "}",
+        extraction_config=(math_verify.LatexExtractionConfig(),),
+        parsing_timeout=_TIMEOUT_SECONDS,
+        raise_on_error=True,
+    )
+    equations = [value for value in gold if isinstance(value, Eq)]
+    return bool(equations) and math_verify.verify(
+        equations, _false_equation(), timeout_seconds=_TIMEOUT_SECONDS, raise_on_error=True
+    )
+
+
+def _legacy_compare(answer: str, reference: str, diagnostics: dict[str, int]) -> bool:
+    """Use legacy expression comparison while preserving every equation side."""
+    expected_parts = reference.split("=")
+    answer_parts = answer.split("=")
+    if len(expected_parts) != len(answer_parts):
+        return False
+
+    def same_sides(actual_parts: list[str]) -> bool:
+        return all(
+            math_utils.is_equiv(actual, expected, diagnostics=diagnostics)
+            or math_utils.hendrycks_is_equiv(actual, expected)
+            for actual, expected in zip(actual_parts, expected_parts)
+        )
+
+    return same_sides(answer_parts) or (len(expected_parts) == 2 and same_sides(answer_parts[::-1]))
+
+
 def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
     """Score on a process main thread; async callers must use process isolation."""
     if threading.current_thread() is not threading.main_thread():
@@ -92,10 +148,41 @@ def score(prediction: str, label: str, diagnostics: dict[str, int]) -> float:
         ),
         diagnostics,
     )
+    if not target:
+        return 0.0
+    guarded = False
+    try:
+        if any(isinstance(value, Eq) for value in gold):
+            guarded = _requires_legacy_verifier(reference)
+    except errors.TimeoutException:
+        _record_timeout(diagnostics)
+        guarded = True
+    except Exception:
+        logger.debug("Math-Verify reference probe failed; guarding equation comparison")
+        guarded = True
+    if guarded:
+        # Reuse the old comparison rules on already-anchored candidates. The old
+        # extractor/normalizer can discard equation LHSs (e.g. 1=0 -> 0), so do
+        # not rerun it on the full response or compare whole equations at once.
+        for answer in target:
+            if isinstance(answer, str) and _legacy_compare(answer, reference, diagnostics):
+                return 1.0
     # Reproduce verify(list, list)'s candidate order and exception recovery, but
     # expose timeout counts. The library also supplies literal-string candidates;
     # those may still agree after a symbolic comparison times out.
     for expected, answer in product(gold, target):
+        if guarded:
+            # The empty-solver bug is in equation-to-equation comparison. Keep
+            # literal matches and the library's ordinary assignment-to-value
+            # rule (i=0 vs 0, B=matrix vs matrix); neither invokes that solver.
+            literal_pair = isinstance(expected, str) and isinstance(answer, str)
+            assignment_value = (
+                isinstance(expected, Eq)
+                and isinstance(answer, (Expr, MatrixBase))
+                and not answer.has(relational.Relational)
+            )
+            if not (literal_pair or assignment_value):
+                continue
         try:
             if math_verify.verify(expected, answer, timeout_seconds=_TIMEOUT_SECONDS, raise_on_error=True):
                 return 1.0
@@ -132,7 +219,11 @@ class MathVerifier(ground_truth_utils.MathVerifier):
         label: Any,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> ground_truth_utils.VerificationResult:
+        # This math parser already operates on the supplied text, without any
+        # thinking-boundary selection; both input conventions use the same path.
         # SIGALRM requires a main thread. Reuse MILES's bounded subprocess pool
         # for direct async callers too; the worker invokes synchronous __call__.
         spec = {

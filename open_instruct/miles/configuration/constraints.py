@@ -309,6 +309,7 @@ STRUCTURED_FIELDS = {
         "sources",
         "pools",
         "sampling",
+        "over_length",
     },
     "launch": {
         "auto_resume",

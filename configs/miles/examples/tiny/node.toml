@@ -39,6 +39,8 @@ BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
 
 # Prepared math, instruction-following and code data; no judge-dependent verifiers.
 [data]
+# Exclude over-budget training prompts and record per-source counts; held-out data stays strict.
+over_length = "exclude"
 prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/train.jsonl"
 reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/verifiers.json"
 
@@ -64,19 +66,19 @@ provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
 
 [[evaluation.tasks]]
 task = "gsm8k"
-# Independent 8K evaluation budget; training still uses 32K responses.
+# Fixed 32K evaluation responses, independent of the served context capacity.
 # Clear GSM8K's default blank-line stop so it does not truncate reasoning there.
-generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
 task = "gsm8k:platinum"
-generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
 task = "ifeval_ood" # IFBench; distinct from IFEval.
-generation = { temperature = 0.0, max_tokens = 8192, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128 }
 
 [trainer]
@@ -104,6 +106,10 @@ wandb_project = "open-instruct-miles"
 wandb_group = "node"
 
 [core]
+# Grade the presented response; process/format exceptions must be explicitly declared.
+reward_final_answer_only = true
+# Set to "none" only when using an explicitly non-thinking policy/template.
+reward_reasoning_mode = "required"
 max_policy_lag = 12
 # A response cut off at max_response_length scores 0 (capped = wrong).
 reward_zero_truncated = true

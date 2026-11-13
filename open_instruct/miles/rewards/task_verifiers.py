@@ -58,6 +58,11 @@ class MultiplicationVerifier:
 
 
 class R1FormatVerifier(MultiplicationVerifier):
+    grading_objective = "format"
+    # The full-input check requires a raw closing-think boundary. Its response
+    # presentation check is also useful for explicitly non-thinking policies.
+    grading_requires_reasoning_scopes = ("full",)
+
     async def async_call(self, tokens, prediction, label, **kwargs):
         return RewardResult(float(re.match(r".*?</think>\s*<answer>.*?</answer>", prediction, re.DOTALL) is not None))
 
@@ -69,6 +74,8 @@ class R1FormatVerifier(MultiplicationVerifier):
 
 class ManifestIFVerifier(MultiplicationVerifier):
     """Translate canonical baseline constraint targets to OI's legacy list wrapper."""
+
+    grading_accepts_selected_input = True
 
     async def async_call(self, tokens, prediction, label, **kwargs):
         target = label

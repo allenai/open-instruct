@@ -11,15 +11,21 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
-def load_tokenizer(name_or_path, *, revision=None, trust_remote_code=False, use_fast=True):
+def load_tokenizer(name_or_path, *, revision=None, trust_remote_code=False, use_fast=True, local_files_only=False):
     """Preserve custom GPT-2 pre-tokenizers stored in tokenizer.json."""
     kwargs: dict[str, Any] = {"revision": revision, "trust_remote_code": trust_remote_code, "use_fast": use_fast}
+    if local_files_only:
+        kwargs["local_files_only"] = True
     tokenizer = AutoTokenizer.from_pretrained(name_or_path, **kwargs)
     if not use_fast or not isinstance(tokenizer, GPT2Tokenizer) or not tokenizer.is_fast:
         return tokenizer
 
     tokenizer_file = hub.cached_file(
-        name_or_path, "tokenizer.json", revision=revision, _raise_exceptions_for_missing_entries=False
+        name_or_path,
+        "tokenizer.json",
+        revision=revision,
+        local_files_only=local_files_only,
+        _raise_exceptions_for_missing_entries=False,
     )
     if tokenizer_file is None:
         return tokenizer

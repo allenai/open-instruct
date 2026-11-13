@@ -31,6 +31,7 @@ from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution import serving, startup
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
+from open_instruct.miles.rewards import rewards
 from open_instruct.miles.rollout import pool_metrics
 
 logger = logger_utils.setup_logger(__name__)
@@ -39,6 +40,12 @@ logger = logger_utils.setup_logger(__name__)
 async def train(args, *, export_hf=None):
     if getattr(args, "cluster_backend", "ray") != "ray":
         raise ValueError("Core currently requires the Ray cluster backend")
+    if getattr(args.olmo_core, "reward_config", None) and getattr(args, "custom_rm_path", None) in (
+        "open_instruct.miles.rewards.rewards.registered_reward",
+        "open_instruct.miles.rewards.rewards.rollout_reward",
+    ):
+        with stage(args, "reward_registry_validation"):
+            rewards.validate_registry(args)
     pooled = getattr(args.olmo_core, "prompt_provider", "shuffle") == "pools"
     exhaustion_type = None
     if pooled:
@@ -301,6 +308,7 @@ async def train(args, *, export_hf=None):
             if (
                 (stopped_for_time and getattr(args, "save", None))
                 or sentinel
+                or (getattr(args.olmo_core, "save_final_checkpoint", False) and rollout_id == args.num_rollout - 1)
                 or should_run_periodic_action(rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout)
             ):
                 # The async data source snapshots its cursor and pristine pending
@@ -428,6 +436,7 @@ async def train(args, *, export_hf=None):
             raise cleanup_error
     return {
         "completed_rollout_ids": completed,
+        "num_rollout": args.num_rollout,
         "pools_exhausted": exhausted,
         "start_rollout_id": args.start_rollout_id,
         "export_hf": export_hf,

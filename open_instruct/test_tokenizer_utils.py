@@ -51,7 +51,7 @@ class TestSerializedTokenizer(unittest.TestCase):
         broken = AutoTokenizer.from_pretrained(self.path)
         saved_pre = json.loads(self.backend.to_str())["pre_tokenizer"]
         self.assertNotEqual(json.loads(broken.backend_tokenizer.to_str())["pre_tokenizer"], saved_pre)
-        fixed = tokenizer_utils.load_tokenizer(str(self.path))
+        fixed = tokenizer_utils.load_tokenizer(str(self.path), local_files_only=True)
         for text in ["<think>\nOkay", "12345 can't stop.", "café 中文\n\n"]:
             self.assertEqual(fixed.encode(text, add_special_tokens=False), self.backend.encode(text).ids)
         self.assertEqual(fixed.eos_token_id, self.backend.token_to_id("<eos>"))
@@ -139,6 +139,10 @@ class TestSerializedTokenizer(unittest.TestCase):
         ):
             self.assertIs(tokenizer_utils.load_tokenizer("repo", revision="pinned"), fixed)
         source.assert_called_once_with(
-            "repo", "tokenizer.json", revision="pinned", _raise_exceptions_for_missing_entries=False
+            "repo",
+            "tokenizer.json",
+            revision="pinned",
+            local_files_only=False,
+            _raise_exceptions_for_missing_entries=False,
         )
         load.assert_called_once_with("repo", revision="pinned", trust_remote_code=False, use_fast=True)

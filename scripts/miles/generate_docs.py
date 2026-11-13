@@ -88,14 +88,15 @@ def render(native_help=None):
     text += "\n## Example recipes\n\nGenerated from the actual structured TOMLs. These are starting recipes, not universal defaults; see [development defaults](development-defaults.md). GPU columns distinguish per-node trainers from total rollout GPUs.\n\n"
     allocations = []
     recipes = []
-    for path in sorted((ROOT / "configs/miles/examples").glob("*.toml")):
+    examples = ROOT / "configs/miles/examples"
+    for path in sorted(examples.rglob("*.toml")):
         spec = run_spec.RunSpec.load(path)
         resolved = spec.compile()
         m = resolved.miles
         allocation = spec.plan()["allocation"]
         allocations.append(
             (
-                path.name,
+                str(path.relative_to(examples)),
                 f"{m['actor_num_nodes']} × {m['actor_num_gpus_per_node']}",
                 m["rollout_num_gpus"],
                 m["colocate"],
@@ -107,7 +108,7 @@ def render(native_help=None):
         )
         recipes.append(
             (
-                path.name,
+                str(path.relative_to(examples)),
                 f"{m['rollout_batch_size']} × {m['n_samples_per_prompt']}",
                 m["global_batch_size"],
                 m["num_rollout"],

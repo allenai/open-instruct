@@ -40,7 +40,7 @@ from open_instruct.miles.errors import InputError
 
 logger = logger_utils.setup_logger(__name__)
 
-TABLE_SCHEMA_VERSION = 1
+TABLE_SCHEMA_VERSION = 2
 SKIP_MODES = ("all_zero", "all_full", "zero_variance")
 SCOPES = ("start_checkpoint", "run_version", "mixed")
 
@@ -64,12 +64,14 @@ def _choose(values, name, explicit):
     return next(iter(values))
 
 
-def evidence(loaded, *, lineage, protocol, scopes):
+def evidence(loaded, *, lineage, protocol, scopes, grading_policy=None):
     """Valid rewards per input key, with the independent units that produced them."""
     table = {}
     for row in loaded["groups"]:
         attempt = row["_attempt"]
         if attempt["lineage"]["inventory_sha256"] != lineage or attempt["protocol_sha256"] != protocol:
+            continue
+        if row.get("grading_policy") != grading_policy:
             continue
         run = attempt["run"]
         deterministic = bool(attempt["protocol"].get("sglang_enable_deterministic_inference"))
@@ -120,6 +122,7 @@ def build(
     skip,
     lineage=None,
     protocol=None,
+    grading_policy=None,
     scopes=("start_checkpoint",),
     min_observations=16,
     min_units=2,
@@ -142,7 +145,20 @@ def build(
     lineage = _choose({m["lineage"]["inventory_sha256"] for m in manifests}, "lineage", lineage)
     protocols = {m["protocol_sha256"]: m["protocol"] for m in manifests if m["lineage"]["inventory_sha256"] == lineage}
     protocol = _choose(set(protocols), "protocol", protocol)
-    candidates = evidence(loaded, lineage=lineage, protocol=protocol, scopes=set(scopes))
+    policies = {}
+    for row in loaded["groups"]:
+        attempt = row["_attempt"]
+        if attempt["lineage"]["inventory_sha256"] == lineage and attempt["protocol_sha256"] == protocol:
+            policy = row.get("grading_policy")
+            identity = "legacy" if policy is None else inference_records.sha256(policy)
+            policies[identity] = policy
+    if not policies:
+        policies["legacy"] = None
+    policy_id = _choose(set(policies), "grading-policy", grading_policy)
+    selected_policy = policies[policy_id]
+    candidates = evidence(
+        loaded, lineage=lineage, protocol=protocol, scopes=set(scopes), grading_policy=selected_policy
+    )
     excluded, kept_by_readmission = [], []
     counts = collections.defaultdict(collections.Counter)
     for key in sorted(candidates):
@@ -185,6 +201,8 @@ def build(
         "lineage": lineage,
         "protocol_sha256": protocol,
         "protocol": protocols[protocol],
+        "grading_policy": selected_policy,
+        "grading_policy_id": policy_id,
         "rule": {
             "skip": sorted(skip),
             "scopes": sorted(scopes),
@@ -222,8 +240,10 @@ class Selection:
         if digest != core.selection_sha256:
             raise RuntimeError(f"Selection table {path} has SHA-256 {digest}, not the pinned {core.selection_sha256}")
         table = json.loads(data)
-        if table.get("schema_version") != TABLE_SCHEMA_VERSION:
+        if table.get("schema_version") not in (1, TABLE_SCHEMA_VERSION):
             raise RuntimeError(f"Selection table {path} has unsupported schema {table.get('schema_version')!r}")
+        if table["schema_version"] == 1 and table.get("grading_policy") is not None:
+            raise RuntimeError("Versioned grading contracts require selection table schema 2; rebuild the table")
         lineage = recording.lineage_identity(args.hf_checkpoint)["inventory_sha256"]
         if lineage != table["lineage"]:
             raise RuntimeError(
@@ -235,10 +255,16 @@ class Selection:
                 "Selection table evidence used a different sampling/verifier protocol "
                 f"({table['protocol_sha256']}) than this run ({self.protocol_sha256})"
             )
+        self.grading_policy = recording.grading_policy(args)
+        if table.get("grading_policy") != self.grading_policy:
+            raise RuntimeError(
+                "Selection table evidence used a different grading contract than this run; "
+                "rebuild the table from matching records. Unversioned tables are usable only in legacy mode."
+            )
         self.sha256 = digest
         logger.warning(
-            "Using prompt-exclusion table %s: compatibility checks do not cover verifier code changes, "
-            "reward_final_answer_only, or the judge registry/model. Confirm that this evidence was collected "
+            "Using prompt-exclusion table %s: compatibility checks do not cover verifier code changes "
+            "or the judge registry/model. Historical unversioned records cannot certify grading flags. Confirm that evidence was collected "
             "with the intended reward semantics before reusing it.",
             path,
         )
@@ -251,7 +277,8 @@ class Selection:
         metadata = sample.metadata or {}
         task = inference_records.task_identity(metadata, sample.prompt)["task_key"]
         tokens = metadata.get("run_prompt_token_ids_sha256")
-        return inference_records.sha256({"task": task, "tokens": tokens, "protocol": self.protocol_sha256})
+        base = inference_records.sha256({"task": task, "tokens": tokens, "protocol": self.protocol_sha256})
+        return recording.grading_input_key(base, self.grading_policy)
 
     def keep(self, group):
         domain = self.excluded.get(self.input_key(group[0]))
@@ -293,6 +320,9 @@ def main(argv):
     parser.add_argument("--lineage", help="Starting-checkpoint lineage digest; required if the store holds several")
     parser.add_argument("--protocol", help="Protocol digest; required if the lineage holds several")
     parser.add_argument(
+        "--grading-policy", help="Grading-policy digest or legacy; required for mixed-contract evidence"
+    )
+    parser.add_argument(
         "--scope", action="append", choices=SCOPES, help="Policy scopes to use; default start_checkpoint only"
     )
     parser.add_argument("--min-observations", type=int, default=16)
@@ -311,6 +341,7 @@ def main(argv):
             skip=options.skip,
             lineage=options.lineage,
             protocol=options.protocol,
+            grading_policy=options.grading_policy,
             scopes=tuple(options.scope or ("start_checkpoint",)),
             min_observations=options.min_observations,
             min_units=options.min_units,

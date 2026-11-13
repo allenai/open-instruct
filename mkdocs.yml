@@ -117,6 +117,7 @@ nav:
       - Data and evaluation:
         - Data and rewards: miles/data-and-evaluation.md
         - Dataset reward verifiers: miles/dataset-verifiers.md
+        - Grading inputs and changes: miles/grading.md
         - Dataset source preparation: miles/source-preparation.md
         - Managed judges: miles/managed-judges.md
         - Background evaluation: miles/background-evaluation.md

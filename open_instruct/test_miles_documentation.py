@@ -74,7 +74,7 @@ def test_special_control_descriptions_cover_dispatch():
     assert constraints.SPECIAL_CONTROLS.keys() <= described.keys()
 
 
-@pytest.mark.parametrize("path", sorted((ROOT / "configs/miles/examples").glob("*.toml")), ids=lambda p: p.stem)
+@pytest.mark.parametrize("path", sorted((ROOT / "configs/miles/examples").rglob("*.toml")), ids=lambda p: p.stem)
 def test_example_plans_and_launch_render_without_gpu_or_network(path):
     spec = run_spec.RunSpec.load(path)
     plan = spec.plan()

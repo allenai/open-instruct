@@ -44,7 +44,7 @@ runs reuse their recorded data unchanged. For named source datasets, the `train`
 component in `prepared_sample_id` identifies the source split, including when the
 row is assigned to this run's held-out partition; it is not a training assignment.
 
-The [single-node example](../../configs/miles/examples/node.toml) takes prepared
+The [single-node example](../../configs/miles/examples/tiny/node.toml) takes prepared
 math, instruction-following and code JSONL with a verifier registry, without
 judge-dependent tasks; its placeholder paths do not identify the complete published Olmo 3 mixture.
 Use manifest adoption when starting from dataset manifests. Unsupported task/verifier contracts fail
@@ -211,7 +211,7 @@ It also handles requests crossing multiple complete epochs. A provider implement
 `requires_feedback`; the provider itself
 does not require an epoch or source-mixture abstraction. Alternate implementations
 can be supplied through the data source's Python `provider=` argument. The built-in
-choices are `core.prompt_provider = "shuffle"` (default), `"remind"`, and `"mixture"`.
+choices are `core.prompt_provider = "shuffle"` (default), `"remind"`, `"mixture"`, `"pools"`, and `"priority"`.
 Structured `data.sources` selects `"mixture"` automatically.
 
 Provider state is saved atomically alongside the existing pending-group ledger.
@@ -226,6 +226,96 @@ recorder delivers every scored group before its best-effort disk queue, includin
 all-1 and all-0 groups dropped by the unchanged reward filter. A lost disk row does
 not lose feedback; an unavailable recorder fails the run rather than silently
 turning off adaptation.
+
+### Historical priority groups
+
+Tagliere v6 annotates each row with a model-specific historical reward priority.
+The opt-in priority provider visits every row in group 1 before group 2, then 3,
+then 4 in each dataset traversal. Run duration uses the ordinary MILES epoch or
+rollout budget; priority does not impose a one-pass stop.
+This allows a short training run to focus first on prompts with mixed historical
+rewards, while keeping one dataset artifact for different run budgets.
+
+```toml
+[core]
+prompt_provider = "priority"
+prompt_priority_field = "reward_priority_olmo35_sft_hero"
+```
+
+| Group | Historical evidence |
+| --- | --- |
+| 1 | At least one fully scored response group had differing rewards. |
+| 2 | Unknown: no matching history or no fully scored response group. |
+| 3 | All fully scored groups were zero and at least half of scored responses hit the token cap. |
+| 4 | Other constant rewards, including all-zero groups without frequent truncation. |
+
+All fresh draws come from the active group until it is exhausted. Groups have no
+sampling weights. Each row appears once per sampler epoch; the next epoch starts
+at group 1 with a new deterministic within-group shuffle. `data.seed` fixes an independent shuffle within
+each group, making the selection order deterministic across batch sizes and
+resume. `data.shuffle = false` keeps original row order within each group.
+A request may cross a group boundary; empty groups are skipped. Priorities control
+prompt selection; asynchronous generation can complete prompts in a different order.
+
+Optionally weight row sources **within the active priority group**, including
+sources inside a single Tagliere artifact:
+
+```toml
+[core]
+prompt_provider = "priority"
+prompt_priority_field = "reward_priority_olmo35_sft_hero"
+prompt_priority_source_field = "workbench.source.candidate_id"
+# Illustrative source labels/weights: use the actual values in your export and
+# provide a positive weight for every source that has rows.
+prompt_priority_source_weights = { C036 = 1.0, C046 = 2.0 }
+```
+
+The selected metadata path identifies the source. Tagliere exports its canonical
+Workbench source ID at `workbench.source.candidate_id`; flat fields such as
+`source_name` or `source_dataset` can also be selected. Relative weights control the next source draw while that source
+has rows in the active group; they are independent of its remaining row count.
+An exhausted or absent source is skipped and the remaining weights are
+renormalized. The whole priority group must finish before moving to the next.
+Rows appear once per sampler epoch: weights affect their order and early-budget
+exposure, not their total count after a complete pass. Without source weights, each priority
+group is one ordinary shuffled row list. With weights, `data.shuffle = false`
+preserves row order within each source, while the seed still fixes source draws.
+All observed source labels need positive finite weights; missing labels or weights
+fail startup. Configured labels absent from the input are harmless. Changing the
+source field or weights rejects checkpoint resume.
+
+Missing, noninteger, or out-of-range labels fail startup. Logs record the metadata
+field, group counts, seed, and shuffle mode. The selected field must match the
+exported history: choosing a different model's history is a run decision.
+Historical groups stay fixed as training progresses and do not change grades or
+the online zero-variance filter. A filtered row is not revisited until the next
+sampler epoch.
+
+Set the ordinary native MILES budget in the run file, for either priority or
+shuffle:
+
+```toml
+[training]
+num_epoch = 2
+```
+
+Alternatively, set `training.num_rollouts` for a fixed collection budget. Choose
+one; structured runs reject both rather than silently ignoring `num_epoch`.
+With neither set, the existing default of 100 rollouts remains. MILES resolves
+`num_epoch` after loading the prepared data as
+`num_rollout = num_epoch * (dataset_size // rollout_batch_size)`.
+Batch rounding, online filtering/refill, and async prefetch mean this native
+training-budget estimate need not equal exact fresh-prompt traversals. A rollout
+can contain several optimizer steps if its collection exceeds the global batch.
+Epoch-budget runs save the final completed update by default; an explicit
+`training.save_interval` still enables periodic checkpoints.
+
+Use this with one `data.rl_manifest` or prepared `data.prompt_data` input. Named
+source mixtures/pools, frozen exclusion tables, and replay cannot be combined
+with this provider. Ordinary shuffle remains the default. Checkpoints save the
+sampler epoch and cursor alongside pending prompts, and reject changes to the
+field, source weights, seed, shuffle mode, or group/source assignments on resume.
+The existing MILES runtime pin is unchanged.
 
 ### ReMind review provider
 
@@ -413,22 +503,71 @@ reports these source-group counts:
 | General | 20,636 |
 | Total | 102,014 |
 
-Prepare every source row once, preserving the published proportions, source
-identities, verifier names and targets. Do not substitute a balanced four-domain
-basket, an RLZero mixture or a smoke-test subset. Render and tokenize prompts with
-the selected policy checkpoint; the source's saved token IDs belong to its original
-tokenizer. Preserve the full question for judged examples in `metadata.judge_query`.
+Prepare the full published split as the starting population, preserving source
+identities, verifier names and targets. Render and tokenize prompts with the
+selected policy checkpoint; the source's saved token IDs belong to its original
+tokenizer. The example explicitly sets `data.over_length = "exclude"`, so the
+training population contains only rows that fit the run's effective prompt budget.
+At smaller budgets, this can change source-group proportions in the single input
+file; the published counts above describe the starting population, not a guarantee
+about retained rows. Preserve the full question for judged examples in
+`metadata.judge_query`.
 The trusted verifier registry must support math, code/code_stdio and instruction
 following; general-quality and general-quality_ref use the template's named bindings.
 Code verification requires an externally provisioned service.
 
 The `dolci-think-rl-7b` paths in the template are **prepared-artifact placeholders**,
 not an automatic Hugging Face download or proof of provenance. Before launch,
-record the source ID/revision and verify row counts, source-group counts and retained
-identities against the pinned source. Record any deliberate exclusions as a changed
-mixture; do not silently filter rows to satisfy the policy's prompt-length limit.
-Use the existing prepared-JSONL or immutable-manifest input contract. Background
-benchmark evaluation is configured separately and does not change this training mix.
+record the source ID/revision and verify the starting row counts, source-group
+counts and identities against the pinned source. Preparation records the prompt
+limit and per-source original/excluded/retained counts in its manifest and logs.
+Review those counts as the run's changed training population before interpreting
+results. To require the entire prepared input to fit, explicitly set
+`data.over_length = "fail"`; this remains the library default when the option is
+omitted. Use the existing prepared-JSONL or immutable-manifest input contract.
+Background benchmark evaluation is configured separately and does not change the
+training population.
+
+## Run-specific prompt limits
+
+A release can serve runs with different context and response budgets. Preparation
+checks rendered prompts using the run's tokenizer against `rollout_max_prompt_len`,
+which defaults to `inference.max_context_length - inference.max_response_length`.
+Prompts exactly at the limit are accepted. The default policy, `fail`, stops on
+any over-limit prompt. To exclude over-limit **training** prompts, set:
+
+```toml
+[data]
+over_length = "exclude"
+# Keep your existing tasks, sources, rl_manifest, or prompt_data settings.
+```
+
+This applies to all training sources; per-source overrides are rejected. It
+preserves prompt text, ordering, identities and configured source fractions or
+pool weights. Named-task counts select the initial candidate rows; exclusion does
+not backfill them. Held-out prompts still fail on excess length. Other validation,
+including token-ID/template compatibility, verifier constraints and train/held-out
+overlap, still applies to all candidate rows, including excluded rows.
+
+`prepared/data/manifest.json` records `prompt_length`: the effective policy,
+integer prompt limit, training scope, and original/excluded/retained counts by
+configured source name. For a single input, it uses the first nonempty string in
+`metadata.source_dataset`, then `metadata.source_name`, falling back to `train`
+when neither is available. This also supports older Workbench exports. Pool counts
+are included when pools are configured. The same counts appear in preparation logs. Each configured `data.sources` entry and each
+previously populated pool must retain at least one row to preserve its sampling
+allocation; otherwise preparation fails before publishing data. In single-input
+and named-task runs, metadata-based source groups are reporting-only and may
+lose all their rows. These labels identify provenance, not per-task allocations;
+named tasks sharing a dataset share its reporting bucket. The overall training input
+must still retain at least one row. Configured empty pools retain their existing
+behavior.
+
+The mixture manifest's row counts and hashes describe the retained files, so the
+runtime sampler continues to enforce its row-count check. The source release
+remains unchanged. Policy and limit are part of immutable preparation identity;
+changing either requires a fresh run root. This is preparation-time filtering;
+launch-time length preflight remains separate work.
 
 ## Online group filtering
 
@@ -834,7 +973,6 @@ enabled = true
 root = "/run/inference-records"
 
 [core]
-prepared_batch_overlap = false
 prompt_replay_enabled = true
 prompt_replay_max_successes = 0
 prompt_replay_truncation = "any"
@@ -865,8 +1003,17 @@ unchanged by the sampler; an eight-response recipe remains eight-response.
 | Stale work | Pool mode defaults to `async_unused_samples_handler="drop"`; explicit retry is rejected. Drops release reservations; dropped fresh rows are not redrawn, so complete traversal does not imply complete observed or trained coverage. |
 | Recovery | Manifest and selection-policy identity, cursors, RNG, targets, delivery counters, reservations, and replay histories are checkpointed with pending prompts. |
 
-The first implementation supports fully asynchronous disaggregated serving,
-without prepared-batch overlap. The application requires the companion MILES
+Pool mode supports fully asynchronous disaggregated serving, with or without
+[prepared-batch overlap](core.md#prepared-batch-overlap). With overlap, the batch
+prepared for the next update is staged while the current update trains; exposure
+is still credited once per completed update, in training order, and a checkpoint
+taken in between regenerates the prepared prompts on resume.
+
+Keep `core.prepared_batch_overlap` unchanged when resuming an existing run:
+switching it from `false` to `true` (or back) is rejected by the run-spec identity
+check. This support does not enable changing the setting on resume.
+
+The application requires the companion MILES
 runtime's `core_commit_exposure` callback and finite-pool termination support,
 included in this branch's runtime source pin. Older images fail explicitly.
 Build an image from this branch before launching this mode; the existing image

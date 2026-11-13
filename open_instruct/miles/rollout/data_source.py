@@ -74,6 +74,9 @@ class DashboardDrainingRolloutDataSource:
         self._collect_dashboard = bool(getattr(args, "use_miles_dashboard", False))
         self._selection = record_selection.Selection(args) if getattr(core, "selection_table", None) else None
         self._feedback_core = None
+        # Pool exposure staged per update, awaiting its optimizer commit. Prepared-batch
+        # overlap stages update N + 1 while update N trains, so two may be outstanding.
+        self._exposure_batches: dict[int, list[int]] = {}
         if self._delegate.provider.requires_feedback and (
             not self._fully_async or not getattr(core, "records_root", None) or self._selection is not None
         ):
@@ -152,17 +155,23 @@ class DashboardDrainingRolloutDataSource:
                 count != self._delegate.args.n_samples_per_prompt for count in counts.values()
             ):
                 raise ValueError("Exposure batch must contain complete prompt groups")
-            if getattr(self, "_exposure_batch", None) is not None:
+            staged = self._exposure_batches
+            if staged and (len(staged) > 1 or rollout_id != max(staged) + 1):
+                # Only the batch prepared for the next update may join the one in training.
                 raise RuntimeError("Uncommitted exposure batch")
-            self._exposure_batch = (rollout_id, sorted(counts))
+            if any(counts.keys() & selections for selections in staged.values()):
+                raise RuntimeError("Prompt group staged for two exposure batches")
+            staged[rollout_id] = sorted(counts)
 
     def commit_training_batch(self, rollout_id):
         with self._cursor_lock:
-            batch = getattr(self, "_exposure_batch", None)
-            if batch is None and self._delegate.provider.committed_update == rollout_id:
+            staged = self._exposure_batches
+            if rollout_id not in staged and self._delegate.provider.committed_update == rollout_id:
                 return self._delegate.provider.metrics()
-            if batch is None or batch[0] != rollout_id:
+            if rollout_id not in staged or rollout_id != min(staged):
+                # Updates commit in training order, never ahead of an earlier staged batch.
                 raise RuntimeError("Missing or mismatched exposure batch")
+            batch = (rollout_id, staged[rollout_id])
             selections = [
                 {
                     "selection_id": selection,
@@ -175,7 +184,7 @@ class DashboardDrainingRolloutDataSource:
                 for selection in batch[1]
             ]
             self._delegate.provider.commit(rollout_id, batch[1])
-            self._exposure_batch = None
+            del staged[rollout_id]
             metrics = self._delegate.provider.metrics()
             if not hasattr(self, "_exposure_attempt"):
                 self._exposure_attempt = uuid.uuid4().hex
@@ -294,14 +303,27 @@ class DashboardDrainingRolloutDataSource:
                     del self._pending_groups[identity]
 
     def requeue_pending_groups(self, identities: list[int]) -> int:
-        """Reset joined, unconsumed async work to its pristine checkpoint ledger."""
+        """Requeue joined, unconsumed work and release its staged exposure atomically."""
         with self._cursor_lock:
             identities = list(dict.fromkeys(identities))
             if not self._fully_async or any(i not in self._pending_groups for i in identities):
                 raise RuntimeError("cannot requeue an untracked async prompt group")
             selected = set(identities)
             groups = [copy.deepcopy(self._pending_groups[i]) for i in identities]
+            selections = {(group[0].metadata or {}).get("pool_selection_id") for group in groups}
+            released = []
+            for update, batch in self._exposure_batches.items():
+                if selections.intersection(batch):
+                    if not selections.issuperset(batch):
+                        raise RuntimeError("cannot requeue part of a staged exposure batch")
+                    released.append(update)
             self._delegate.buffer = groups + [g for g in self._delegate.buffer if g[0].group_index not in selected]
+            # PreparedBatch.close() joins preparation before requeueing on either
+            # cancellation path. Its staged batch must be released too, so the
+            # same update can be prepared again. Consumed groups fail the ledger
+            # check above; unrelated staged updates retain their commit ordering.
+            for update in released:
+                del self._exposure_batches[update]
             return len(groups)
 
     def save(self, rollout_id: int) -> None:
@@ -318,8 +340,16 @@ class DashboardDrainingRolloutDataSource:
         if not delegate.args.rollout_global_dataset:
             return
         with self._cursor_lock:
-            if getattr(self, "_exposure_batch", None) is not None:
+            if any(update <= rollout_id for update in self._exposure_batches):
                 raise RuntimeError("Cannot checkpoint an uncommitted exposure batch")
+            # A batch prepared for a later update is not saved as staged. Its prompts must
+            # still be in the restart ledger, so resume regenerates them and credit waits
+            # for the update that eventually trains them.
+            outstanding = {
+                (group[0].metadata or {}).get("pool_selection_id") for group in self._pending_groups.values()
+            }
+            if any(not outstanding.issuperset(selections) for selections in self._exposure_batches.values()):
+                raise RuntimeError("Cannot checkpoint a consumed, uncommitted exposure batch")
             state = {
                 key: getattr(delegate, key)
                 for key in ("sample_offset", "epoch_id", "sample_group_index", "sample_index", "metadata")

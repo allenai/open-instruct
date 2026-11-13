@@ -1,10 +1,18 @@
-# Three MILES starting points
+# MILES starting points by model family
+
+These templates provide reviewable starting points for MILES training and policy
+evaluation. Choose a model-family directory, then adapt its paths and topology
+before launching. The `small` family currently contains only a copied dev starter.
 
 | Config | Purpose |
 |---|---|
-| [dev.toml](dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
-| [node.toml](node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
-| [three-node.toml](three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+| [tiny/dev.toml](tiny/dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
+| [tiny/node.toml](tiny/node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
+| [tiny/three-node.toml](tiny/three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+
+`tiny/` holds the existing recipes. `small/dev.toml` currently copies the settings
+of `tiny/dev.toml`, providing a starting file for upcoming model/topology work;
+it does not qualify a larger model on the one-GPU smoke-test layout.
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from
@@ -14,7 +22,11 @@ these TOMLs. Run `plan` on your copy to inspect the resolved settings and unused
 stated.** Start a validation run from the applicable demo and record intentional
 differences. In particular, keep per-response loss weighting
 (`miles.calculate_per_token_loss=false`) and zero reward for truncated responses
-(`core.reward_zero_truncated=true`). A throughput experiment must not silently
+(`core.reward_zero_truncated=true`) and presented-response grading
+(`core.reward_final_answer_only=true`). The examples declare
+`core.reward_reasoning_mode="required"`; use `"none"` explicitly for a non-thinking
+policy/template. Process and boundary-format rewards require declared exceptions;
+see [grading contracts](../../../docs/miles/grading.md). A throughput experiment must not silently
 change either learning-policy setting. The one-node and three-node demos share
 training hyperparameters, including batch size and policy lag; their datasets,
 judges, evaluation panels and topology-specific performance budgets differ.
@@ -36,7 +48,7 @@ Copy a starter before editing it:
 
 ```bash
 mkdir -p runs
-cp configs/miles/examples/dev.toml runs/my-run.toml
+cp configs/miles/examples/tiny/dev.toml runs/my-run.toml
 # Replace model/output paths and YOUR_USERNAME; select an appropriate tiny model.
 python -m open_instruct.miles plan runs/my-run.toml
 python -m open_instruct.miles validate runs/my-run.toml
@@ -71,6 +83,16 @@ lock, or rebuild before submitting.
 
 ## Inputs and expected outputs
 
+All three examples explicitly set `data.over_length = "exclude"`, so preparation
+skips training prompts above the run's effective prompt limit and records
+original/excluded/retained counts per source in its manifest and logs. Source
+weights remain unchanged; an emptied configured source or previously populated
+pool fails preparation, as does an empty overall training input. Reporting-only
+source groups (`source_dataset`, or `source_name` when absent) may disappear at a
+smaller budget. Held-out prompts still fail on excess length. The library default
+remains `"fail"`; remove this example override or set it to `"fail"` to reject
+over-limit training prompts too.
+
 `dev` retains its compatible tiny-checkpoint placeholder and short GSM8K workload.
 It exercises preparation,
 generation, training, shared-engine evaluation, native checkpoint saving and final
@@ -103,9 +125,14 @@ its combined trainer/inference memory footprint checked before replacing the
 `three-node` uses a three-node, 24-GPU footprint. The nodes contain 8 training
 GPUs, 8 inference GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs
 are unused.
-Its training input is the full published `allenai/Dolci-Think-RL-7B` mixture,
+Its starting input is the full published `allenai/Dolci-Think-RL-7B` mixture,
 including general-quality tasks, prepared according to the
-[source and preparation contract](../../../docs/miles/data-and-evaluation.md#three-node-training-mixture). It requires
+[source and preparation contract](../../../docs/miles/data-and-evaluation.md#three-node-training-mixture).
+The example's explicit `over_length = "exclude"` keeps the subset that fits the
+run's prompt budget. This single-file input has no configured source fractions,
+so exclusions can change source-group proportions. Review the preparation manifest
+and logs for the retained population; set `over_length = "fail"` when every input
+row must fit. It requires
 a prepared Qwen3-32B judge with named verifier bindings. It also requires an
 accessible `launch.secrets.BEAKER_TOKEN` for background evaluation.
 Evaluator jobs allocate GPUs beyond the training plan;
@@ -271,3 +298,19 @@ explicit because evaluation changes independently of training topology.
 `plan` reports copied configurations with no request headroom, forced rescoring,
 weight qualification, periodic scoring audits, or other diagnostic overhead.
 Review those warnings instead of inheriting settings from an old experiment.
+
+## Candidate evaluation sampling
+
+Policy evaluation uses temperature 1.0 and top-p 0.95. Background tasks explicitly
+request 32,768 response tokens, independent of the serving context size; the math
+tasks retain 32 draws. Shared in-loop evaluation defaults to the same sampling
+and caps its inherited response budget at 32K; short smoke tests keep their
+smaller budgets. Explicit run overrides still win. Judge sampling and training
+rollout sampling are independent. This candidate protocol awaits the paired
+control evaluation results.
+
+SciCode explicitly sets temperature 1.0 and 32K responses, but the pinned
+evaluator does not expose top-p for that external task. Full nucleus-sampling
+alignment requires an evaluator update. Keep benchmark-specific protocols such
+as greedy RULER and BFCL explicit when adding them; do not override every task
+in a suite globally.

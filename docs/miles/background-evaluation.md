@@ -15,7 +15,7 @@ evaluation joins the last collection's batch, merging periodic and final tasks a
 the same update. The worker submits accepted receipts sequentially; it does not
 queue additional collections or wait at shutdown.
 
-The [three-node example](../../configs/miles/examples/three-node.toml) opts into background
+The [three-node example](../../configs/miles/examples/tiny/three-node.toml) opts into background
 evaluation with a pinned sandbox-enabled image and the 25-entry post-training
 development/text-safety panel. It sets `interval=0`, `initial=true` and `final=true`
 to evaluate the full panel before and after training only, including when the run
@@ -26,7 +26,7 @@ the global value: a task can opt into periodic evaluation under a global zero, o
 set zero to opt out under a positive global interval. The global `initial` and
 `final` flags still apply to every task. With both flags false and all intervals
 zero, no background evaluations or evaluation snapshots are scheduled.
-The [node example](../../configs/miles/examples/node.toml) runs a smaller GSM8K,
+The [node example](../../configs/miles/examples/tiny/node.toml) runs a smaller GSM8K,
 GSM8K-Platinum and IFBench panel initially, every 50 updates, and finally.
 Dev retains shared-engine evaluation, which remains the low-level default. The three-node template is
 provisional; check evaluator compatibility for the full model. Remove explicit
@@ -51,16 +51,17 @@ provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
 
 [[evaluation.tasks]]
 task = "gsm8k"
-generation = { temperature = 0.0, max_tokens = 2048, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
 task = "gsm8k:platinum"
-generation = { temperature = 0.0, max_tokens = 2048, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
 task = "ifeval_ood" # IFBench; distinct from the IFEval task named "ifeval".
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
 interval = 100
 scoring = { limit = 128 }
 
@@ -84,9 +85,9 @@ ID; never configure a separate evaluation run.
 The limited GSM8K tasks above are small mechanics examples. The three-node template
 uses individual task variants from `math:posttrain:dev`, `general:posttrain:dev`,
 `hillclimb:dev` and `safety_thinking`, deduplicated to 25 entries. Individual names
-make the panel explicit and do not create synthetic cross-benchmark aggregate scores. It retains full task sizes
-and sampling defaults from the pinned olmo-eval revision, including AIME/HMMT
-pass@32 with 16K responses. The pinned IFBench defaults differ from newer upstream
+make the panel explicit and do not create synthetic cross-benchmark aggregate scores. It retains full task sizes and explicitly sets candidate policy sampling to
+temperature 1.0, top-p 0.95 and 32,768 response tokens, including AIME/HMMT
+with 32 draws. These budgets are independent of the served context limit. The pinned IFBench defaults differ from newer upstream
 revisions; changing the image/revision can change the benchmark protocol.
 
 Use the full panel at the initial and final checkpoints for official comparisons.
@@ -108,7 +109,7 @@ Tasks with the same generation overrides, harness preset, harness overrides and
 execution kind and auxiliary GPU count share a job. Empty generation overrides preserve each task's own
 defaults. Each unfinished task starts its own native SGLang engine; completed
 tasks remain reusable after preemption. Model loading repeats between tasks.
-The three-node panel creates five groups: 17 ordinary tasks, LiveCodeBench, SciCode,
+The three-node panel creates six groups: seven 32-draw math tasks, ten other native tasks, LiveCodeBench, SciCode,
 five WildGuard-judged tasks and StrongREJECT. Each group requests one policy GPU;
 each judge group also reserves one GPU with task `auxiliary_gpus=1`. The worker
 exposes the policy and auxiliary GPUs to olmo-eval, whose planner assigns
@@ -482,3 +483,21 @@ retain prompt/completion lengths and finish reasons. The full panel allows
 A failed task is recorded in `task-failures.json`; subsequent independent tasks
 still execute. The collection remains failed until every task validates. Retrying
 reuses successful task attempts and reruns the failures.
+
+### Shared in-loop policy evaluation
+
+Held-out evaluation in the training allocation defaults to temperature 1.0 and
+top-p 0.95, with an inherited response budget capped at 32,768 tokens. It retains
+a shorter training response budget in smoke tests. Explicit `miles.eval_temperature`,
+`miles.eval_top_p` and `miles.eval_max_response_len` (or the structured inference
+alias) override these defaults. OPD in-loop evaluation uses the same sampling
+and cap when its evaluation response length is inherited. These settings do not
+change training rollouts or reward judges.
+
+The candidate background configuration uses per-task overrides rather than
+changing the evaluator's global defaults. SciCode uses `arguments.temperature=1.0`
+and `arguments.max_tokens=32768`; the pinned external task has no top-p control.
+Keep that limitation visible until the evaluator supports it. For benchmarks
+with their own decoding contract (for example RULER or BFCL), preserve that
+contract rather than applying these settings globally. Keep pre-change scores
+labelled by their original protocol when comparing checkpoints.
