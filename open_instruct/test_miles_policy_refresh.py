@@ -42,7 +42,6 @@ def test_refresh_is_explicit_and_compiles_into_core_config():
         ({"use_fault_tolerance": True}, "use_fault_tolerance"),
         ({"rollout_temperature": 0.7}, "temperature"),
         ({"rollout_top_p": 0.9}, "top_p"),
-        ({"rollout_top_k": 10}, "top_k"),
         ({"sglang_cuda_graph_backend_decode": "tc_piecewise"}, "backend_decode"),
         ({"sglang_cuda_graph_backend_prefill": "tc_piecewise"}, "backend_prefill"),
         ({"advantage_estimator": "gspo"}, "grpo"),
@@ -77,3 +76,9 @@ def test_refresh_checks_effective_json_graph_overrides(encode):
             "sglang_cuda_graph_config": encode({"decode": {"backend": "full"}}),
         },
     ).validate()
+
+
+@pytest.mark.parametrize("top_p", [0.95, 1.0])
+def test_refresh_finite_sampling_support_is_preserved(top_p):
+    config = configured()
+    dataclasses.replace(config, miles=config.miles | {"rollout_top_p": top_p, "rollout_top_k": 100278}).validate()

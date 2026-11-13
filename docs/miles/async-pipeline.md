@@ -65,8 +65,10 @@ collection, the managed single-turn producer, MILES router metadata and TIS.
 Keep `use_rollout_logprobs=false`; it is independent of retaining original behavior
 probabilities for TIS. Full decode CUDA graphs or disabled graphs are accepted;
 prefill graphs, speculative decoding, serving prefill/decode disaggregation and
-automatic engine fault tolerance are rejected. Sampling must use
-temperature/top-p 1 and top-k -1. See [configuration](configuration.md) and
+automatic engine fault tolerance are rejected. Sampling uses temperature 1. Full-policy sampling keeps top-p 1 and top-k -1.
+Nucleus sampling requires a finite positive top-k for exact sampling-support replay;
+setting top-k to the complete model vocabulary introduces no additional token cutoff.
+Core scoring and the policy loss both normalize over the recorded per-token support. See [configuration](configuration.md) and
 [throughput settings](throughput-profiles.md).
 A configured refresh mode does not prove a particular short run actually crossed
 a policy boundary; inspect retained token spans and `refresh_scores` observations.

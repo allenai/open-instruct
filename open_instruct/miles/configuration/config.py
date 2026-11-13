@@ -794,14 +794,14 @@ class RunConfig:
                 "refresh requires miles.sglang_cuda_graph_backend_prefill=disabled, including JSON overrides",
                 constraints.Category.NOT_VALIDATED,
             )
-        if options.get("rollout_temperature", 1.0) != 1.0 or options.get("rollout_top_p", 1.0) != 1.0:
+        if options.get("rollout_temperature", 1.0) != 1.0:
             raise constraints.error(
-                "refresh qualification requires rollout_temperature=1 and rollout_top_p=1",
-                constraints.Category.NOT_VALIDATED,
+                "refresh qualification requires rollout_temperature=1", constraints.Category.NOT_VALIDATED
             )
-        if options.get("rollout_top_k", -1) != -1:
+        if options.get("rollout_top_p", 1.0) < 1.0 and options.get("rollout_top_k", -1) < 1:
             raise constraints.error(
-                "refresh qualification requires rollout_top_k=-1", constraints.Category.NOT_VALIDATED
+                "refresh rollout_top_p below 1 requires finite positive rollout_top_k for sampling-support replay",
+                constraints.Category.NOT_IMPLEMENTED,
             )
 
     def arguments(self) -> list[str]:
