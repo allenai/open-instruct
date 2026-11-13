@@ -1,0 +1,171 @@
+{
+  "purpose": "Validate priority as a modifier of uniform/exposure pool allocation using original Tagliere v7 records, actual MILES data-source recovery and commit paths, and the existing tiny Olmo MoE on one local RTX 4090.",
+  "feature_revision": "917772f2d",
+  "runtime_image": "codex-miles-task-graders:6f3359eb0",
+  "v7_export_artifact": "a3336ae8bf43adef5738a1a7327eba87ebf498b3a84d4d5528aa836476f694da",
+  "v7_export_release_id": "22525087d1469746eef45d7ef007962e3e2cfc726a01b5060deae35546f8278d",
+  "v7_source": "/home/robert/storage/rl-data-workbench/workflows/tagliere-v6-20261112/stages/b57195b822202829c4f4b5c7496f5259adf135d97b7e6fd6e9d0ca24ae820fd8/attempt-0001/output/train.jsonl",
+  "subset": {
+    "extracted_rows": 80,
+    "candidates": [
+      "C094",
+      "C031"
+    ],
+    "all_original_priorities": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "allocation_rows": 2048,
+    "allocation_sha256": {
+      "C094": "702a6a584928ac005cc9dbb11842131cc398997b9ab060cd1a1da09a5b906501",
+      "C031": "55559e6d1b69153d1a600503bdefb588f39c431d4ba8620c4b168de4f296249a"
+    },
+    "preserved": [
+      "input",
+      "label",
+      "all original metadata including priority and verifier targets"
+    ],
+    "pool_assignment": "Runtime source-pool labels added during ordinary preparation"
+  },
+  "ledger_checks": {
+    "uniform": {
+      "status": "passed",
+      "trained": {
+        "C094": 5,
+        "C031": 11
+      },
+      "filtered": 8,
+      "committed_groups": 16,
+      "receipts": 16,
+      "C094_exhausted_at_draw": 13,
+      "resume_pending_verified": true
+    },
+    "exposure": {
+      "status": "passed",
+      "trained": {
+        "C094": 6,
+        "C031": 10
+      },
+      "filtered": 8,
+      "committed_groups": 16,
+      "receipts": 16,
+      "C094_exhausted_at_draw": 16,
+      "resume_pending_verified": true
+    }
+  },
+  "allocation_check": {
+    "controlled_acceptance": {
+      "C094": 0.25,
+      "C031": 0.75
+    },
+    "independent_seeds": 5,
+    "updates_per_trial": 64,
+    "groups_per_update": 4,
+    "uniform_C094_trained_share": 0.2359375,
+    "exposure_C094_trained_share": 0.503125,
+    "exposure_trial_shares": [
+      0.51171875,
+      0.5,
+      0.50390625,
+      0.5390625,
+      0.4609375
+    ]
+  },
+  "gpu_checks": {
+    "uniform": {
+      "status": "passed",
+      "scope": "Existing tiny Olmo MoE + production v7 loader/priority sampler/commit ledger; injected token-parity GRPO rewards; not the distributed native trainer or original task grading",
+      "gpu": "NVIDIA GeForce RTX 4090",
+      "updates": 8,
+      "groups_per_update": 3,
+      "responses_per_group": 2,
+      "incomplete_tail_uncredited": 0,
+      "trained": {
+        "C094": 8,
+        "C031": 16
+      },
+      "seconds": 0.8038263309281319,
+      "median_update_seconds": 0.014023500960320234,
+      "model_parameters": 26591104,
+      "resume_optimizer_and_sampler": true,
+      "max_memory_allocated": 1494777856,
+      "model_weights_changed": true
+    },
+    "exposure": {
+      "status": "passed",
+      "scope": "Existing tiny Olmo MoE + production v7 loader/priority sampler/commit ledger; injected token-parity GRPO rewards; not the distributed native trainer or original task grading",
+      "gpu": "NVIDIA GeForce RTX 4090",
+      "updates": 7,
+      "groups_per_update": 3,
+      "responses_per_group": 2,
+      "incomplete_tail_uncredited": 2,
+      "trained": {
+        "C094": 8,
+        "C031": 13
+      },
+      "seconds": 0.22161541902460158,
+      "median_update_seconds": 0.01324679097160697,
+      "model_parameters": 26591104,
+      "resume_optimizer_and_sampler": true,
+      "max_memory_allocated": 1494777856,
+      "model_weights_changed": true
+    }
+  },
+  "native_runtime_tests": {
+    "passed": 59,
+    "command": "pytest --require-miles-runtime tests/miles/test_pool_provider.py tests/miles/test_pool_prepared_batch_runtime.py tests/miles/test_pool_exhaustion_driver.py -q",
+    "coverage": [
+      "real zero-variance filtering and no credit before commit",
+      "priority group recorded in trained exposure receipts",
+      "pending-group checkpoint regeneration",
+      "cross-loop prepared batch cancellation, stale discard, handoff and retry",
+      "priority modifier with uniform and exposure",
+      "partial and total inventory exhaustion preserves last completed optimizer update"
+    ]
+  },
+  "additional_cpu_tests": 330,
+  "limitations": [
+    "Not a full native distributed training run: async pools require separate trainer/rollout GPUs; this host has one physical GPU.",
+    "GPU exercise uses the existing 26.6M-parameter tiny Olmo MoE through its HF implementation, injected one-token parity rewards and real production source/commit ledger. It does not test original task-grader correctness or learning quality.",
+    "Controlled acceptance is injected, not measured H196 acceptance. Exposure balances cumulative groups and redistributes after whole-pool exhaustion; exact per-update quotas are not promised."
+  ],
+  "local_artifacts": "/home/robert/proj/open-instruct/outputs/pr2256-priority-v7-local",
+  "reproduce": [
+    "python extract.py",
+    "python extract_allocation.py",
+    "bash run_local.sh tests",
+    "bash run_local.sh ledger",
+    "bash run_local.sh gpu",
+    "PYTHONPATH=<feature-worktree> python allocation.py"
+  ],
+  "runtime_pins": {
+    "olmo-core": {
+      "repository": "https://github.com/allenai/Olmo-core.git",
+      "revision": "903e57d46cc2c62cb5611e49c4d0e2052eb798d2"
+    },
+    "miles": {
+      "repository": "https://github.com/allenai/miles-olmo-core.git",
+      "revision": "6b78328406a42d41d5dce260779655f685dc4524"
+    },
+    "olmo-sglang": {
+      "repository": "https://github.com/allenai/olmo-sglang.git",
+      "revision": "069dc0a3cf0e28bd9f03d035aa98fc2bd5e8896a"
+    },
+    "sglang": {
+      "repository": "https://github.com/sgl-project/sglang.git",
+      "revision": "b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"
+    },
+    "megatron-lm": {
+      "repository": "https://github.com/radixark/Megatron-LM.git",
+      "revision": "235952df607b3820716e5e67728a5ab470ca33ae"
+    },
+    "megatron-bridge": {
+      "repository": "https://github.com/radixark/Megatron-Bridge.git",
+      "revision": "8cd3466d14d2337c8492827b3712482c2b3e4866"
+    }
+  },
+  "additional_runtime_compatibility_check": "Same 59 runtime tests, ledger checks and tiny-model GPU exercise also passed with control image open-instruct-miles-core-a87a0feac (newer Core/MILES/olmo-sglang pins).",
+  "v7_train_sha256": "798d9f4fe896272bf043b6c7e25fc783a1209937590683233cf879de7c2eb720"
+}
