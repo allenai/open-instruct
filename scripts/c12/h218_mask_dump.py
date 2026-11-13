@@ -27,7 +27,7 @@ import os
 import sys
 
 import numpy as np
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 IM_START, IM_END = "<|im_start|>", "<|im_end|>"
 
@@ -76,11 +76,14 @@ def main():
     ap.add_argument("--max-seq-length", type=int, default=131072)
     ap.add_argument("--check-tokenizer", default=None)
     a = ap.parse_args()
-    tok = AutoTokenizer.from_pretrained(a.cache_dir)
+    # The cache writer saves its tokenizer (with the chat template) under <cache>/tokenizer.
+    tok = AutoTokenizer.from_pretrained(os.path.join(a.cache_dir, "tokenizer"))
     im_end_ids = tok.encode(IM_END, add_special_tokens=False)
     assert len(im_end_ids) == 1, im_end_ids
     im_end_id = im_end_ids[0]
-    other = AutoTokenizer.from_pretrained(a.check_tokenizer) if a.check_tokenizer else None
+    # The start's tokenizer dir may carry a newer transformers' tokenizer_config; load the file directly.
+    other = (PreTrainedTokenizerFast(tokenizer_file=os.path.join(a.check_tokenizer, "tokenizer.json"))
+             if a.check_tokenizer else None)
     stats, rows, tokens, labels = load_rows(a.cache_dir)
     lengths = np.array([e - s for _, s, e in rows])
     loss = 0
