@@ -69,8 +69,11 @@ OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h161-gpu
 LR=5e-5
 EXTRA_ARGS=""
 DESC="ledger H161 GPU companion (draft)"
+# HF cache and Beaker secrets; an arm owned by someone else sets its own (b1r-toolA).
+HF_ROOT=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache
+SECRET_HF=abhishekr_HF_TOKEN; SECRET_WANDB=abhishekr_WANDB_API_KEY; SECRET_BEAKER=abhishekr_BEAKER_TOKEN
 case "$ARM" in
-    b1r|b1r-superior|b1r-ifchatv2|b1r-sciv1|b1r-scimcq)
+    b1r|b1r-superior|b1r-ifchatv2|b1r-sciv1|b1r-scimcq|b1r-toolA)
          MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
          HF_REF=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed
          LR=2e-4; REPLAY=/weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r
@@ -84,7 +87,17 @@ case "$ARM" in
              (sciv1) HYP=h185; ADD=$D/h174/data/sciv1-b41afb5d.parquet; CACHE=e55fb4bb90-6068a350-rowaligned ;;
              (scimcq) HYP=h186; ADD=$D/h175/data/out-a1/h175-scimcq-6a60033f.parquet; CACHE=125b9c5edc-6068a350-rowaligned ;;
          esac
-         if [[ -n "$SRC" ]]; then
+         if [[ "$SRC" == toolA ]]; then
+             # ledger H221 (baileyk): nemo replaced by its control selection minus the tier-A tool-call rows, at 1.0
+             # (ledger experiments/h221/data/build_nemo_toolA.py); H182's replay dir unchanged; the arm's own cache.
+             HYP=h221; ROOT221=/weka/olmo-3p5-post-checkpoints/baileyk/h221
+             MIXER="${MIXER/$P\/nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426/$ROOT221/data/nemo-toolA-3b0ecf41.parquet 1.0}"
+             [[ "$MIXER" == *nemo-toolA-3b0ecf41.parquet* ]] || { echo "nemo swap failed" >&2; exit 1; }
+             CACHE="${H221_CACHE:?H221_CACHE=<the arm cache name from experiments/h221/cache_job.sh>}"
+             OUT_ROOT=/weka/olmo-3p5-post-checkpoints/baileyk/h221-gpu; DESC="ledger h221 toolA-b1-gpu"; HOURS=16
+             HF_ROOT=$ROOT221/hf_cache; SECRET_HF=BAILEYK_HF_TOKEN; SECRET_WANDB=BAILEYK_WANDB_API_KEY
+             SECRET_BEAKER=BAILEYK_BEAKER_TOKEN
+         elif [[ -n "$SRC" ]]; then
              MIXER="$MIXER $ADD 1.0"; REPLAY=/weka/olmo-3p5-post-checkpoints/abhishekr/$HYP/replay-$SRC
              OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/$HYP-gpu; DESC="ledger $HYP $SRC-b1-gpu"; HOURS=16
          fi
@@ -193,16 +206,16 @@ import json, os, sys
 env = [
     {"name": "OLMO_SHARED_FS", "value": "1"},
     {"name": "EXPECTED_NUMPY_CACHE", "value": "$CACHE"},
-    {"name": "HF_HOME", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/huggingface"},
-    {"name": "HF_DATASETS_CACHE", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/huggingface"},
-    {"name": "HF_HUB_CACHE", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/hub"},
+    {"name": "HF_HOME", "value": "$HF_ROOT/huggingface"},
+    {"name": "HF_DATASETS_CACHE", "value": "$HF_ROOT/huggingface"},
+    {"name": "HF_HUB_CACHE", "value": "$HF_ROOT/hub"},
     {"name": "NCCL_DEBUG", "value": "ERROR"},
     {"name": "NCCL_SOCKET_IFNAME", "value": "ib"},
     {"name": "NCCL_IB_HCA", "value": "^=mlx5_bond_0"},
     $EXTRA_ENV
-    {"name": "HF_TOKEN", "secret": "abhishekr_HF_TOKEN"},
-    {"name": "WANDB_API_KEY", "secret": "abhishekr_WANDB_API_KEY"},
-    {"name": "BEAKER_TOKEN", "secret": "abhishekr_BEAKER_TOKEN"},
+    {"name": "HF_TOKEN", "secret": "$SECRET_HF"},
+    {"name": "WANDB_API_KEY", "secret": "$SECRET_WANDB"},
+    {"name": "BEAKER_TOKEN", "secret": "$SECRET_BEAKER"},
 ]
 task = {
     "name": "$RUN_NAME",
