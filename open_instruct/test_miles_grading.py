@@ -65,6 +65,30 @@ def test_response_parts(raw, mode, thinking, response, gate, count):
     assert "raw" not in parts.summary() and "full" not in parts.summary()
 
 
+@pytest.mark.parametrize(
+    "response",
+    [
+        "\n\n42\n\t",
+        "\n<answer>42</answer>\nExplanation outside the wrapper.\n",
+        '  {"answer": 42}  \n',
+        "\n```python\nprint(42)\n```\n",
+    ],
+)
+@pytest.mark.parametrize("final", [False, True])
+def test_flag_selects_full_or_after_thinking_without_answer_cleanup(monkeypatch, response, final):
+    seen = []
+
+    async def verify(tokens, prediction, label, **kwargs):
+        seen.append(prediction)
+        return SimpleNamespace(score=1.0, cost=0.0)
+
+    full = "<think>scratch answer</think>" + response
+    sample = item(full)
+    assert score(monkeypatch, sample, SimpleNamespace(async_call=verify), final=final) == 1
+    assert seen == [response if final else full]
+    assert sample.response == full
+
+
 def test_prompt_state_and_nonthinking_contract_are_explicit():
     parts = grading.split_response("work", prompt="question<think> \n")
     assert parts.prompt_opens_reasoning and parts.gate == "missing_final_answer"
@@ -282,10 +306,12 @@ def test_literal_opener_in_delivered_prose_is_not_a_reopened_section():
 
 
 @pytest.mark.parametrize("scope", grading.SCOPES)
-def test_judge_payload_respects_declared_view(monkeypatch, scope):
+@pytest.mark.parametrize("final", [False, True])
+@pytest.mark.parametrize("name", ["general-quality", "general-quality_ref", "general-web_instruct_general_verifier"])
+def test_judge_payload_respects_declared_view(monkeypatch, scope, final, name):
     registry = rewards._VerifierRegistry()
-    registry["general-quality"] = SimpleNamespace()
-    registry.grading_policies["general-quality"] = grading.GradingPolicy(scope)
+    registry[name] = SimpleNamespace()
+    registry.grading_policies[name] = grading.GradingPolicy(scope)
     monkeypatch.setattr(rewards, "_registry", lambda path: registry)
     monkeypatch.setattr(rewards.judge_registry, "bound", lambda name: True)
     monkeypatch.setattr(rewards.judge_registry, "resolve_request", lambda *args, **kwargs: None)
@@ -294,27 +320,29 @@ def test_judge_payload_respects_declared_view(monkeypatch, scope):
 
     def request(config, prompt):
         prompts.append(prompt)
-        return '{"REASONING":"ok","SCORE":10}'
+        return "Final Decision: Yes" if name == "general-web_instruct_general_verifier" else '{"SCORE":10}'
 
     monkeypatch.setattr(general_judge, "_request", request)
-    raw = "<think><answer>scratch answer</answer>more work</think><answer>delivered answer</answer>"
-    sample = item(raw, name="general-quality")
+    delivered = "\n\n<answer>delivered answer</answer>\nExplanation outside the wrapper.\n\t"
+    raw = "<think><answer>scratch answer</answer>more work</think>" + delivered
+    sample = item(raw, name=name)
     sample.metadata["judge_query"] = "question"
-    args = SimpleNamespace(olmo_core=CoreConfig(reward_config="unused", reward_final_answer_only=True))
+    args = SimpleNamespace(olmo_core=CoreConfig(reward_config="unused", reward_final_answer_only=final))
     assert asyncio.run(rewards.registered_reward(args, sample)) == 1
     parts = grading.split_response(raw)
     expected, _ = general_judge.build_judge_prompt(
-        "general-quality",
-        query="question",
-        prediction=parts.text(scope),
-        target=None,
-        extract_answer=scope == "response",
+        name, query="question", prediction=parts.text(scope) if final else raw, target=None, extract_answer=not final
     )
     assert prompts == [expected]
-    if scope == "response":
-        assert "scratch answer" not in prompts[0] and "delivered answer" in prompts[0]
+    if not final:
+        # Historical generic extraction prefers the first answer wrapper, even
+        # when it is inside thinking. This remains legacy behavior, not a new
+        # shared input contract.
+        assert "scratch answer" in prompts[0] and "delivered answer" not in prompts[0]
+    elif scope == "response":
+        assert delivered in prompts[0] and "scratch answer" not in prompts[0]
     else:
-        assert "<answer>scratch answer</answer>more work" in prompts[0]
+        assert parts.text(scope) in prompts[0]
     assert sample.response == raw
 
 

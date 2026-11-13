@@ -108,3 +108,13 @@ def test_feedback_and_persisted_rows_share_the_grading_identity(native, tmp_path
     row = read_record(recorder, sample())
     assert source.rows[0]["input_key"] == row["input_key"]
     assert source.rows[0]["responses"][0]["grading"] == row["responses"][0]["grading"]
+
+
+def test_intact_judge_contract_cannot_pool_with_previous_extraction_contract(native, tmp_path, monkeypatch):
+    keys = []
+    for version in (1, 2):
+        monkeypatch.setattr(grading, "SCHEMA_VERSION", version)
+        row = read_record(native.create_recorder(arguments(tmp_path)), sample())
+        assert row["grading_policy"]["schema_version"] == version
+        keys.append(row["input_key"])
+    assert keys[0] != keys[1]

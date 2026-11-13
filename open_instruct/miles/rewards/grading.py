@@ -2,7 +2,8 @@
 
 This module owns reasoning boundaries for MILES final-answer grading. Task
 parsers still own answer wrappers, mathematical syntax, programs and tool calls.
-Legacy dispatch and direct verifier calls retain their existing extraction.
+Legacy dispatch and direct verifier calls retain their existing extraction in
+their own adapters; that normalization is not part of this selector.
 """
 
 from dataclasses import dataclass
@@ -14,7 +15,9 @@ Scope = Literal["response", "thinking", "full"]
 ReasoningMode = Literal["required", "none"]
 SCOPES = ("response", "thinking", "full")
 REASONING_MODES = ("required", "none")
-SCHEMA_VERSION = 1
+# Also identifies the effective grading contract in persisted evidence. Version
+# 2 sends selected judge inputs intact, including answer tags and whitespace.
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -108,17 +111,6 @@ def split_response(
     return ResponseParts(
         raw, full, thinking, response, start, reasoning_mode, opened, closed, count, completion_status, gate
     )
-
-
-def legacy_response_text(text: str) -> str:
-    """Compatibility extraction for direct callers without a declared policy.
-
-    These callers historically use the last suffix when present and otherwise
-    accept the full text, including unfinished thinking. Do not apply eligibility
-    gates here: the MILES dispatcher applies them only in final-answer mode.
-    """
-    parts = split_response(text)
-    return (parts.full if parts.response is None else parts.response).strip()
 
 
 @dataclass(frozen=True)

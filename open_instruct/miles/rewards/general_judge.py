@@ -173,7 +173,12 @@ def parse_web_instruct_judge_response(content: str) -> tuple[str, float]:
 def build_judge_prompt(
     name: str, *, query: str, prediction: str, target: Any, extract_answer: bool = True
 ) -> tuple[str, str]:
-    """Build an oracle-validated general-quality judge prompt."""
+    """Build an oracle-validated general-quality judge prompt.
+
+    ``extract_answer`` preserves the historical direct-call/flag-off contract.
+    Shared grading views must pass False: a quality judge should see the chosen
+    text intact, rather than implicitly accepting an answer-wrapper convention.
+    """
     try:
         template, expected_sha256 = _PROMPTS[name]
     except KeyError as error:

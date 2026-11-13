@@ -11,7 +11,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from open_instruct.miles.rewards import grading, response_text
+from open_instruct.miles.rewards import deterministic_verifiers, grading, response_text
 
 
 def replay(path, *, reasoning_mode="required"):
@@ -40,7 +40,7 @@ def replay(path, *, reasoning_mode="required"):
             sources[str(row.get("source", "unknown"))] += 1
             old_gates[old_gate or "eligible"] += 1
             new_gates[parts.gate or "eligible"] += 1
-            if grading.legacy_response_text(raw) != previous_legacy:
+            if deterministic_verifiers.answer_text(raw) != previous_legacy:
                 counts["legacy_input_changes"] += 1
             if old_gate is None and parts.gate is None and parts.response != previous:
                 counts["eligible_input_changes"] += 1

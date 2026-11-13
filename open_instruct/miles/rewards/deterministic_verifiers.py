@@ -18,7 +18,7 @@ from fractions import Fraction
 import regex
 
 from open_instruct import logger_utils
-from open_instruct.miles.rewards import grading, task_verifiers
+from open_instruct.miles.rewards import response_text, task_verifiers
 
 _QUOTED_PAIR_PATTERN = r'".+":\s*".+"'
 _FORMAT_SEARCH_TIMEOUT_SECONDS = 0.1
@@ -45,8 +45,15 @@ class Result:
 
 
 def answer_text(text):
-    """Use an explicit final region when present; support non-thinking policies."""
-    return grading.legacy_response_text(text)
+    """Legacy consumer normalization, separate from shared view selection.
+
+    Existing task consumers still depend on this suffix/whitespace convention.
+    Keep it here until each consumer has an explicit selected-input contract.
+    In particular, this fallback accepts unfinished thinking for direct callers;
+    it must never be used as the dispatcher's final-answer eligibility policy.
+    """
+    text = response_text.strip_terminal_special_tokens(text)
+    return text.rsplit("</think>", 1)[-1].strip()
 
 
 def strict_json(text):

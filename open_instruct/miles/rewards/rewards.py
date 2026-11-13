@@ -503,9 +503,10 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                 # the original tokens; token scorers require that scope at load.
                 tokens = []
             if judge_registry.bound(name):
-                # A trusted process/whole-response rubric must see its declared
-                # view intact, without the answer-task wrapper extractor.
-                judge_options = {"extract_answer": False} if policy and policy.scope != "response" else {}
+                # Shared selection already chose the grading view. A quality
+                # judge reads that entire view, including wrappers, prose and
+                # whitespace. Preserve historical extraction only in legacy mode.
+                judge_options = {"extract_answer": False} if parts is not None else {}
                 score = await general_judge.general_judge_score(
                     args, sample, name=name, target=copy.deepcopy(spec["target"]), prediction=response, **judge_options
                 )

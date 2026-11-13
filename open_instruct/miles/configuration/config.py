@@ -36,6 +36,9 @@ RECORD_RESPONSE_MODES = ("off", "all", "sample")
 @dataclasses.dataclass(frozen=True)
 class CoreConfig:
     reward_zero_truncated: bool = True
+    # False: historical consumer dispatch on full text. True: shared selection
+    # of the text after thinking; trusted per-verifier process exceptions apply.
+    # Selection preserves answer whitespace and does not extract answer wrappers.
     reward_final_answer_only: bool = False
     # Only used by final-answer grading. Non-thinking runs must opt into none.
     reward_reasoning_mode: str = "required"
