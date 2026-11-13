@@ -101,10 +101,10 @@ reward_zero_truncated = true
 calculate_per_token_loss = false
 ```
 
-This works with every verifier, managed judges included; only
-`reward_final_answer_only` is restricted to text verifiers. It cannot be combined
+This works with every verifier, managed judges included. It cannot be combined
 with a `custom_reward_post_process_path` other than the default ungraded-response
-exclusion described below.
+exclusion described below. Final-answer selection and explicit verifier exceptions
+are described in [Grading inputs and changes](grading.md).
 
 ## Ungraded responses
 
@@ -160,10 +160,18 @@ before occupying training batch slots.
 ## Final-answer-only rewards
 
 Set `core.reward_final_answer_only=true` to grade only text after the last literal
-`</think>`. A missing closing marker or whitespace-only final answer receives zero
-without calling a verifier. This applies to text/code verifiers and named judges;
+`</think>` by default. A missing closing marker, whitespace-only final answer or
+reopened thinking receives each verifier's floor without calling it. Set
+`core.reward_reasoning_mode="none"` for an explicitly non-thinking run. This applies to text/code verifiers and named judges;
 judge rubrics retain their normal answer-tag extraction within that final region.
 The full response and its token IDs remain available for training and recording.
+
+The shared `ResponseParts` object separates thinking and the delivered answer or
+action. Trusted registry `grading` policies can select `response`, `thinking` or
+`full` text and separately permit a missing delivered response for process
+objectives. ToolRL uses both the raw boundary and the selected action; token-length
+graders retain full trajectory tokens. See the [configuration, interface and
+per-path behavior register](grading.md) before changing a run's grading policy.
 
 Verifiers can optionally implement
 `async_call_final_answer(tokens, prediction, label, **kwargs)`. In final-answer

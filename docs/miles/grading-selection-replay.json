@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "comparison_revision": "46d2dbbb5bc13baa7c821afb82cd16a95be52e41",
+  "measurement": "input-and-gate-selection-only; no grader execution or score/accuracy claim",
+  "limitations": "Selection over supplied text; completeness is not independently certified. No finish-state/truncation gating or token alignment is inferred. Missing prompts cannot certify prefills.",
+  "input": "/tmp/claude-1000/-home-robert-proj-open-instruct/bd0a056b-cf84-4dab-807c-80e3c81f012a/scratchpad/hunt/draws.jsonl",
+  "input_sha256": "ca3e01655e3e7200fbe16df97659ccb37fcc25f1b3ff456a2af252ede9814d90",
+  "reasoning_mode": "required",
+  "counts": {
+    "rows": 39535,
+    "legacy_input_changes": 0,
+    "eligible_input_changes": 0,
+    "gate_changes": 35,
+    "multiple_closing_markers": 110
+  },
+  "sources": {
+    "C037": 1486,
+    "C038": 753,
+    "C039": 1514,
+    "C040": 1475,
+    "C044": 74,
+    "C046": 46,
+    "C047": 43,
+    "C048": 382,
+    "C089": 1458,
+    "C091": 1513,
+    "C092": 1529,
+    "C093": 1474,
+    "C094": 1508,
+    "C095": 1511,
+    "C096": 1500,
+    "C097": 1517,
+    "C098": 1477,
+    "C099": 1491,
+    "C100": 1522,
+    "C101": 1510,
+    "C102": 1506,
+    "C103": 730,
+    "C104": 1451,
+    "C105": 1349,
+    "C106": 1323,
+    "C109": 1201,
+    "dolci": 8192
+  },
+  "previous_gates": {
+    "eligible": 39286,
+    "missing_final_answer": 249
+  },
+  "new_gates": {
+    "eligible": 39251,
+    "missing_final_answer": 249,
+    "unfinished_reasoning": 35
+  },
+  "changed_examples": [
+    {
+      "set": "screen",
+      "source": "C048",
+      "id": "C048:a4ce9a3b9434c5f231e2cbe30696d9a721c11d69:Data/Nemotron-CrossThink-Math.jsonl:72776",
+      "draw": 14,
+      "previous_gate": null,
+      "new_gate": "unfinished_reasoning"
+    },
+    {
+      "set": "screen",
+      "source": "C048",
+      "id": "C048:a4ce9a3b9434c5f231e2cbe30696d9a721c11d69:Data/Nemotron-CrossThink-Math.jsonl:72776",
+      "draw": 10,
+      "previous_gate": null,
+      "new_gate": "unfinished_reasoning"
+    },
+    {
+      "set": "screen",
+      "source": "C048",
+      "id": "C048:a4ce9a3b9434c5f231e2cbe30696d9a721c11d69:Data/Nemotron-CrossThink-Math.jsonl:44174",
+      "draw": 11,
+      "previous_gate": null,
+      "new_gate": "unfinished_reasoning"
+    },
+    {
+      "set": "screen",
+      "source": "C048",
+      "id": "C048:a4ce9a3b9434c5f231e2cbe30696d9a721c11d69:Data/Nemotron-CrossThink-Math.jsonl:44174",
+      "draw": 1,
+      "previous_gate": null,
+      "new_gate": "unfinished_reasoning"
+    },
+    {
+      "set": "screen",
+      "source": "C048",
+      "id": "C048:a4ce9a3b9434c5f231e2cbe30696d9a721c11d69:Data/Nemotron-CrossThink-Math.jsonl:44174",
+      "draw": 15,
+      "previous_gate": null,
+      "new_gate": "unfinished_reasoning"
+    }
+  ]
+}
