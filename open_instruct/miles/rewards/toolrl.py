@@ -31,6 +31,9 @@ class ToolRLResult:
 
 
 class ToolRLVerifier:
+    grading_scopes = ("response", "full")
+    grading_requires_reasoning = True
+
     def __init__(self, verifier_config=None):
         self.config = verifier_config or ToolRLConfig()
 
@@ -43,10 +46,26 @@ class ToolRLVerifier:
         return 0.0 if self.config.unit_scale or not toolrl_utils.validate_target(label) else -3.0
 
     async def async_call(self, tokens, prediction, label, **kwargs):
-        result = toolrl_utils.score_response(
+        return self._grade(
             prediction,
             label,
             think_prefix_in_prompt=label.get("think_prefix_in_prompt", self.config.think_prefix_in_prompt),
+        )
+
+    async def async_call_parts(self, tokens, parts, label, *, scope, **kwargs):
+        # Format examines the original boundary; correctness sees the same
+        # delivered action selected for other graders. A full-scope override
+        # deliberately retains the legacy first-marker action parser.
+        return self._grade(
+            parts.full,
+            label,
+            think_prefix_in_prompt=parts.prompt_opens_reasoning,
+            action=parts.response if scope == "response" else None,
+        )
+
+    def _grade(self, prediction, label, *, think_prefix_in_prompt, action=None):
+        result = toolrl_utils.score_response(
+            prediction, label, think_prefix_in_prompt=think_prefix_in_prompt, action=action
         )
         has_calls = bool(toolrl_utils.validate_target(label))
         full_success = has_calls and result.score == 4.0

@@ -645,6 +645,9 @@ class MaxLenVerifier(VerifierFunction):
     The ground truth (label) is interpreted as the maximum length.
     """
 
+    grading_scope = "full"
+    grading_uses_tokens = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("max_length", verifier_config=verifier_config, weight=1.0)
 
@@ -679,6 +682,9 @@ class UpToMaxLenVerifier(VerifierFunction):
 
     The ground truth (label) is interpreted as the maximum length.
     """
+
+    grading_scope = "full"
+    grading_uses_tokens = True
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("up_to_max_length", verifier_config=verifier_config, weight=1.0)

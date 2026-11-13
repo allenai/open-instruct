@@ -126,7 +126,9 @@ def validate_target(reference):
     return reference["calls"]
 
 
-def score_response(prediction: str, reference: dict, *, think_prefix_in_prompt: bool = False) -> ToolRLScore:
+def score_response(
+    prediction: str, reference: dict, *, think_prefix_in_prompt: bool = False, action: str | None = None
+) -> ToolRLScore:
     """Native format credit plus upstream's fixed semantic call reward.
 
     No-call targets grade plain answer format only, never factual correctness.
@@ -141,7 +143,9 @@ def score_response(prediction: str, reference: dict, *, think_prefix_in_prompt: 
         prediction = "<think>" + prediction
     match = re.fullmatch(r"<think>.*?</think>\s*(.*)", prediction, re.DOTALL)
     formatted = match is not None and prediction.count("<think>") == prediction.count("</think>") == 1
-    action = prediction.split("</think>", 1)[1].strip() if "</think>" in prediction else prediction.strip()
+    if action is None:
+        action = prediction.split("</think>", 1)[1] if "</think>" in prediction else prediction
+    action = action.strip()
     if "<think>" in action:
         action = ""
     if expected:
