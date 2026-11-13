@@ -161,6 +161,16 @@ def runtime_values(values):
     ):
         if key in values:
             integer(values[key], f"miles.{key}")
+    candidates = values.get("rollout_top_logprobs_num", 0)
+    integer(candidates, "miles.rollout_top_logprobs_num", minimum=0)
+    if candidates:
+        top_k = values.get("rollout_top_k", -1)
+        integer(top_k, "miles.rollout_top_k", minimum=-1)
+        if candidates < top_k:
+            raise InputError(
+                "miles.rollout_top_logprobs_num must be >= miles.rollout_top_k "
+                "when collecting candidate probabilities for filtered sampling."
+            )
     if (
         values.get("rollout_num_gpus")
         and values.get("rollout_num_gpus_per_engine")

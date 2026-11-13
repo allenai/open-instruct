@@ -375,6 +375,12 @@ validation rejects an unset or false Core setting. Core then enables the serving
 FP32 head and rejects an explicit false serving setting. For matched comparisons
 use the same head precision and candidate recording in both arms.
 
+Whenever candidate probabilities are collected, preflight requires
+`rollout_top_logprobs_num >= rollout_top_k`, regardless of the selected loss.
+Unfiltered sampling (`rollout_top_k=-1`, `rollout_top_p=1`) can record a partial
+candidate head. With candidate collection disabled, ordinary top-k sampling is
+unaffected; score centering itself still requires a positive candidate count.
+
 The original implementation is upstream
 [#3621–#3626](https://github.com/radixark/miles/pull/3625). This runtime also
 explicitly handles empty tails under complete-support replay, addressing
