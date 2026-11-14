@@ -1,10 +1,8 @@
 {
   "purpose": "Validate priority as a modifier of uniform/exposure pool allocation using original Tagliere v7 records, actual MILES data-source recovery and commit paths, and the existing tiny Olmo MoE on one local RTX 4090.",
-  "feature_revision": "917772f2d",
   "runtime_image": "codex-miles-task-graders:6f3359eb0",
   "v7_export_artifact": "a3336ae8bf43adef5738a1a7327eba87ebf498b3a84d4d5528aa836476f694da",
   "v7_export_release_id": "22525087d1469746eef45d7ef007962e3e2cfc726a01b5060deae35546f8278d",
-  "v7_source": "/home/robert/storage/rl-data-workbench/workflows/tagliere-v6-20261112/stages/b57195b822202829c4f4b5c7496f5259adf135d97b7e6fd6e9d0ca24ae820fd8/attempt-0001/output/train.jsonl",
   "subset": {
     "extracted_rows": 80,
     "candidates": [
@@ -131,15 +129,6 @@
     "GPU exercise uses the existing 26.6M-parameter tiny Olmo MoE through its HF implementation, injected one-token parity rewards and real production source/commit ledger. It does not test original task-grader correctness or learning quality.",
     "Controlled acceptance is injected, not measured H196 acceptance. Exposure balances cumulative groups and redistributes after whole-pool exhaustion; exact per-update quotas are not promised."
   ],
-  "local_artifacts": "/home/robert/proj/open-instruct/outputs/pr2256-priority-v7-local",
-  "reproduce": [
-    "python extract.py",
-    "python extract_allocation.py",
-    "bash run_local.sh tests",
-    "bash run_local.sh ledger",
-    "bash run_local.sh gpu",
-    "PYTHONPATH=<feature-worktree> python allocation.py"
-  ],
   "runtime_pins": {
     "olmo-core": {
       "repository": "https://github.com/allenai/Olmo-core.git",
@@ -167,5 +156,15 @@
     }
   },
   "additional_runtime_compatibility_check": "Same 59 runtime tests, ledger checks and tiny-model GPU exercise also passed with control image open-instruct-miles-core-a87a0feac (newer Core/MILES/olmo-sglang pins).",
-  "v7_train_sha256": "798d9f4fe896272bf043b6c7e25fc783a1209937590683233cf879de7c2eb720"
+  "v7_train_sha256": "798d9f4fe896272bf043b6c7e25fc783a1209937590683233cf879de7c2eb720",
+  "measured_feature_revision": "917772f2d",
+  "revision_note": "The recorded GPU measurements used pre-rebase feature revision 917772f2d. Rebase onto b9817cebf preserved sampling code unchanged (range-diff verified). Later review follow-ups separate scan counters and suppress receipt aliases when priority is disabled; the original GPU measurements do not claim to exercise those follow-ups.",
+  "v7_export_location": "s3://robertb-beaker/tagliere/v7/export/",
+  "reproduction_status": "The custom v7 extraction/allocation and tiny-model GPU runners were local-only and are not distributed with this report. The committed tests and exact runtime pins above reproduce the sampling, filtering, prepared-batch and recovery regressions; artifact IDs and SHA256 values identify the measured dataset and subsets.",
+  "post_review_verification": {
+    "cpu_tests_passed": 371,
+    "native_runtime_tests_passed": 59,
+    "lint_format_typecheck_docs": "passed",
+    "changes": "Separate priority-scan read counters; omit input priority aliases from non-priority trained receipts; clean machine-local evidence paths. GPU measurements above remain historical."
+  }
 }

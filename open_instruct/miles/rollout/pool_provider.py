@@ -160,6 +160,7 @@ class PoolPromptProvider:
             sample = copy.copy(self.providers[name].next_samples(1)[0])
             sample.metadata = sample.metadata | {SELECTION_ID: self.draws}
             if priority := self.sampling.get("priority"):
+                # Stamp the validated label for trained-exposure receipts.
                 sample.metadata["sampling_priority_group"] = pool_sampling.priority_value(
                     sample.metadata, priority["field"]
                 )
@@ -167,7 +168,7 @@ class PoolPromptProvider:
             metadata = {
                 key: sample.metadata[key]
                 for key in (*RECEIPT_FIELDS, replay_evidence.SELECTION_ID, replay_evidence.REPLAY, replay_evidence.KEY)
-                if key in sample.metadata
+                if key in sample.metadata and (key != "sampling_priority_group" or priority)
             }
             self.pending[self.draws] = {"pool": name, "active": active, "metadata": metadata}
             self.draws += 1

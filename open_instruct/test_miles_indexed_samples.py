@@ -176,9 +176,11 @@ def test_priority_disk_order_matches_memory_and_resumes(tmp_path, policy, shuffl
     try:
         codes = catalog.priority_codes("priority")
         assert codes.dtype.itemsize == 1 and len(codes) == len(catalog)
-        before = catalog.metrics()["disk_reads"]
+        before = catalog.metrics()
+        assert before["disk_reads"] == 0
+        assert before["priority_scan_reads"] == len(catalog)
         assert catalog.priority_codes("priority") is codes
-        assert catalog.metrics()["disk_reads"] == before
+        assert catalog.metrics() == before
         disk = pool_provider.PoolPromptProvider(catalog, **options)
         memory = pool_provider.PoolPromptProvider(samples, **options)
         first = disk.next_samples(13)

@@ -29,7 +29,7 @@ class Catalog:
         self.bytes = 0
         self.lock = threading.Lock()
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="prompt-prefetch")
-        self.reads, self.hits = 0, 0
+        self.reads, self.hits, self.priority_reads = 0, 0, 0
         self.priorities = {}
         try:
             for source in sources:
@@ -48,7 +48,7 @@ class Catalog:
     def __len__(self):
         return self.ends[-1] if self.ends else 0
 
-    def _read(self, row):
+    def _read(self, row, *, priority_scan=False):
         source = bisect.bisect_right(self.ends, row)
         local = row - (self.ends[source - 1] if source else 0)
         entry = self.indexes[source][local]
@@ -56,7 +56,10 @@ class Catalog:
         if len(raw) != int(entry["length"]):
             raise OSError("Prepared prompt read was incomplete")
         with self.lock:
-            self.reads += 1
+            if priority_scan:
+                self.priority_reads += 1
+            else:
+                self.reads += 1
         return raw
 
     def _finished(self, row, future):
@@ -110,7 +113,7 @@ class Catalog:
         if field not in self.priorities:
             codes = np.empty(len(self), dtype=np.uint8)
             for row in range(len(self)):
-                data = json.loads(self._read(row))
+                data = json.loads(self._read(row, priority_scan=True))
                 codes[row] = pool_sampling.priority_value(data.get("metadata"), field)
             self.priorities[field] = codes
         return self.priorities[field]
@@ -131,6 +134,7 @@ class Catalog:
                 "cache_rows": len(self.cache),
                 "prefetch_pending": len(self.pending),
                 "disk_reads": self.reads,
+                "priority_scan_reads": self.priority_reads,
                 "cache_hits": self.hits,
             }
 

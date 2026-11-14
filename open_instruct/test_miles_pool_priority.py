@@ -187,3 +187,22 @@ def test_preparation_rejects_invalid_priority_before_training(environment, tmp_p
     }
     with pytest.raises(ValueError, match="source-component row 1: Priority metadata.priority"):
         test_miles_run_data.prepare(environment, data)
+
+
+@pytest.mark.parametrize("policy", ["uniform", "exposure"])
+@pytest.mark.parametrize("priority", [False, True])
+def test_priority_receipt_alias_is_only_stamped_when_enabled(policy, priority):
+    sample = SimpleNamespace(prompt="q", metadata={"sampling_pool": "p", "priority": 1, "sampling_priority_group": 4})
+    sampling = {"policy": policy}
+    if priority:
+        sampling["priority"] = {"field": "priority"}
+    p = pool_provider.PoolPromptProvider(
+        [sample], pools={"p": {}}, seed=1, shuffle=True, identity="alias-fixture", sampling=sampling
+    )
+    drawn = p.next_samples(1)[0]
+    receipt = p.pending[drawn.metadata["pool_selection_id"]]["metadata"]
+    if priority:
+        assert drawn.metadata["sampling_priority_group"] == receipt["sampling_priority_group"] == 1
+    else:
+        assert drawn.metadata["sampling_priority_group"] == 4
+        assert "sampling_priority_group" not in receipt

@@ -959,7 +959,10 @@ Disk-backed inventories scan labels once at startup and retain one byte per row,
 without retaining prompt or verifier payloads. Checkpoints preserve progress,
 pending selections and exposure accounting; changing the modifier invalidates
 sampler resume identity. Committed exposure receipts include
-`sampling_priority_group` for per-stratum accounting.
+`sampling_priority_group` for per-stratum accounting. This runtime receipt field
+is stamped only when the modifier is enabled. Startup label reads are reported
+separately as `rollout/prompt_storage/priority_scan_reads`; `disk_reads` continues
+to count demand and prefetch reads.
 
 This modifier does not support replay, `shuffle` or `weighted` allocation. The
 standalone `core.prompt_provider="priority"` remains available with its existing
