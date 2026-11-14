@@ -228,6 +228,46 @@ def instrument_nvfp4_processing():
     method.process_weights_after_loading = process
 
 
+def instrument_kda_inputs():
+    """Retain first real prefill recurrence inputs; never change cache state."""
+    if os.environ.get("OI_PUBLICATION_TRACE_KDA") != "1":
+        return
+    kernel = importlib.import_module("olmo_sglang.kda.backend").OlmoFLAKDAKernel
+    original = kernel._run
+    captured = False
+
+    def run(instance, *values, **options):
+        nonlocal captured
+        if captured or not values or values[0].shape[1] < 32:
+            return original(instance, *values, **options)
+        captured = True
+        # Snapshot only referenced states, before the native call commits them.
+        # Detached CPU copies synchronize and are explicitly diagnostic only.
+        initial, valid = instance._gather_initial_state(options["ssm_states"], options["cache_indices"])
+        inputs = {
+            "positional": [value.detach().cpu().clone() for value in values],
+            "options": {
+                name: value.detach().cpu().clone() if isinstance(value, torch.Tensor) else value
+                for name, value in options.items()
+                if name not in {"ssm_states", "track_state"}
+            },
+            "initial_state": initial.detach().cpu().clone(),
+            "valid": valid.detach().cpu().clone(),
+        }
+        directory = Path(os.environ["OI_PUBLICATION_AUDIT"])
+        torch.save(inputs, directory / f"kda-inputs-{os.getpid()}.pt")
+        result = original(instance, *values, **options)
+        output = result[0] if isinstance(result, tuple) else result
+        torch.save(output.detach().cpu().clone(), directory / f"kda-output-{os.getpid()}.pt")
+        save(
+            directory / f"kda-receipt-{os.getpid()}.json",
+            {"diagnostic_only": True, "synchronizes_cuda": True, "cache_modified_by_instrumentation": False},
+        )
+        return result
+
+    kernel._run = run
+
+
 def trace_forward(model, original_forward, values, options):
     """One prefill trace for locating divergence; never a qualification receipt.
 
@@ -277,6 +317,7 @@ def audit_scheduler(*args, **kwargs):
     instrument_receiver()
     instrument_nvfp4_quantization()
     instrument_nvfp4_processing()
+    instrument_kda_inputs()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
     original_load, original_forward = model_type.load_weights, model_type.forward
 

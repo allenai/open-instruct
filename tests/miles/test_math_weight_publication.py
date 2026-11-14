@@ -14,6 +14,36 @@ def scores(delta=0.0):
     return [{"meta_info": {"input_token_logprobs": [[None, 0]] + [[-2.0 + delta, i] for i in range(1, 40)]}}]
 
 
+def test_kda_diagnostic_captures_prior_state_without_replaying_or_changing_result(monkeypatch, tmp_path):
+    calls = []
+
+    class Kernel:
+        def _gather_initial_state(self, states, indices):
+            return states.index_select(0, indices), indices >= 0
+
+        def _run(self, *values, **options):
+            calls.append(values)
+            options["ssm_states"].add_(1)
+            return values[0], "native metadata"
+
+    monkeypatch.setenv("OI_PUBLICATION_TRACE_KDA", "1")
+    monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
+    monkeypatch.setattr(gate.importlib, "import_module", lambda _: SimpleNamespace(OlmoFLAKDAKernel=Kernel))
+    gate.instrument_kda_inputs()
+    values = [torch.ones(1, 43, 2, 4) for _ in range(5)]
+    state = torch.zeros(3, 2, 4, 4)
+    options = {"ssm_states": state, "cache_indices": torch.tensor([1]), "track_state": None}
+    for _ in range(2):
+        result = Kernel()._run(*values, **options)
+        assert result[0] is values[0] and result[1] == "native metadata"
+    assert len(calls) == 2 and torch.equal(state, torch.full_like(state, 2))
+    saved = torch.load(next(tmp_path.glob("kda-inputs-*.pt")), weights_only=True)
+    assert torch.count_nonzero(saved["initial_state"]) == 0
+    assert "ssm_states" not in saved["options"] and "track_state" not in saved["options"]
+    assert len(list(tmp_path.glob("kda-inputs-*.pt"))) == 1
+    assert torch.equal(torch.load(next(tmp_path.glob("kda-output-*.pt")), weights_only=True), values[0])
+
+
 def test_sender_matches_pinned_trainer_cumem_default_and_preserves_override(monkeypatch):
     monkeypatch.delenv("NCCL_CUMEM_ENABLE", raising=False)
     gate.configure_transport_environment()
