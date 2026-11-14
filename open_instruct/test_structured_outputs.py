@@ -51,7 +51,8 @@ def test_temporal_scalars_require_quotes(kind, separator, value):
     label = target(kind, schema={"type": "object", "properties": {"n": {"type": "string"}}, "required": ["n"]})
     verifier = structured.StructuredOutputVerifier()
     result = verifier([], f"n{separator}{value}", label)
-    assert result.score == 0 and result.diagnostics["status"] == "parse_error"
+    assert result.score == 0 and result.diagnostics["status"] == "completed"
+    assert result.diagnostics["outcome"] == "parse_error"
     assert verifier([], f'n{separator}"{value}"', label).score == 1
 
 
@@ -105,7 +106,8 @@ def test_csv_boolean_subschemas(subschema, location):
 @pytest.mark.parametrize("schema", [{"type": "object"}, {"patternProperties": {".*": {"type": "string"}}}])
 def test_yaml_nonstring_keys_are_parse_errors(key, schema):
     result = structured.StructuredOutputVerifier()([], f"{key}: value", target("yaml", schema=schema))
-    assert result.score == 0 and result.diagnostics["status"] == "parse_error"
+    assert result.score == 0 and result.diagnostics["status"] == "completed"
+    assert result.diagnostics["outcome"] == "parse_error"
 
 
 def test_schema_strengthening_is_explicit_and_does_not_mutate_target():
@@ -145,7 +147,8 @@ def test_ambiguous_or_unsafe_parse_is_zero(kind, text):
 @pytest.mark.parametrize("text", ["n: &n [*n]", "a: &a [1, 2]\nb: &b [*a, *a]\nc: [*b, *b]"])
 def test_yaml_aliases_rejected_before_expansion(text):
     result = structured.StructuredOutputVerifier()([], text, target("yaml", schema={}))
-    assert result.score == 0 and result.diagnostics["status"] == "parse_error"
+    assert result.score == 0 and result.diagnostics["status"] == "completed"
+    assert result.diagnostics["outcome"] == "parse_error"
     assert "aliases" in result.diagnostics["error"]
 
 
@@ -614,7 +617,8 @@ def test_malformed_pythonic_answers_score_zero_and_worker_recovers(arguments):
     async def run():
         result = await verifier.async_call([], response, tool_target())
         assert result.score == 0
-        assert result.diagnostics["status"] == "parse_error"
+        assert result.diagnostics["status"] == "completed"
+        assert result.diagnostics["outcome"] == "parse_error"
         assert (
             await verifier.async_call([], '<function_calls>submit(result={"n":3})</function_calls>', tool_target())
         ).score == 1
@@ -711,3 +715,78 @@ def test_additional_properties_do_not_apply_to_declared_or_pattern_matched_field
         label["tool_payload_key"] = None
         response = "<tool_call><function=submit><parameter=n>text</parameter></function></tool_call>"
         assert structured.StructuredOutputVerifier()([], response, label).score == 1
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+def test_wrong_format_zeroes_remain_native_selection_evidence(tmp_path, mixed):
+    records = pytest.importorskip("miles.utils.inference_records")
+    summary = pytest.importorskip("miles.utils.record_summary")
+    selection = pytest.importorskip("open_instruct.miles.datasets.record_selection")
+    replay = pytest.importorskip("open_instruct.miles.datasets.replay_evidence")
+    verifier = structured.StructuredOutputVerifier()
+    store = tmp_path / "records"
+    for unit in range(4):
+        args = SimpleNamespace(
+            olmo_core=SimpleNamespace(
+                records_root=str(store),
+                records_responses="off",
+                records_response_sample_rate=None,
+                reward_config=None,
+                filter_zero_std_groups=True,
+            ),
+            hf_checkpoint=str(tmp_path / "checkpoint"),
+            wandb_run_name=f"attempt-{unit}",
+            start_rollout_id=0,
+            rollout_seed=17,
+            rollout_temperature=1.0,
+        )
+        recorder = records.Recorder(args, lineage_factory=lambda path: {"inventory_sha256": "a" * 64})
+        samples = []
+        for index in range(8):
+            response = '{"n":3}' if mixed and index < 4 else "not JSON"
+            result = verifier([], response, target())
+            samples.append(
+                SimpleNamespace(
+                    index=index,
+                    group_index=0,
+                    rollout_id=0,
+                    prompt="Return JSON with integer n.",
+                    response=response,
+                    response_length=len(response),
+                    reward=result.score,
+                    status="completed",
+                    weight_versions=["0"],
+                    metadata={
+                        "verifiers": [{"name": "structured", "target": target()}],
+                        "run_prompt_token_ids_sha256": "tokens",
+                        "verifier_diagnostics": {"structured": result.diagnostics},
+                    },
+                )
+            )
+        recorder.record_group(samples, decision="passed" if mixed else "filtered")
+        recorder.close()
+        assert not recorder.unavailable and recorder.counts["failed"] == 0
+    loaded = summary.load(store)
+    assert len(loaded["groups"]) == 4
+    assert all(response["validity"]["valid"] for group in loaded["groups"] for response in group["responses"])
+    attempt = next(iter(loaded["attempts"].values()))
+    evidence = selection.evidence(
+        loaded,
+        lineage=attempt["lineage"]["inventory_sha256"],
+        protocol=attempt["protocol_sha256"],
+        scopes={"start_checkpoint"},
+    )
+    assert next(iter(evidence.values()))["observations"] == 32
+    assert {replay.classify(group)["category"] for group in loaded["groups"]} == {
+        "mixed" if mixed else "zero_completed"
+    }
+    table = selection.build(store, skip=["all_zero", "all_full"], readmit_fraction=0)
+    assert [row["mode"] for row in table["excluded"]] == ([] if mixed else ["all_zero"])
+
+
+def test_structured_timeout_remains_invalid_native_evidence():
+    records = pytest.importorskip("miles.utils.inference_records")
+    result = structured.timeout_result(TimeoutError("verification budget exceeded"), time.monotonic())
+    metadata = {"verifiers": [{"name": "structured"}], "verifier_diagnostics": {"structured": result.diagnostics}}
+    assert result.score == 0 and result.diagnostics["status"] == "timeout"
+    assert records.validity(metadata)["valid"] is False
