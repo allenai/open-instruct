@@ -407,6 +407,8 @@ def test_all_researcher_examples_compile_to_native_arguments():
         "tiny/node.toml",
         "tiny/three-node.toml",
         "small/dev.toml",
+        "tiny/half-node-gsm8k.toml",
+        "tiny/half-node-dolci-math.toml",
     }
     for path in paths:
         run = RunSpec.load(path)
@@ -424,7 +426,7 @@ def test_all_researcher_examples_compile_to_native_arguments():
             assert config.miles["use_tis"] is True
             assert config.miles["use_rollout_logprobs"] is False
             assert config.core.publication_mode == "refresh"
-            assert config.core.max_policy_lag == 12
+            assert config.core.max_policy_lag == (4 if path.stem.startswith("half-node-") else 12)
         else:
             assert config.core.publication_mode == "barrier"
             assert config.core.filter_zero_std_groups is False
