@@ -74,26 +74,20 @@ WANDB_API_KEY = "your-wandb-secret"
 OPENAI_API_KEY = "your-judge-secret"
 ```
 
-Before launching a panel containing SciCode, replace the example's
-`arguments.h5py_host_path` with the absolute path to your `test_data.h5` on a
-filesystem mounted in the evaluator. Launch validation rejects missing paths,
-`YOUR_…` placeholders and unexpanded variables. Planning and validation warn
-about unresolved paths while keeping examples loadable. The submitting
-workstation need not mount WEKA; file existence is checked in the evaluator
-before inference. Edit the existing SciCode task's `arguments` table; for example,
-if the file is at `/weka/oe-adapt-default/scicode/test_data.h5`:
+SciCode uses the `SCICODE_H5PY_HOST_PATH` Beaker secret by default. The secret
+contains the reference-file path used by the evaluator; it is provisioned in
+`ai2/olmo-instruct` and `ai2/open-instruct-dev`. The standard three-node panel
+needs no path edit. Evaluator jobs inherit `launch.weka_mounts`, which must include
+the filesystem holding the reference file.
 
-```toml
-[[evaluation.tasks]]
-task = "scicode"
-kind = "external"
-arguments = { temperature = 1.0, max_tokens = 32768, split = "validation", h5py_host_path = "/weka/oe-adapt-default/scicode/test_data.h5" }
-```
-
-Use your actual reference-file location and ensure that its filesystem appears in
-`launch.weka_mounts`. If you do not intend to run SciCode, remove its task entry
-instead. Then rerun `python -m open_instruct.miles plan path/to/your-run.toml`
-before launching.
+To use another workspace or asset, set
+`evaluation.secrets.SCICODE_H5PY_HOST_PATH` to your Beaker secret's name, or set
+`arguments.h5py_host_path` explicitly in the SciCode task. An explicit path takes
+precedence over the secret. The evaluator resolves the secret and verifies that
+the file exists before starting inference. Secret values are not resolved on the
+submitting workstation or written into launch receipts. Explicit placeholders
+are rejected before launch, with a planning warning explaining how to use the
+default or supply an override.
 
 Workspace and budget default to `launch.workspace` and `launch.budget`. Evaluator
 jobs inherit `launch.weka_mounts`, `WANDB_API_KEY` and `HF_TOKEN` secret references.
