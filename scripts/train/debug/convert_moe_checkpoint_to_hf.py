@@ -22,6 +22,10 @@ strict validation only ever passed on the 275M/480M ladder models. Use
 --skip-validation for KDA and validate functionally with an eval instead
 (CPU and CUDA conversions were verified bit-identical over the full 35 GB).
 
+generation_config.json gets eos_token_id [100265, 100257] (<|im_end|>, <|endoftext|>) by default: the
+chat stop list for the default Olmo 3 chat tokenizer, as chat SFT exports need. A tokenizer with other ids, or a
+base/midtrain export that should stop only at <|endoftext|>, passes --eos-token-ids explicitly (e.g. 100257).
+
 Note for GDN-based MoE hybrids (not KDA): olmo-core's `is_olmo_hybrid_model`
 returns True for them and routes to the dense-hybrid exporter, which crashes on
 the missing `feed_forward` attribute. KDA is unaffected because
@@ -34,12 +38,12 @@ import pathlib
 import tempfile
 
 import torch
-import torch.distributed.checkpoint.state_dict as dist_cp_sd
 from olmo_core.config import DType
 from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_keys
 from olmo_core.nn.hf import convert_checkpoint_to_hf
 from olmo_core.nn.transformer.config import TransformerConfig
 from olmo_core.utils import prepare_cli_environment
+from torch.distributed.checkpoint import state_dict as dist_cp_sd
 
 from open_instruct import logger_utils
 
