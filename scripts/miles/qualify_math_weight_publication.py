@@ -24,7 +24,7 @@ import httpx
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
-from scripts.miles import qualify_math_quantization
+from scripts.miles import diagnostic_native_config, qualify_math_quantization
 from torch import distributed as dist
 
 from open_instruct.miles.execution import quantized_publication
@@ -377,6 +377,11 @@ def audit_scheduler(*args, **kwargs):
         instrument_nvfp4_quantization()
     if os.environ.get("OI_PUBLICATION_TRACE_PACKING") == "1":
         instrument_nvfp4_processing()
+    intervention = os.environ.get("OI_PUBLICATION_NATIVE_CONFIG_RECEIPT")
+    if intervention:
+        if os.environ.get("OI_MILES_PUBLICATION_DIAGNOSTICS") != "1":
+            raise ValueError("Native intervention requires isolated diagnostic mode")
+        diagnostic_native_config.install(intervention, Path(os.environ["OI_PUBLICATION_AUDIT"]), save)
     instrument_kda_inputs()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
     if os.environ.get("OI_PUBLICATION_MATCH_LOADER_CONTEXT") == "1":
@@ -645,6 +650,8 @@ def fresh_checkpoint(args, variant):
 
 
 def run(args):
+    if os.environ.get("OI_PUBLICATION_NATIVE_CONFIG_RECEIPT"):
+        raise ValueError("Native intervention is forbidden in strict refresh qualification")
     args.output.mkdir(parents=True, exist_ok=False)
     configure_transport_environment()
     if torch.cuda.device_count() != 4:

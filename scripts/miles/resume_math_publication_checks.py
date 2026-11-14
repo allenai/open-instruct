@@ -7,6 +7,7 @@ It retains every failed replica comparison rather than stopping at the first one
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -82,6 +83,8 @@ def load_publications(folder, model, precision, runtime_lock):
 
 def run(args):
     args.output.mkdir(parents=True, exist_ok=False)
+    if getattr(args, "native_config_receipt", None):
+        os.environ["OI_PUBLICATION_NATIVE_CONFIG_RECEIPT"] = str(args.native_config_receipt.resolve())
     gate.configure_transport_environment()
     if torch.cuda.device_count() != 4 or any("B300" not in torch.cuda.get_device_name(i) for i in range(4)):
         raise ValueError("Requires exactly four approved B300 GPUs")
@@ -106,6 +109,15 @@ def run(args):
         with gate.Fleet(args, changed[variant], f"fresh-{variant}") as fleet:
             reference, audits = fleet.probe(f"fresh-{variant}", protocol["probes"])
             repeated, repeated_audits = fleet.probe(f"fresh-{variant}-repeat", protocol["probes"])
+        if getattr(args, "native_config_receipt", None):
+            for directory in fleet.directories:
+                receipt = json.loads((directory / "native-intervention-post.json").read_text())
+                if receipt["matched_calls"] < 2:
+                    raise ValueError("Recorded native key was not exercised repeatedly")
+        gate.save(
+            args.output / f"fresh-{variant}-outputs.json",
+            {"diagnostic_only": True, "outputs": reference, "repeated": repeated, "audits": audits},
+        )
         for rank in range(3):
             record = {"variant": variant, "replica": rank, "passed": False}
             try:
@@ -146,6 +158,7 @@ def main():
     for name in ("model", "output", "resume-publications", "reuse-mutation-checkpoints"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--precision", choices=("bf16", "nvfp4"), required=True)
+    parser.add_argument("--native-config-receipt", type=Path)
     parser.add_argument("--fresh-variants", type=int, choices=(0, 1, 2), nargs="+", default=[0, 1, 2])
     args = parser.parse_args()
     args.gpu, args.port = None, None
