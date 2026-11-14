@@ -102,7 +102,7 @@ def run(args):
     )
     changed = {0: args.model, **{v: gate.fresh_checkpoint(args, v) for v in (1, 2)}}
     checks, failures = [], []
-    for variant in (0, 1, 2):
+    for variant in args.fresh_variants:
         with gate.Fleet(args, changed[variant], f"fresh-{variant}") as fleet:
             reference, audits = fleet.probe(f"fresh-{variant}", protocol["probes"])
             repeated, repeated_audits = fleet.probe(f"fresh-{variant}-repeat", protocol["probes"])
@@ -146,6 +146,7 @@ def main():
     for name in ("model", "output", "resume-publications", "reuse-mutation-checkpoints"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--precision", choices=("bf16", "nvfp4"), required=True)
+    parser.add_argument("--fresh-variants", type=int, choices=(0, 1, 2), nargs="+", default=[0, 1, 2])
     args = parser.parse_args()
     args.gpu, args.port = None, None
     run(args)

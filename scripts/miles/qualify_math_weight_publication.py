@@ -228,6 +228,50 @@ def instrument_nvfp4_processing():
     method.process_weights_after_loading = process
 
 
+def trace_forward(model, original_forward, values, options):
+    """One prefill trace for locating divergence; never a qualification receipt.
+
+    CPU fingerprints synchronize CUDA and can hide timing bugs. A repaired gate
+    must therefore pass again without this explicitly enabled instrumentation.
+    """
+
+    def tensors(value):
+        if isinstance(value, torch.Tensor):
+            return {**tensor_fingerprint(value), "stride": list(value.stride())}
+        if isinstance(value, (tuple, list)):
+            return [tensors(item) for item in value]
+        if isinstance(value, dict):
+            return {key: tensors(item) for key, item in value.items()}
+        return None
+
+    records, handles = [], []
+
+    def observe(name, module, inputs, output):
+        records.append({"module": name, "input": tensors(inputs), "output": tensors(output)})
+
+    buffers = {name: tensors(value) for name, value in model.named_buffers()}
+    try:
+        for name, module in model.named_modules():
+            if module is not model:
+                handles.append(module.register_forward_hook(lambda m, i, o, name=name: observe(name, m, i, o)))
+        result = original_forward(model, *values, **options)
+    finally:
+        for handle in handles:
+            handle.remove()
+    save(
+        Path(os.environ["OI_PUBLICATION_AUDIT"]) / f"prefill-trace-{os.getpid()}.json",
+        {
+            "diagnostic_only": True,
+            "synchronizes_cuda": True,
+            "input": tensors(values),
+            "buffers": buffers,
+            "modules": records,
+        },
+    )
+    model._publication_prefill_traced = True
+    return result
+
+
 def audit_scheduler(*args, **kwargs):
     """Observe real serving weights after each load, without changing numerics."""
     instrument_receiver()
@@ -290,6 +334,14 @@ def audit_scheduler(*args, **kwargs):
                 )
             save(Path(os.environ["OI_PUBLICATION_AUDIT"]) / f"audit-{os.getpid()}-{epoch}.json", inventory)
             model._publication_audited_epoch = epoch
+        input_ids = values[0] if values else options.get("input_ids")
+        if (
+            os.environ.get("OI_PUBLICATION_TRACE_PREFILL") == "1"
+            and not getattr(model, "_publication_prefill_traced", False)
+            and isinstance(input_ids, torch.Tensor)
+            and input_ids.numel() >= 32
+        ):
+            return trace_forward(model, original_forward, values, options)
         return original_forward(model, *values, **options)
 
     model_type.load_weights, model_type.forward = load, forward

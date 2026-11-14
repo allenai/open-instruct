@@ -244,3 +244,35 @@ def test_encoding_diagnostics_preserve_native_arguments_results_and_sampling(mon
         assert receipt["provided_scale"] == gate.tensor_fingerprint(scale)
         assert receipt["input_stride"] == [4, 1]
     assert torch.equal(weight, before)
+
+
+def test_prefill_trace_preserves_outputs_and_removes_hooks(monkeypatch, tmp_path):
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.projection = torch.nn.Linear(2, 2, bias=False)
+            self.register_buffer("derived", torch.tensor([7.0]))
+
+        def forward(self, value):
+            return self.projection(value)
+
+    model = Model()
+    value = torch.ones(3, 2)
+    expected = model(value)
+    monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
+    actual = gate.trace_forward(model, Model.forward, (value,), {})
+    assert torch.equal(actual, expected)
+    assert model._publication_prefill_traced
+    assert not model.projection._forward_hooks
+    receipt = json.loads(next(tmp_path.glob("prefill-trace-*.json")).read_text())
+    assert receipt["diagnostic_only"] and receipt["synchronizes_cuda"]
+    assert receipt["buffers"]["derived"]["sha256"] == gate.tensor_fingerprint(model.derived)["sha256"]
+    assert receipt["modules"][0]["module"] == "projection"
+    assert receipt["modules"][0]["output"]["sha256"] == gate.tensor_fingerprint(expected)["sha256"]
+
+    def broken(model, value):
+        raise RuntimeError("original failure")
+
+    with pytest.raises(RuntimeError, match="original failure"):
+        gate.trace_forward(model, broken, (value,), {})
+    assert not model.projection._forward_hooks
