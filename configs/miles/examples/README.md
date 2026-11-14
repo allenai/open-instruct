@@ -136,7 +136,7 @@ row must fit. It requires
 a prepared Qwen3-32B judge with named verifier bindings. It also requires an
 accessible `launch.secrets.BEAKER_TOKEN` for background evaluation.
 Evaluator jobs allocate GPUs beyond the training plan;
-overlapping jobs can increase that total. Its 25-entry post-training development
+overlapping jobs can increase that total. Its ordinary 25-entry post-training development
 and text-safety panel runs on the initial/final checkpoints only. With `interval = 0`,
 periodic evaluation remains disabled even when the run is extended. It preserves pinned task sampling
 and full evaluation sizes. olmo-eval launches WildGuard/StrongREJECT judges on an extra GPU
@@ -314,3 +314,9 @@ evaluator does not expose top-p for that external task. Full nucleus-sampling
 alignment requires an evaluator update. Keep benchmark-specific protocols such
 as greedy RULER and BFCL explicit when adding them; do not override every task
 in a suite globally.
+
+The tiny three-node template additionally evaluates the full native BFCLv3
+single-turn and multi-turn category panels using a dedicated, model-family-scoped
+vLLM worker. Its 17 categories add two independent policy jobs, not training
+samples or a shared-engine tool benchmark. See [native BFCL evaluation](../../../docs/miles/background-evaluation.md#native-bfcl-tool-evaluation)
+for the H196 tokenizer/template profile, archive locator, sampling and resume contract.

@@ -15,7 +15,7 @@ import pytest
 
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.evaluation import evaluation, evaluation_runner
+from open_instruct.miles.evaluation import bfcl_runtime, evaluation, evaluation_runner
 from open_instruct.miles.execution import workflow
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,10 +42,12 @@ def test_node_uses_periodic_native_background_evaluation():
 
 def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_node):
     tasks = three_node.evaluation["tasks"]
-    assert len(tasks) == len({task["task"] for task in tasks}) == 25
+    assert len(tasks) == len({task["task"] for task in tasks}) == 42
     assert all(not task["scoring"] for task in tasks)
     for task in tasks:
-        if task.get("kind") == "external":
+        if task.get("worker") == bfcl_runtime.WORKER:
+            assert task["generation"] == bfcl_runtime.generation(bfcl_runtime.panel_for(task["task"]))
+        elif task.get("kind") == "external":
             assert task["arguments"]["temperature"] == 1.0
             assert task["arguments"]["max_tokens"] == 32768
         else:
@@ -57,8 +59,8 @@ def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_nod
             }
     milestones = three_node.plan()["evaluation"]["milestones"]
     assert [point["update"] for point in milestones] == [0, 200]
-    assert all(sum(map(len, point["groups"])) == 25 for point in milestones)
-    assert len(milestones[0]["groups"]) == 6
+    assert all(sum(map(len, point["groups"])) == 42 for point in milestones)
+    assert len(milestones[0]["groups"]) == 8
     # Extending the run never introduces periodic full-panel evaluations.
     document = three_node.to_dict()
     document["training"]["num_rollouts"] = 2500
@@ -66,7 +68,7 @@ def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_nod
     assert [point["update"] for point in extended.plan()["evaluation"]["milestones"]] == [0, 2500]
     for update in (1, 999, 1000, 2000, 2499):
         assert evaluation.groups(extended.evaluation, update, 2500) == []
-    assert sum(map(len, evaluation.groups(extended.evaluation, 2500, 2500))) == 25
+    assert sum(map(len, evaluation.groups(extended.evaluation, 2500, 2500))) == 42
 
 
 def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three_node, tmp_path, monkeypatch):
@@ -94,27 +96,27 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
     manager.dispatch(0, initial)
     manager.worker.join(5)
     assert not manager.worker.is_alive()
-    assert len(calls) == 6
+    assert len(calls) == 8
     for update in (1, 999, 1000, 2000, 2499):
         assert evaluation.training_snapshot(args, update) is None
         manager.dispatch(update, "unused-checkpoint")
-    assert len(calls) == 6
+    assert len(calls) == 8
     final = Path(evaluation.training_snapshot(args, 2500))
     final.mkdir(parents=True)
     (final / ".complete").touch()
     manager.dispatch(2500, final)
     manager.worker.join(5)
     assert not manager.worker.is_alive()
-    assert len(calls) == 12
+    assert len(calls) == 16
 
     receipts = [
         json.loads(path.read_text())
         for path in (Path(run.output["root"]) / "evaluation").glob("update-*.json")
         if not path.name.endswith(".beaker.json")
     ]
-    assert len(receipts) == 12
+    assert len(receipts) == 16
     assert {r["status"] for r in receipts} == {"submitted"}
-    assert {r["experiment_id"] for r in receipts} == {f"experiment-{i}" for i in range(1, 13)}
+    assert {r["experiment_id"] for r in receipts} == {f"experiment-{i}" for i in range(1, 17)}
     assert {r["update"] for r in receipts} == {0, 2500}
     for update, checkpoint in ((0, initial), (2500, final)):
         endpoint = [r for r in receipts if r["update"] == update]
@@ -123,12 +125,17 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
         assert sorted(tasks, key=lambda task: task["task"]) == sorted(
             run.evaluation["tasks"], key=lambda task: task["task"]
         )
-        assert all(r["training"] == training and r["evaluation"]["revision"] == config["revision"] for r in endpoint)
-    for specs in (calls[:6], calls[6:]):
-        assert sorted(spec["tasks"][0]["resources"]["gpuCount"] for spec in specs) == [1, 1, 1, 1, 2, 2]
+        assert all(r["training"] == training for r in endpoint)
+        for receipt in endpoint:
+            expected = (
+                bfcl_runtime.PROFILE["evaluator_revision"] if receipt["tasks"][0].get("worker") else config["revision"]
+            )
+            assert receipt["evaluation"]["revision"] == expected
+    for specs in (calls[:8], calls[8:]):
+        assert sorted(spec["tasks"][0]["resources"]["gpuCount"] for spec in specs) == [1, 1, 1, 1, 1, 1, 2, 2]
         for spec in specs:
             job = spec["tasks"][0]
-            assert job["image"] == {"beaker": config["image"]}
+            assert job["image"]["beaker"] in {config["image"], bfcl_runtime.PROFILE["image"]}
             assert job["context"] == {"priority": "high", "autoResume": True}
             assert job["constraints"]["cluster"] == [config["cluster"]]
 
@@ -136,12 +143,12 @@ def test_full_panel_submits_only_endpoints_and_does_not_resubmit_on_resume(three
     resumed.dispatch(0, initial)
     resumed.dispatch(2500, final)
     assert resumed.worker is None
-    assert len(calls) == 12
+    assert len(calls) == 16
 
 
 def test_panel_groups_keep_execution_requirements_separate(three_node):
     groups = evaluation.groups(three_node.evaluation, 0, 200)
-    assert sorted(map(len, groups)) == [1, 1, 1, 5, 7, 10]
+    assert sorted(map(len, groups)) == [1, 1, 1, 4, 5, 7, 10, 13]
     for group in groups:
         for task in group:
             assert task.get("harness", {}) == group[0].get("harness", {})

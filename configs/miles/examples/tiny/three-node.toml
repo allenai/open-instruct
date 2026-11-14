@@ -65,7 +65,7 @@ save_interval = 25
 
 [evaluation]
 mode = "background"
-# Full official development/text-safety panel before and after training only.
+# Full development/text-safety and native BFCL panels before and after training only.
 # Zero disables periodic evaluation, even when the run is extended.
 interval = 0
 initial = true
@@ -226,6 +226,103 @@ auxiliary_gpus = 1
 "auxiliary_providers.sr_judge.kwargs.lora_modules" = ["strongreject=qylu4156/strongreject-15k-v1"]
 "auxiliary_providers.sr_judge.tokenizer" = "qylu4156/strongreject-15k-v1"
 "auxiliary_providers.sr_judge.kwargs.add_bos_token" = true
+
+[evaluation.bfcl]
+# H196/Olmo 3.5 tiny native-tool profile; this shared archive is checksum-pinned.
+# Override this locator when staging the same archive elsewhere; the worker verifies its bytes.
+plugin_archive = "/weka/oe-adapt-default/abhishekr/handoff/termination-2x2/ladders-3542d99.tar"
+
+# Native function calls require the dedicated vLLM worker, independently of the SGLang panel.
+# Keep each selected panel complete: 13 single-turn categories and four multi-turn categories.
+
+[[evaluation.tasks]]
+task = "bfcl_simple"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_multiple"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_parallel"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_parallel_multiple"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_java"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_javascript"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_irrelevance"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_live_simple"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_live_multiple"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_live_parallel"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_live_parallel_multiple"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_live_irrelevance"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_live_relevance"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 4096, num_samples = 1 }
+
+[[evaluation.tasks]]
+task = "bfcl_multi_turn_base"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 16384, num_samples = 1 }
+harness_preset = "bfcl_multi_turn"
+
+[[evaluation.tasks]]
+task = "bfcl_multi_turn_miss_func"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 16384, num_samples = 1 }
+harness_preset = "bfcl_multi_turn"
+
+[[evaluation.tasks]]
+task = "bfcl_multi_turn_miss_param"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 16384, num_samples = 1 }
+harness_preset = "bfcl_multi_turn"
+
+[[evaluation.tasks]]
+task = "bfcl_multi_turn_long_context"
+worker = "bfcl-native-h196-v1"
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 16384, num_samples = 1 }
+harness_preset = "bfcl_multi_turn"
 
 [trainer]
 gpus = 8

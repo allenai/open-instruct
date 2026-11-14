@@ -21,6 +21,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
+from importlib import util as import_util
 from pathlib import Path
 from urllib import error as urlerror
 from urllib import request
@@ -574,6 +575,67 @@ def resolve_scicode_reference(task):
     return path
 
 
+def native_bfcl_worker(receipt):
+    """Load only the registered standalone worker copied with the frozen receipt."""
+    settings = receipt["evaluation"].get("worker")
+    if not settings:
+        return None
+    if settings.get("name") != "bfcl-native-h196-v1":
+        raise ValueError("Unknown native evaluation worker")
+    path = Path(__file__).with_name("bfcl_runtime.py")
+    if hashlib.sha256(path.read_bytes()).hexdigest() != settings["identity"]["source_sha256"]:
+        raise ValueError("Native BFCL worker differs from the frozen receipt")
+    spec = import_util.spec_from_file_location("miles_native_bfcl_worker", path)
+    if spec is None or spec.loader is None:
+        raise ValueError("Native BFCL worker module is unavailable")
+    worker = import_util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    if settings["identity"] != worker.identity(receipt["evaluation"]):
+        raise ValueError("Native BFCL runtime identity differs from the frozen receipt")
+    return worker
+
+
+def run_native_bfcl(receipt, output, worker):
+    """Run one native CLI per full panel, retaining WEKA progress for native resume."""
+    native = output / "native"
+    native.mkdir(exist_ok=True)
+    marker = native / "worker-complete.json"
+    complete = marker.exists()
+    if complete:
+        saved = json.loads(marker.read_text())
+        if saved["tasks"] != receipt["tasks"] or saved["worker"] != receipt["evaluation"]["worker"]:
+            raise ValueError("Native BFCL completion provenance differs")
+        if saved["scores"] != completed_scores(native, receipt["tasks"]):
+            raise ValueError("Native BFCL completed scores changed")
+        worker.validate_counts(native, receipt["tasks"])
+    if not complete:
+        worker.validate_checkpoint(
+            receipt["checkpoint"], receipt["update"], receipt["evaluation"]["worker"]["profile"]
+        )
+        script = worker.launch_command(receipt, native)
+        write_json(native / "worker-command.json", ["bash", "-euc", script])
+        log_path = native / "olmo-eval.log"
+        try:
+            with log_path.open("a") as log, startup_progress(log_path):
+                subprocess.run(
+                    ["bash", "-euc", script],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    check=True,
+                    env=gpu_environments(receipt)[1],
+                )
+        except subprocess.CalledProcessError:
+            print_failure_log(log_path)
+            raise
+        values = completed_scores(native, receipt["tasks"])
+        worker.validate_counts(native, receipt["tasks"])
+        write_json(marker, {"tasks": receipt["tasks"], "worker": receipt["evaluation"]["worker"], "scores": values})
+    write_json(output / "task-results.json", ["native"])
+    write_json(output / "scores.json", completed_scores(output, receipt["tasks"]))
+    write_json(output / "evaluation.json", {"status": "complete"})
+    try_publish(receipt, output)
+
+
 def run_evaluation(receipt):
     with evaluation_output(receipt) as output:
         run_evaluation_locked(receipt, output)
@@ -582,11 +644,25 @@ def run_evaluation(receipt):
 def run_evaluation_locked(receipt, output):
     server = None
     try:
+        native_worker = native_bfcl_worker(receipt)
         status = output / "evaluation.json"
         if status.exists() and json.loads(status.read_text()).get("status") == "complete":
             completed_scores(output, receipt["tasks"])
+            if native_worker:
+                if not (output / "native" / "worker-complete.json").is_file():
+                    raise ValueError("Native BFCL completed evaluation has no worker completion marker")
+                run_native_bfcl(receipt, output, native_worker)
+                return
             print(f"Reusing completed evaluation: {output}", flush=True)
             try_publish(receipt, output)
+            return
+        if native_worker:
+            revision = subprocess.check_output(
+                ["git", "-C", "/opt/olmo-eval", "rev-parse", "HEAD"], text=True, timeout=10
+            ).strip()
+            if revision != receipt["evaluation"]["revision"]:
+                raise ValueError("Native BFCL evaluator revision differs from the frozen receipt")
+            run_native_bfcl(receipt, output, native_worker)
             return
         # Discover completions before starting an expensive inference server.
         pending = [task for task in receipt["tasks"] if saved_task(output, task)[1] is None]

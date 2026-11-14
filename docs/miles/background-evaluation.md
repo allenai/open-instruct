@@ -17,7 +17,7 @@ queue additional collections or wait at shutdown.
 
 The [three-node example](../../configs/miles/examples/tiny/three-node.toml) opts into background
 evaluation with a pinned sandbox-enabled image and the 25-entry post-training
-development/text-safety panel. It sets `interval=0`, `initial=true` and `final=true`
+development/text-safety panel plus 17 native BFCL categories. It sets `interval=0`, `initial=true` and `final=true`
 to evaluate the full panel before and after training only, including when the run
 is extended. Zero disables periodic evaluation; it does not disable either endpoint.
 Positive intervals count completed optimizer updates, not rollout collections.
@@ -124,7 +124,7 @@ Tasks with the same generation overrides, harness preset, harness overrides and
 execution kind and auxiliary GPU count share a job. Empty generation overrides preserve each task's own
 defaults. Each unfinished task starts its own native SGLang engine; completed
 tasks remain reusable after preemption. Model loading repeats between tasks.
-The three-node panel creates six groups: seven 32-draw math tasks, ten other native tasks, LiveCodeBench, SciCode,
+The ordinary three-node panel creates six groups: seven 32-draw math tasks, ten other native tasks, LiveCodeBench, SciCode,
 five WildGuard-judged tasks and StrongREJECT. Each group requests one policy GPU;
 each judge group also reserves one GPU with task `auxiliary_gpus=1`. The worker
 exposes the policy and auxiliary GPUs to olmo-eval, whose planner assigns
@@ -257,6 +257,65 @@ The earlier generic, graphs-disabled configuration took about 21–26 minutes pe
 fit the three-hour default. Do not assume the optimized profile makes that timeout
 sufficient: measure the full tasks and set `evaluation.timeout` accordingly.
 An interrupted task restarts from its beginning; completed tasks are reusable.
+
+### Native BFCL tool evaluation
+
+The current tiny three-node template adds two independent BFCL workers to those
+six groups: all 13 native single-turn categories (3,641 questions), and all four
+multi-turn categories (800 questions). The 42 configured tasks form eight groups
+at the same initial/final milestones. No tool data is added to training, and dev,
+node and shared-engine evaluation retain their existing settings.
+
+These tasks select `worker="bfcl-native-h196-v1"`; they cannot run through the
+ordinary SGLang provider, which does not accept native tool requests. The worker
+uses its own immutable evaluator image/revision and an isolated pinned vLLM
+0.19.1 environment. It reserves one policy GPU, 12 CPUs and 96 GiB RAM per group;
+there is no reward-judge GPU. It invokes all categories in one native CLI call
+per group, retaining native calls, tool execution/state checking and scorer
+semantics. This is not the text-only `:prompt` approximation.
+
+The model-family profile targets H196/Olmo 3.5 tiny (`Olmo3MoeForCausalLM`,
+1,024 hidden width and 16 layers), with the native XML tool template. Model shape,
+tokenizer and template hashes are checked before bootstrap/model startup; another
+model family needs a separately reviewed profile. The profile pins the vLLM and
+transformers plugins through a checksum-verified archive and a fixed OLMo-core
+revision. The shared archive locator is explicit in `[evaluation.bfcl]`:
+
+```toml
+[evaluation.bfcl]
+plugin_archive = "/weka/oe-adapt-default/abhishekr/handoff/termination-2x2/ladders-3542d99.tar"
+```
+
+You can stage the same archive elsewhere and override this absolute locator; its
+required checksum remains fixed. The corresponding WEKA mount must be available
+to the evaluator. Cache paths derive from the run's evaluation root, and evaluator
+secrets are inherited by reference through the existing configuration. No study
+output directory, account credential or training-source overlay is embedded.
+
+BFCL uses temperature 1.0, top-p 0.95 and one sample, with a 4,096-token single-turn
+or 16,384-token per-turn multi-turn cap, a 65,536-token context and native context
+fitting. The native multi-turn harness owns its step/termination limits. The
+`qwen3_xml` tool parser and `olmo3` reasoning parser preserve the H196 tool
+contract; prefix caching is disabled and the Mamba SSM cache uses float32. These
+benchmark settings do not change training's top-p 1.0 or any ordinary panel task.
+The existing ordinary-panel context-budget issue is a separate evaluator fix.
+
+Resolved worker/image/protocol hashes enter task grouping and frozen receipts.
+The existing receipt claim prevents duplicate or ambiguous submission retries.
+The MILES runner holds its normal output lock, while native `--resume` keeps
+partial progress in canonical WEKA output. A successful native exit and complete
+category counts are required before a completion marker or W&B scores are
+committed. A failed/preempted attempt retains its native artifacts for a clean
+resume; successful completed groups reuse results without loading the model.
+The Beaker result remains `/output`, outside the input mount, and the parent
+wrapper copies artifacts on success or failure. No deletion or `--fresh` occurs.
+
+Native per-category metrics are published without replacing their contracts with
+a guessed pooled headline score. Requests/predictions and requested/effective
+budgets remain available for paired analysis. Native scoring mistakes and expected
+tool errors are distinct from missing/provider-failed outputs. Runtime bootstrap
+and model validation of the pinned profile remain visible in the draft PR's run
+evidence; offline configuration tests alone are not a GPU qualification claim.
 
 ## Snapshots and receipts
 

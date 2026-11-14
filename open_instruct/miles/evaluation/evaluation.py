@@ -19,7 +19,7 @@ from pathlib import Path
 
 from open_instruct import logger_utils
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.evaluation import evaluation_runner
+from open_instruct.miles.evaluation import bfcl_runtime, evaluation_runner
 from open_instruct.miles.infrastructure import artifacts as state
 from open_instruct.miles.infrastructure import infra_timeouts
 
@@ -61,6 +61,7 @@ def parse(value, launch):
         "timeout",
         "provider_kwargs",
         "external_server_args",
+        "bfcl",
     }
     if "server_args" in value:
         raise InputError("evaluation.server_args was replaced by provider_kwargs; use SGLang Python option names")
@@ -167,6 +168,8 @@ def parse(value, launch):
             "kind",
             "arguments",
             "auxiliary_gpus",
+            "worker",
+            "worker_profile",
         }:
             raise InputError(
                 "evaluation.tasks accept task, interval, generation, scoring, harness, harness_preset, kind, arguments and auxiliary_gpus"
@@ -175,6 +178,18 @@ def parse(value, launch):
         if not isinstance(name, str) or not name or name in names:
             raise InputError("evaluation task names must be nonempty and unique")
         names.add(name)
+        worker = task.get("worker")
+        if worker not in (None, bfcl_runtime.WORKER):
+            raise InputError("Unknown evaluation task worker")
+        if name.startswith("bfcl") and ":prompt" not in name and worker != bfcl_runtime.WORKER:
+            raise InputError("Native BFCL tool tasks require the dedicated BFCL worker")
+        if worker == bfcl_runtime.WORKER:
+            try:
+                bfcl_runtime.normalize_task(task, value)
+            except ValueError as error:
+                raise InputError(str(error)) from error
+        elif "worker_profile" in task:
+            raise InputError("worker_profile requires a registered evaluation worker")
         auxiliary_gpus = task.get("auxiliary_gpus", 0)
         if type(auxiliary_gpus) is not int or auxiliary_gpus < 0:
             raise InputError("evaluation task auxiliary_gpus must be a nonnegative integer")
@@ -234,6 +249,12 @@ def parse(value, launch):
         for task in tasks
     ):
         value["secrets"].setdefault(SCICODE_REFERENCE_SECRET, SCICODE_REFERENCE_SECRET)
+
+    try:
+        bfcl_runtime.resolved_profile(value)
+        bfcl_runtime.validate_panels(tasks)
+    except ValueError as error:
+        raise InputError(str(error)) from error
     validate_judge_credentials(value)
     return value
 
@@ -307,6 +328,7 @@ def groups(config, update, total):
                     "harness_preset": task.get("harness_preset", "default"),
                     "harness": task.get("harness", {}),
                     "auxiliary_gpus": task.get("auxiliary_gpus", 0),
+                    "worker_profile": task.get("worker_profile"),
                 },
                 sort_keys=True,
             )
@@ -372,9 +394,17 @@ def specification(receipt):
     runner = Path(__file__).with_name("evaluation_runner.py").read_bytes()
     if hashlib.sha256(runner).hexdigest() != receipt["runner_sha256"]:
         raise InputError("Evaluator runner differs from the recorded source; use its committed checkout")
+    helper_setup = ""
+    if config.get("worker"):
+        helper = Path(__file__).with_name("bfcl_runtime.py").read_bytes()
+        if hashlib.sha256(helper).hexdigest() != config["worker"]["identity"]["source_sha256"]:
+            raise InputError("BFCL worker differs from the frozen receipt")
+        helper_source = base64.b64encode(helper).decode()
+        helper_setup = f"; pathlib.Path('/tmp/bfcl_runtime.py').write_bytes(base64.b64decode({helper_source!r}))"
     payload = base64.b64encode(json.dumps(receipt).encode()).decode()
     source = base64.b64encode(runner).decode()
     setup = f"import base64,pathlib; pathlib.Path('/tmp/evaluate.py').write_bytes(base64.b64decode({source!r})); pathlib.Path('/tmp/evaluation.json').write_bytes(base64.b64decode({payload!r}))"
+    setup += helper_setup
     sandbox = any(
         task.get("kind") == "external" or task.get("harness_preset") == "codex_python"
         for task in receipt.get("tasks", [])
@@ -401,6 +431,7 @@ def specification(receipt):
                 "resources": {
                     "gpuCount": config["gpus"] + max(task.get("auxiliary_gpus", 0) for task in receipt["tasks"]),
                     "sharedMemory": "32 GiB",
+                    **({"cpuCount": 12, "memory": "96 GiB"} if config.get("worker") else {}),
                 },
                 "constraints": {"cluster": [config["cluster"]]},
                 "context": {"priority": "high", "autoResume": True},
@@ -529,7 +560,11 @@ class Coordinator:
                 checkpoint=str(checkpoint),
                 tasks=tasks,
                 group_id=key,
-                evaluation=self.config,
+                evaluation=(
+                    bfcl_runtime.settings(self.config)
+                    if tasks[0].get("worker") == bfcl_runtime.WORKER
+                    else self.config
+                ),
                 training=self.training,
                 status="pending",
                 runner_sha256=hashlib.sha256(
