@@ -48,11 +48,14 @@ def test_three_node_panel_preserves_protocols_and_before_after_cadence(three_nod
         if task.get("kind") == "external":
             assert task["arguments"]["temperature"] == 1.0
             assert task["arguments"]["max_tokens"] == 32768
+            assert task["arguments"]["fit_max_tokens_to_context"] is True
+            assert "top_p" not in task["arguments"]  # Requires the separate evaluator API update.
         else:
             assert task["generation"] == {
                 "temperature": 1.0,
                 "top_p": 0.95,
                 "max_tokens": 32768,
+                "fit_max_tokens_to_context": True,
                 "num_samples": 32 if ":pass_at_32" in task["task"] else 1,
             }
     milestones = three_node.plan()["evaluation"]["milestones"]
@@ -608,3 +611,22 @@ def test_manual_scicode_cannot_override_client_model_name(three_node, arguments)
     document["evaluation"]["external_server_args"] = arguments
     with pytest.raises(InputError, match="cannot override snapshot, served model name"):
         RunSpec.from_dict(document)
+
+
+@pytest.mark.parametrize("example", ["node", "three-node"])
+def test_background_examples_use_context_fit_runtime_and_forward_native_flag(example, tmp_path):
+    run = RunSpec.load(ROOT / f"configs/miles/examples/tiny/{example}.toml")
+    config = evaluation.runtime(run, run.compile().miles)
+    assert config["image"] == "01M7CK4QK3MJ7Q9MZYRQTMTPYW"
+    assert config["revision"] == "56dc89212fc040a0b7fd957901c3b326b8a5cd11"
+    for tasks in evaluation.groups(config, 0, run.to_dict()["training"]["num_rollouts"]):
+        receipt = {"checkpoint": "/weka/test/hf", "evaluation": config, "tasks": tasks}
+        argv = evaluation_runner.command(receipt, tmp_path)
+        if tasks[0].get("kind") == "external":
+            assert "fit_max_tokens_to_context=true" in argv
+            assert argv[argv.index("fit_max_tokens_to_context=true") - 1] == "--arg"
+        else:
+            assert all(task["generation"]["fit_max_tokens_to_context"] is True for task in tasks)
+            assert argv.count("fit_max_tokens_to_context=true") == len(tasks)
+            assert argv.count("temperature=1.0") == len(tasks)
+            assert argv.count("top_p=0.95") == len(tasks)

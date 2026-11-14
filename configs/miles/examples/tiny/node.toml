@@ -54,8 +54,8 @@ interval = 50
 initial = true
 final = true
 # Evaluator image with the inline olmo-eval SGLang provider.
-image = "01M5ZGD5K01GNW3ASDPNXXPEJ3"
-revision = "3536fe751e40162cc33d5e647085e986375aadce"
+image = "01M7CK4QK3MJ7Q9MZYRQTMTPYW"
+revision = "56dc89212fc040a0b7fd957901c3b326b8a5cd11"
 gpus = 1 # Additional allocation per task group, outside the 8-GPU training layout.
 cluster = "ai2/holmes"
 submit_timeout = 30
@@ -66,19 +66,19 @@ provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
 
 [[evaluation.tasks]]
 task = "gsm8k"
-# Fixed 32K evaluation responses, independent of the served context capacity.
+# Nominal 32K evaluation responses, reduced only when needed to fit the context.
 # Clear GSM8K's default blank-line stop so it does not truncate reasoning there.
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
 task = "gsm8k:platinum"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128, num_fewshot = 0 }
 
 [[evaluation.tasks]]
 task = "ifeval_ood" # IFBench; distinct from IFEval.
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1, stop_sequences = [] }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1, stop_sequences = [] }
 scoring = { limit = 128 }
 
 [trainer]
