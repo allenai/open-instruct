@@ -259,7 +259,6 @@ def test_gated_judge_guard_allows_evaluations_without_gated_downloads(three_node
         ({"arguments": {}}, "kind=external"),
         ({"task": "unsupported", "kind": "external"}, "Only scicode"),
         ({"task": "scicode", "kind": "external", "arguments": {"split": "test"}}, "validation"),
-        ({"task": "scicode", "kind": "external", "arguments": {"split": "validation"}}, "reference data"),
     ],
 )
 def test_invalid_panel_settings_fail_before_launch(three_node, patch, message):

@@ -526,7 +526,14 @@ def run_tasks(receipt, output):
             # attempts intact and rerun only this unfinished task in a fresh path.
             attempt = directory / "attempts" / uuid.uuid4().hex
             attempt.mkdir(parents=True)
-            args = command({**receipt, "tasks": [task]}, attempt)
+            command_task = task
+            if task.get("kind") == "external" and task["task"] == "scicode":
+                # Preserve the frozen task identity used for completion/resume.
+                command_task = {
+                    **task,
+                    "arguments": {**task["arguments"], "h5py_host_path": resolve_scicode_reference(task)},
+                }
+            args = command({**receipt, "tasks": [command_task]}, attempt)
             write_json(attempt / "command.json", args)
             log_path = attempt / "olmo-eval.log"
             try:
@@ -551,6 +558,20 @@ def run_tasks(receipt, output):
     write_json(output / "task-failures.json", [{"task": task, "error": str(error)} for task, error in failures])
     if failures:
         raise failures[0][1]
+
+
+def resolve_scicode_reference(task):
+    """Resolve the secret inside the evaluator, before starting inference."""
+    arguments = task["arguments"]
+    path = arguments.get("h5py_host_path")
+    if path is None:
+        path = os.environ.get("SCICODE_H5PY_HOST_PATH", "").strip()
+    if not path or not Path(path).is_absolute() or not Path(path).is_file():
+        raise ValueError(
+            "SciCode reference data is unavailable. Check the evaluator's SCICODE_H5PY_HOST_PATH Beaker secret "
+            "and filesystem mount, or set arguments.h5py_host_path to an existing test_data.h5 file."
+        )
+    return path
 
 
 def run_evaluation(receipt):
@@ -581,8 +602,8 @@ def run_evaluation_locked(receipt, output):
         ):
             raise RuntimeError("Code evaluation requires a sandbox-enabled evaluator image with Podman")
         for task in pending:
-            if task.get("kind") == "external" and not Path(task["arguments"]["h5py_host_path"]).is_file():
-                raise ValueError("SciCode reference data is missing: arguments.h5py_host_path")
+            if task.get("kind") == "external" and task["task"] == "scicode":
+                resolve_scicode_reference(task)
         revision = subprocess.check_output(
             ["git", "-C", "/opt/olmo-eval", "rev-parse", "HEAD"], text=True, timeout=10
         ).strip()
