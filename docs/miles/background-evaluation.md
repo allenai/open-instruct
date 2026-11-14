@@ -80,7 +80,20 @@ filesystem mounted in the evaluator. Launch validation rejects missing paths,
 `YOUR_…` placeholders and unexpanded variables. Planning and validation warn
 about unresolved paths while keeping examples loadable. The submitting
 workstation need not mount WEKA; file existence is checked in the evaluator
-before inference.
+before inference. Edit the existing SciCode task's `arguments` table; for example,
+if the file is at `/weka/oe-adapt-default/scicode/test_data.h5`:
+
+```toml
+[[evaluation.tasks]]
+task = "scicode"
+kind = "external"
+arguments = { temperature = 1.0, max_tokens = 32768, split = "validation", h5py_host_path = "/weka/oe-adapt-default/scicode/test_data.h5" }
+```
+
+Use your actual reference-file location and ensure that its filesystem appears in
+`launch.weka_mounts`. If you do not intend to run SciCode, remove its task entry
+instead. Then rerun `python -m open_instruct.miles plan path/to/your-run.toml`
+before launching.
 
 Workspace and budget default to `launch.workspace` and `launch.budget`. Evaluator
 jobs inherit `launch.weka_mounts`, `WANDB_API_KEY` and `HF_TOKEN` secret references.

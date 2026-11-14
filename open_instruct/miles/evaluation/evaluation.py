@@ -31,6 +31,16 @@ GATED_JUDGE_MODELS = {"allenai/wildguard", "google/gemma-2b"}
 # olmo-eval task families whose datasets are gated, keyed by the task name before "_" or ":".
 GATED_TASK_DATASETS = {"gpqa": "Idavidrein/gpqa"}
 
+SCICODE_REFERENCE_HELP = (
+    "SciCode requires arguments.h5py_host_path for its reference data, set to an explicit absolute reference-data file path. "
+    'In your run config, edit the [[evaluation.tasks]] entry with task="scicode": '
+    'set arguments.h5py_host_path="/weka/oe-adapt-default/scicode/test_data.h5", using the actual location of your file. '
+    "Replace the example YOUR_USERNAME placeholder and any unexpanded variables. "
+    "Ensure the file exists on the evaluator and its filesystem is included in launch.weka_mounts. "
+    "If you do not want SciCode, remove its [[evaluation.tasks]] entry. "
+    "Then rerun python -m open_instruct.miles plan <your-run-config> before launching."
+)
+
 
 def parse(value, launch):
     value = dict(value)
@@ -193,7 +203,7 @@ def parse(value, launch):
                 raise InputError("SciCode development evaluation requires arguments.split=validation")
             # Templates stay loadable; validate_scicode_reference_path rejects unresolved paths at launch.
             if not isinstance(arguments.get("h5py_host_path"), str) or not arguments["h5py_host_path"]:
-                raise InputError("SciCode requires arguments.h5py_host_path for its reference data")
+                raise InputError(SCICODE_REFERENCE_HELP)
         elif "arguments" in task:
             raise InputError("evaluation task arguments require kind=external")
         preset = task.get("harness_preset", "default")
@@ -238,11 +248,7 @@ def validate_scicode_reference_path(config):
             or not Path(path).is_absolute()
             or re.search(r"YOUR_[A-Z_]+|[$<>]", path)
         ):
-            raise InputError(
-                "SciCode requires arguments.h5py_host_path to be an explicit absolute reference-data file path. "
-                "Replace the example YOUR_USERNAME placeholder and any unexpanded variables before launching; "
-                "the file must be accessible on the evaluator's mounted filesystem."
-            )
+            raise InputError(SCICODE_REFERENCE_HELP)
 
 
 def validate_judge_credentials(config):

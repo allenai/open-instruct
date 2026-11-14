@@ -51,7 +51,12 @@ def test_example_placeholder_fails_before_launch_or_preparation(boundary, monkey
     # Planning the template is useful before its deployment paths are filled in.
     plan = run.plan()
     assert plan["evaluation"]["milestones"]
-    assert any("h5py_host_path" in warning for warning in plan["launch_warnings"])
+    warning = next(warning for warning in plan["launch_warnings"] if "h5py_host_path" in warning)
+    assert 'edit the [[evaluation.tasks]] entry with task="scicode"' in warning
+    assert 'arguments.h5py_host_path="/weka/oe-adapt-default/scicode/test_data.h5"' in warning
+    assert "launch.weka_mounts" in warning
+    assert "remove its [[evaluation.tasks]] entry" in warning
+    assert "python -m open_instruct.miles plan" in warning
     prepare = Mock(side_effect=AssertionError("must not prepare model"))
     monkeypatch.setattr(workflow, "prepare_model", prepare)
     with pytest.raises(InputError, match="Replace the example YOUR_USERNAME placeholder"):
