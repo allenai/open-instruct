@@ -44,6 +44,67 @@ def test_receiver_preserves_causal_error_and_context(monkeypatch, tmp_path):
     assert "causal collective failure" in error["traceback"]
 
 
+def test_packing_diagnostics_observe_two_experts_without_changing_processing(monkeypatch, tmp_path):
+    class Quantizer:
+        def process_weights_after_loading(self, layer):
+            layer.weight.data.add_(1)
+            return "native result"
+
+    monkeypatch.setattr(
+        gate.importlib, "import_module", lambda _: SimpleNamespace(ModelOptNvFp4OnlineFusedMoEMethod=Quantizer)
+    )
+    monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
+    layer = torch.nn.Module()
+    layer.register_parameter("weight", torch.nn.Parameter(torch.arange(12.0).reshape(3, 4)))
+    layer.register_parameter("scale", torch.nn.Parameter(torch.tensor(1.0)))
+    before = layer.weight.detach().clone()
+    gate.instrument_nvfp4_processing()
+    for epoch in (1, 2):
+        assert Quantizer().process_weights_after_loading(layer) == "native result"
+        assert torch.equal(layer.weight, before + epoch)
+        receipt = json.loads(next(tmp_path.glob(f"packing-*-{epoch}.json")).read_text())
+        assert receipt["epoch"] == epoch and receipt["sample_experts"] == [0, 1]
+        assert receipt["before"]["weight"] == gate.tensor_fingerprint((before + epoch - 1)[:2])
+        assert receipt["after"]["weight"] == gate.tensor_fingerprint((before + epoch)[:2])
+        assert receipt["before"]["scale"] == receipt["after"]["scale"]
+
+
+def test_load_diagnostics_keep_iterator_items_and_report_stale_cache(monkeypatch, tmp_path):
+    name = "model.layers.1.mlp.experts.0.gate_proj.weight"
+    weight = torch.ones(2, 2, dtype=torch.bfloat16)
+    item = (name, weight, {"sentinel": True})
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self._weight_targets = SimpleNamespace(params={"stale": object()})
+
+        def load_weights(self, weights):
+            received = list(weights)
+            assert len(received) == 1 and received[0] is item
+            return {name}
+
+        def forward(self):
+            pass
+
+    model = Model()
+    monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
+    monkeypatch.setattr(gate, "instrument_receiver", lambda: None)
+    monkeypatch.setattr(gate, "instrument_nvfp4_processing", lambda: None)
+    modules = {
+        "olmo_sglang.models.olmo3_moe": SimpleNamespace(Olmo3MoeForCausalLM=Model),
+        "sglang.srt.managers.scheduler": SimpleNamespace(
+            run_scheduler_process=lambda: model.load_weights(iter([item]))
+        ),
+    }
+    monkeypatch.setattr(gate.importlib, "import_module", modules.__getitem__)
+    assert gate.audit_scheduler() == {name}
+    receipt = json.loads(next(tmp_path.glob("incoming-*.json")).read_text())
+    assert receipt["weights"] == {name: gate.tensor_fingerprint(weight)}
+    assert receipt["stale_cached_parameters"] == ["stale"]
+    assert torch.equal(weight, torch.ones_like(weight))
+
+
 def test_reuse_requires_matching_mutation_hash_and_model(tmp_path):
     checkpoint = tmp_path / "changed-checkpoint-1"
     checkpoint.mkdir()

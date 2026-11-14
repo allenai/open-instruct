@@ -156,15 +156,78 @@ def compare_scores(actual, expected, precision, *, unchanged=False):
     return {"tokens": diff.numel(), "max_abs": diff.abs().max().item(), "atol": atol, "rtol": rtol}
 
 
+def tensor_fingerprint(tensor):
+    cpu = tensor.detach().contiguous().cpu()
+    return {
+        "dtype": str(cpu.dtype),
+        "shape": list(cpu.shape),
+        "sha256": hashlib.sha256(cpu.reshape(-1).view(torch.uint8).numpy().tobytes()).hexdigest(),
+    }
+
+
+def instrument_nvfp4_processing():
+    """Observe packing boundaries without changing weights or loader behavior."""
+    method = importlib.import_module("sglang.srt.layers.quantization.nvfp4_online").ModelOptNvFp4OnlineFusedMoEMethod
+    original = method.process_weights_after_loading
+
+    def process(quantizer, layer):
+        epoch = getattr(layer, "_publication_packing_epoch", 0) + 1
+        layer._publication_packing_epoch = epoch
+
+        # Only two experts per layer are copied, retaining useful causal evidence
+        # without copying the whole model at every packing boundary.
+        def sample():
+            return {
+                name: tensor_fingerprint(value[:2] if value.ndim else value)
+                for name, value in layer.named_parameters(recurse=False)
+            }
+
+        before = sample()
+        result = original(quantizer, layer)
+        directory = Path(os.environ["OI_PUBLICATION_AUDIT"])
+        # Object identity is stable within a receiver and separates its layers.
+        save(
+            directory / f"packing-{os.getpid()}-{id(layer)}-{epoch}.json",
+            {"epoch": epoch, "before": before, "after": sample(), "sample_experts": [0, 1]},
+        )
+        return result
+
+    method.process_weights_after_loading = process
+
+
 def audit_scheduler(*args, **kwargs):
     """Observe real serving weights after each load, without changing numerics."""
     instrument_receiver()
+    instrument_nvfp4_processing()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
     original_load, original_forward = model_type.load_weights, model_type.forward
 
     def load(model, *values, **options):
-        result = original_load(model, *values, **options)
+        incoming = {}
+
+        def observed_weights():
+            for item in values[0]:
+                name, tensor, *_ = item
+                match = EXPERT.fullmatch(name)
+                if match is not None and int(match[2]) < 2:
+                    incoming[name] = tensor_fingerprint(tensor)
+                yield item
+
+        result = original_load(model, observed_weights(), *values[1:], **options)
         model._publication_audit_epoch = getattr(model, "_publication_audit_epoch", 0) + 1
+        if incoming:
+            params = dict(model.named_parameters())
+            resolver = getattr(model, "_weight_targets", None)
+            stale = (
+                []
+                if resolver is None
+                else [name for name, value in resolver.params.items() if params.get(name) is not value]
+            )
+            save(
+                Path(os.environ["OI_PUBLICATION_AUDIT"])
+                / f"incoming-{os.getpid()}-{model._publication_audit_epoch}.json",
+                {"weights": incoming, "stale_cached_parameters": stale},
+            )
         return result
 
     def forward(model, *values, **options):
