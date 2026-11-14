@@ -21,8 +21,12 @@ def scores(delta=0.0):
 def test_publication_context_matches_immutable_runtime_loader():
     path = Path("/opt/core-rl/sources/sglang/python/sglang/srt/model_loader/loader.py")
     tree = ast.parse(path.read_text())
-    loader = next(node for node in ast.walk(tree) if isinstance(node, ast.ClassDef) and node.name == "DefaultModelLoader")
-    method = next(node for node in loader.body if isinstance(node, ast.FunctionDef) and node.name == "load_weights_only")
+    loader = next(
+        node for node in ast.walk(tree) if isinstance(node, ast.ClassDef) and node.name == "DefaultModelLoader"
+    )
+    method = next(
+        node for node in loader.body if isinstance(node, ast.FunctionDef) and node.name == "load_weights_only"
+    )
     scopes = [
         node
         for node in ast.walk(method)
