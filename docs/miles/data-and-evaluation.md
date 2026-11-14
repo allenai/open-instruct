@@ -61,6 +61,11 @@ automatically supply every Olmo 3 external service.
 Review rendered prompts and answer format after changing it. A familiar task
 name or equal split count does not prove identical questions or reward semantics.
 
+For the GSM8K and Dolci half-node benchmarks, use the
+[boxed-math preparation script](half-node-math.md). It injects the instruction
+into prepared inputs and uses the learner chat template; no new wrapper option
+is needed.
+
 ## Screening instruction-following training data
 
 MILES preparation rejects known unsuitable targets assigned to the built-in

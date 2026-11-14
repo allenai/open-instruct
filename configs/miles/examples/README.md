@@ -7,8 +7,13 @@ before launching. The `small` family currently contains only a copied dev starte
 | Config | Purpose |
 |---|---|
 | [tiny/dev.toml](tiny/dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
+| [tiny/half-node-gsm8k.toml](tiny/half-node-gsm8k.toml) | Four-GPU original GSM8K benchmark with full Platinum evaluation |
+| [tiny/half-node-dolci-math.toml](tiny/half-node-dolci-math.toml) | Four-GPU Dolci math proposal with separate AIME 2024/2025 evaluation |
 | [tiny/node.toml](tiny/node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
 | [tiny/three-node.toml](tiny/three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+
+See the [half-node math guide](../../../docs/miles/half-node-math.md) for boxed-prompt
+data preparation, historical GSM8K overrides, and Dolci qualification requirements.
 
 `tiny/` holds the existing recipes. `small/dev.toml` currently copies the settings
 of `tiny/dev.toml`, providing a starting file for upcoming model/topology work;
