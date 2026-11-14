@@ -45,3 +45,19 @@ def test_output_comparison_preserves_actual_differences_and_finiteness():
     assert not replay.difference(a, b * float("nan"))["finite"]
     with pytest.raises(ValueError, match="layout"):
         replay.difference(a, b.float())
+
+
+def test_single_config_interventions_hold_other_recorded_choices_fixed():
+    base = {"first": {"cache": {"(1,)": "a"}}, "second": {"cache": {"(2,)": "b"}}}
+    target = {"first": {"cache": {"(1,)": "c"}}, "second": {"cache": {"(2,)": "d"}}}
+    changes = list(replay.single_config_changes(base, target))
+    assert [name for name, _ in changes] == ["first", "second"]
+    for name, snapshot in changes:
+        assert snapshot[name] == target[name]
+        other = "second" if name == "first" else "first"
+        assert snapshot[other] == base[other]
+    changes[0][1]["second"]["cache"].clear()
+    assert base["second"]["cache"] == {"(2,)": "b"}
+    assert target["second"]["cache"] == {"(2,)": "d"}
+    with pytest.raises(ValueError, match="sets differ"):
+        list(replay.single_config_changes(base, {}))

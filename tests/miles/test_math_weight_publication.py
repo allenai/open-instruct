@@ -89,7 +89,10 @@ def test_dispatch_snapshot_unwraps_heuristics_and_serializes_launch_choices(monk
     assert wrapper.fn is kernel and cache[(43, "bf16")] is config
 
 
-def test_kda_diagnostic_captures_prior_state_without_replaying_or_changing_result(monkeypatch, tmp_path):
+@pytest.mark.parametrize("capture_index", [0, 1])
+def test_kda_diagnostic_captures_prior_state_without_replaying_or_changing_result(
+    monkeypatch, tmp_path, capture_index
+):
     calls = []
 
     class Kernel:
@@ -102,18 +105,21 @@ def test_kda_diagnostic_captures_prior_state_without_replaying_or_changing_resul
             return values[0], "native metadata"
 
     monkeypatch.setenv("OI_PUBLICATION_TRACE_KDA", "1")
+    monkeypatch.setenv("OI_PUBLICATION_KDA_CAPTURE_INDEX", str(capture_index))
     monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
     monkeypatch.setattr(gate.importlib, "import_module", lambda _: SimpleNamespace(OlmoFLAKDAKernel=Kernel))
     gate.instrument_kda_inputs()
     values = [torch.ones(1, 43, 2, 4) for _ in range(5)]
     state = torch.zeros(3, 2, 4, 4)
     options = {"ssm_states": state, "cache_indices": torch.tensor([1]), "track_state": None}
-    for _ in range(2):
+    for _ in range(3):
         result = Kernel()._run(*values, **options)
         assert result[0] is values[0] and result[1] == "native metadata"
-    assert len(calls) == 2 and torch.equal(state, torch.full_like(state, 2))
+    assert len(calls) == 3 and torch.equal(state, torch.full_like(state, 3))
     saved = torch.load(next(tmp_path.glob("kda-inputs-*.pt")), weights_only=True)
-    assert torch.count_nonzero(saved["initial_state"]) == 0
+    assert torch.equal(saved["initial_state"], torch.full_like(saved["initial_state"], capture_index))
+    receipt = json.loads(next(tmp_path.glob("kda-receipt-*.json")).read_text())
+    assert receipt["prefill_recurrence_index"] == capture_index
     assert "ssm_states" not in saved["options"] and "track_state" not in saved["options"]
     assert len(list(tmp_path.glob("kda-inputs-*.pt"))) == 1
     assert torch.equal(torch.load(next(tmp_path.glob("kda-output-*.pt")), weights_only=True), values[0])

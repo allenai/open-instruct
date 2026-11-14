@@ -7,6 +7,7 @@ server. The saved inputs come from the real Core publication diagnostic.
 
 import argparse
 import ast
+import copy
 import hashlib
 import importlib
 import json
@@ -58,11 +59,23 @@ def difference(a, b):
     }
 
 
+def single_config_changes(base, target):
+    """Vary one recorded native cache at a time, keeping all others fixed."""
+    if base.keys() != target.keys():
+        raise ValueError("Captured native autotuner sets differ")
+    for path in base:
+        if base[path]["cache"] != target[path]["cache"]:
+            snapshot = copy.deepcopy(base)
+            snapshot[path] = copy.deepcopy(target[path])
+            yield path, snapshot
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--bisect-configs", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     torch.cuda.set_device(args.gpu)
@@ -132,6 +145,32 @@ def main():
             }
         )
         publication.save(args.output / "progress.json", checks)
+    interventions = []
+    if args.bisect_configs:
+        base = records[0][1]["fla_dispatch"]
+        for target_index, (name, receipt, _, _) in enumerate(records[1:], 1):
+            for path, snapshot in single_config_changes(base, receipt["fla_dispatch"]):
+                installed = restore_dispatch(snapshot)
+                repeats = []
+                for _ in range(2):
+                    states.zero_()
+                    states.index_copy_(0, indices.long(), initial)
+                    with torch.inference_mode():
+                        result = kernel._run(*positional, **options, ssm_states=states)
+                    torch.cuda.synchronize()
+                    repeats.append(result.cpu())
+                interventions.append(
+                    {
+                        "target_receiver": name,
+                        "changed_autotuner": path,
+                        "installed": installed,
+                        "base_output_comparison": difference(repeats[0], outputs[0]),
+                        "target_output_comparison": difference(repeats[0], outputs[target_index]),
+                        "repeat_agreement": difference(*repeats),
+                        "actual_dispatch": publication.fla_dispatch_snapshot(),
+                    }
+                )
+                publication.save(args.output / "config-interventions.json", interventions)
     publication.save(
         args.output / "diagnostic-complete.json",
         {
@@ -144,6 +183,7 @@ def main():
             "gpu": args.gpu,
             "identical_inputs_state": True,
             "checks": checks,
+            "single_config_interventions": interventions,
             "config_pair_differences": [
                 {"a": records[0][0], "b": records[index][0], **difference(outputs[0], outputs[index])}
                 for index in (1, 2)

@@ -269,16 +269,23 @@ def fla_dispatch_snapshot():
 
 
 def instrument_kda_inputs():
-    """Retain first real prefill recurrence inputs; never change cache state."""
+    """Retain one real prefill recurrence's inputs; never change cache state."""
     if os.environ.get("OI_PUBLICATION_TRACE_KDA") != "1":
         return
     kernel = importlib.import_module("olmo_sglang.kda.backend").OlmoFLAKDAKernel
     original = kernel._run
     captured = False
+    capture_index = int(os.environ.get("OI_PUBLICATION_KDA_CAPTURE_INDEX", "0"))
+    if capture_index < 0:
+        raise ValueError("KDA capture index must be nonnegative")
+    prefill_index = -1
 
     def run(instance, *values, **options):
-        nonlocal captured
+        nonlocal captured, prefill_index
         if captured or not values or values[0].shape[1] < 32:
+            return original(instance, *values, **options)
+        prefill_index += 1
+        if prefill_index != capture_index:
             return original(instance, *values, **options)
         captured = True
         # Snapshot only referenced states, before the native call commits them.
@@ -305,6 +312,7 @@ def instrument_kda_inputs():
                 "diagnostic_only": True,
                 "synchronizes_cuda": True,
                 "cache_modified_by_instrumentation": False,
+                "prefill_recurrence_index": prefill_index,
                 "core_compat": getattr(instance, "core_compat", None),
                 "allow_neg_eigval": getattr(instance, "allow_neg_eigval", None),
                 "fla_dispatch": fla_dispatch_snapshot(),
