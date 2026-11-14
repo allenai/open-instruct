@@ -101,20 +101,24 @@ def test_source_pool_preparation_reaches_runtime_with_replay(args, tmp_path, mon
         loader.close()
 
 
-def setup(args, tmp_path, policy="shuffle"):
+def setup(args, tmp_path, policy="shuffle", *, priority=False):
     test_remind_provider.setup_remind(args, tmp_path)
     test_mixture_provider.setup(args)
     path = Path(args.olmo_core.prompt_mixture)
     manifest = json.loads(path.read_text())
     manifest["pools"] = {"math": {"label": "math"}, "if": {"label": "if"}, "empty": {"label": "empty"}}
     manifest["sampling"] = {"policy": policy}
+    if priority:
+        manifest["sampling"]["priority"] = {"field": "priority"}
     if policy == "weighted":
         manifest["sampling"]["weights"] = {"math": 3, "if": 1, "empty": 1}
     for source, pool in zip(manifest["sources"], ["math", "if"], strict=True):
         source.pop("fraction")
         data = path.parent / source["path"]
         rows = [json.loads(line) for line in data.read_text().splitlines()]
-        for row in rows:
+        for index, row in enumerate(rows):
+            if priority:
+                row["metadata"]["priority"] = 4 - index % 4
             row["pool_id"] = pool
             row["metadata"].update(pool_id=pool, sampling_pool=pool)
         raw = "".join(json.dumps(row) + "\n" for row in rows).encode()
@@ -128,9 +132,13 @@ def setup(args, tmp_path, policy="shuffle"):
     args.n_samples_per_prompt = 2
 
 
-@pytest.mark.parametrize("policy", ["shuffle", "uniform", "weighted", "exposure"])
-def test_actual_filter_does_not_credit_until_optimizer_commit_and_restore(args, tmp_path, policy):
-    setup(args, tmp_path, policy)
+@pytest.mark.parametrize(
+    "policy,priority",
+    [(p, False) for p in ("shuffle", "uniform", "weighted", "exposure")]
+    + [(p, True) for p in ("uniform", "exposure")],
+)
+def test_actual_filter_does_not_credit_until_optimizer_commit_and_restore(args, tmp_path, policy, priority):
+    setup(args, tmp_path, policy, priority=priority)
     source = DashboardDrainingRolloutDataSource(args)
     buffer = HomogeneousPolicyDataBuffer(DataBufferConstructorInput(args, source.add_samples))
     recorder = buffer._delegate._records
@@ -156,6 +164,8 @@ def test_actual_filter_does_not_credit_until_optimizer_commit_and_restore(args, 
         assert len(receipts) == 1
         receipt = json.loads(receipts[0].read_text())
         assert receipt["update"] == 1 and receipt["selection_ids"] == [kept[0].metadata["pool_selection_id"]]
+        if priority:
+            assert receipt["selections"][0]["sampling_priority_group"] == kept[0].metadata["priority"]
         outstanding = source.get_samples(1)
         source.save(0)
         recorder.close()

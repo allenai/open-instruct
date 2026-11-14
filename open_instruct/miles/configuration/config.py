@@ -11,7 +11,14 @@ import re
 from pathlib import Path
 from typing import Any
 
-from open_instruct.miles.configuration import async_capacity, constraints, graph_config, throughput, validation
+from open_instruct.miles.configuration import (
+    async_capacity,
+    constraints,
+    graph_config,
+    score_centering,
+    throughput,
+    validation,
+)
 from open_instruct.miles.configuration import options as cli_options
 from open_instruct.miles.errors import InputError
 
@@ -354,6 +361,7 @@ class RunConfig:
         """Resolve Core router, precision and group-filter settings for all entry points."""
         options = cli_options.normalize_options(self.miles)
         options.setdefault("calculate_per_token_loss", False)
+        score_centering.validate(options, fp32_lm_head=self.core.fp32_lm_head)
         if not options.get("use_miles_router", False):
             # Mirror the pinned MILES Core invariant during offline planning.
             # Core owns request retries and weight-ready membership. Refuse
@@ -770,8 +778,12 @@ class RunConfig:
             self._validate_engine_drain(options, collection, samples)
         except InputError as error:
             raise InputError(str(error).replace("engine_drain", "refresh")) from error
-        if not options.get("use_tis", False) or options.get("use_rollout_logprobs", False):
-            raise constraints.error("refresh requires miles.use_tis=true and miles.use_rollout_logprobs=false")
+        if not (options.get("use_tis", False) or score_centering.uses_importance_sampling(options)) or options.get(
+            "use_rollout_logprobs", False
+        ):
+            raise constraints.error(
+                "refresh requires miles.use_tis=true or score_centering_is=tis/mis, and miles.use_rollout_logprobs=false"
+            )
         if options.get("advantage_estimator", "grpo") != "grpo":
             raise constraints.error(
                 "refresh currently supports the token-level grpo objective only", constraints.Category.NOT_IMPLEMENTED
