@@ -15,12 +15,16 @@
 #   resume G3: the smoke's schedule with autoResume, batch hashes, an ephemeral checkpoint at step 10 and a hold after
 #          step 19 for `beaker job preempt`; the requeued job resumes from step10 and replays steps 11-19.
 #   train  the run: permanent checkpoint half way (H182's), ephemeral every SAVE_EVERY (1000), keep 2.
+#   mem    memory smoke at SEQ (default 262144), one instance per rank: 20 steps, no checkpoint, no final save, no
+#          replay (REPLAY optional), output under abhishekr/smoke/. Timeout 1 h. Not a ledger arm.
 #
 # Env: IMAGE (default the H111/H182 image), PRIORITY (high), MIN_RUNTIME, TIMEOUT, SAVE_EVERY, AUTO_RESUME,
-# MAX_RETRIES, RUN_SUFFIX, WAIT_FOR_BASE=<minutes>, DRY_RUN=1.
+# MAX_RETRIES, RUN_SUFFIX, WAIT_FOR_BASE=<minutes>, DRY_RUN=1, SEQ (mem mode only).
 set -euo pipefail
 BASE="${1:?b1, noag or tmax}"
-MODE="${2:?smoke, resume or train}"
+MODE="${2:?smoke, resume, train or mem}"
+SEQ=131072
+[[ "$MODE" == mem ]] && SEQ="${SEQ_MEM:-262144}"
 SEED=34521
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
@@ -42,11 +46,19 @@ $P/nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
 $P/nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
 /weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/if/nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456"
 OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/c12r-long
+[[ "$MODE" == mem ]] && OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/smoke/c12r-mem
 ROOTC=$OUT_ROOT/cache
-CACHE=bf82a8fab8-0a2e7a2c-rowaligned
+# The cache dir name hashes "<seed>:<max_seq_length>" (olmo_core_finetune._numpy_cache_dir); every length is a
+# symlink to the same frozen tokens, packed at SEQ at load time.
+case "$SEQ" in
+    131072) CACHE=bf82a8fab8-0a2e7a2c-rowaligned ;;
+    262144) CACHE=bf82a8fab8-c9650527-rowaligned ;;
+    *) echo "no cache id for SEQ $SEQ" >&2; exit 1 ;;
+esac
 FROZEN=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/a7/cache-neptune/numpy_sft/bf82a8fab8-6068a350-rowaligned
+if [[ "$MODE" == mem ]]; then REPLAY="${REPLAY:-}"; STEPS=20; else
 REPLAY="${REPLAY:?REPLAY=<H194 POOL dir>}"
-STEPS="${S_R:?S_R=<steps from H194 R4 prime>}"
+STEPS="${S_R:?S_R=<steps from H194 R4 prime>}"; fi
 CKPT=$(((STEPS + 1) / 2)); HOURS=24
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="c12rlong-${BASE}-s${SEED}${RUN_SUFFIX:-}"
@@ -56,6 +68,8 @@ case "$MODE" in
     resume) STEPS=30; CKPT=1000000; SAVE_EVERY=10; HOLD_AT=19; HOURS=3; RUN_NAME="${RUN_NAME}-resume"
            MIN_RUNTIME="${MIN_RUNTIME:-5m}"; AUTO_RESUME="${AUTO_RESUME:-1}"; MAX_RETRIES="${MAX_RETRIES:-1}" ;;
     train) MIN_RUNTIME="${MIN_RUNTIME:-1h}"; AUTO_RESUME="${AUTO_RESUME:-1}" ;;
+    mem)   STEPS=20; CKPT=1000000; SAVE_EVERY=1000000; HOURS=1; RUN_NAME="${RUN_NAME}-mem${SEQ}"
+           MIN_RUNTIME="${MIN_RUNTIME:-30m}"; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
 esac
 TIMEOUT="${TIMEOUT:-${HOURS}h}"
@@ -65,15 +79,15 @@ DUMP_DIR="$OUTPUT_DIR/step1"
 ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
 --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
 --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
---row_aligned_parts --document_boundaries_from_metadata --max_seq_length 131072 \
+--row_aligned_parts --document_boundaries_from_metadata --max_seq_length $SEQ \
 --per_device_train_batch_size 1 --gradient_accumulation_steps 1 --learning_rate 2e-4 --warmup_ratio 0.03 \
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs 1 --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --loss_implementation fused_linear \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
 --no_save_async --with_tracking --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
---local_cache_dir $ROOTC --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR \
---extra_numpy_dirs $REPLAY"
+--local_cache_dir $ROOTC --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR"
+[[ -n "$REPLAY" ]] && ARGS="$ARGS --extra_numpy_dirs $REPLAY"
 
 BASE_RECEIPT="$(dirname "$MODEL")/RECEIPT.json"
 WRAP=$(gzip -9c "$HERE/h194_wrap.py" | base64 | tr -d '\n')
@@ -125,6 +139,14 @@ fi
 exit \$RC"
     EXTRA_ENV='{"name": "H161_DUMP_DIR", "value": "'"$DUMP_DIR"'"}, {"name": "H161_NO_FINAL_SAVE", "value": "1"},
     {"name": "H161_BATCH_HASH", "value": "1"},'
+elif [[ "$MODE" == mem ]]; then
+    CMD="$PRE
+nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv -l 30 > /tmp/smi.csv &
+$TORCHRUN; RC=\$?
+echo H194-TRAIN-EXIT \$RC \$(date -u +%FT%TZ)
+sort -t, -k2 -n /tmp/smi.csv | tail -3
+exit \$RC"
+    EXTRA_ENV='{"name": "H161_NO_FINAL_SAVE", "value": "1"},'
 else
     CMD="$PRE
 $TORCHRUN"
@@ -161,7 +183,7 @@ task = {
     "timeout": "$TIMEOUT",
 }
 spec = {"version": "v2", "budget": "ai2/oe-other",
-        "description": "ledger H194 c12r-long: $RUN_NAME, $STEPS steps, 1x8 B300, seq 131072, fused_linear, lr 2e-4",
+        "description": "ledger H194 c12r-long: $RUN_NAME, $STEPS steps, 1x8 B300, seq $SEQ, fused_linear, lr 2e-4",
         "tasks": [task]}
 if int("${MAX_RETRIES:-0}"):
     spec["retry"] = {"allowedTaskRetries": int("${MAX_RETRIES:-0}")}
