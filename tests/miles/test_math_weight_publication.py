@@ -179,9 +179,15 @@ def test_load_diagnostics_keep_iterator_items_and_report_stale_cache(monkeypatch
 
     model = Model()
     monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
+    monkeypatch.delenv("OI_PUBLICATION_TRACE_ENCODING", raising=False)
+    monkeypatch.delenv("OI_PUBLICATION_TRACE_PACKING", raising=False)
+
+    def unexpected_instrumentation():
+        raise AssertionError("Strict gate must not synchronize inside quantization/packing")
+
     monkeypatch.setattr(gate, "instrument_receiver", lambda: None)
-    monkeypatch.setattr(gate, "instrument_nvfp4_processing", lambda: None)
-    monkeypatch.setattr(gate, "instrument_nvfp4_quantization", lambda: None)
+    monkeypatch.setattr(gate, "instrument_nvfp4_processing", unexpected_instrumentation)
+    monkeypatch.setattr(gate, "instrument_nvfp4_quantization", unexpected_instrumentation)
     modules = {
         "olmo_sglang.models.olmo3_moe": SimpleNamespace(Olmo3MoeForCausalLM=Model),
         "sglang.srt.managers.scheduler": SimpleNamespace(

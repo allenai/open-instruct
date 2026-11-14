@@ -340,8 +340,10 @@ def trace_forward(model, original_forward, values, options):
 def audit_scheduler(*args, **kwargs):
     """Observe real serving weights after each load, without changing numerics."""
     instrument_receiver()
-    instrument_nvfp4_quantization()
-    instrument_nvfp4_processing()
+    if os.environ.get("OI_PUBLICATION_TRACE_ENCODING") == "1":
+        instrument_nvfp4_quantization()
+    if os.environ.get("OI_PUBLICATION_TRACE_PACKING") == "1":
+        instrument_nvfp4_processing()
     instrument_kda_inputs()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
     if os.environ.get("OI_PUBLICATION_MATCH_LOADER_CONTEXT") == "1":
