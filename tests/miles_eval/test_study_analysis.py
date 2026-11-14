@@ -146,3 +146,86 @@ def test_speed_rejects_invalid_grid(tmp_path, failure):
     write_rows(path, rows)
     with pytest.raises(ValueError):
         analysis.speed_cases(path, "nvfp4")
+
+
+def warmed_fixture(tmp_path):
+    rows = speed_rows("bf16")
+    warmups = {}
+    provenance = {"timing_protocol": "exact-workload-warmup-v1", "context_length": 18434, "process_id": "job-pid-time"}
+    for i, row in enumerate(rows):
+        workload = tuple(row[k] for k in analysis.KEYS[:3])
+        warmup_id = str(workload)
+        start = 10 * (i // 3) + 1
+        row.update(
+            provenance=provenance.copy(),
+            warmup_id=warmup_id,
+            wall_start=start + 3 + 2 * (i % 3),
+            wall_end=start + 5 + 2 * (i % 3),
+            monotonic_start=start + 3 + 2 * (i % 3),
+            monotonic_end=start + 5 + 2 * (i % 3),
+        )
+        warmups.setdefault(
+            warmup_id,
+            {
+                **copy.deepcopy(row),
+                "id": warmup_id,
+                "wall_start": start,
+                "wall_end": start + 2,
+                "monotonic_start": start,
+                "monotonic_end": start + 2,
+            },
+        )
+    path = tmp_path / "measurements.jsonl"
+    write_rows(path, rows)
+    write_rows(tmp_path / "warmups.jsonl", list(warmups.values()))
+    (tmp_path / "complete.json").write_text(json.dumps({"cases": 54, "options": {"context_length": 18434}}))
+    return path, rows, list(warmups.values())
+
+
+def test_exact_workload_warmup_receipts(tmp_path):
+    path, _, _ = warmed_fixture(tmp_path)
+    cases, receipt = analysis.warmed_speed_cases(path, "bf16")
+    assert len(cases) == 54
+    assert receipt["referenced_warmups"] == 18
+    assert len(receipt["sources"]) == 3
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "overlap",
+        "wrong_shape",
+        "short_warmup",
+        "wrong_process",
+        "bad_clock",
+        "nan",
+        "missing",
+        "duplicate",
+        "wrong_request_ids",
+    ],
+)
+def test_warmed_gate_rejects_invalid_receipts(tmp_path, failure):
+    path, rows, warmups = warmed_fixture(tmp_path)
+    if failure == "overlap":
+        rows[0]["monotonic_start"] = 2
+        rows[0]["monotonic_end"] = 4
+    elif failure == "wrong_shape":
+        warmups[0]["prompt_tokens"] = 2048
+    elif failure == "short_warmup":
+        warmups[0]["completion_counts"] = {"0": 1}
+    elif failure == "wrong_process":
+        warmups[0]["provenance"]["process_id"] = "different"
+    elif failure == "bad_clock":
+        rows[0]["monotonic_end"] += 1
+    elif failure == "nan":
+        warmups[0]["wall_start"] = float("nan")
+    elif failure == "missing":
+        warmups.pop(0)
+    elif failure == "duplicate":
+        warmups.append(warmups[0])
+    else:
+        rows[0]["completion_counts"] = {"999": 256}
+    write_rows(path, rows)
+    write_rows(tmp_path / "warmups.jsonl", warmups)
+    with pytest.raises((ValueError, KeyError)):
+        analysis.warmed_speed_cases(path, "bf16")

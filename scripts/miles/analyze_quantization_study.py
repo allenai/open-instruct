@@ -83,6 +83,54 @@ def speed_cases(path, precision, *, legacy_original=None, legacy_validation=None
     return cases
 
 
+def warmed_speed_cases(path, precision):
+    """Require durable same-process exact-workload warmup before every measurement."""
+    path = Path(path)
+    cases = speed_cases(path, precision)
+    complete = json.loads(path.with_name("complete.json").read_text())
+    if complete["cases"] != 54 or complete["options"]["context_length"] != 18434:
+        raise ValueError("Missing complete warmed grid receipt")
+    warmups = read_rows(path.with_name("warmups.jsonl"))
+    by_id = {row["id"]: row for row in warmups}
+    if len(by_id) != len(warmups):
+        raise ValueError("Duplicate warmup ID")
+    referenced = set()
+    for row in read_rows(path):
+        warmup = by_id[row["warmup_id"]]
+        referenced.add(warmup["id"])
+        provenance = row["provenance"]
+        if (
+            provenance != warmup["provenance"]
+            or provenance["timing_protocol"] != "exact-workload-warmup-v1"
+            or provenance["context_length"] != 18434
+            or not provenance.get("process_id")
+            or any(row[key] != warmup[key] for key in KEYS[:3])
+            or set(warmup["completion_counts"]) != {str(i) for i in range(row["concurrency"])}
+            or set(warmup["completion_counts"].values()) != {row["output_tokens_per_request"]}
+            or set(row["completion_counts"]) != {str(i) for i in range(row["concurrency"])}
+        ):
+            raise ValueError("Warmup workload, counts or process provenance mismatch")
+        for record in (warmup, row):
+            times = [record[key] for key in ("wall_start", "wall_end", "monotonic_start", "monotonic_end", "seconds")]
+            if not all(math.isfinite(value) for value in times) or record["seconds"] <= 0:
+                raise ValueError("Invalid timing interval")
+            if record["wall_end"] < record["wall_start"] or not math.isclose(
+                record["monotonic_end"] - record["monotonic_start"], record["seconds"], abs_tol=1e-6
+            ):
+                raise ValueError("Inconsistent timing interval")
+        if warmup["monotonic_end"] > row["monotonic_start"] or warmup["wall_end"] > row["wall_start"]:
+            raise ValueError("Warmup overlaps measurement")
+    if len(referenced) < 18:
+        raise ValueError("Missing exact-workload warmups")
+    return cases, {
+        "warmups": len(warmups),
+        "referenced_warmups": len(referenced),
+        "sources": {
+            str(p): digest(p) for p in (path, path.with_name("complete.json"), path.with_name("warmups.jsonl"))
+        },
+    }
+
+
 def paired_speed(cases):
     """Ratio >1 means the named arm is faster than BF16 auto for equal work."""
     baseline = cases["bf16"]
@@ -238,8 +286,11 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     speed = commands.add_parser("speed")
     speed.add_argument("--measurements", action="append", required=True, help="precision=measurements.jsonl")
-    speed.add_argument("--legacy-original", type=Path, required=True)
-    speed.add_argument("--legacy-validation", type=Path, required=True)
+    speed.add_argument("--legacy-original", type=Path)
+    speed.add_argument("--legacy-validation", type=Path)
+    speed.add_argument(
+        "--warmed", action="store_true", help="Require exact-workload warmup receipts for all four arms"
+    )
     aime = commands.add_parser("aime")
     aime.add_argument("--predictions", type=Path, required=True)
     aime.add_argument("--snapshot", type=Path, required=True)
@@ -254,6 +305,10 @@ def main():
         report = aime_year(args.predictions, args.snapshot, args.metrics, args.year, args.snapshot_sha256)
         report["precision"] = args.precision
     else:
+        if args.warmed == bool(args.legacy_original or args.legacy_validation):
+            parser.error("Choose --warmed or both legacy provenance paths")
+        if not args.warmed and not (args.legacy_original and args.legacy_validation):
+            parser.error("Legacy analysis requires both provenance paths")
         paths = dict(item.split("=", 1) for item in args.measurements)
         if set(paths) != {"bf16", "bf16-control", "fp8", "nvfp4"} or len(args.measurements) != 4:
             parser.error("Require exactly the four approved precision measurement paths")
@@ -269,7 +324,17 @@ def main():
             )
             for p, path in paths.items()
         }
+        warmup_receipts = {}
+        if args.warmed:
+            for precision, path in paths.items():
+                cases[precision], warmup_receipts[precision] = warmed_speed_cases(path, precision)
         report = paired_speed(cases)
+        if args.warmed:
+            report["warmup_receipts"] = warmup_receipts
+            report["caveats"][:2] = [
+                "All four warmed grids use context18434; original mixed-context and short-warmup grids remain separate sensitivity results.",
+                "Every measurement follows same-process exact-workload warmup and cache flush. No compiler-event trace was collected; warmup does not prove absence of all runtime compilation.",
+            ]
         report["sources"] = {path: digest(path) for path in paths.values()}
         report["auxiliary_provenance"] = {
             str(p): digest(p)
