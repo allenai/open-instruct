@@ -91,6 +91,7 @@ def test_load_diagnostics_keep_iterator_items_and_report_stale_cache(monkeypatch
     monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
     monkeypatch.setattr(gate, "instrument_receiver", lambda: None)
     monkeypatch.setattr(gate, "instrument_nvfp4_processing", lambda: None)
+    monkeypatch.setattr(gate, "instrument_nvfp4_quantization", lambda: None)
     modules = {
         "olmo_sglang.models.olmo3_moe": SimpleNamespace(Olmo3MoeForCausalLM=Model),
         "sglang.srt.managers.scheduler": SimpleNamespace(
@@ -200,6 +201,7 @@ def test_audit_includes_norm_parameters_without_quant_methods(monkeypatch, tmp_p
     monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
     monkeypatch.setattr(gate, "instrument_receiver", lambda: None)
     monkeypatch.setattr(gate, "instrument_nvfp4_processing", lambda: None)
+    monkeypatch.setattr(gate, "instrument_nvfp4_quantization", lambda: None)
     modules = {
         "olmo_sglang.models.olmo3_moe": SimpleNamespace(Olmo3MoeForCausalLM=Model),
         "sglang.srt.managers.scheduler": SimpleNamespace(run_scheduler_process=lambda: model.forward()),
@@ -210,3 +212,35 @@ def test_audit_includes_norm_parameters_without_quant_methods(monkeypatch, tmp_p
     assert len(rows) == 1 and rows[0]["name"] == "norm"
     assert rows[0]["class"] == "LayerNorm" and rows[0]["quant_method"] == "NoneType"
     assert rows[0]["parameters"]["weight"] == gate.tensor_fingerprint(model.norm.weight)
+
+
+def test_encoding_diagnostics_preserve_native_arguments_results_and_sampling(monkeypatch, tmp_path):
+    weight = torch.arange(16.0).reshape(4, 4)
+    scale = torch.tensor(0.25)
+    encoded = (weight.to(torch.uint8), weight.clone(), scale)
+    calls = []
+
+    class Quantizer:
+        @staticmethod
+        def _quantize_weight_nvfp4(actual, actual_scale=None):
+            assert actual is weight and actual_scale is scale
+            calls.append(True)
+            return encoded
+
+    monkeypatch.setattr(
+        gate.importlib, "import_module", lambda _: SimpleNamespace(ModelOptNvFp4OnlineFusedMoEMethod=Quantizer)
+    )
+    monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
+    before = weight.clone()
+    gate.instrument_nvfp4_quantization()
+    for _ in range(1025):
+        assert Quantizer._quantize_weight_nvfp4(weight, scale) is encoded
+    receipts = [json.loads(path.read_text()) for path in tmp_path.glob("encoding-*.json")]
+    assert len(calls) == 1025
+    assert {receipt["call"] for receipt in receipts} == {0, 1, 2, 3, 1024}
+    for receipt in receipts:
+        assert receipt["input"] == gate.tensor_fingerprint(weight)
+        assert receipt["encoded"] == [gate.tensor_fingerprint(value) for value in encoded]
+        assert receipt["provided_scale"] == gate.tensor_fingerprint(scale)
+        assert receipt["input_stride"] == [4, 1]
+    assert torch.equal(weight, before)

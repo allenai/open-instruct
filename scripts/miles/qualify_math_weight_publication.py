@@ -165,6 +165,39 @@ def tensor_fingerprint(tensor):
     }
 
 
+def instrument_nvfp4_quantization():
+    """Locate a mismatch before or after encoding without replacing the encoder."""
+    method = importlib.import_module("sglang.srt.layers.quantization.nvfp4_online").ModelOptNvFp4OnlineFusedMoEMethod
+    original = method._quantize_weight_nvfp4
+    calls = 0
+
+    def quantize(weight, weight_scale_2=None):
+        nonlocal calls
+        index = calls
+        calls += 1
+        # The approved model has 512 experts and two encodings per expert:
+        # w2 and the combined w1/w3. Sample four calls per layer/publication.
+        sampled = index % 1024 < 4
+        before = tensor_fingerprint(weight) if sampled else None
+        result = original(weight, weight_scale_2)
+        if sampled:
+            save(
+                Path(os.environ["OI_PUBLICATION_AUDIT"]) / f"encoding-{os.getpid()}-{index}.json",
+                {
+                    "call": index,
+                    "input": before,
+                    "input_stride": list(weight.stride()),
+                    "input_device": str(weight.device),
+                    "default_dtype": str(torch.get_default_dtype()),
+                    "provided_scale": None if weight_scale_2 is None else tensor_fingerprint(weight_scale_2),
+                    "encoded": [tensor_fingerprint(value) for value in result],
+                },
+            )
+        return result
+
+    method._quantize_weight_nvfp4 = staticmethod(quantize)
+
+
 def instrument_nvfp4_processing():
     """Observe packing boundaries without changing weights or loader behavior."""
     method = importlib.import_module("sglang.srt.layers.quantization.nvfp4_online").ModelOptNvFp4OnlineFusedMoEMethod
@@ -198,6 +231,7 @@ def instrument_nvfp4_processing():
 def audit_scheduler(*args, **kwargs):
     """Observe real serving weights after each load, without changing numerics."""
     instrument_receiver()
+    instrument_nvfp4_quantization()
     instrument_nvfp4_processing()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
     original_load, original_forward = model_type.load_weights, model_type.forward
