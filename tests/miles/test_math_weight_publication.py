@@ -74,6 +74,21 @@ def test_dispatch_snapshot_retains_selected_configs_without_mutating_cache(monke
     assert cache == {(43, "bf16"): "native config"}
 
 
+def test_dispatch_snapshot_unwraps_heuristics_and_serializes_launch_choices(monkeypatch):
+    config = SimpleNamespace(kwargs={"BK": 128}, num_warps=4, num_stages=2, num_ctas=1, maxnreg=None)
+    cache = {(43, "bf16"): config}
+    kernel = SimpleNamespace(cache=cache, configs=[config], best_config=config)
+    wrapper = SimpleNamespace(fn=kernel)
+    monkeypatch.setitem(sys.modules, "olmo_sglang.kda.test_dispatch", SimpleNamespace(kernel=wrapper))
+    result = gate.fla_dispatch_snapshot()["olmo_sglang.kda.test_dispatch.kernel.fn"]
+    assert result["cache"]["(43, 'bf16')"] == result["best_config"]
+    assert result["best_config"]["kwargs"] == {"BK": 128}
+    assert result["best_config"]["num_warps"] == 4
+    assert result["best_config"]["num_stages"] == 2
+    assert json.loads(json.dumps(result)) == result
+    assert wrapper.fn is kernel and cache[(43, "bf16")] is config
+
+
 def test_kda_diagnostic_captures_prior_state_without_replaying_or_changing_result(monkeypatch, tmp_path):
     calls = []
 

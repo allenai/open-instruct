@@ -232,17 +232,39 @@ def instrument_nvfp4_processing():
 
 def fla_dispatch_snapshot():
     """Record selected native autotune configurations, without changing them."""
+
+    def config_details(config):
+        # Triton Config.__repr__ only exposes a process-local memory address.
+        # Preserve the actual launch choices for comparison across receivers.
+        if hasattr(config, "kwargs"):
+            return {
+                name: getattr(config, name)
+                for name in ("kwargs", "num_warps", "num_stages", "num_ctas", "maxnreg", "enable_fp_fusion")
+                if hasattr(config, name)
+            }
+        return repr(config)
+
     dispatch = {}
     for name, module in list(sys.modules.items()):
-        if module is None or not name.startswith("fla."):
+        if module is None or not name.startswith(("fla.", "olmo_sglang.kda.")):
             continue
         for attribute, value in vars(module).copy().items():
-            cache = getattr(value, "cache", None)
-            if isinstance(cache, dict) and hasattr(value, "configs"):
-                dispatch[f"{name}.{attribute}"] = {
-                    "cache": {repr(key): repr(config) for key, config in cache.copy().items()},
-                    "best_config": repr(getattr(value, "best_config", None)),
-                }
+            seen = set()
+            path = f"{name}.{attribute}"
+            # FLA wraps autotuners in Triton heuristics; their outer object has
+            # no cache. Inspect the native wrapper chain without invoking it.
+            while id(value) not in seen:
+                seen.add(id(value))
+                cache = getattr(value, "cache", None)
+                if isinstance(cache, dict) and hasattr(value, "configs"):
+                    dispatch[path] = {
+                        "cache": {repr(key): config_details(config) for key, config in cache.copy().items()},
+                        "best_config": config_details(getattr(value, "best_config", None)),
+                    }
+                if not hasattr(value, "fn"):
+                    break
+                value = value.fn
+                path += ".fn"
     return dispatch
 
 
