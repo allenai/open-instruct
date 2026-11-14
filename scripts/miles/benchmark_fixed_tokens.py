@@ -14,6 +14,51 @@ from pathlib import Path
 
 from scripts.miles.qualify_math_quantization import FP8_EXCLUSIONS
 
+TIMING_PROTOCOL = "exact-workload-warmup-v1"
+
+
+def generate(engine, tokens, output_length, concurrency):
+    """Use the same streaming path for untimed warmup and measured work."""
+    wall_start = time.time()
+    start = time.monotonic()
+    first, last, counts, intervals = {}, {}, {}, []
+    for chunk in engine.generate(
+        input_ids=[tokens] * concurrency,
+        sampling_params={"temperature": 1.0, "top_p": 0.95, "max_new_tokens": output_length, "ignore_eos": True},
+        stream=True,
+    ):
+        now = time.monotonic()
+        for item in chunk if isinstance(chunk, list) else [chunk]:
+            index = item.get("index", 0)
+            count = item.get("meta_info", {}).get("completion_tokens", 0)
+            previous = counts.get(index, 0)
+            if count > previous:
+                if index not in first:
+                    first[index] = now - start
+                elif count == previous + 1:
+                    intervals.append(now - last[index])
+                last[index] = now
+                counts[index] = count
+    end = time.monotonic()
+    if set(counts) != set(range(concurrency)) or any(count != output_length for count in counts.values()):
+        raise ValueError(f"Incomplete fixed-length generation: {counts}")
+    return {
+        "wall_start": wall_start,
+        "wall_end": time.time(),
+        "monotonic_start": start,
+        "monotonic_end": end,
+        "seconds": end - start,
+        "completion_counts": counts,
+        "ttft_seconds": list(first.values()),
+        "single_token_interval_seconds": intervals,
+    }
+
+
+def append_record(stream, record):
+    stream.write(json.dumps(record) + "\n")
+    stream.flush()
+    os.fsync(stream.fileno())
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -34,7 +79,10 @@ def main():
         "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "qualification_options_sha256": hashlib.sha256(args.options.read_bytes()).hexdigest(),
         "job_id": os.environ.get("BEAKER_JOB_ID"),
-        "timing": "monotonic streaming; load/compile/warmup/cache flush excluded",
+        "timing_protocol": TIMING_PROTOCOL,
+        "timing": "monotonic streaming after exact-workload warmup and cache flush; load/warmup/flush excluded",
+        "compilation_caveat": "Warmup exercises identical streaming workload; no compiler-event trace is collected",
+        "process_id": f"{os.environ.get('BEAKER_JOB_ID', 'local')}-{os.getpid()}-{time.time_ns()}",
         "context_length": args.context_length,
     }
     measurements = args.output / "measurements.jsonl"
@@ -53,6 +101,8 @@ def main():
             or record["provenance"]["qualification_options_sha256"] != provenance["qualification_options_sha256"]
             or len(record["completion_counts"]) != record["concurrency"]
             or set(record["completion_counts"].values()) != {record["output_tokens_per_request"]}
+            or record["provenance"].get("timing_protocol") != TIMING_PROTOCOL
+            or record["provenance"]["source_sha256"] != provenance["source_sha256"]
         ):
             raise ValueError("Saved benchmark provenance/counts differ")
     if completed == expected and (args.output / "complete.json").exists():
@@ -71,48 +121,33 @@ def main():
         (args.output / "server-info.json").write_text(
             json.dumps(engine.get_server_info(), default=str, indent=2) + "\n"
         )
-        engine.generate(
-            input_ids=[sentence] * 16, sampling_params={"temperature": 1.0, "max_new_tokens": 128, "ignore_eos": True}
-        )
-        with measurements.open("a") as stream:
+        with measurements.open("a") as stream, (args.output / "warmups.jsonl").open("a") as warmups:
             for prompt_length in (512, 2048):
                 tokens = (sentence * (prompt_length // len(sentence) + 1))[:prompt_length]
                 for output_length in (256, 4096, 16384):
                     for concurrency in (1, 8, 16):
+                        warmup = None
                         for repeat in range(args.repeats):
                             if (prompt_length, output_length, concurrency, repeat) in completed:
                                 continue
+                            if warmup is None:
+                                engine.flush_cache()
+                                warmup = {
+                                    "id": f"{provenance['process_id']}-{prompt_length}-{output_length}-{concurrency}",
+                                    "prompt_tokens": prompt_length,
+                                    "output_tokens_per_request": output_length,
+                                    "concurrency": concurrency,
+                                    "provenance": provenance,
+                                    **generate(engine, tokens, output_length, concurrency),
+                                }
+                                append_record(warmups, warmup)
                             engine.flush_cache()
-                            start = time.monotonic()
-                            first, last, counts, intervals = {}, {}, {}, []
-                            for chunk in engine.generate(
-                                input_ids=[tokens] * concurrency,
-                                sampling_params={
-                                    "temperature": 1.0,
-                                    "top_p": 0.95,
-                                    "max_new_tokens": output_length,
-                                    "ignore_eos": True,
-                                },
-                                stream=True,
-                            ):
-                                now = time.monotonic()
-                                for item in chunk if isinstance(chunk, list) else [chunk]:
-                                    index = item.get("index", 0)
-                                    count = item.get("meta_info", {}).get("completion_tokens", 0)
-                                    previous = counts.get(index, 0)
-                                    if count > previous:
-                                        if index not in first:
-                                            first[index] = now - start
-                                        elif count == previous + 1:
-                                            intervals.append(now - last[index])
-                                        last[index] = now
-                                        counts[index] = count
-                            elapsed = time.monotonic() - start
-                            if len(counts) != concurrency or any(count != output_length for count in counts.values()):
-                                raise ValueError(f"Incomplete fixed-length generation: {counts}")
+                            result = generate(engine, tokens, output_length, concurrency)
+                            elapsed = result["seconds"]
                             record = {
                                 "context_length": args.context_length,
-                                "completion_counts": counts,
+                                **result,
+                                "warmup_id": warmup["id"],
                                 "provenance": provenance,
                                 "precision": args.precision,
                                 "prompt_tokens": prompt_length,
@@ -120,14 +155,10 @@ def main():
                                 "concurrency": concurrency,
                                 "repeat": repeat,
                                 "seconds": elapsed,
-                                "output_tokens_per_second": sum(counts.values()) / elapsed,
+                                "output_tokens_per_second": sum(result["completion_counts"].values()) / elapsed,
                                 "requests_per_second": concurrency / elapsed,
-                                "ttft_seconds": list(first.values()),
-                                "single_token_interval_seconds": intervals,
                             }
-                            stream.write(json.dumps(record) + "\n")
-                            stream.flush()
-                            os.fsync(stream.fileno())
+                            append_record(stream, record)
         (args.output / "complete.json").write_text(
             json.dumps({"cases": 18 * args.repeats, "options": options}, indent=2) + "\n"
         )
