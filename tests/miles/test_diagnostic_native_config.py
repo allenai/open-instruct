@@ -117,6 +117,7 @@ def test_two_recorded_tuners_are_independent_and_validated_before_install(monkey
     extra = writes[str(tmp_path / "gate-native-intervention/native-intervention-post.json")]
     assert primary["target"] == diagnostic.TARGET and extra["target"] == diagnostic.GATE_TARGET
     assert primary["matched_calls"] == extra["matched_calls"] == 2
+    assert (tmp_path / "gate-native-intervention").is_dir()
 
 
 @pytest.mark.parametrize("extra", [[{"target": "another.kernel"}], [{}, {}]])

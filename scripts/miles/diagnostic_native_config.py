@@ -85,6 +85,7 @@ def _prepare(receipt, receipt_hash, output, save):
         return result
 
     def apply():
+        output.mkdir(parents=True, exist_ok=True)
         save(output / "native-intervention-installed.json", record)
         tuner.run = run
 
