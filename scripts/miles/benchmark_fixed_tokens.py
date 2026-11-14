@@ -21,6 +21,8 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--repeats", type=int, default=3)
     args = parser.parse_args()
+    if args.repeats < 1:
+        parser.error("--repeats must be positive")
     args.output.mkdir(parents=True, exist_ok=False)
     options = json.loads(args.options.read_text())
     os.environ["OLMO_SGLANG_CORE_COMPAT"] = "auto" if args.precision == "bf16" else "off"
@@ -31,6 +33,9 @@ def main():
     tokenizer = importlib.import_module("transformers").AutoTokenizer.from_pretrained(options["model_path"])
     sentence = tokenizer.encode("Solve the following mathematics problem step by step. ", add_special_tokens=False)
     try:
+        (args.output / "server-info.json").write_text(
+            json.dumps(engine.get_server_info(), default=str, indent=2) + "\n"
+        )
         engine.generate(
             input_ids=[sentence] * 16, sampling_params={"temperature": 1.0, "max_new_tokens": 128, "ignore_eos": True}
         )
@@ -83,7 +88,7 @@ def main():
                             stream.write(json.dumps(record) + "\n")
                             stream.flush()
         (args.output / "complete.json").write_text(
-            json.dumps({"cases": 54 * args.repeats // 3, "options": options}, indent=2) + "\n"
+            json.dumps({"cases": 18 * args.repeats, "options": options}, indent=2) + "\n"
         )
     finally:
         engine.shutdown()
