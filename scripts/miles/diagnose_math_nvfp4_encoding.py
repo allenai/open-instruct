@@ -7,11 +7,35 @@ import argparse
 import importlib
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
 from safetensors import safe_open
 from scripts.miles import qualify_math_weight_publication as gate
+
+# Exact values from DefaultModelLoader.load_weights_only in the pinned image.
+# The original loader restores them before serving, so a direct publication
+# through model.load_weights otherwise sees a different quantization recipe.
+LOADER_ENV = {
+    "FLASHINFER_DISABLE_FP4_QUANT_FAST_MATH": "1",
+    "FLASHINFER_NVFP4_4OVER6": "1",
+    "FLASHINFER_NVFP4_4OVER6_E4M3_USE_256": "0",
+    "FLASHINFER_NVFP4_4OVER6_ERR_MODE": "MSE",
+    "FLASHINFER_NVFP4_4OVER6_ERR_USE_FAST_MATH": "1",
+}
+
+
+@contextmanager
+def encoding_context(mode):
+    if mode == "ambient":
+        yield
+    elif mode == "pinned_loader":
+        utils = importlib.import_module("sglang.srt.utils")
+        with utils.temp_set_env(**LOADER_ENV):
+            yield
+    else:
+        raise ValueError(f"Unknown encoding context: {mode}")
 
 
 def replay(args):
@@ -28,12 +52,21 @@ def replay(args):
                     for projection in ("gate_proj", "up_proj", "down_proj"):
                         name = f"model.layers.{layer}.mlp.experts.{expert}.{projection}.weight"
                         weight = source.get_tensor(name).contiguous()
-                        for index, dtype in enumerate((torch.bfloat16, torch.float32, torch.bfloat16, torch.float32)):
+                        cases = (
+                            ("pinned_loader", torch.bfloat16),
+                            ("ambient", torch.float32),
+                            ("pinned_loader", torch.float32),
+                            ("ambient", torch.bfloat16),
+                        )
+                        for index, (mode, dtype) in enumerate(cases):
                             torch.set_default_dtype(dtype)
-                            encoded = method._quantize_weight_nvfp4(weight)
+                            with encoding_context(mode):
+                                encoded = method._quantize_weight_nvfp4(weight)
                             row = {
                                 "name": name,
                                 "iteration": index,
+                                "context": mode,
+                                "loader_environment": LOADER_ENV if mode == "pinned_loader" else None,
                                 "default_dtype": str(dtype),
                                 "input": gate.tensor_fingerprint(weight),
                                 "stride": list(weight.stride()),

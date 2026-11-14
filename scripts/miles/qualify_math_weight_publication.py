@@ -228,6 +228,22 @@ def instrument_nvfp4_processing():
     method.process_weights_after_loading = process
 
 
+def fla_dispatch_snapshot():
+    """Record selected native autotune configurations, without changing them."""
+    dispatch = {}
+    for name, module in list(sys.modules.items()):
+        if module is None or not name.startswith("fla."):
+            continue
+        for attribute, value in vars(module).copy().items():
+            cache = getattr(value, "cache", None)
+            if isinstance(cache, dict) and hasattr(value, "configs"):
+                dispatch[f"{name}.{attribute}"] = {
+                    "cache": {repr(key): repr(config) for key, config in cache.copy().items()},
+                    "best_config": repr(getattr(value, "best_config", None)),
+                }
+    return dispatch
+
+
 def instrument_kda_inputs():
     """Retain first real prefill recurrence inputs; never change cache state."""
     if os.environ.get("OI_PUBLICATION_TRACE_KDA") != "1":
@@ -261,7 +277,14 @@ def instrument_kda_inputs():
         torch.save(output.detach().cpu().clone(), directory / f"kda-output-{os.getpid()}.pt")
         save(
             directory / f"kda-receipt-{os.getpid()}.json",
-            {"diagnostic_only": True, "synchronizes_cuda": True, "cache_modified_by_instrumentation": False},
+            {
+                "diagnostic_only": True,
+                "synchronizes_cuda": True,
+                "cache_modified_by_instrumentation": False,
+                "core_compat": getattr(instance, "core_compat", None),
+                "allow_neg_eigval": getattr(instance, "allow_neg_eigval", None),
+                "fla_dispatch": fla_dispatch_snapshot(),
+            },
         )
         return result
 

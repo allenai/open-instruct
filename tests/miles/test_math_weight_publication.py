@@ -3,15 +3,54 @@
 import copy
 import hashlib
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
 import torch
+from scripts.miles import diagnose_math_nvfp4_encoding as encoder
 from scripts.miles import qualify_math_weight_publication as gate
 
 
 def scores(delta=0.0):
     return [{"meta_info": {"input_token_logprobs": [[None, 0]] + [[-2.0 + delta, i] for i in range(1, 40)]}}]
+
+
+def test_encoder_replay_uses_exact_pinned_loader_scope_and_restores_on_failure(monkeypatch):
+    contexts = []
+
+    class Scope:
+        def __enter__(self):
+            contexts.append("enter")
+
+        def __exit__(self, *error):
+            contexts.append(("exit", error[0]))
+
+    def environment(**values):
+        assert values == encoder.LOADER_ENV
+        assert values["FLASHINFER_NVFP4_4OVER6"] == "1"
+        assert values["FLASHINFER_NVFP4_4OVER6_ERR_MODE"] == "MSE"
+        return Scope()
+
+    monkeypatch.setattr(encoder.importlib, "import_module", lambda _: SimpleNamespace(temp_set_env=environment))
+    with encoder.encoding_context("ambient"):
+        pass
+    assert contexts == []
+    with pytest.raises(RuntimeError, match="native error"), encoder.encoding_context("pinned_loader"):
+        raise RuntimeError("native error")
+    assert contexts == ["enter", ("exit", RuntimeError)]
+    with pytest.raises(ValueError, match="Unknown encoding context"), encoder.encoding_context("invalid"):
+        pass
+
+
+def test_dispatch_snapshot_retains_selected_configs_without_mutating_cache(monkeypatch):
+    cache = {(43, "bf16"): "native config"}
+    kernel = SimpleNamespace(cache=cache, configs=["native config"], best_config="native config")
+    monkeypatch.setitem(sys.modules, "fla.test_publication_dispatch", SimpleNamespace(kernel=kernel))
+    result = gate.fla_dispatch_snapshot()["fla.test_publication_dispatch.kernel"]
+    assert result["cache"] == {"(43, 'bf16')": "'native config'"}
+    assert result["best_config"] == "'native config'"
+    assert cache == {(43, "bf16"): "native config"}
 
 
 def test_kda_diagnostic_captures_prior_state_without_replaying_or_changing_result(monkeypatch, tmp_path):
