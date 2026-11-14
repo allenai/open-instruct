@@ -36,7 +36,7 @@ def specification(image, spec, *, hostnames=None, compiled=None):
         if hostnames is not None:
             raise InputError("OPD uses a single cluster allocation; hostname overrides are unsupported")
         return opd_launch.specification(image, spec)
-    evaluation.validate_reference_paths(spec.evaluation)
+    evaluation.validate_scicode_reference_path(spec.evaluation)
     config = compiled if compiled is not None else spec.compile()
     layout = topology.plan(spec, config)
     host_networking = layout["replicas"] > 1 or bool(spec.judges["judging"]["bindings"])

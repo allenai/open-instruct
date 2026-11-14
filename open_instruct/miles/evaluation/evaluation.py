@@ -191,6 +191,7 @@ def parse(value, launch):
             arguments = task.get("arguments", {})
             if not isinstance(arguments, dict) or arguments.get("split") != "validation":
                 raise InputError("SciCode development evaluation requires arguments.split=validation")
+            # Templates stay loadable; validate_scicode_reference_path rejects unresolved paths at launch.
             if not isinstance(arguments.get("h5py_host_path"), str) or not arguments["h5py_host_path"]:
                 raise InputError("SciCode requires arguments.h5py_host_path for its reference data")
         elif "arguments" in task:
@@ -220,7 +221,7 @@ def parse(value, launch):
     return value
 
 
-def validate_reference_paths(config):
+def validate_scicode_reference_path(config):
     """Reject unresolved SciCode assets before allocating a training/evaluation job.
 
     Examples remain loadable for planning. The path belongs to the remote worker,
@@ -235,10 +236,7 @@ def validate_reference_paths(config):
             or not path.strip()
             or path != path.strip()
             or not Path(path).is_absolute()
-            or "YOUR_USERNAME" in path
-            or "$" in path
-            or "<" in path
-            or ">" in path
+            or re.search(r"YOUR_[A-Z_]+|[$<>]", path)
         ):
             raise InputError(
                 "SciCode requires arguments.h5py_host_path to be an explicit absolute reference-data file path. "
@@ -353,7 +351,7 @@ def runtime(spec, options):
 
 def specification(receipt):
     config = receipt["evaluation"]
-    validate_reference_paths({"tasks": receipt.get("tasks", [])})
+    validate_scicode_reference_path({"tasks": receipt.get("tasks", [])})
     # Carry the committed runner to the independent evaluator image. No source
     # checkout, dependency resolution or moving branch is used at job startup.
     runner = Path(__file__).with_name("evaluation_runner.py").read_bytes()
@@ -434,6 +432,10 @@ def submit(receipt, path):
             error=type(error).__name__,
             diagnostic="Submission failed or timed out; inspect Beaker before manual resubmission. No automatic retry.",
         )
+        if isinstance(error, InputError):
+            # Our specification InputErrors contain controlled diagnostics, not
+            # child output or credential values. Keep the actionable message.
+            receipt["diagnostic"] = str(error)
         if isinstance(error, subprocess.CalledProcessError):
             receipt["exit_code"] = error.returncode
             try:
@@ -446,7 +448,7 @@ def submit(receipt, path):
         logger.warning(
             "BACKGROUND EVALUATION GAP at update %s: %s; receipt %s",
             receipt["update"],
-            receipt.get("submission_error", type(error).__name__),
+            receipt.get("submission_error", receipt["diagnostic"]),
             path,
         )
     state.atomic_json(path, receipt)

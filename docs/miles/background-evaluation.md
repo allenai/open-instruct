@@ -77,8 +77,8 @@ OPENAI_API_KEY = "your-judge-secret"
 Before launching a panel containing SciCode, replace the example's
 `arguments.h5py_host_path` with the absolute path to your `test_data.h5` on a
 filesystem mounted in the evaluator. Launch validation rejects missing paths,
-`YOUR_USERNAME` placeholders and unexpanded variables. Examples can still be
-loaded for planning. The submitting workstation need not mount WEKA; file
+`YOUR_…` placeholders and unexpanded variables. Planning and validation warn
+about unresolved paths while keeping examples loadable. The submitting workstation need not mount WEKA; file
 existence is checked in the evaluator before inference.
 
 Workspace and budget default to `launch.workspace` and `launch.budget`. Evaluator

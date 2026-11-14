@@ -13,6 +13,7 @@ from mkdocs.structure.files import Files
 from scripts.miles import docs_site, generate_docs
 
 from open_instruct.miles.configuration import constraints, options, run_spec
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import launch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +79,15 @@ def test_special_control_descriptions_cover_dispatch():
 def test_example_plans_and_launch_render_without_gpu_or_network(path):
     spec = run_spec.RunSpec.load(path)
     plan = spec.plan()
+    if any(task.get("task") == "scicode" for task in spec.evaluation.get("tasks", [])):
+        assert any("h5py_host_path" in warning for warning in plan["launch_warnings"])
+        with pytest.raises(InputError, match="YOUR_USERNAME"):
+            launch.specification("test-image", spec)
+        document = spec.to_dict()
+        for task in document["evaluation"]["tasks"]:
+            if task["task"] == "scicode":
+                task["arguments"]["h5py_host_path"] = "/weka/oe-adapt-default/scicode/test_data.h5"
+        spec = run_spec.RunSpec.from_dict(document)
     tasks = launch.specification("test-image", spec, hostnames=[f"host-{i}" for i in range(32)])["tasks"]
     assert len(tasks) == 1
     assert tasks[0].get("replicas", 1) == plan["allocation"]["replicas"]
