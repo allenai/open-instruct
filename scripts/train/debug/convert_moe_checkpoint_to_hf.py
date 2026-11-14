@@ -102,6 +102,18 @@ def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir:
     return dist_cp_sd.get_model_state_dict(model, options=options)
 
 
+CHAT_EOS_TOKEN_IDS = (100265, 100257)  # <|im_end|>, <|endoftext|>
+
+
+def write_generation_eos(output_dir: pathlib.Path, eos_token_ids: list[int]) -> None:
+    """Set generation_config.json's eos_token_id to the chat stop list; the converter derives it from config.json."""
+    path = output_dir / "generation_config.json"
+    generation_config = json.loads(path.read_text())
+    generation_config["eos_token_id"] = list(eos_token_ids)
+    path.write_text(json.dumps(generation_config, indent=2) + "\n")
+    logger.info("generation_config.json eos_token_id = %s", eos_token_ids)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-i", "--checkpoint-input-path", required=True)
@@ -110,6 +122,10 @@ def main() -> None:
     parser.add_argument("-t", "--tokenizer", default="allenai/olmo-3-tokenizer-instruct-dev")
     parser.add_argument("-s", "--max-sequence-length", type=int, default=8192)
     parser.add_argument("--skip-validation", dest="validate", action="store_false")
+    # The chat models end a turn with <|im_end|> (100265), not <|endoftext|> (100257). Without it in
+    # generation_config.json, servers that take stop tokens from there (vLLM's OpenAI server) never stop the turn:
+    # H203's export repeated its tool call to the token budget on BFCL. B1 exports carry the same list.
+    parser.add_argument("--eos-token-ids", type=int, nargs="+", default=list(CHAT_EOS_TOKEN_IDS))
     # Defaults to CUDA, not CPU: validation runs both implementations, and the
     # KDA/fla Triton kernels reject CPU tensors ("Pointer argument (at 0) cannot be
     # accessed from Triton"). On CPU the weights still get written, so the failure
@@ -142,6 +158,7 @@ def main() -> None:
         device=args.device,
         validation_device=args.device,
     )
+    write_generation_eos(pathlib.Path(args.huggingface_output_dir), args.eos_token_ids)
     logger.info("CONVERSION_OK")
 
 
