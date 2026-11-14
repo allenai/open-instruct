@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Merged pool exposure, explicit discard feedback and terminal serving-startup failure propagation integrated with main masked REINFORCE++ returns; strict scoring tolerance restored after eager-scoring validation. SwiGLU int64 offsets and source-bundle IDs retained. Weighted-pool GPU runs qualified at application 55703fbbf/runtime bbcb01d; current runtime revision CPU-validated.",
+  "status": "Score-centering candidate transport and complete-support correction CPU-tested. Paired Olmo 3.5 Tiny GSM8K GPU training completed at application a2e5f39ce005c17c2746f2d07059a516fefde189 and backend aa53c1c00e5b88ce01cf37f458650a1bc47daf77 using unfiltered Core refresh sampling; the study exercises the existing partial-head estimator, not the new complete-support correction. Later application preflight changes are CPU-tested. GPU pytest remains separate. Other source and binary-base pins unchanged.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "6b78328406a42d41d5dce260779655f685dc4524"
+      "revision": "22d2fb4ca0f87255b56ec0cd733f487cca22ebc7"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
