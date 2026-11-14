@@ -6,12 +6,13 @@ Requires olmo-core on `akshitab/emo_modularity` or later: earlier revisions rais
 NotImplementedError for peri-LN checkpoints, which these are.
 
 The model config comes from a file rather than the checkpoint's own config.json,
-because the training config is the one whose blocks match the saved weights (see
-scripts/train/debug/make_kda_sft_config.py).
+because the training config is the one whose blocks match the saved weights. Pass
+the olmo-core training config JSON the run was launched with (it needs the `model`
+and `dataset.tokenizer` sections); none ships in this repo.
 
     uv run python scripts/train/debug/convert_moe_checkpoint_to_hf.py \
         -i <ckpt>/step172 -o <ckpt>/hf_step172 \
-        -c scripts/train/debug/kda_mt_sft.json
+        -c <run's training config>.json
 
 Validation caveat: strict logit validation FAILS (~92-99% mismatch, abs diff
 ~1.5) on every OLMoE3 latent-KDA 1.2B checkpoint, including Jacob's known-good
@@ -129,6 +130,7 @@ def main() -> None:
     # The chat models end a turn with <|im_end|> (100265), not <|endoftext|> (100257). Without it in
     # generation_config.json, servers that take stop tokens from there (vLLM's OpenAI server) never stop the turn:
     # H203's export repeated its tool call to the token budget on BFCL. B1 exports carry the same list.
+    # Delete this override once the olmo-core pin's save_hf_model writes the chat stop list itself.
     parser.add_argument("--eos-token-ids", type=int, nargs="+", default=list(CHAT_EOS_TOKEN_IDS))
     # Defaults to CUDA, not CPU: validation runs both implementations, and the
     # KDA/fla Triton kernels reject CPU tensors ("Pointer argument (at 0) cannot be
