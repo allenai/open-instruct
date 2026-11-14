@@ -526,7 +526,14 @@ def run_tasks(receipt, output):
             # attempts intact and rerun only this unfinished task in a fresh path.
             attempt = directory / "attempts" / uuid.uuid4().hex
             attempt.mkdir(parents=True)
-            args = command({**receipt, "tasks": [task]}, attempt)
+            command_task = task
+            if task.get("kind") == "external" and task["task"] == "scicode":
+                # Preserve the frozen task identity used for completion/resume.
+                command_task = {
+                    **task,
+                    "arguments": {**task["arguments"], "h5py_host_path": resolve_scicode_reference(task)},
+                }
+            args = command({**receipt, "tasks": [command_task]}, attempt)
             write_json(attempt / "command.json", args)
             log_path = attempt / "olmo-eval.log"
             try:
@@ -564,7 +571,7 @@ def resolve_scicode_reference(task):
             "SciCode reference data is unavailable. Check the evaluator's SCICODE_H5PY_HOST_PATH Beaker secret "
             "and filesystem mount, or set arguments.h5py_host_path to an existing test_data.h5 file."
         )
-    arguments["h5py_host_path"] = path
+    return path
 
 
 def run_evaluation(receipt):

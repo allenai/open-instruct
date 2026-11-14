@@ -1,6 +1,7 @@
 """SciCode reference assets must be resolved before a job is allocated."""
 
 import hashlib
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -127,13 +128,19 @@ def test_runner_resolves_secret_into_external_command(tmp_path, monkeypatch):
     reference.touch()
     monkeypatch.setenv("SCICODE_H5PY_HOST_PATH", str(reference))
     task = {"task": "scicode", "kind": "external", "arguments": {"split": "validation"}}
-    evaluation_runner.resolve_scicode_reference(task)
-    command = evaluation_runner.command({"checkpoint": "/hf", "tasks": [task]}, tmp_path)
+    identity_before = evaluation_runner.saved_task(tmp_path, task)[0]
+    resolved = {
+        **task,
+        "arguments": {**task["arguments"], "h5py_host_path": evaluation_runner.resolve_scicode_reference(task)},
+    }
+    command = evaluation_runner.command({"checkpoint": "/hf", "tasks": [resolved]}, tmp_path)
     assert f'h5py_host_path="{reference}"' in command
+    assert "h5py_host_path" not in task["arguments"]
+    assert evaluation_runner.saved_task(tmp_path, task)[0] == identity_before
     # Explicit config wins over the environment.
     monkeypatch.setenv("SCICODE_H5PY_HOST_PATH", "/missing/secret-value")
-    evaluation_runner.resolve_scicode_reference(task)
-    assert task["arguments"]["h5py_host_path"] == str(reference)
+    task["arguments"]["h5py_host_path"] = str(reference)
+    assert evaluation_runner.resolve_scicode_reference(task) == str(reference)
 
 
 @pytest.mark.parametrize("path", [None, "/missing/reference.h5", "relative.h5"])
@@ -145,3 +152,24 @@ def test_runner_reports_unavailable_secret_without_echoing_value(path, monkeypat
         evaluation_runner.resolve_scicode_reference({"task": "scicode", "arguments": {}})
     if path:
         assert path not in str(error.value)
+
+
+def test_secret_resolution_preserves_completed_task_resume(tmp_path, monkeypatch):
+    reference = tmp_path / "reference.h5"
+    reference.touch()
+    monkeypatch.setenv("SCICODE_H5PY_HOST_PATH", str(reference))
+    command = Mock(return_value=["unused-evaluator"])
+    monkeypatch.setattr(evaluation_runner, "command", command)
+    monkeypatch.setattr(evaluation_runner.subprocess, "run", Mock())
+    monkeypatch.setattr(evaluation_runner, "startup_progress", lambda path: nullcontext())
+    monkeypatch.setattr(evaluation_runner, "gpu_environments", lambda receipt: (None, {}))
+    monkeypatch.setattr(evaluation_runner, "completed_scores", lambda output, tasks: {"eval/scicode/score": 1.0})
+    task = {"task": "scicode", "kind": "external", "arguments": {"split": "validation"}}
+    receipt = {"tasks": [task]}
+    evaluation_runner.run_tasks(receipt, tmp_path)
+    passed_task = command.call_args.args[0]["tasks"][0]
+    assert passed_task["arguments"]["h5py_host_path"] == str(reference)
+    assert "h5py_host_path" not in task["arguments"]
+    assert evaluation_runner.saved_task(tmp_path, task)[1] is not None
+    evaluation_runner.run_tasks(receipt, tmp_path)
+    assert command.call_count == 1
