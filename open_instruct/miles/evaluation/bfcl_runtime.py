@@ -194,6 +194,9 @@ def validate_panels(tasks):
         expected = set(settings["tasks"])
         if selected & expected and selected & expected != expected:
             raise ValueError("Native BFCL worker requires each selected category panel in full")
+        intervals = {task.get("interval") for task in tasks if task["task"] in expected}
+        if len(intervals) > 1:
+            raise ValueError("Native BFCL categories in a panel require the same evaluation interval")
 
 
 def settings(config):

@@ -181,7 +181,7 @@ def parse(value, launch):
         worker = task.get("worker")
         if worker not in (None, bfcl_runtime.WORKER):
             raise InputError("Unknown evaluation task worker")
-        if name.startswith("bfcl") and ":prompt" not in name and worker != bfcl_runtime.WORKER:
+        if name.startswith("bfcl") and not name.endswith((":prompt", ":base")) and worker != bfcl_runtime.WORKER:
             raise InputError("Native BFCL tool tasks require the dedicated BFCL worker")
         if worker == bfcl_runtime.WORKER:
             try:

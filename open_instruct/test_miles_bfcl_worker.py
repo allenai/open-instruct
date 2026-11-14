@@ -241,3 +241,18 @@ assert 'open_instruct' not in command
 assert '--resume' in argv
 """
     subprocess.run([sys.executable, "-I", "-c", setup + "\n" + probe], cwd=tmp_path, check=True)
+
+
+def test_completion_bfcl_base_keeps_existing_generic_provider_path(run):
+    document = run.to_dict()
+    document["evaluation"]["tasks"] = [{"task": "bfcl_simple:base", "generation": {"temperature": 1.0}}]
+    configured = RunSpec.from_dict(document)
+    assert configured.evaluation["tasks"][0]["task"] == "bfcl_simple:base"
+    assert "worker" not in configured.evaluation["tasks"][0]
+
+
+def test_native_panel_rejects_mismatched_intervals_before_submission(run):
+    document = run.to_dict()
+    next(t for t in document["evaluation"]["tasks"] if t.get("worker"))["interval"] = 100
+    with pytest.raises(InputError, match="same evaluation interval"):
+        RunSpec.from_dict(document)
