@@ -1,9 +1,11 @@
 """Offline guards for the study's live transport gate; GPU evidence is separate."""
 
+import ast
 import copy
 import hashlib
 import json
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +16,21 @@ from scripts.miles import qualify_math_weight_publication as gate
 
 def scores(delta=0.0):
     return [{"meta_info": {"input_token_logprobs": [[None, 0]] + [[-2.0 + delta, i] for i in range(1, 40)]}}]
+
+
+def test_publication_context_matches_immutable_runtime_loader():
+    path = Path("/opt/core-rl/sources/sglang/python/sglang/srt/model_loader/loader.py")
+    tree = ast.parse(path.read_text())
+    loader = next(node for node in ast.walk(tree) if isinstance(node, ast.ClassDef) and node.name == "DefaultModelLoader")
+    method = next(node for node in loader.body if isinstance(node, ast.FunctionDef) and node.name == "load_weights_only")
+    scopes = [
+        node
+        for node in ast.walk(method)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "temp_set_env"
+    ]
+    assert len(scopes) == 1
+    expected = {keyword.arg: ast.literal_eval(keyword.value) for keyword in scopes[0].keywords}
+    assert gate.quantized_publication.NVFP4_LOADER_ENV == encoder.LOADER_ENV == expected
 
 
 def test_encoder_replay_uses_exact_pinned_loader_scope_and_restores_on_failure(monkeypatch):

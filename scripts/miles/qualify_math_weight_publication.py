@@ -27,6 +27,8 @@ from safetensors.torch import save_file
 from scripts.miles import qualify_math_quantization
 from torch import distributed as dist
 
+from open_instruct.miles.execution import quantized_publication
+
 EXPERT = re.compile(r"^model\.layers\.(\d+)\.mlp\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$")
 # Preregistered tolerances on fixed-token conditional log probabilities. Full
 # parameter hashes must ALSO match fresh loading, including every quant scale.
@@ -342,6 +344,8 @@ def audit_scheduler(*args, **kwargs):
     instrument_nvfp4_processing()
     instrument_kda_inputs()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
+    if os.environ.get("OI_PUBLICATION_MATCH_LOADER_CONTEXT") == "1":
+        quantized_publication.install_nvfp4_publication_context(model_type)
     original_load, original_forward = model_type.load_weights, model_type.forward
 
     def load(model, *values, **options):
