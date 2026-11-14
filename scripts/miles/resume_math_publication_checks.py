@@ -111,9 +111,14 @@ def run(args):
             repeated, repeated_audits = fleet.probe(f"fresh-{variant}-repeat", protocol["probes"])
         if getattr(args, "native_config_receipt", None):
             for directory in fleet.directories:
-                receipt = json.loads((directory / "native-intervention-post.json").read_text())
-                if receipt["matched_calls"] < 2:
-                    raise ValueError("Recorded native key was not exercised repeatedly")
+                source = json.loads(args.native_config_receipt.read_text())
+                directories = [directory]
+                if source.get("additional_interventions"):
+                    directories.append(directory / "gate-native-intervention")
+                for destination in directories:
+                    receipt = json.loads((destination / "native-intervention-post.json").read_text())
+                    if receipt["matched_calls"] < 2:
+                        raise ValueError("Recorded native key was not exercised repeatedly")
         gate.save(
             args.output / f"fresh-{variant}-outputs.json",
             {"diagnostic_only": True, "outputs": reference, "repeated": repeated, "audits": audits},

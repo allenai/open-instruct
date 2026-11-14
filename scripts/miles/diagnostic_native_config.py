@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 TARGET = "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel.fn"
+GATE_TARGET = "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel.fn"
 
 
 def runtime_key(tuner, args, kwargs):
@@ -20,11 +21,27 @@ def runtime_key(tuner, args, kwargs):
 
 
 def install(receipt_path, output, save):
-    """Control ONE recorded key, preserving every other native choice and result."""
+    """Control recorded causal keys in isolated servers; validate all before mutation."""
     receipt = json.loads(Path(receipt_path).read_text())
-    if receipt["target"] != TARGET or receipt.get("diagnostic_only") is not True:
+    extra = receipt.get("additional_interventions", [])
+    if len(extra) > 1 or (extra and extra[0].get("target") != GATE_TARGET):
+        raise ValueError("Only the recorded residual gate intervention may be added")
+    if receipt.get("target") != TARGET:
+        raise ValueError("Primary intervention must be the recorded intra-token tuner")
+    receipt_hash = hashlib.sha256(Path(receipt_path).read_bytes()).hexdigest()
+    installs = [_prepare(receipt, receipt_hash, output, save)]
+    for entry in extra:
+        installs.append(_prepare(entry, receipt_hash, output / "gate-native-intervention", save))
+    for apply in installs:
+        apply()
+
+
+def _prepare(receipt, receipt_hash, output, save):
+    """Resolve one key/config without changing a tuner until every guard passes."""
+    target = receipt["target"]
+    if target not in (TARGET, GATE_TARGET) or receipt.get("diagnostic_only") is not True:
         raise ValueError("Only the approved isolated native tuner intervention is allowed")
-    module, attribute, wrapper = TARGET.rsplit(".", 2)
+    module, attribute, wrapper = target.rsplit(".", 2)
     tuner = getattr(getattr(importlib.import_module(module), attribute), wrapper)
     original = tuner.run
     source_hash = hashlib.sha256(inspect.getsource(type(tuner).run).encode()).hexdigest()
@@ -41,8 +58,8 @@ def install(receipt_path, output, save):
     record = {
         "diagnostic_only": True,
         "qualification_passed": False,
-        "receipt_sha256": hashlib.sha256(Path(receipt_path).read_bytes()).hexdigest(),
-        "target": TARGET,
+        "receipt_sha256": receipt_hash,
+        "target": target,
         "key": key_text,
         "config": details,
         "runtime_membership_verified": True,
@@ -50,7 +67,6 @@ def install(receipt_path, output, save):
         "matched_calls": 0,
         "other_key_calls": 0,
     }
-    save(output / "native-intervention-installed.json", record)
 
     def run(*args, **kwargs):
         actual_key = runtime_key(tuner, args, kwargs)
@@ -68,4 +84,8 @@ def install(receipt_path, output, save):
         save(output / "native-intervention-post.json", {**record, "actual_key": repr(actual_key)})
         return result
 
-    tuner.run = run
+    def apply():
+        save(output / "native-intervention-installed.json", record)
+        tuner.run = run
+
+    return apply

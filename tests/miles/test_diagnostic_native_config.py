@@ -83,3 +83,48 @@ def test_strict_refresh_gate_refuses_intervention_before_cuda_or_artifacts(monke
     monkeypatch.setenv("OI_PUBLICATION_NATIVE_CONFIG_RECEIPT", "diagnostic.json")
     with pytest.raises(ValueError, match="forbidden in strict"):
         gate.run(SimpleNamespace())
+
+
+def test_two_recorded_tuners_are_independent_and_validated_before_install(monkeypatch, tmp_path):
+    tuner, receipt, path, _, _ = setup(monkeypatch, tmp_path)
+    gate_tuner = Tuner()
+    modules = {
+        diagnostic.TARGET.rsplit(".", 2)[0]: SimpleNamespace(
+            chunk_kda_fwd_kernel_intra_token_parallel=SimpleNamespace(fn=tuner)
+        ),
+        diagnostic.GATE_TARGET.rsplit(".", 2)[0]: SimpleNamespace(
+            kda_gate_chunk_cumsum_vector_kernel=SimpleNamespace(fn=gate_tuner)
+        ),
+    }
+    monkeypatch.setattr(diagnostic.importlib, "import_module", modules.__getitem__)
+    receipt["additional_interventions"] = [{**receipt, "target": diagnostic.GATE_TARGET}]
+    receipt["additional_interventions"][0]["autotuner_run_sha256"] = "bad"
+    path.write_text(json.dumps(receipt))
+    original = tuner.run
+    with pytest.raises(ValueError, match="implementation changed"):
+        diagnostic.install(path, tmp_path, lambda *_: None)
+    assert tuner.run == original and tuner.cache == {} and gate_tuner.cache == {}
+    receipt["additional_interventions"][0]["autotuner_run_sha256"] = receipt["autotuner_run_sha256"]
+    path.write_text(json.dumps(receipt))
+    writes = {}
+    diagnostic.install(path, tmp_path, lambda p, v: writes.update({str(p): dict(v)}))
+    tensor = torch.zeros(1, dtype=torch.bfloat16)
+    for _ in range(2):
+        for selected in (tuner, gate_tuner):
+            assert selected.run(tensor, 128) is tensor
+            assert selected.best_config is selected.configs[1]
+    primary = writes[str(tmp_path / "native-intervention-post.json")]
+    extra = writes[str(tmp_path / "gate-native-intervention/native-intervention-post.json")]
+    assert primary["target"] == diagnostic.TARGET and extra["target"] == diagnostic.GATE_TARGET
+    assert primary["matched_calls"] == extra["matched_calls"] == 2
+
+
+@pytest.mark.parametrize("extra", [[{"target": "another.kernel"}], [{}, {}]])
+def test_unapproved_additional_tuners_fail_closed(monkeypatch, tmp_path, extra):
+    tuner, receipt, path, save, _ = setup(monkeypatch, tmp_path)
+    receipt["additional_interventions"] = extra
+    path.write_text(json.dumps(receipt))
+    original = tuner.run
+    with pytest.raises(ValueError, match="residual gate"):
+        diagnostic.install(path, tmp_path, save)
+    assert tuner.run == original and tuner.cache == {}
