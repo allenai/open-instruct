@@ -211,8 +211,16 @@ class StructuredOutputVerifier:
                 except (RecursionError, OverflowError) as error:
                     return instance_error_result(error, start)
                 except (ValueError, TypeError, yaml.YAMLError, csv.Error, xmltodict.expat.ExpatError) as error:
+                    # Wrong model syntax is a completed negative grade, not a
+                    # verifier failure; native records use status for validity.
                     return common.Result(
-                        0.0, diagnostics={"kind": "structured_v1", "status": "parse_error", "error": str(error)}
+                        0.0,
+                        diagnostics={
+                            "kind": "structured_v1",
+                            "status": "completed",
+                            "outcome": "parse_error",
+                            "error": str(error),
+                        },
                     )
                 # An explicit empty Registry refuses retrieval by default, including
                 # network access. Do not use jsonschema's legacy default registry.
