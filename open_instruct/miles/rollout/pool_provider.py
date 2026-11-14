@@ -229,8 +229,14 @@ class PoolPromptProvider:
             replay = entry["metadata"].get("prompt_replay_review", False)
             self.tokens[f"{name}/{'replay' if replay else 'fresh'}_groups"] += 1
             if self.sampling["policy"] == "exposure":
-                for active in entry["active"]:
-                    self.targets[active] += 1 / len(entry["active"])
+                if "weights" in self.sampling:
+                    for active, share in pool_sampling.target_shares(
+                        self.sampling["weights"], entry["active"]
+                    ).items():
+                        self.targets[active] += share
+                else:
+                    for active in entry["active"]:
+                        self.targets[active] += 1 / len(entry["active"])
         self.committed_update = update
         self.last_commit = list(selections)
 
