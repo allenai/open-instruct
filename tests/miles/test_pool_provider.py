@@ -379,3 +379,32 @@ def test_collection_file_preserves_origins_and_release_in_receipts(args, tmp_pat
     finally:
         recorder.close()
         source.close()
+
+
+def test_stop_on_source_exhaustion_through_native_loader_and_checkpoint(args, tmp_path):
+    setup(args, tmp_path, "exposure", priority=True)
+    args.olmo_core = dataclasses.replace(args.olmo_core, stop_on_pool_exhaustion=True)
+    source = DashboardDrainingRolloutDataSource(args)
+    try:
+        updates = 0
+        while source.provider.available():
+            groups = source.get_samples(1)
+            source.acknowledge_groups(groups)
+            source.stage_training_batch(updates, groups[0])
+            source.commit_training_batch(updates)
+            updates += 1
+        assert any(provider.available() for provider in source.provider.providers.values())
+        with pytest.raises(StopIteration):
+            source.get_samples(1)
+        source.save(updates - 1)
+        source.close()
+        args.load, args.start_rollout_id = args.save, updates
+        restored = DashboardDrainingRolloutDataSource(args)
+        try:
+            restored.load(updates - 1)
+            assert not restored.provider.available()
+            assert sum(restored.provider.trained.values()) == updates
+        finally:
+            restored.close()
+    finally:
+        source.close()

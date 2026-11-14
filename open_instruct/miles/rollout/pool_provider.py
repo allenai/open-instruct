@@ -70,7 +70,12 @@ class FinitePrompts:
 class PoolPromptProvider:
     requires_feedback = True
 
-    def __init__(self, samples, *, pools, seed, shuffle, identity, replay=None, sampling=None):
+    def __init__(
+        self, samples, *, pools, seed, shuffle, identity, replay=None, sampling=None, stop_on_exhaustion=False
+    ):
+        self.stop_on_exhaustion = stop_on_exhaustion
+        if stop_on_exhaustion and replay is not None:
+            raise ValueError("Stopping on pool exhaustion does not support replay")
         self.sampling = pool_sampling.validate({} if sampling is None else sampling, pools)
         priority = self.sampling.get("priority")
         if priority and replay is not None:
@@ -78,6 +83,7 @@ class PoolPromptProvider:
         self.identity = copy.deepcopy(
             {
                 "version": 4,
+                **({"stop_on_exhaustion": True} if stop_on_exhaustion else {}),
                 "manifest": identity,
                 "pools": pools,
                 "seed": seed,
@@ -112,6 +118,7 @@ class PoolPromptProvider:
             self.providers[name] = (
                 replay_provider.ReplayPromptProvider(base, members, **replay) if replay and members else base
             )
+        self.initial_pools = {name for name, provider in self.providers.items() if provider.available()}
         self.draws = 0
         self.pending = {}
         self.trained = Counter()
@@ -128,7 +135,10 @@ class PoolPromptProvider:
             self.catalog.close()
 
     def active(self):
-        return [name for name, provider in self.providers.items() if provider.available()]
+        active = [name for name, provider in self.providers.items() if provider.available()]
+        if self.stop_on_exhaustion and set(active) != self.initial_pools:
+            return []
+        return active
 
     def available(self):
         return bool(self.active())

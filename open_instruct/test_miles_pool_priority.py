@@ -206,3 +206,38 @@ def test_priority_receipt_alias_is_only_stamped_when_enabled(policy, priority):
     else:
         assert drawn.metadata["sampling_priority_group"] == 4
         assert "sampling_priority_group" not in receipt
+
+
+@pytest.mark.parametrize("policy", ["uniform", "exposure"])
+def test_stop_on_first_pool_exhaustion_preserves_other_inventory_and_resume(policy):
+    rows = [
+        SimpleNamespace(prompt=f"{pool}-{i}", metadata={"sampling_pool": pool, "priority": 1 + i % 4})
+        for pool, size in (("small", 4), ("large", 40))
+        for i in range(size)
+    ]
+    options = dict(
+        pools={"small": {}, "large": {}, "empty": {}},
+        seed=17,
+        shuffle=True,
+        identity="stop",
+        sampling={"policy": policy, "priority": {"field": "priority"}},
+        stop_on_exhaustion=True,
+    )
+    p = pool_provider.PoolPromptProvider(rows, **options)
+    seen = []
+    while p.available():
+        sample = p.next_samples(1)[0]
+        seen.append(sample)
+        p.commit(len(seen) - 1, [sample.metadata["pool_selection_id"]])
+    assert sum(s.metadata["sampling_pool"] == "small" for s in seen) == 4
+    assert p.providers["large"].available()
+    assert p.trained["small"] == 4
+    restored = pool_provider.PoolPromptProvider(rows, **options)
+    restored.load_state_dict(p.state_dict())
+    assert not restored.available()
+    with pytest.raises(StopIteration):
+        restored.next_samples(1)
+    options["stop_on_exhaustion"] = False
+    changed = pool_provider.PoolPromptProvider(rows, **options)
+    with pytest.raises(ValueError, match="identity"):
+        changed.load_state_dict(p.state_dict())

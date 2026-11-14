@@ -971,6 +971,12 @@ an entire pool still redistributes allocation among available pools. Exposure
 balances cumulative trained groups, not strict per-update quotas. Monitor whole-pool
 supply and consumed shares when comparing mixtures.
 
+For finite mixture studies, `core.stop_on_pool_exhaustion=true` stops fresh
+selection when any initially nonempty pool runs out. Configured empty pools are
+ignored. The ordinary finite-exhaustion path saves and evaluates the last complete
+update, without requiring a full final batch. Replay is unsupported with this
+option. The default remains redistribution among available pools.
+
 Exposure counts groups, not draws or tokens: a prompt with eight responses counts
 as one unit only after the optimizer update using it succeeds. If Math delivers a
 trained group on 25% of draws and IF on 50%, equal exposure needs approximately

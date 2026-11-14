@@ -137,6 +137,7 @@ def load(args, first_dataset):
                 identity=hashlib.sha256(raw).hexdigest(),
                 replay=replay,
                 sampling=manifest.get("sampling", {}),
+                stop_on_exhaustion=core.stop_on_pool_exhaustion,
             )
         except BaseException:
             catalog.close()

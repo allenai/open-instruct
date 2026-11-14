@@ -120,6 +120,7 @@ class CoreConfig:
     records_response_sample_rate: float | None = None
     # Prompt selection; ReMind uses scored outcomes from inference records.
     prompt_provider: str = "shuffle"
+    stop_on_pool_exhaustion: bool = False
     prompt_mixture: str | None = None
     prompt_priority_field: str | None = None
     prompt_priority_source_field: str | None = None
@@ -140,6 +141,7 @@ class CoreConfig:
 
     def __post_init__(self):
         validation.choice(self.reward_reasoning_mode, "core.reward_reasoning_mode", ("required", "none"))
+        validation.boolean(self.stop_on_pool_exhaustion, "core.stop_on_pool_exhaustion")
         validation.boolean(self.prompt_replay_enabled, "core.prompt_replay_enabled")
         validation.boolean(self.prompt_replay_answer_probe, "core.prompt_replay_answer_probe")
         validation.number(self.prompt_replay_fraction, "core.prompt_replay_fraction", maximum=1)
@@ -516,6 +518,10 @@ class RunConfig:
             )
         if (self.core.prompt_provider in ("mixture", "pools")) != (self.core.prompt_mixture is not None):
             raise constraints.error("core.prompt_mixture is required only with prompt_provider=mixture or pools")
+        if self.core.stop_on_pool_exhaustion and (
+            self.core.prompt_provider != "pools" or self.core.prompt_replay_enabled
+        ):
+            raise constraints.error("stop_on_pool_exhaustion requires named pools without replay")
         if self.core.prompt_provider in ("mixture", "pools") and not options.get("rollout_global_dataset", True):
             raise constraints.error("Mixtures require rollout_global_dataset=true")
         if self.core.prompt_provider in ("mixture", "pools") and self.core.selection_table is not None:
