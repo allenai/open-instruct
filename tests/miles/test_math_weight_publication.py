@@ -182,3 +182,31 @@ def test_buckets_preserve_every_name_and_force_gate_up_split_across_layers():
                 expected = 1.0 if not match or variant == 0 else (0.875, 1.125)[variant - 1]
                 assert torch.equal(tensor, torch.full_like(tensor, expected))
         assert all(torch.equal(t, torch.ones_like(t)) for t in state.values())
+
+
+def test_audit_includes_norm_parameters_without_quant_methods(monkeypatch, tmp_path):
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.norm = torch.nn.LayerNorm(2)
+
+        def load_weights(self, weights):
+            return set()
+
+        def forward(self):
+            return "native output"
+
+    model = Model()
+    monkeypatch.setenv("OI_PUBLICATION_AUDIT", str(tmp_path))
+    monkeypatch.setattr(gate, "instrument_receiver", lambda: None)
+    monkeypatch.setattr(gate, "instrument_nvfp4_processing", lambda: None)
+    modules = {
+        "olmo_sglang.models.olmo3_moe": SimpleNamespace(Olmo3MoeForCausalLM=Model),
+        "sglang.srt.managers.scheduler": SimpleNamespace(run_scheduler_process=lambda: model.forward()),
+    }
+    monkeypatch.setattr(gate.importlib, "import_module", modules.__getitem__)
+    assert gate.audit_scheduler() == "native output"
+    rows = json.loads(next(tmp_path.glob("audit-*.json")).read_text())
+    assert len(rows) == 1 and rows[0]["name"] == "norm"
+    assert rows[0]["class"] == "LayerNorm" and rows[0]["quant_method"] == "NoneType"
+    assert rows[0]["parameters"]["weight"] == gate.tensor_fingerprint(model.norm.weight)

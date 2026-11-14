@@ -236,16 +236,24 @@ def audit_scheduler(*args, **kwargs):
             inventory = []
             for name, module in model.named_modules():
                 method = getattr(module, "quant_method", None)
-                if method is None:
+                direct_parameters = list(module.named_parameters(recurse=False))
+                if method is None and not direct_parameters:
                     continue
                 parameters = {}
-                for key, tensor in module.named_parameters(recurse=False):
+                for key, tensor in direct_parameters:
                     cpu = tensor.detach().contiguous().cpu()
                     if cpu.is_floating_point() and not torch.isfinite(cpu.float()).all():
                         raise ValueError(f"Nonfinite serving tensor {name}.{key}")
                     digest = hashlib.sha256(cpu.reshape(-1).view(torch.uint8).numpy().tobytes()).hexdigest()
                     parameters[key] = {"dtype": str(cpu.dtype), "shape": list(cpu.shape), "sha256": digest}
-                inventory.append({"name": name, "quant_method": type(method).__name__, "parameters": parameters})
+                inventory.append(
+                    {
+                        "name": name,
+                        "class": type(module).__name__,
+                        "quant_method": type(method).__name__,
+                        "parameters": parameters,
+                    }
+                )
             save(Path(os.environ["OI_PUBLICATION_AUDIT"]) / f"audit-{os.getpid()}-{epoch}.json", inventory)
             model._publication_audited_epoch = epoch
         return original_forward(model, *values, **options)
