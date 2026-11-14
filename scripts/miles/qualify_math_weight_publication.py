@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,6 +31,46 @@ EXPERT = re.compile(r"^model\.layers\.(\d+)\.mlp\.experts\.(\d+)\.(gate_proj|up_
 # Preregistered tolerances on fixed-token conditional log probabilities. Full
 # parameter hashes must ALSO match fresh loading, including every quant scale.
 TOLERANCES = {"bf16": (2e-4, 1e-4), "nvfp4": (0.05, 0.01)}
+
+
+def configure_transport_environment():
+    # Match miles.ray.specs.train.compute_trainer_env_vars. Without this,
+    # the standalone sender uses NCCL's cuMem default while SGLang explicitly
+    # disables it in _set_envs_and_config, which can break their first collective.
+    # Set before creating any process group; children inherit the same value.
+    os.environ.setdefault("NCCL_CUMEM_ENABLE", "0")
+
+
+def instrument_receiver():
+    """Retain the CUDA context and original traceback if transport fails."""
+    updater_type = importlib.import_module(
+        "sglang.srt.model_executor.model_runner_components.weight_updater"
+    ).WeightUpdater
+    original = updater_type.receive_weights_from_distributed
+
+    def receive(updater, **options):
+        details = {
+            "phase": "receive",
+            "pid": os.getpid(),
+            "gpu_id": updater.gpu_id,
+            "current_device": torch.cuda.current_device(),
+            "device": updater.device,
+            "NCCL_CUMEM_ENABLE": os.environ.get("NCCL_CUMEM_ENABLE"),
+            "tensors": len(options["names"]),
+            "first": options["names"][0],
+        }
+        context = Path(os.environ["OI_PUBLICATION_AUDIT"]) / "transport-context.json"
+        if not context.exists():
+            save(context, details)
+        try:
+            return original(updater, **options)
+        except Exception:
+            details["traceback"] = traceback.format_exc()
+            save(Path(os.environ["OI_PUBLICATION_AUDIT"]) / "transport-error.json", details)
+            print(json.dumps(details), flush=True)
+            raise
+
+    updater_type.receive_weights_from_distributed = receive
 
 
 def make_probes(tokenizer):
@@ -117,6 +158,7 @@ def compare_scores(actual, expected, precision, *, unchanged=False):
 
 def audit_scheduler(*args, **kwargs):
     """Observe real serving weights after each load, without changing numerics."""
+    instrument_receiver()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
     original_load, original_forward = model_type.load_weights, model_type.forward
 
@@ -209,6 +251,7 @@ class Fleet:
                 destination.mkdir(parents=True)
                 number = port()
                 env = dict(os.environ, OI_PUBLICATION_AUDIT=str(destination))
+                env["NCCL_DEBUG_FILE"] = str(destination / "nccl-%h-%p.log")
                 stream = (destination / "server.log").open("w")
                 self.streams.append(stream)
                 process = subprocess.Popen(
@@ -305,6 +348,17 @@ class Fleet:
 
 
 def fresh_checkpoint(args, variant):
+    if args.reuse_mutation_checkpoints is not None:
+        target = args.reuse_mutation_checkpoints / f"changed-checkpoint-{variant}"
+        receipt = json.loads((target / "qualification-mutation.json").read_text())
+        if receipt["variant"] != variant or Path(receipt["source"]).resolve() != args.model.resolve():
+            raise ValueError("Mutation checkpoint provenance mismatch")
+        with (target / "model.safetensors").open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if digest != receipt["sha256"]:
+            raise ValueError("Mutation checkpoint hash mismatch")
+        save(args.output / f"reused-mutation-{variant}.json", {"path": str(target), **receipt})
+        return target
     target = args.output / f"changed-checkpoint-{variant}"
     target.mkdir()
     for source in args.model.iterdir():
@@ -332,6 +386,7 @@ def fresh_checkpoint(args, variant):
 
 def run(args):
     args.output.mkdir(parents=True, exist_ok=False)
+    configure_transport_environment()
     if torch.cuda.device_count() != 4:
         raise ValueError("Requires exactly the approved four visible GPUs")
     if any("B300" not in torch.cuda.get_device_name(i) for i in range(4)):
@@ -365,6 +420,10 @@ def run(args):
                 Path("/opt/core-rl/sources/runtime.lock.json").read_bytes()
             ).hexdigest(),
             "precision": args.precision,
+            "transport_environment": {
+                "NCCL_CUMEM_ENABLE": os.environ["NCCL_CUMEM_ENABLE"],
+                "provenance": "Pinned miles.ray.specs.train.compute_trainer_env_vars sender default; inherited by servers",
+            },
             "probes": probes,
             "tolerances": TOLERANCES,
             "unchanged_bf16_tolerance": 0,
@@ -466,6 +525,7 @@ def main():
     parser.add_argument("--server", action="store_true")
     parser.add_argument("--gpu", type=int)
     parser.add_argument("--port", type=int)
+    parser.add_argument("--reuse-mutation-checkpoints", type=Path)
     args = parser.parse_args()
     if args.server:
         server(args)
