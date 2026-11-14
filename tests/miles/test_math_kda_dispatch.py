@@ -104,9 +104,12 @@ def test_capture_input_identity_includes_dtype_shape_and_nested_options():
     assert replay.unequal_paths({"x": 1}, {"y": 1}) == ["inputs"]
 
 
-def test_inspect_only_cli_records_confounds_without_initializing_cuda(tmp_path, monkeypatch):
+@pytest.mark.parametrize("nested", [False, True])
+def test_inspect_only_cli_records_confounds_without_initializing_cuda(tmp_path, monkeypatch, nested):
     for index in range(3):
         directory = tmp_path / "captures" / f"gpu{index + 1}"
+        if nested:
+            directory = directory / "recurrence-1"
         directory.mkdir(parents=True)
         torch.save({"initial_state": torch.tensor([float(index)])}, directory / "kda-inputs-1.pt")
         torch.save(torch.tensor([float(index)]), directory / "kda-output-1.pt")

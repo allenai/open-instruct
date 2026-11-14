@@ -89,7 +89,7 @@ def test_dispatch_snapshot_unwraps_heuristics_and_serializes_launch_choices(monk
     assert wrapper.fn is kernel and cache[(43, "bf16")] is config
 
 
-@pytest.mark.parametrize("capture_index", [0, 1])
+@pytest.mark.parametrize("capture_index", [0, 1, "0,1"])
 def test_kda_diagnostic_captures_prior_state_without_replaying_or_changing_result(
     monkeypatch, tmp_path, capture_index
 ):
@@ -116,13 +116,17 @@ def test_kda_diagnostic_captures_prior_state_without_replaying_or_changing_resul
         result = Kernel()._run(*values, **options)
         assert result[0] is values[0] and result[1] == "native metadata"
     assert len(calls) == 3 and torch.equal(state, torch.full_like(state, 3))
-    saved = torch.load(next(tmp_path.glob("kda-inputs-*.pt")), weights_only=True)
-    assert torch.equal(saved["initial_state"], torch.full_like(saved["initial_state"], capture_index))
-    receipt = json.loads(next(tmp_path.glob("kda-receipt-*.json")).read_text())
-    assert receipt["prefill_recurrence_index"] == capture_index
-    assert "ssm_states" not in saved["options"] and "track_state" not in saved["options"]
-    assert len(list(tmp_path.glob("kda-inputs-*.pt"))) == 1
-    assert torch.equal(torch.load(next(tmp_path.glob("kda-output-*.pt")), weights_only=True), values[0])
+    indices = [int(index) for index in str(capture_index).split(",")]
+    for index in indices:
+        directory = tmp_path if len(indices) == 1 else tmp_path / f"recurrence-{index}"
+        saved = torch.load(next(directory.glob("kda-inputs-*.pt")), weights_only=True)
+        assert torch.equal(saved["initial_state"], torch.full_like(saved["initial_state"], index))
+        receipt = json.loads(next(directory.glob("kda-receipt-*.json")).read_text())
+        assert receipt["prefill_recurrence_index"] == index
+        assert "ssm_states" not in saved["options"] and "track_state" not in saved["options"]
+        assert len(list(directory.glob("kda-inputs-*.pt"))) == 1
+        assert torch.equal(torch.load(next(directory.glob("kda-output-*.pt")), weights_only=True), values[0])
+    assert len(list(tmp_path.rglob("kda-receipt-*.json"))) == len(indices)
 
 
 def test_sender_matches_pinned_trainer_cumem_default_and_preserves_override(monkeypatch):

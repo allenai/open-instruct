@@ -269,25 +269,25 @@ def fla_dispatch_snapshot():
 
 
 def instrument_kda_inputs():
-    """Retain one real prefill recurrence's inputs; never change cache state."""
+    """Retain selected real prefill inputs; never change native cache state."""
     if os.environ.get("OI_PUBLICATION_TRACE_KDA") != "1":
         return
     kernel = importlib.import_module("olmo_sglang.kda.backend").OlmoFLAKDAKernel
     original = kernel._run
-    captured = False
-    capture_index = int(os.environ.get("OI_PUBLICATION_KDA_CAPTURE_INDEX", "0"))
-    if capture_index < 0:
+    capture_indices = {int(index) for index in os.environ.get("OI_PUBLICATION_KDA_CAPTURE_INDEX", "0").split(",")}
+    if any(index < 0 for index in capture_indices):
         raise ValueError("KDA capture index must be nonnegative")
+    captured = set()
     prefill_index = -1
 
     def run(instance, *values, **options):
         nonlocal captured, prefill_index
-        if captured or not values or values[0].shape[1] < 32:
+        if captured == capture_indices or not values or values[0].shape[1] < 32:
             return original(instance, *values, **options)
         prefill_index += 1
-        if prefill_index != capture_index:
+        if prefill_index not in capture_indices:
             return original(instance, *values, **options)
-        captured = True
+        captured.add(prefill_index)
         # Snapshot only referenced states, before the native call commits them.
         # Detached CPU copies synchronize and are explicitly diagnostic only.
         initial, valid = instance._gather_initial_state(options["ssm_states"], options["cache_indices"])
@@ -302,6 +302,9 @@ def instrument_kda_inputs():
             "valid": valid.detach().cpu().clone(),
         }
         directory = Path(os.environ["OI_PUBLICATION_AUDIT"])
+        if len(capture_indices) > 1:
+            directory = directory / f"recurrence-{prefill_index}"
+            directory.mkdir(parents=True, exist_ok=False)
         torch.save(inputs, directory / f"kda-inputs-{os.getpid()}.pt")
         result = original(instance, *values, **options)
         output = result[0] if isinstance(result, tuple) else result

@@ -146,10 +146,15 @@ def main():
     args.output.mkdir(parents=True, exist_ok=False)
     records = []
     for directory in sorted(args.capture.glob("gpu*")):
+        receiver = directory.name
+        if args.expected_recurrence_index is not None:
+            nested = directory / f"recurrence-{args.expected_recurrence_index}"
+            if nested.is_dir():
+                directory = nested
         (receipt_path,) = directory.glob("kda-receipt-*.json")
         (inputs_path,) = directory.glob("kda-inputs-*.pt")
         (output_path,) = directory.glob("kda-output-*.pt")
-        records.append((directory.name, json.loads(receipt_path.read_text()), inputs_path, output_path))
+        records.append((receiver, json.loads(receipt_path.read_text()), inputs_path, output_path))
     if len(records) != 3:
         raise ValueError("Require all three captured application receivers")
     captured = [torch.load(record[2], map_location="cpu", weights_only=True) for record in records]
