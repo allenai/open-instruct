@@ -14,9 +14,13 @@ and `dataset.tokenizer` sections); none ships in this repo.
         -i <ckpt>/step172 -o <ckpt>/hf_step172 \
         -c <run's training config>.json
 
+For KDA checkpoints add `--skip-validation --device cpu` (see the caveat below).
+Input and output must be local or WEKA paths: `-i` is joined with pathlib and the
+EOS step writes to a local directory, so remote (`gs://`) paths are not supported.
+
 Validation caveat: strict logit validation FAILS (~92-99% mismatch, abs diff
-~1.5) on every OLMoE3 latent-KDA 1.2B checkpoint, including Jacob's known-good
-midtrain -- the two forward implementations disagree at this scale regardless
+~1.5) on every OLMoE3 latent-KDA 1.2B checkpoint, including a known-good
+midtrain checkpoint -- the two forward implementations disagree at this scale regardless
 of checkpoint, config, or the OLMO_HF_* parity env vars (bisected 2026-08-20).
 The scaling-ladders production workload passes --skip-validation --device cpu;
 strict validation only ever passed on the 275M/480M ladder models. Use
@@ -59,7 +63,7 @@ def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir:
     ``akshitab/emo_modularity`` (f2cf93839) taught ``convert_checkpoint_to_hf`` that layout
     (``_load_ddp_optimizer_model_state``); the Olmo 3.5 hero lineage (89e7dcb7) never got it,
     so every hero SFT conversion died with "Missing key in checkpoint state_dict:
-    model.embeddings.weight" (01M2N8CRTAZHXD6605MSY9615M, 2026-09-16). This is that function,
+    model.embeddings.weight" (2026-09-16). This is that function,
     ported: the same key candidates, the converter then takes the gathered state dict.
     """
     checkpoint_keys = set(get_checkpoint_metadata(model_and_optim_dir).state_dict_metadata)
@@ -129,9 +133,15 @@ def main() -> None:
     parser.add_argument("--skip-validation", dest="validate", action="store_false")
     # The chat models end a turn with <|im_end|> (100265), not <|endoftext|> (100257). Without it in
     # generation_config.json, servers that take stop tokens from there (vLLM's OpenAI server) never stop the turn:
-    # H203's export repeated its tool call to the token budget on BFCL. B1 exports carry the same list.
+    # an A4B SFT export without it repeated its tool call up to the token budget on BFCL.
     # Delete this override once the olmo-core pin's save_hf_model writes the chat stop list itself.
-    parser.add_argument("--eos-token-ids", type=int, nargs="+", default=list(CHAT_EOS_TOKEN_IDS))
+    parser.add_argument(
+        "--eos-token-ids",
+        type=int,
+        nargs="+",
+        default=list(CHAT_EOS_TOKEN_IDS),
+        help="generation_config.json eos_token_id list (default: <|im_end|>, <|endoftext|>)",
+    )
     # Defaults to CUDA, not CPU: validation runs both implementations, and the
     # KDA/fla Triton kernels reject CPU tensors ("Pointer argument (at 0) cannot be
     # accessed from Triton"). On CPU the weights still get written, so the failure
@@ -147,6 +157,8 @@ def main() -> None:
         raise SystemExit(f"{args.config} has no dataset.tokenizer section")
 
     logger.info("converting %s -> %s", args.checkpoint_input_path, args.huggingface_output_dir)
+    # load_keys is a generator, but load_ddp_main_params consumes it fully inside this block and returns
+    # materialized CPU tensors, so work_dir can go before the conversion. Keep the consumption inside the block.
     with tempfile.TemporaryDirectory() as work_dir:
         model_state_dict = load_ddp_main_params(
             str(pathlib.Path(args.checkpoint_input_path) / "model_and_optim"), model_config, work_dir
