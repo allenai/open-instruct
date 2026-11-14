@@ -1,5 +1,7 @@
 """Offline validation of diagnostic replay's native-config identity contract."""
 
+import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -61,3 +63,74 @@ def test_single_config_interventions_hold_other_recorded_choices_fixed():
     assert target["second"]["cache"] == {"(2,)": "d"}
     with pytest.raises(ValueError, match="sets differ"):
         list(replay.single_config_changes(base, {}))
+
+
+def test_capture_inspection_rejects_state_and_semantic_confounds(tmp_path):
+    records = []
+    captured = []
+    for index in range(3):
+        inputs = tmp_path / f"inputs{index}.pt"
+        output = tmp_path / f"output{index}.pt"
+        data = {"initial_state": torch.zeros(2), "options": {"scale": 1.0}, "positional": [torch.ones(2)]}
+        torch.save(data, inputs)
+        torch.save(torch.tensor([float(index)]), output)
+        receipt = {"prefill_recurrence_index": 1, "core_compat": True, "allow_neg_eigval": False, "fla_dispatch": {}}
+        records.append((f"gpu{index + 1}", receipt, inputs, output))
+        captured.append(data)
+    report = replay.inspect_captures(records, captured, expected_index=1)
+    assert report["causal_replay_allowed"]
+    assert not report["qualification_passed"]
+    assert len(report["pairs"]) == 3
+    assert report["pairs"][0]["output_comparison"]["max_abs"] == 1.0
+    captured[1]["initial_state"][0] = 1
+    captured[2]["options"]["scale"] = 2.0
+    records[2][1]["core_compat"] = False
+    report = replay.inspect_captures(records, captured, expected_index=1)
+    assert not report["causal_replay_allowed"]
+    assert report["pairs"][0]["unequal_input_paths"] == ["inputs.initial_state"]
+    assert report["pairs"][1]["unequal_input_paths"] == ["inputs.options.scale"]
+    assert report["pairs"][1]["unequal_semantics"] == ["core_compat"]
+    with pytest.raises(ValueError, match="recurrence index"):
+        replay.inspect_captures(records, captured, expected_index=0)
+    del records[1][1]["prefill_recurrence_index"]
+    with pytest.raises(ValueError, match="lacks recurrence"):
+        replay.inspect_captures(records, captured)
+
+
+def test_capture_input_identity_includes_dtype_shape_and_nested_options():
+    assert replay.unequal_paths({"x": torch.ones(2)}, {"x": torch.ones(2).bfloat16()}) == ["inputs.x"]
+    assert replay.unequal_paths((1, [2]), (1, [3])) == ["inputs[1][0]"]
+    assert replay.unequal_paths({"x": 1}, {"y": 1}) == ["inputs"]
+
+
+def test_inspect_only_cli_records_confounds_without_initializing_cuda(tmp_path, monkeypatch):
+    for index in range(3):
+        directory = tmp_path / "captures" / f"gpu{index + 1}"
+        directory.mkdir(parents=True)
+        torch.save({"initial_state": torch.tensor([float(index)])}, directory / "kda-inputs-1.pt")
+        torch.save(torch.tensor([float(index)]), directory / "kda-output-1.pt")
+        (directory / "kda-receipt-1.json").write_text(
+            json.dumps(
+                {"prefill_recurrence_index": 1, "core_compat": False, "allow_neg_eigval": True, "fla_dispatch": {}}
+            )
+        )
+    monkeypatch.setattr(torch.cuda, "set_device", lambda *_: pytest.fail("CPU inspection must not initialize CUDA"))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "diagnostic",
+            "--capture",
+            str(tmp_path / "captures"),
+            "--output",
+            str(tmp_path / "inspection"),
+            "--inspect-only",
+            "--expected-recurrence-index",
+            "1",
+        ],
+    )
+    replay.main()
+    report = json.loads((tmp_path / "inspection/capture-inspection.json").read_text())
+    assert not report["causal_replay_allowed"]
+    assert len(report["pairs"]) == 3
+    assert all(pair["unequal_input_paths"] == ["inputs.initial_state"] for pair in report["pairs"])

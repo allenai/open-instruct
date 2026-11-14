@@ -70,17 +70,78 @@ def single_config_changes(base, target):
             yield path, snapshot
 
 
+def unequal_paths(a, b, path="inputs"):
+    """Identify every changed input/state without moving captures onto a GPU."""
+    if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
+        return [] if a.dtype == b.dtype and a.shape == b.shape and torch.equal(a, b) else [path]
+    if type(a) is not type(b):
+        return [path]
+    if isinstance(a, dict):
+        if a.keys() != b.keys():
+            return [path]
+        return [item for key in a for item in unequal_paths(a[key], b[key], f"{path}.{key}")]
+    if isinstance(a, (list, tuple)):
+        if len(a) != len(b):
+            return [path]
+        return [item for index, (x, y) in enumerate(zip(a, b)) for item in unequal_paths(x, y, f"{path}[{index}]")]
+    return [] if a == b else [path]
+
+
+def inspect_captures(records, captured, expected_index=None):
+    """Gate causal replay on complete inputs and matching native semantics."""
+    semantics = ("prefill_recurrence_index", "core_compat", "allow_neg_eigval")
+    receipts = [record[1] for record in records]
+    for receipt in receipts:
+        if any(key not in receipt for key in semantics):
+            raise ValueError("Capture receipt lacks recurrence/native semantics")
+        if expected_index is not None and receipt["prefill_recurrence_index"] != expected_index:
+            raise ValueError("Captured recurrence index differs from requested diagnostic")
+    pairs = []
+    outputs = [torch.load(record[3], map_location="cpu", weights_only=True) for record in records]
+    for left in range(len(records)):
+        for right in range(left + 1, len(records)):
+            changed = unequal_paths(captured[left], captured[right])
+            changed_semantics = [key for key in semantics if receipts[left][key] != receipts[right][key]]
+            pairs.append(
+                {
+                    "receivers": [records[left][0], records[right][0]],
+                    "unequal_input_paths": changed,
+                    "unequal_semantics": changed_semantics,
+                    "causal_replay_allowed": not changed and not changed_semantics,
+                    "output_comparison": difference(outputs[left], outputs[right]),
+                    "unequal_dispatch_paths": unequal_paths(
+                        receipts[left]["fla_dispatch"], receipts[right]["fla_dispatch"], "fla_dispatch"
+                    ),
+                }
+            )
+    return {
+        "diagnostic_only": True,
+        "qualification_passed": False,
+        "prefill_recurrence_index": receipts[0]["prefill_recurrence_index"],
+        "causal_replay_allowed": bool(pairs) and all(pair["causal_replay_allowed"] for pair in pairs),
+        "pairs": pairs,
+        "captures": [
+            {
+                "receiver": name,
+                "input_sha256": hashlib.sha256(inputs.read_bytes()).hexdigest(),
+                "output_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+                "receipt": receipt,
+            }
+            for name, receipt, inputs, output in records
+        ],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--bisect-configs", action="store_true")
+    parser.add_argument("--inspect-only", action="store_true", help="Write CPU input/state comparison without GPU use")
+    parser.add_argument("--expected-recurrence-index", type=int)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
-    torch.cuda.set_device(args.gpu)
-    importlib.import_module("olmo_sglang").register()
-    backend = importlib.import_module("olmo_sglang.kda.backend")
     records = []
     for directory in sorted(args.capture.glob("gpu*")):
         (receipt_path,) = directory.glob("kda-receipt-*.json")
@@ -91,18 +152,15 @@ def main():
         raise ValueError("Require all three captured application receivers")
     captured = [torch.load(record[2], map_location="cpu", weights_only=True) for record in records]
 
-    # The causal comparison must hold EVERY input and state constant.
-    def compare_tree(a, b):
-        if isinstance(a, torch.Tensor):
-            return a.dtype == b.dtype and a.shape == b.shape and torch.equal(a, b)
-        if isinstance(a, dict):
-            return a.keys() == b.keys() and all(compare_tree(a[key], b[key]) for key in a)
-        if isinstance(a, list):
-            return len(a) == len(b) and all(compare_tree(x, y) for x, y in zip(a, b))
-        return a == b
-
-    if not all(compare_tree(captured[0], other) for other in captured[1:]):
+    inspection = inspect_captures(records, captured, args.expected_recurrence_index)
+    publication.save(args.output / "capture-inspection.json", inspection)
+    if args.inspect_only:
+        return
+    if not inspection["causal_replay_allowed"]:
         raise ValueError("Captured receivers have unequal native KDA inputs/state")
+    torch.cuda.set_device(args.gpu)
+    importlib.import_module("olmo_sglang").register()
+    backend = importlib.import_module("olmo_sglang.kda.backend")
     cpu = captured[0]
     device = torch.device("cuda", args.gpu)
     positional = [value.to(device) for value in cpu["positional"]]
