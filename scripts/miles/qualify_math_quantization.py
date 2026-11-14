@@ -48,12 +48,21 @@ def audited_scheduler(*args, **kwargs):
     return scheduler.run_scheduler_process(*args, **kwargs)
 
 
-def verify_inventory(modules, precision):
+def verify_inventory(modules, precision, *, kv_cache_dtype=None):
     experts = [module for module in modules if module["name"].endswith(".experts")]
     if len(experts) != 15:
         raise ValueError(f"Expected 15 routed expert modules, found {len(experts)}")
     for module in modules:
         name, method = module["name"], module["quant_method"].lower()
+        # SGLang attaches this scale loader even with an explicitly BF16 pool.
+        # Its name does not describe the cache's storage dtype or weight precision.
+        if method == "fp8kvcachemethod" and module["class"] == "RadixAttention":
+            parameters = module["parameters"]
+            if kv_cache_dtype not in ("bf16", "bfloat16") or parameters != {
+                key: {"dtype": "torch.float32", "shape": []} for key in ("k_scale", "v_scale")
+            }:
+                raise ValueError(f"Unverified BF16 KV scale loader: {name}")
+            continue
         low_precision = "fp8" in method or "fp4" in method
         if not name.endswith(".experts") and low_precision:
             raise ValueError(f"Unexpected quantized non-expert module: {name}: {method}")
@@ -134,7 +143,9 @@ def main():
         inventories = list(args.output.glob("layers-*.json"))
         if len(inventories) != 1:
             raise ValueError(f"Expected one TP1 inventory, got {len(inventories)}")
-        audit = verify_inventory(json.loads(inventories[0].read_text()), args.precision)
+        audit = verify_inventory(
+            json.loads(inventories[0].read_text()), args.precision, kv_cache_dtype=options["kv_cache_dtype"]
+        )
         if len(outputs) != 16 or any(not output.get("text") for output in outputs):
             raise ValueError("Incomplete generation smoke")
         (args.output / "qualified.json").write_text(
