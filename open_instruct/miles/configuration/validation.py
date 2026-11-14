@@ -164,7 +164,8 @@ def runtime_values(values):
     candidates = values.get("rollout_top_logprobs_num", 0)
     integer(candidates, "miles.rollout_top_logprobs_num", minimum=0)
     top_k = values.get("rollout_top_k", -1)
-    integer(top_k, "miles.rollout_top_k", minimum=-1)
+    if type(top_k) is not int or (top_k != -1 and top_k < 1):
+        raise InputError(f"miles.rollout_top_k must be -1 or a positive integer; got {top_k!r}.")
     if candidates and candidates < top_k:
         raise InputError(
             "miles.rollout_top_logprobs_num must be >= miles.rollout_top_k "

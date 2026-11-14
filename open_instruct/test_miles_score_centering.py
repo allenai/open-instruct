@@ -77,6 +77,16 @@ def test_explicit_off_policy_correction_selects_native_score_centering_tis(tmp_p
     assert config.miles["use_tis"] is False
 
 
+def test_explicit_off_policy_correction_rejects_conflicting_score_centering_mis(tmp_path):
+    data = document(tmp_path) | {
+        "async": {"fully_async": True, "off_policy_correction": "tis"},
+        "trainer": {"fp32_lm_head": True},
+        "miles": {"loss_type": "score_centering", "score_centering_is": "mis", "rollout_top_logprobs_num": 20},
+    }
+    with pytest.raises(ValueError, match=r"Conflicting settings for miles\.score_centering_is"):
+        RunSpec.from_dict(data, config_path=tmp_path / "run.toml").compile()
+
+
 @pytest.mark.parametrize("trainer", [{}, {"fp32_lm_head": False}])
 def test_score_centering_requires_explicit_core_fp32_head(tmp_path, trainer):
     data = document(tmp_path) | {
