@@ -93,8 +93,9 @@ def test_capture_inspection_rejects_state_and_semantic_confounds(tmp_path):
     with pytest.raises(ValueError, match="recurrence index"):
         replay.inspect_captures(records, captured, expected_index=0)
     del records[1][1]["prefill_recurrence_index"]
-    with pytest.raises(ValueError, match="lacks recurrence"):
-        replay.inspect_captures(records, captured)
+    with pytest.raises(ValueError, match="recurrence index"):
+        replay.inspect_captures(records, captured, expected_index=1)
+    assert not replay.inspect_captures(records, captured)["causal_replay_allowed"]
 
 
 def test_capture_input_identity_includes_dtype_shape_and_nested_options():

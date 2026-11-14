@@ -90,7 +90,9 @@ def unequal_paths(a, b, path="inputs"):
 def inspect_captures(records, captured, expected_index=None):
     """Gate causal replay on complete inputs and matching native semantics."""
     semantics = ("prefill_recurrence_index", "core_compat", "allow_neg_eigval")
-    receipts = [record[1] for record in records]
+    # Older first-recurrence captures did not record the index. Keep that
+    # provenance unknown; an explicit expected index always requires a receipt.
+    receipts = [{"prefill_recurrence_index": None, **record[1]} for record in records]
     for receipt in receipts:
         if any(key not in receipt for key in semantics):
             raise ValueError("Capture receipt lacks recurrence/native semantics")
