@@ -903,6 +903,10 @@ class RunSpec:
 
     def launch_warnings(self, miles, core=None) -> list[str]:
         warnings = []
+        try:
+            evaluation.validate_scicode_reference_path(self.evaluation)
+        except InputError as error:
+            warnings.append(str(error))
         if core is not None and core.max_run_seconds is not None and "save_interval" not in miles:
             warnings.append(
                 "training.save_checkpoints=false: the core.max_run_seconds stop cannot be resumed, so it is "

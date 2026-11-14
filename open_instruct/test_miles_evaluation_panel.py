@@ -23,7 +23,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def three_node():
-    return RunSpec.load(ROOT / "configs/miles/examples/tiny/three-node.toml")
+    document = RunSpec.load(ROOT / "configs/miles/examples/tiny/three-node.toml").to_dict()
+    for task in document["evaluation"]["tasks"]:
+        if task["task"] == "scicode":
+            task["arguments"]["h5py_host_path"] = "/weka/oe-adapt-default/scicode/test_data.h5"
+    return RunSpec.from_dict(document)
 
 
 def test_node_uses_periodic_native_background_evaluation():
