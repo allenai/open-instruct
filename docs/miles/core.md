@@ -369,11 +369,20 @@ Use `advantage_estimator="grpo"` and omit legacy `use_tis`; the compiler selects
 score centering's own weighting. Explicit `async.off_policy_correction="tis"`
 also selects this native TIS mode. Refresh accepts `tis` or `mis`, retaining its
 policy-lag, routing-replay and unfiltered-sampling constraints. Unweighted score
-centering is available for synchronous runs. Score centering requires
+centering is available for synchronous runs. This integration currently requires
 `trainer.fp32_lm_head=true` (or `core.fp32_lm_head=true` in the low-level API);
 validation rejects an unset or false Core setting. Core then enables the serving
 FP32 head and rejects an explicit false serving setting. For matched comparisons
 use the same head precision and candidate recording in both arms.
+
+For score centering, we enforce trainer FP32 output. This is a numerical-precision
+recommendation enforced as a conservative Core qualification policy, not a
+mathematical requirement of score centering. Upstream
+[#4031](https://github.com/radixark/miles/pull/4031) automatically enables the
+rollout FP32 head; it does not require the Core trainer setting. Our paired Core
+study used FP32 heads but did not compare BF16 against FP32, so it does not
+establish that trainer FP32 output is necessary. We retain the validation guard
+until other trainer precision configurations are qualified.
 
 Whenever candidate probabilities are collected, preflight requires
 `rollout_top_logprobs_num >= rollout_top_k`, regardless of the selected loss.
