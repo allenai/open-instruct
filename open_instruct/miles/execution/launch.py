@@ -19,6 +19,7 @@ from open_instruct.miles.configuration import advisories, specs, topology
 from open_instruct.miles.configuration import config as miles_config
 from open_instruct.miles.distillation import opd_config, opd_launch
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.evaluation import evaluation
 from open_instruct.miles.execution import workflow
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -35,6 +36,7 @@ def specification(image, spec, *, hostnames=None, compiled=None):
         if hostnames is not None:
             raise InputError("OPD uses a single cluster allocation; hostname overrides are unsupported")
         return opd_launch.specification(image, spec)
+    evaluation.validate_reference_paths(spec.evaluation)
     config = compiled if compiled is not None else spec.compile()
     layout = topology.plan(spec, config)
     host_networking = layout["replicas"] > 1 or bool(spec.judges["judging"]["bindings"])

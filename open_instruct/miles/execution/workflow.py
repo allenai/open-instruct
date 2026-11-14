@@ -347,6 +347,7 @@ def run_directory(spec):
 
 
 def execute(spec):
+    evaluation.validate_reference_paths(spec.evaluation)
     with run_directory(spec) as (root, state):
         timing_args = SimpleNamespace(save=root)
         with stage(timing_args, "model_preparation"):

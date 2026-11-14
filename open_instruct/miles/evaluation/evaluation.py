@@ -220,6 +220,33 @@ def parse(value, launch):
     return value
 
 
+def validate_reference_paths(config):
+    """Reject unresolved SciCode assets before allocating a training/evaluation job.
+
+    Examples remain loadable for planning. The path belongs to the remote worker,
+    so existence is checked there rather than on the submitting workstation.
+    """
+    for task in config.get("tasks", []):
+        if task.get("kind") != "external" or task.get("task") != "scicode":
+            continue
+        path = task.get("arguments", {}).get("h5py_host_path")
+        if (
+            not isinstance(path, str)
+            or not path.strip()
+            or path != path.strip()
+            or not Path(path).is_absolute()
+            or "YOUR_USERNAME" in path
+            or "$" in path
+            or "<" in path
+            or ">" in path
+        ):
+            raise InputError(
+                "SciCode requires arguments.h5py_host_path to be an explicit absolute reference-data file path. "
+                "Replace the example YOUR_USERNAME placeholder and any unexpanded variables before launching; "
+                "the file must be accessible on the evaluator's mounted filesystem."
+            )
+
+
 def validate_judge_credentials(config):
     """Reject known gated managed-judge and dataset downloads without an evaluator secret."""
     if config["secrets"].get("HF_TOKEN", "").strip():
@@ -326,6 +353,7 @@ def runtime(spec, options):
 
 def specification(receipt):
     config = receipt["evaluation"]
+    validate_reference_paths({"tasks": receipt.get("tasks", [])})
     # Carry the committed runner to the independent evaluator image. No source
     # checkout, dependency resolution or moving branch is used at job startup.
     runner = Path(__file__).with_name("evaluation_runner.py").read_bytes()
