@@ -1,0 +1,2981 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/allenai/open-instruct/miles/grading/">
+      
+      
+        <link rel="prev" href="../dataset-verifiers/">
+      
+      
+        <link rel="next" href="../source-preparation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Grading inputs and changes - Open Instruct</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#shared-grading-inputs-and-behavior-changes" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Open Instruct" class="md-header__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Open Instruct
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Grading inputs and changes
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="ai2-dark" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7M9 21a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="ai2" data-md-color-primary="custom" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7M9 21v-1h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1m3-17a5 5 0 0 0-5 5c0 2.05 1.23 3.81 3 4.58V16h4v-2.42c1.77-.77 3-2.53 3-4.58a5 5 0 0 0-5-5"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Open Instruct" class="md-nav__button md-logo" aria-label="Open Instruct" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Open Instruct
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenai/open-instruct" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    allenai/open-instruct
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../get_started/ai2_internal_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ai2 Internal Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Olmo 3 &amp; Olmo Hybrid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../olmo2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo 2 Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu3 Reproduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tulu1_tulu2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tulu1 tulu2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dataset_transformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset Transformations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/trained_model_location/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trained Model Location
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/finetune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supervised finetuning (SFT)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/sft_running_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tpu_sft_guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running SFT on TPU: a known-good starting point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/dpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Direct Preference Optimization (DPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grouped Relative Policy Optimization (GRPO)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/olmo_core_sharding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OLMo-core Sharding and Parallelism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/tool_training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Tool-Using Models and RL Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/reward_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reward Modeling (RM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../verify-tokenization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verifying SFT tokenization is byte-identical to origin/main
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../slack-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Integrations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    MILES
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_2" id="__nav_5_1_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grpo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GRPO guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../feature-parity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support and limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development-defaults/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development defaults
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_3" id="__nav_5_1_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and training
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Models and training
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models-and-checkpoints/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models and checkpoints
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../moe-model-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hybrid MoE support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core-compatible-serving/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core-compatible serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topology and capacity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../long-sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Long sequences
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sequence-packing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequence packing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async queues
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine-drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../opd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experimental OPD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_4" id="__nav_5_1_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and evaluation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5_1_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data and evaluation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-and-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data and rewards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset-verifiers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset reward verifiers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grading inputs and changes
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grading inputs and changes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-and-eligibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration and eligibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verifier-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifier interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consumer-migration-selection-versus-task-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Consumer migration: selection versus task parsing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#effective-grading-change-register" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Effective grading change register
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits-and-remaining-qualification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits and remaining qualification
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../source-preparation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset source preparation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managed-judges/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed judges
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../background-evaluation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Background evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inference-records/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inference records
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_5" id="__nav_5_1_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations and development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations and development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../throughput-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Throughput
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compiler-cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compiler caches
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation contracts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_1_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1_6" id="__nav_5_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_1_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-training-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MILES options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-serving-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SGLang options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Not Maintained
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Not Maintained
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithms/synthetic_preference_dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synthetic preference dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-and-eligibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration and eligibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verifier-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifier interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consumer-migration-selection-versus-task-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Consumer migration: selection versus task parsing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#effective-grading-change-register" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Effective grading change register
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits-and-remaining-qualification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits and remaining qualification
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="shared-grading-inputs-and-behavior-changes">Shared grading inputs and behavior changes</h1>
+<p>MILES training combines mathematical, code, instruction-following, tool and model-judge rewards. Historically these graders selected their own answer regions, so a correct answer in thinking could earn credit even when the delivered answer was wrong or unfinished. This implementation gives final-answer grading one shared representation of thinking and the delivered response, with explicit answer, process, format and composite objective types for components that need different context. This page records the effective grading changes against open-instruct <code>46d2dbbb5bc13baa7c821afb82cd16a95be52e41</code>, including the paths whose behavior is preserved.</p>
+<h2 id="configuration-and-eligibility">Configuration and eligibility</h2>
+<p>The library default remains <code>reward_final_answer_only=false</code>; the maintained <code>dev</code>, <code>node</code> and <code>three-node</code> examples explicitly enable it for thinking policies. The disabled mode retains existing grader dispatch, boundary extraction, token inputs, gates and judge payloads. Registry <code>grading</code> policies are validated but do not change legacy scoring. Direct verifier calls, Core/vLLM and DeepSpeed/vLLM trainers, and the OPD wrapper retain their existing behavior. OPD explicitly requests legacy scoring.</p>
+<p>For a thinking-policy run:</p>
+<div class="highlight"><pre><span></span><code><span class="k">[core]</span>
+<span class="n">reward_final_answer_only</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<span class="n">reward_reasoning_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;required&quot;</span>
+</code></pre></div>
+<p>For an explicitly non-thinking run, use <code>reward_reasoning_mode="none"</code>. This accepts the whole response without requiring <code>&lt;/think&gt;</code>. It rejects reasoning control tags and a prompt that prefills <code>&lt;think&gt;</code> as <code>unexpected_reasoning</code>; it does not infer the reasoning convention from absent generated tags.</p>
+<p><code>ResponseParts</code> contains the original <code>raw</code> text, terminal-cleaned <code>full</code> text, <code>thinking</code>, delivered <code>response</code>, the response's character offset, prompt-opening/closing state, closing-marker count, and completion status. A tool call is a delivered response; the model need not append a prose summary to earn action correctness credit. The thinking opener may be in the prompt or response. If the rendered prompt already ends in a closed thinking section, generated text starts in the response region; no prompt tokens are counted as generated thinking. A missing delivered response is distinct from a present but empty one.</p>
+<p>Selection retains the last literal <code>&lt;/think&gt;</code> convention. Missing closure and whitespace-only or terminator-only tails receive <code>missing_final_answer</code>. A new <code>&lt;think&gt;</code> at the beginning of the selected suffix, after whitespace, receives <code>unfinished_reasoning</code>. An interior literal mention in explanatory prose does not trigger that shared gate. Repeated closing markers still select the last suffix and are recorded rather than globally rejected. Selection does not extract a scalar, program, JSON document, answer tag or tool call: those remain task parsers' responsibilities.</p>
+<p>The two ordinary input views are <strong>full response</strong> and <strong>after thinking</strong>. Selection preserves leading/trailing whitespace, answer wrappers, code fences, and explanatory prose in the selected text. The sole transport cleanup removes the existing terminal <code>&lt;|endoftext|&gt;</code> / <code>&lt;|im_end|&gt;</code> markers; it does not generally trim whitespace. Testing whether a response is empty uses whitespace inspection without modifying the delivered text. Thinking-only input remains an explicit exception for process objectives, rather than another answer-extraction heuristic.</p>
+<p><code>reward_final_answer_only=false</code> sends terminal-cleaned full text into the historical consumer path. <code>true</code> selects the after-thinking view by default, with the registry's explicit process exceptions. These statements describe <strong>input selection</strong>, not a guarantee that every historical consumer grades that input verbatim: the consumer review below makes those remaining parsers visible. Non-thinking runs and prompt-prefilled closed thinking select the complete generated text as the delivered response.</p>
+<p>Factory declarations and the trusted reward registry determine objective types and input views. A reasoning/whole-trajectory exception must declare <code>objective="process"</code> or <code>objective="format"</code>; <code>scope="full"</code> alone no longer authorizes an answer grader to see thinking:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;answer&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;factory&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;open_instruct.miles.rewards.task_verifiers.MultiplicationVerifier&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;whole_response_length&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;factory&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;open_instruct.ground_truth_utils.UpToMaxLenVerifier&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;grading&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;objective&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;process&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;scope&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;full&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;require_response&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>objective="answer"</code></td>
+<td>Default: correctness, quality or constraints on the presented answer/action. Requires <code>scope="response"</code>; it cannot opt back into thinking.</td>
+</tr>
+<tr>
+<td><code>objective="process"</code></td>
+<td>Explicit reasoning or trajectory objective. Requires <code>scope="thinking"</code> (default) or <code>scope="full"</code>. Length verifiers declare process/full in their factory.</td>
+</tr>
+<tr>
+<td><code>objective="format"</code></td>
+<td>Explicit presentation/structure objective. R1 checks answer presentation in the response; a boundary-format component such as ToolRL declares full context.</td>
+</tr>
+<tr>
+<td><code>objective="composite"</code></td>
+<td>A structured consumer with separately declared component objective types and views. ToolRL combines answer correctness on response with format on full text. A registry cannot relabel it as a single objective.</td>
+</tr>
+<tr>
+<td><code>scope="response"</code></td>
+<td>Default selected string: the delivered answer or action. A completed nonempty response is mandatory.</td>
+</tr>
+<tr>
+<td><code>scope="thinking"</code></td>
+<td>Deliver the thinking region to a process grader. This is an explicit change of objective.</td>
+</tr>
+<tr>
+<td><code>scope="full"</code></td>
+<td>Deliver terminal-cleaned full text, with original response/trajectory tokens. Native task parsers may still extract their own answer from this input.</td>
+</tr>
+<tr>
+<td><code>require_response=true</code></td>
+<td>Default for every scope: a missing/empty/unfinished delivered response gates this component at its verifier floor.</td>
+</tr>
+<tr>
+<td><code>require_response=false</code></td>
+<td>Explicitly allow thinking/full objectives to grade without a completed delivered response. Cannot be used with <code>scope="response"</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Full-text access does not itself bypass eligibility. Setting <code>require_response=false</code> requires an explicit <code>scope="thinking"</code> or <code>scope="full"</code>, even when a factory defaults to full scope; preparation and runtime enforce the same declaration. <code>reward_zero_truncated</code> still gates <strong>every</strong> component, including explicit thinking/full exceptions. It is independent of response selection. Gates retain each verifier's target-dependent floor and weight; they are neither verifier failures nor ungraded-response omissions.</p>
+<p>Do not add <code>grading</code> to per-row verifier metadata: targets and weights do not authorize a different input policy. Preparation validates grading keys, types and enum values without importing factories. Runtime registry loading resolves factory defaults and validates objective/view combinations, token requirements and composite declarations. Token-based verifiers reject scopes other than <code>full</code> at registry load. ToolRL declares a composite objective: correctness always uses <code>response</code>, and format uses <code>full</code>. A full/thinking override of the composite is rejected rather than letting correctness see thinking. Its native format objective requires reasoning; final mode rejects ToolRL or a thinking-scope objective combined with <code>reward_reasoning_mode="none"</code> before grading/gating.</p>
+<p>Named-judge bindings may replace a registry's factory/configuration, but preserve its trusted <code>grading</code> declaration unless the override explicitly supplies another one. For prepared inputs with a reward registry, inherited policies are included in the preparation contract. A cached preparation from before this preservation fix is rejected when it would have dropped an explicit policy; use a fresh output directory. Preparations without such declarations keep their existing contract.</p>
+<h2 id="verifier-interface">Verifier interface</h2>
+<p>Ordinary verifiers continue to receive <code>async_call(tokens, prediction, label, **kwargs)</code>, with <code>prediction</code> selected by the registry policy. For <code>scope="response"</code>, an existing <code>async_call_final_answer</code> override still takes precedence. R1 format and native manifest IF keep those overrides. Migrated consumers declare <code>grading_accepts_selected_input=True</code>; the dispatcher then supplies <code>selected_input=True</code> for any selected view, including process/full inputs. The consumer skips all thinking-boundary discovery but retains its task parser. This flag is internal to the trusted adapter and cannot be supplied by dataset rows. Flag-off dispatch omits it, preserving historical calls.</p>
+<p>A grader needing both pieces can implement:</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">async_call_parts</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tokens</span><span class="p">,</span> <span class="n">parts</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">scope</span><span class="p">,</span> <span class="n">query</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">rollout_state</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">prediction</span> <span class="o">=</span> <span class="n">parts</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span>
+    <span class="c1"># parts.thinking and parts.response are independently available.</span>
+</code></pre></div>
+<p>The dispatcher uses this method only in final-answer mode, after the component's eligibility gate. It takes precedence over the final-answer/string methods. Legacy mode always uses <code>async_call</code>. No adapter to an external experimental verifier is included. A factory outside the <code>open_instruct</code> namespace must explicitly declare registry <code>grading</code> or implement the parts protocol before it can score in final mode. The native reward bridge validates its registry in driver startup, before allocating workers: undeclared external contracts and incompatible reasoning conventions fail there. Direct scoring calls retain the same checks before eligibility gates. An explicit declaration is an assertion of compatibility, not automatic qualification: external graders still need positive/negative controls. Optional string fallback is retained for in-repository text graders.</p>
+<p>Composite factories also declare <code>grading_components</code>, mapping names to <code>{objective, scope}</code>. Their parts method receives a <code>component_inputs</code> dictionary of the exact selected strings; ToolRL reads <code>format</code> and <code>correctness</code> from that dictionary. The current composite score retains its joint eligibility gate and native aggregation formula: sub-objectives do not silently acquire independent rewards, weights or gates. Ordinary independently weighted verifiers still have their own eligibility policies.</p>
+<p>Only full-scope consumers receive original tokens. Response/thinking scopes receive <code>[]</code>, as the sample does not provide reliable decoded-character-to-token alignment. The implementation does not retokenize generated text or fabricate token slices. A token-dependent custom grader must declare <code>grading_uses_tokens=True</code> and <code>grading_scope="full"</code>; the registry rejects a selected-text scope for it. Text-based thinking grading is supported; token-based thinking-only grading requires an explicit future alignment contract.</p>
+<p>Original samples, labels and training loss masks are preserved. <code>metadata.grading</code> records the parser version, reasoning convention, boundary status, character counts, and every component's objective type, scope, eligibility requirement and gate. Composite records additionally identify each sub-objective and its input view. It does not duplicate the response text. <code>reward_gate</code> remains a compatibility summary when any component is gated; the per-component record is authoritative for mixed objectives.</p>
+<p>The Open Instruct recorder integration retains this summary in each saved response, including when raw-response recording is disabled. New final-mode group rows also carry <code>grading_policy</code> and extend their evidence <code>input_key</code> with the selector version, reasoning convention and truncation policy. This prevents pooling new final-mode evidence with legacy results or a different declared reasoning convention. The feedback recorder, persisted row and prompt-exclusion selector use the same extended key. Exclusion tables carry their grading contract, reject cross-contract use and require <code>--grading-policy</code> when the chosen lineage/protocol contains mixed grading evidence. New tables use schema 2; historical unversioned schema-1 tables remain usable only in legacy mode. Rebuild old final-mode tables from matching records instead of silently accepting incompatible keys. Default-off rows and the pinned base recorder's manifest format are unchanged.</p>
+<h2 id="consumer-migration-selection-versus-task-parsing">Consumer migration: selection versus task parsing</h2>
+<p>The shared selector owns thinking boundaries and eligibility. Consumers may still extract mathematical answers, code, JSON or answer wrappers from the supplied string, but migrated paths never look for <code>&lt;/think&gt;</code> again. They retain their existing task-level whitespace normalization; this step does not change every formatting rubric. Grading contract schema <strong>3</strong> identifies typed components and authoritative selected inputs; records with another schema identify a different grading contract.</p>
+<p>The 16 entry points below previously interpreted thinking boundaries after shared selection. They now accept the selected-input contract. The count includes Manifest IF separately from its native IFEval delegate; NeMo's extra parser is already included among the ten common-helper consumers.</p>
+<table>
+<thead>
+<tr>
+<th>Consumers</th>
+<th style="text-align: right;">Count</th>
+<th>Flag-on behavior after migration</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Deterministic, complete-code, Litmus, JSON Schema, structured formats, long context, Reasoning Gym, NeMo calendar, NeMo instruction, NeMo single-step tools</td>
+<td style="text-align: right;">10</td>
+<td><code>answer_text(selected_input=True)</code> retains task whitespace normalization and skips thinking discovery. All async/worker paths forward the contract.</td>
+</tr>
+<tr>
+<td>Manifest IF, native IFEval, IFEvalOld, F1, puzzle matcher</td>
+<td style="text-align: right;">5</td>
+<td>Keep answer/assistant-tag cleanup and native normalization; skip the thinking split. The async bridge forwards the contract to opted-in synchronous implementations.</td>
+</tr>
+<tr>
+<td>Legacy LM judge</td>
+<td style="text-align: right;">1</td>
+<td>Keep first-answer-wrapper extraction and assistant-tag cleanup; disable its thinking-boundary fallback. No live legacy-judge qualification is claimed.</td>
+</tr>
+<tr>
+<td>NeMo's additional action parser</td>
+<td style="text-align: right;">Included above</td>
+<td>Bypass its own split and blanket opener rejection; shared eligibility is authoritative. Action syntax/comparison is unchanged.</td>
+</tr>
+<tr>
+<td>Long-context opener rejection</td>
+<td style="text-align: right;">Included above</td>
+<td>Shared eligibility is authoritative; literal interior opener text is no longer automatically treated as unfinished thinking.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Other consumers</th>
+<th>Objective / decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Named quality/reference/WebInstruct judges</td>
+<td>Answer by default; explicitly declared process/format views are possible. Their selected input stays intact, including whitespace, answer wrappers and surrounding prose.</td>
+</tr>
+<tr>
+<td>ToolRL</td>
+<td>Composite: full context for native boundary-format credit, selected response for action correctness. No local reasoning split or blanket opener rejection in selected-action correctness. Native format rules, scaling, partial credit and joint missing-response floor remain.</td>
+</tr>
+<tr>
+<td>R1 format</td>
+<td>Declares format/response; retains its answer-presentation check. An explicit format/full declaration retains the native raw-boundary check.</td>
+</tr>
+<tr>
+<td>Math, strict math, GSM8K, legacy code, rubric judge, multiplication, Sudoku, Flan, string/search</td>
+<td>No explicit thinking split to migrate in these consumers. Keep their downstream mathematical/program/wrapper/phrase parsing.</td>
+</tr>
+<tr>
+<td>MaxLen / UpToMaxLen</td>
+<td>Declare process/full; retain actual trajectory tokens. Other state/passthrough objectives retain their native contract.</td>
+</tr>
+<tr>
+<td>External factories</td>
+<td>Still require a trusted declaration or parts interface. An asserted contract does not automatically qualify an external parser; positive/negative controls remain required.</td>
+</tr>
+</tbody>
+</table>
+<p>Flag-off behavior is intentionally unchanged, including consumers that historically stripped thinking despite receiving full text. Making flag-off mean that every consumer actually grades full text would be a separate objective migration, reviewed per path rather than hidden in this change.</p>
+<p>Validation results and saved-response measurements are recorded in <a href="https://github.com/allenai/open-instruct/pull/2250">PR #2250</a>; this page describes the grading contract and effective behavior changes.</p>
+<h2 id="effective-grading-change-register">Effective grading change register</h2>
+<p>The comparison below distinguishes the old flag-on implementation from flag-off compatibility. The new default-off implementation is unchanged in every row unless a future, separately documented correctness fix changes it.</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Previous flag-on behavior</th>
+<th>New flag-on behavior / effective change</th>
+<th>Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>General MILES math (including remapped legacy factory), strict math, GSM8K</td>
+<td>Grade the last closing-marker suffix.</td>
+<td>Same selected text, anchor rules and mathematical equivalence. Correct thinking cannot rescue a wrong delivered answer.</td>
+<td>Existing symbolic worker regression and math tests; selection tests.</td>
+</tr>
+<tr>
+<td>Legacy assertion/stdio code</td>
+<td>Extract a program from the selected suffix.</td>
+<td>Same suffix and code/service contract. No execution-service, timeout or test changes.</td>
+<td>Final-answer code-dispatch tests.</td>
+</tr>
+<tr>
+<td>Complete-code</td>
+<td>Select suffix, then its task parser selects again.</td>
+<td>No second thinking split in selected-input mode. Program extraction and execution-service semantics remain unchanged.</td>
+<td>Complete-code tests and shared selection tests.</td>
+</tr>
+<tr>
+<td>Deterministic MCQA, numeric, exact text, countdown, formatting, knights</td>
+<td>Select last suffix; parse according to the target.</td>
+<td>Use the selected view without a second thinking split. Existing task whitespace, declarations and comparison rules remain; legacy/direct calls retain suffix fallback.</td>
+<td>Deterministic verifier tests.</td>
+</tr>
+<tr>
+<td>NeMo IF / calendar</td>
+<td>Select last suffix and apply the target.</td>
+<td>Skip local thinking selection on every selected view; retain native parsing, tolerances and constraint aggregation.</td>
+<td>NeMo constraints tests.</td>
+</tr>
+<tr>
+<td>Dolci manifest IF / legacy IFEval</td>
+<td>Outer selection followed by IF normalization.</td>
+<td>Skip local thinking selection; retain answer/assistant-tag cleanup, native whitespace normalization and constraint aggregation. No historical qualified-module adapter.</td>
+<td>Real native IF wrapper/copy-span parity tests.</td>
+</tr>
+<tr>
+<td>JSON Schema / structured output</td>
+<td>Select suffix and validate parsed content.</td>
+<td>Skip local thinking selection; format/schema parsing and schema-only content weaknesses are unchanged.</td>
+<td>Structured/JSON-schema tests.</td>
+</tr>
+<tr>
+<td>Litmus / Reasoning Gym / long context</td>
+<td>Select suffix, then task extraction/scoring.</td>
+<td>Skip local thinking selection; retain answer extraction, tolerances and partial credit. Long-context interior literal openers are now governed by the shared gate.</td>
+<td>Family tests.</td>
+</tr>
+<tr>
+<td>Named judges: response scope</td>
+<td>Select suffix; rubric extracts answer tags within it and inconsistently trims whitespace.</td>
+<td><strong>Intentional input change:</strong> send the entire selected response intact, including wrappers, whitespace, and text outside answer tags. No implicit answer extraction. Answer tags in thinking remain inaccessible.</td>
+<td>All three named judge templates, every scope, both flag settings, and exact payload preservation tests.</td>
+</tr>
+<tr>
+<td>Named judges: explicit thinking/full scope</td>
+<td>No per-grader scope.</td>
+<td>New explicit objective: selected view is sent intact, with answer extraction disabled. Rubric templates, bindings and score parsers are unchanged.</td>
+<td>New judge view/payload tests.</td>
+</tr>
+<tr>
+<td>Legacy <code>LMJudgeVerifier</code> / <code>RubricVerifier</code> registered directly</td>
+<td>Receive the outer suffix, then apply their own first-answer/last-answer tag rules.</td>
+<td>LM judge skips its thinking fallback for selected views but retains first-answer-wrapper extraction. Rubric keeps its last-answer-wrapper rule. Process views are not re-split; wrapper extraction remains task parsing. Direct legacy calls are unchanged.</td>
+<td>Source tracing and shared string-dispatch regressions; no live legacy-judge qualification claimed.</td>
+</tr>
+<tr>
+<td>NeMo single-step tools</td>
+<td>Outer suffix; prompt-opening state disabled after selection.</td>
+<td>Skip both local thinking split and blanket opener rejection on selected views. Shared gates decide eligibility, so literal interior openers in messages/arguments are content. Native syntax, similarity thresholds and extra-call behavior remain unchanged.</td>
+<td>NeMo worker/prompt-opener tests.</td>
+</tr>
+<tr>
+<td>ToolRL response scope</td>
+<td>Lost the raw boundary; valid no-call format could score 0 and call rewards could lose format credit.</td>
+<td><strong>Correctness fix:</strong> raw boundary supplies format credit; shared selected action supplies correctness. Prompt-prefilled reasoning comes from the rendered prompt, overriding both a copied label flag and registry <code>think_prefix_in_prompt</code> configuration. Reward scaling, floors and partial-credit formula are unchanged.</td>
+<td>New call/no-call and prompt-prefix tests; existing ToolRL scale/floor/parser tests.</td>
+</tr>
+<tr>
+<td>ToolRL repeated markers</td>
+<td>Suffix-only input lost format context and native parsing otherwise used the first marker.</td>
+<td>Format still fails repeated boundaries; correctness uses the shared last suffix. Composite full overrides are rejected; only flag-off/direct native calls retain first-marker action parsing.</td>
+<td>Repeated-marker action-selection test.</td>
+</tr>
+<tr>
+<td>R1 format</td>
+<td>Optional suffix override checks answer tags.</td>
+<td>Same response-scope check; empty answer tags/trailing text retain existing format semantics. Explicit full scope uses the raw-boundary check and rejects non-thinking mode, while response-format checking remains usable without thinking.</td>
+<td>Existing final-answer format tests.</td>
+</tr>
+<tr>
+<td>Multiplication / Sudoku / Flan / string/search/F1/puzzle tasks</td>
+<td>Parse task-specific answer tags, finish tags or text from suffix.</td>
+<td>Retain task parsers and answer-wrapper rules. F1 and puzzle skip their local thinking split on selected inputs. No new participation floors.</td>
+<td>Existing task tests and shared selection tests.</td>
+</tr>
+<tr>
+<td>Passthrough/environment objectives</td>
+<td>Passthrough returns zero independently of text; legacy environment workflows aggregate rollout rewards separately.</td>
+<td>Same scoring and rollout-state forwarding. Explicit full-scope process graders can retain trajectory input; no environment reward aggregation or per-turn decomposition is changed.</td>
+<td>Source tracing and shared dispatch/state-preservation regressions.</td>
+</tr>
+<tr>
+<td>MaxLen / UpToMaxLen registered in MILES</td>
+<td>Received <code>[]</code>, silently scoring zero-length input.</td>
+<td><strong>Correctness fix:</strong> declared full scope retains actual trajectory tokens. Still requires a delivered response unless explicitly exempted. Legacy callers and formulas are unchanged.</td>
+<td>New actual-factory length tests and invalid-scope rejection.</td>
+</tr>
+<tr>
+<td>Leading reopened reasoning after closure</td>
+<td>Generic suffix graders could award credit; NeMo already rejected it.</td>
+<td><strong>Intentional eligibility change:</strong> response-required components receive their floor. Interior literal mentions do not trigger the shared gate. Explicit thinking/full exceptions may still grade.</td>
+<td>Reopened-reasoning, literal-mention and legacy-parity tests.</td>
+</tr>
+<tr>
+<td>Declared non-thinking runs</td>
+<td>Flag-on required a closing tag and zeroed valid tagless answers.</td>
+<td><strong>New opt-in:</strong> <code>reward_reasoning_mode="none"</code> accepts a completed tagless response, reserving reasoning tags as control syntax.</td>
+<td>Non-thinking/parser tests.</td>
+</tr>
+<tr>
+<td>Prompt-prefilled closed thinking</td>
+<td>Flag-on required another closing marker in generated text.</td>
+<td><strong>Intentional boundary correction:</strong> a rendered prompt ending in <code>&lt;/think&gt;</code> establishes that generated text is already the delivered response.</td>
+<td>Prompt-prefilled closed-thinking test.</td>
+</tr>
+<tr>
+<td>Mixed response/process objectives</td>
+<td>One global missing-final gate suppressed all components.</td>
+<td><strong>New opt-in:</strong> each declared exception can grade; response-required components still receive their floor. Truncation remains global.</td>
+<td>Mixed-component/floor/truncation tests.</td>
+</tr>
+<tr>
+<td>External custom verifiers</td>
+<td>Could silently reapply a raw-boundary requirement to a selected suffix.</td>
+<td><strong>Compatibility requirement:</strong> final mode now rejects undeclared external input contracts before eligibility gating; legacy mode remains supported.</td>
+<td>External-verifier declared/full-scope and missing-response tests.</td>
+</tr>
+<tr>
+<td>Prepared registry validation / named-judge overrides</td>
+<td>Preparation could assume answer defaults for a process factory; binding overrides could discard an explicit grading policy.</td>
+<td><strong>Integration fixes:</strong> preparation checks syntax without guessing factory defaults; named binding replacements preserve trusted policies. Effective inherited policies enter the prepared-data contract, rejecting stale caches that dropped them.</td>
+<td>MaxLen/UpToMaxLen defaults, process/format binding preservation, explicit override precedence and stale-cache refusal tests.</td>
+</tr>
+<tr>
+<td>Verifier/service failures, omissions, weights, floors</td>
+<td>Existing exception, exclusion and target-dependent floor behavior.</td>
+<td>Unchanged. New input provenance does not convert infrastructure failures to model mistakes.</td>
+<td>Existing reward-failure/omission suites.</td>
+</tr>
+<tr>
+<td>Inference records and feedback</td>
+<td>Pinned recorder drops arbitrary metadata and its protocol identity omits global grading flags.</td>
+<td><strong>New-contract provenance:</strong> persist per-response selection; extend final-mode evidence keys with the effective global grading policy. Default-off keys, admission and rewards are unchanged.</td>
+<td>Actual pinned-recorder persistence, feedback/key parity and contract-separation tests.</td>
+</tr>
+<tr>
+<td>OPD, direct callers, non-MILES GRPO</td>
+<td>Their own extraction contracts.</td>
+<td>Unchanged; no global migration of these workflows is claimed.</td>
+<td>OPD and direct-call tests.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="limits-and-remaining-qualification">Limits and remaining qualification</h2>
+<p>Literal thinking delimiters inside quotations, code, JSON strings or tool arguments are not distinguishable from structural tags using decoded text alone. Last-marker selection retains that existing limitation; a literal opener at the start of a selected response now triggers the documented reopened-reasoning gate. Interior openers are not interpreted by the shared eligibility check; native format parsers may impose their own syntax restrictions. Selected-input NeMo and long-context consumers no longer independently reinterpret opener text; historical direct callers retain their prior checks. Do not treat marker counts as a complete conversation parser. Multi-turn trajectories are retained for full-scope token consumers, not decomposed into per-turn thinking/response pairs.</p>
+<p>Bad targets can still be hidden by an eligibility gate if that verifier has no independent target validation before scoring. Returned timeout semantics, permissive native checker rules, schema-only rewards and judge score parsing remain separate audit items. This refactor does not certify service deployment, gold-label correctness, external experimental modules or all native Reasoning Gym subtasks.</p>
+<p>The pinned recorder's original protocol omission also affects historical/default-off evidence under different truncation settings. That existing upstream issue is not retrospectively repaired here; old records must not be assumed comparable merely because their old input keys match. New per-row grading identity supplements the base manifest, and runtime/verifier revision provenance is still required. The selector schema version must change if a later implementation changes its grading semantics.</p>
+<p>H180 found mixed accuracy and termination changes and retained an IF normalization confound even after reward flow was restored. It does not establish that the cleaner objective improves stopping. These code changes introduce no format bonus, new training run, sampling change or production-default change. Saved-response replay and a controlled training comparison remain separate evidence from CPU regression tests; passing input-contract tests does not establish training quality.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
