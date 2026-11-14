@@ -78,8 +78,9 @@ Before launching a panel containing SciCode, replace the example's
 `arguments.h5py_host_path` with the absolute path to your `test_data.h5` on a
 filesystem mounted in the evaluator. Launch validation rejects missing paths,
 `YOUR_…` placeholders and unexpanded variables. Planning and validation warn
-about unresolved paths while keeping examples loadable. The submitting workstation need not mount WEKA; file
-existence is checked in the evaluator before inference.
+about unresolved paths while keeping examples loadable. The submitting
+workstation need not mount WEKA; file existence is checked in the evaluator
+before inference.
 
 Workspace and budget default to `launch.workspace` and `launch.budget`. Evaluator
 jobs inherit `launch.weka_mounts`, `WANDB_API_KEY` and `HF_TOKEN` secret references.

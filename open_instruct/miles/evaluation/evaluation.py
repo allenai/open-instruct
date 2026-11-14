@@ -448,7 +448,7 @@ def submit(receipt, path):
         logger.warning(
             "BACKGROUND EVALUATION GAP at update %s: %s; receipt %s",
             receipt["update"],
-            receipt.get("submission_error", receipt["diagnostic"]),
+            receipt.get("submission_error", f"{receipt['error']}: {receipt['diagnostic']}"),
             path,
         )
     state.atomic_json(path, receipt)

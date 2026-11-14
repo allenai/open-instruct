@@ -73,3 +73,12 @@ def test_failed_receipt_keeps_actionable_reference_error(tmp_path):
     assert receipt["status"] == "submission_failed"
     assert receipt["error"] == "InputError"
     assert "Replace the example YOUR_USERNAME placeholder" in receipt["diagnostic"]
+
+
+def test_submission_log_keeps_non_validation_error_type(tmp_path, monkeypatch):
+    warning = Mock()
+    monkeypatch.setattr(evaluation.logger, "warning", warning)
+    receipt = {"update": 100, "checkpoint": str(tmp_path / "missing-snapshot")}
+    evaluation.submit(receipt, tmp_path / "receipt.json")
+    assert receipt["error"] == "ValueError"
+    assert warning.call_args.args[2].startswith("ValueError: Submission failed")
