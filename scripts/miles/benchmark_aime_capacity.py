@@ -91,14 +91,17 @@ def command(receipt, output, capacity):
     options = receipt["evaluation"]["provider_kwargs"]
     if options["max_running_requests"] != capacity or options["random_seed"] != 17:
         raise ValueError("Engine capacity or seed mismatch")
+    argv = evaluation_runner.command(receipt, output)
+    task_index = argv.index("--task")
     return [
-        *evaluation_runner.command(receipt, output),
+        *argv[:task_index],
         "-o",
         "provider.kwargs.model_registration=scripts.miles.benchmark_aime_capacity:register",
         "-o",
         f"batching.chunk_size={capacity}",
         "-o",
         f"batching.max_batch_sequences={capacity}",
+        *argv[task_index:],
     ]
 
 

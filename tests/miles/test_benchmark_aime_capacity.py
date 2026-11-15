@@ -47,3 +47,28 @@ def test_command_rejects_changed_draws_before_evaluator_launch(tmp_path):
     receipt = {"tasks": [{"generation": {"num_samples": 16}, "scoring": {"seed": 17}}]}
     with pytest.raises(ValueError, match="sampling protocol"):
         pilot.command(receipt, tmp_path, 128)
+
+
+def test_capacity_overrides_precede_task_selector(monkeypatch, tmp_path):
+    receipt = {
+        "tasks": [
+            {
+                "generation": {
+                    "temperature": 1.0,
+                    "top_p": 0.95,
+                    "max_tokens": 16384,
+                    "num_samples": 32,
+                    "stop_sequences": [],
+                },
+                "scoring": {"seed": 17},
+            }
+        ],
+        "evaluation": {"provider_kwargs": {"max_running_requests": 128, "random_seed": 17}},
+    }
+    monkeypatch.setattr(
+        pilot.evaluation_runner,
+        "command",
+        lambda *args: ["olmo-eval", "--harness", "default", "--task", "aime_2024:pass_at_32"],
+    )
+    argv = pilot.command(receipt, tmp_path, 128)
+    assert argv.index("batching.max_batch_sequences=128") < argv.index("--task")
