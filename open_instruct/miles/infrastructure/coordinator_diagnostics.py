@@ -1,9 +1,11 @@
 """Opt-in, bounded-frequency coordinator diagnostics for H235 failure reproduction."""
 
 import asyncio
-import faulthandler
 import os
+import sys
+import threading
 import time
+import traceback
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -26,25 +28,54 @@ async def heartbeat(interval=30):
         previous = now
 
 
-_STACK_FILES = []
+def sample_stacks(output):
+    # Take strong frame references while holding the GIL. The native faulthandler
+    # watchdog walks frames without the GIL and can segfault on this Python 3.12.3
+    # runtime (CPython gh-123967). Sampling cannot observe a thread that holds the
+    # GIL indefinitely; the independent process/memory watcher covers that gap.
+    frames = sys._current_frames()
+    try:
+        output.write(f"Python stack sample unix={time.time():.3f}\n")
+        for identity, frame in list(frames.items())[:100]:
+            output.write(f"Thread {identity}:\n")
+            output.writelines(traceback.format_stack(frame, limit=50))
+        output.flush()
+    finally:
+        frames.clear()
+
+
+def _watch(stopped, interval, path):
+    output = path.open("a") if path is not None else sys.stderr
+    try:
+        while not stopped.wait(interval):
+            sample_stacks(output)
+    finally:
+        if path is not None:
+            output.close()
+
+
+async def _heartbeat_and_stop(stopped):
+    try:
+        await heartbeat()
+    finally:
+        stopped.set()
 
 
 def start(interval=60, directory=None):
-    # CPython's native watchdog can dump every Python thread even when Python
-    # logging, the actor loop, or a Python watchdog cannot acquire the GIL.
-    # stderr is retained in the Beaker run log. No response payloads are printed.
-    output = None
+    path = None
     if directory is not None:
-        path = Path(directory) / "coordinator-diagnostics"
-        path.mkdir(parents=True, exist_ok=True)
-        output = (path / f"stacks-{os.getpid()}.log").open("a")
-        _STACK_FILES.append(output)
-    faulthandler.enable(file=output, all_threads=True)
-    faulthandler.dump_traceback_later(interval, repeat=True, file=output)
+        directory = Path(directory) / "coordinator-diagnostics"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"stacks-{os.getpid()}.log"
+    stopped = threading.Event()
+    thread = threading.Thread(target=_watch, args=(stopped, interval, path), daemon=True)
+    thread.start()
     logger.info(
-        "Coordinator stack sampling enabled pid=%s unix=%.3f interval_s=%s", os.getpid(), time.time(), interval
+        "Coordinator Python stack sampling enabled pid=%s unix=%.3f interval_s=%s", os.getpid(), time.time(), interval
     )
-    return asyncio.create_task(heartbeat())
+    task = asyncio.create_task(_heartbeat_and_stop(stopped))
+    task.add_done_callback(lambda _: stopped.set())
+    return task
 
 
 @contextmanager
