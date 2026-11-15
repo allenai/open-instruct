@@ -24,10 +24,10 @@ import httpx
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
-from scripts.miles import diagnostic_native_config, qualify_math_quantization
+from scripts.miles import diagnostic_native_config, qualify_math_nvfp4_kv, qualify_math_quantization
 from torch import distributed as dist
 
-from open_instruct.miles.execution import quantized_publication
+from open_instruct.miles.execution import kda_dispatch, quantized_publication
 
 EXPERT = re.compile(r"^model\.layers\.(\d+)\.mlp\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$")
 # Preregistered tolerances on fixed-token conditional log probabilities. Full
@@ -372,6 +372,10 @@ def trace_forward(model, original_forward, values, options):
 
 def audit_scheduler(*args, **kwargs):
     """Observe real serving weights after each load, without changing numerics."""
+    kda_dispatch.install(
+        server_args=args[0] if args else kwargs.get("server_args"),
+        gpu_id=args[2] if len(args) > 2 else kwargs.get("gpu_id"),
+    )
     instrument_receiver()
     if os.environ.get("OI_PUBLICATION_TRACE_ENCODING") == "1":
         instrument_nvfp4_quantization()
@@ -384,8 +388,7 @@ def audit_scheduler(*args, **kwargs):
         diagnostic_native_config.install(intervention, Path(os.environ["OI_PUBLICATION_AUDIT"]), save)
     instrument_kda_inputs()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
-    if os.environ.get("OI_PUBLICATION_MATCH_LOADER_CONTEXT") == "1":
-        quantized_publication.install_nvfp4_publication_context(model_type)
+    quantized_publication.install_nvfp4_publication_context(model_type)
     original_load, original_forward = model_type.load_weights, model_type.forward
 
     def load(model, *values, **options):
@@ -453,7 +456,10 @@ def audit_scheduler(*args, **kwargs):
         return original_forward(model, *values, **options)
 
     model_type.load_weights, model_type.forward = load, forward
-    return importlib.import_module("sglang.srt.managers.scheduler").run_scheduler_process(*args, **kwargs)
+    scheduler = importlib.import_module("sglang.srt.managers.scheduler")
+    if getattr(args[0] if args else kwargs.get("server_args"), "kv_cache_dtype", None) == "nvfp4":
+        qualify_math_nvfp4_kv.install_scheduler_audit(scheduler.Scheduler)
+    return scheduler.run_scheduler_process(*args, **kwargs)
 
 
 def server_options(args):
@@ -483,6 +489,15 @@ def server_options(args):
     )
     if args.precision == "nvfp4":
         options.update(quantization="nvfp4_online", moe_runner_backend="flashinfer_trtllm_routed")
+    if getattr(args, "nvfp4_kv", False):
+        if args.precision != "nvfp4":
+            raise ValueError("Native NVFP4 KV gate requires the selected NVFP4 expert arm")
+        options.update(
+            kv_cache_dtype="nvfp4",
+            prefill_kv_cache_dequant_dtype="nvfp4",
+            page_size=16,
+            attention_backend="trtllm_mha",
+        )
     return options
 
 
@@ -491,6 +506,7 @@ def server(args):
     importlib.import_module("olmo_sglang").register()
     server_args = importlib.import_module("sglang.srt.server_args").ServerArgs
     options = server_options(args)
+    os.environ["OI_KV_GATE_OUTPUT"] = str(args.output)
     save(args.output / "server-options.json", options)
     importlib.import_module("sglang.srt.entrypoints.http_server").launch_server(
         server_args(**options), run_scheduler_process_func=audit_scheduler
@@ -535,6 +551,7 @@ class Fleet:
                         str(gpu),
                         "--port",
                         str(number),
+                        *(["--nvfp4-kv"] if getattr(self.args, "nvfp4_kv", False) else []),
                     ],
                     env=env,
                     stdout=stream,
@@ -606,7 +623,17 @@ class Fleet:
                 if not paths:
                     raise ValueError("Missing serving tensor audit")
                 audit = json.loads(paths[-1].read_text())
-                qualify_math_quantization.verify_inventory(audit, self.args.precision)
+                if getattr(self.args, "nvfp4_kv", False):
+                    pools = list(directory.glob("pool-audit-*.json"))
+                    if len(pools) != 1:
+                        raise ValueError("Missing unique actual native KV/recurrent/backend audit")
+                    qualify_math_nvfp4_kv.verify_audit(json.loads(pools[0].read_text()))
+                    # KV scale loaders are validated against actual physical pools
+                    # above; retain their hashes in the complete comparison audit.
+                    weights = [module for module in audit if module["class"] != "RadixAttention"]
+                    qualify_math_quantization.verify_inventory(weights, self.args.precision)
+                else:
+                    qualify_math_quantization.verify_inventory(audit, self.args.precision, kv_cache_dtype="bf16")
                 audits.append(audit)
         save(self.args.output / f"{label}.json", {"outputs": result, "audits": audits})
         return result, audits
@@ -652,6 +679,9 @@ def fresh_checkpoint(args, variant):
 def run(args):
     if os.environ.get("OI_PUBLICATION_NATIVE_CONFIG_RECEIPT"):
         raise ValueError("Native intervention is forbidden in strict refresh qualification")
+    forbidden = [key for key, value in os.environ.items() if value and key.startswith("OI_PUBLICATION_TRACE_")]
+    if forbidden:
+        raise ValueError(f"Diagnostic tracing forbidden in strict refresh qualification: {forbidden}")
     args.output.mkdir(parents=True, exist_ok=False)
     configure_transport_environment()
     if torch.cuda.device_count() != 4:
@@ -754,8 +784,8 @@ def run(args):
                 save(args.output / "publication-progress.json", reports)
         finally:
             updater.close()
-    for variant in (1, 2):
-        with Fleet(args, changed[variant], f"fresh-{variant}") as fleet:
+    for variant in (0, 1, 2):
+        with Fleet(args, args.model if variant == 0 else changed[variant], f"fresh-{variant}") as fleet:
             reference = fleet.probe(f"fresh-{variant}", probes)
         actual = observed[variant]
         if actual[1] != reference[1]:
@@ -772,14 +802,25 @@ def run(args):
             )
             if x[0] is not None and y[0] is not None
         )
-        if delta <= 1e-3:
+        if variant != 0 and delta <= 1e-3:
             raise ValueError("Changed weights did not measurably perturb probe outputs")
         save(
             args.output / f"comparison-{variant}.json", {"comparisons": comparisons, "baseline_max_abs_change": delta}
         )
     save(
         args.output / "qualified.json",
-        {"precision": args.precision, "publications": reports, "fresh_variants": [1, 2], "passed": True},
+        {
+            "precision": args.precision,
+            "publications": reports,
+            "fresh_variants": [0, 1, 2],
+            "dispatch_policy_sha256": hashlib.sha256(Path(os.environ["OI_MILES_KDA_POLICY"]).read_bytes()).hexdigest()
+            if os.environ.get("OI_MILES_KDA_POLICY")
+            else None,
+            "passed": True,
+            "nvfp4_kv": getattr(args, "nvfp4_kv", False),
+            "full_cap_qualified": False,
+            "scope": "New strict short fixed-token publication gate; full-cap and training/resume gates remain required",
+        },
     )
     dist.destroy_process_group()
 
@@ -789,6 +830,7 @@ def main():
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--precision", choices=("bf16", "nvfp4"), required=True)
+    parser.add_argument("--nvfp4-kv", action="store_true")
     parser.add_argument("--server", action="store_true")
     parser.add_argument("--gpu", type=int)
     parser.add_argument("--port", type=int)

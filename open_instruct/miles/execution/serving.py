@@ -1,6 +1,7 @@
 """Register hybrid serving capabilities before SGLang resolves its arguments."""
 
 import importlib
+import os
 import runpy
 import shlex
 import sys
@@ -8,7 +9,7 @@ from functools import partial
 
 from miles.utils.compiler_cache import startup_cache
 
-from open_instruct.miles.execution import quantized_publication
+from open_instruct.miles.execution import kda_dispatch, quantized_publication
 
 
 def configure_specs(args, specs):
@@ -38,6 +39,18 @@ def main():
     importlib.import_module("miles.utils.compiler_cache.hf_module_cache").prime_serving_modules(sys.argv[1:])
     importlib.import_module("olmo_sglang.kda.backend").register_olmo_kda_backend()
     quantized_publication.install_nvfp4_publication_context()
+    if os.environ.get("OI_MILES_KDA_POLICY"):
+        http_server = importlib.import_module("sglang.srt.entrypoints.http_server")
+        original_launch = http_server.launch_server
+
+        def launch(server_args, *args, **kwargs):
+            if args or "run_scheduler_process_func" in kwargs:
+                raise ValueError("KDA policy requires the application scheduler entrypoint")
+            return original_launch(
+                server_args, run_scheduler_process_func=kda_dispatch.run_scheduler_process, **kwargs
+            )
+
+        http_server.launch_server = launch
     runpy.run_module("sglang.launch_server", run_name="__main__")
 
 
