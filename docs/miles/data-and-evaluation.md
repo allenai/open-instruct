@@ -1023,17 +1023,61 @@ unchanged by the sampler; an eight-response recipe remains eight-response.
 | Contract | Behavior |
 |---|---|
 | Membership | A source-level `pool` assigns the whole source; otherwise rows need a configured top-level `pool_id`. Missing/unknown labels, duplicate label definitions and conflicting runtime annotations fail preparation. |
-| Source fractions | Rejected in pool mode, rather than silently ignored. Use `data.sampling.weights` for fixed pool weights; every configured pool requires a finite positive weight. Weights are rejected for other policies. |
+| Source fractions | Rejected in pool mode, rather than silently ignored. Use `data.sampling.weights` for fixed attempted-draw weights with `weighted`, or trained-group targets with `exposure`; every configured pool requires a finite positive weight. Other policies reject weights. |
 | Finite fresh data | Each row is drawn once; there are no automatic epochs. Empty pools are skipped. |
 | Exposure credit | One group per completed optimizer update that used it. Scored, queued, filtered, or stale groups earn no credit. |
 | Exposure reservations only | Outstanding draws reserve estimated delivery, reducing over-correction during asynchronous generation. |
-| Exposure controller only | Delivery estimate `(trained + 1)/(terminal + 2)`, floored at 0.05; target deficit corrected over a 64-group horizon. Proposal weights are bounded to `[0.25, 5]`, limiting draw ratios to 20:1. |
-| Exposure target only | Each trained group's unit target is divided over the pools active when it was drawn. Inactive pools accrue no new target from later draws. Exact equality is not promised after pools empty or for sources with effectively zero delivery. |
+| Exposure controller only | Delivery estimate `(trained + 1)/(terminal + 2)`, floored at 0.05; target deficit corrected over a 64-group horizon. Without explicit target weights, proposal weights remain bounded to `[0.25, 5]`, limiting draw ratios to 20:1. Explicit weighted exposure bounds correction relative to each desired share instead. |
+| Exposure target only | Each trained group's unit target is divided equally, or proportionally to explicit exposure weights, over pools active when it was drawn. Inactive pools accrue no new target from later draws. Exact proportions are not promised per update, after pools empty, or for effectively zero delivery. |
 | Replay | Within the selected pool, eligible retries may replace a fresh draw. The replay fraction caps that pool's proposed draws. In global shuffle, a retry does not advance the fresh permutation; after it drains, immediately budget-eligible replays are selected uniformly across available pools. Draw counters do not advance for inactive pools, so replay stops at the first non-replay slot after fresh exhaustion; unused earlier slots are not accumulated. |
 | Replay trigger | The low-success history described above, with fresh-response length windows scoped to source within pool. Invalid verifier results are separate from valid zeros. |
 | Exhaustion | A pool without fresh rows or a budget-eligible replay is inactive. Once all pools and outstanding generation drain, an incomplete final collection is not trained; the last completed checkpoint is saved when configured. |
 | Stale work | Pool mode defaults to `async_unused_samples_handler="drop"`; explicit retry is rejected. Drops release reservations; dropped fresh rows are not redrawn, so complete traversal does not imply complete observed or trained coverage. |
 | Recovery | Manifest and selection-policy identity, cursors, RNG, targets, delivery counters, reservations, and replay histories are checkpointed with pending prompts. |
+
+Explicit exposure weights let a package retain a large backbone while adding
+smaller sources. For example, this fragment targets 50% Dolci and a 0.3%
+abstention component while every configured pool is available. The keys assume
+matching source-level pool assignments:
+
+```toml
+[data.sampling]
+policy = "exposure"
+
+[data.sampling.weights]
+dolci = 500
+code = 200
+math = 150
+instruction_following = 100
+formatting = 47
+abstention = 3
+
+[data.sampling.priority]
+field = "reward_priority_olmo35_sft_hero"
+```
+
+These are relative **successfully trained group** targets, not token, inference-cost
+or attempted-draw shares. Within each pool, priority ordering remains independent:
+depleting priority 1 advances that pool to later strata without changing its target.
+The controller estimates pending deliveries and compares their projected exposure
+to the desired shares. Its baseline proposals are proportional to target share
+and inverse delivery; bounded feedback acts relative to that baseline, using
+log-space normalization without an absolute 20:1 proposal-ratio cap. Tiny sources
+can therefore receive fractional-percent allocations. Invalid or numerically
+unrepresentable target weight ratios fail preparation.
+
+This is a flat mixture. When one pool exhausts, its weight is redistributed over
+**all** active survivors. Dolci's share then increases; these weights do not hold
+a fixed Dolci/Tagliere split while reallocating only within Tagliere. Ensure enough
+finite source supply for the planned budget, or interpret the changing mixture
+explicitly using consumed exposure and target counters. A source with almost no
+usable deliveries may still miss its target; the sampler does not fabricate groups.
+
+Omitting `weights` keeps the existing equal-exposure controller and checkpoint
+identity unchanged. Explicit weights select the weighted controller even when
+all weights are equal. Changing weights on resume is rejected as a different
+sampling treatment. The `weighted` policy continues to mean fixed attempted-draw
+weights and does not learn from rewards or successful-update feedback.
 
 Pool mode supports fully asynchronous disaggregated serving, with or without
 [prepared-batch overlap](core.md#prepared-batch-overlap). With overlap, the batch
