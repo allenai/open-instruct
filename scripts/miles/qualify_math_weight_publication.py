@@ -376,7 +376,9 @@ def audit_scheduler(*args, **kwargs):
         server_args=args[0] if args else kwargs.get("server_args"),
         gpu_id=args[2] if len(args) > 2 else kwargs.get("gpu_id"),
     )
-    instrument_receiver()
+    diagnostic = os.environ.get("OI_MILES_PUBLICATION_DIAGNOSTICS") == "1"
+    if diagnostic:
+        instrument_receiver()
     if os.environ.get("OI_PUBLICATION_TRACE_ENCODING") == "1":
         instrument_nvfp4_quantization()
     if os.environ.get("OI_PUBLICATION_TRACE_PACKING") == "1":
@@ -402,7 +404,7 @@ def audit_scheduler(*args, **kwargs):
                     incoming[name] = tensor_fingerprint(tensor)
                 yield item
 
-        result = original_load(model, observed_weights(), *values[1:], **options)
+        result = original_load(model, observed_weights() if diagnostic else values[0], *values[1:], **options)
         model._publication_audit_epoch = getattr(model, "_publication_audit_epoch", 0) + 1
         if incoming:
             params = dict(model.named_parameters())
@@ -420,6 +422,9 @@ def audit_scheduler(*args, **kwargs):
         return result
 
     def forward(model, *values, **options):
+        # Strict gates compute outputs before any hash/copy/synchronization.
+        # Diagnostic traces retain their historical ordering only when opted in.
+        result = None if diagnostic else original_forward(model, *values, **options)
         epoch = getattr(model, "_publication_audit_epoch", 0)
         if getattr(model, "_publication_audited_epoch", None) != epoch:
             inventory = []
@@ -453,7 +458,7 @@ def audit_scheduler(*args, **kwargs):
             and input_ids.numel() >= 32
         ):
             return trace_forward(model, original_forward, values, options)
-        return original_forward(model, *values, **options)
+        return original_forward(model, *values, **options) if diagnostic else result
 
     model_type.load_weights, model_type.forward = load, forward
     scheduler = importlib.import_module("sglang.srt.managers.scheduler")

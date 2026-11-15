@@ -184,7 +184,9 @@ def test_packing_diagnostics_observe_two_experts_without_changing_processing(mon
         assert receipt["before"]["scale"] == receipt["after"]["scale"]
 
 
-def test_load_diagnostics_keep_iterator_items_and_report_stale_cache(monkeypatch, tmp_path):
+@pytest.mark.parametrize("diagnostic", [False, True])
+def test_load_audit_preserves_iterator_and_only_diagnostics_fingerprint_incoming(monkeypatch, tmp_path, diagnostic):
+    monkeypatch.setenv("OI_MILES_PUBLICATION_DIAGNOSTICS", "1" if diagnostic else "0")
     name = "model.layers.1.mlp.experts.0.gate_proj.weight"
     weight = torch.ones(2, 2, dtype=torch.bfloat16)
     item = (name, weight, {"sentinel": True})
@@ -221,9 +223,12 @@ def test_load_diagnostics_keep_iterator_items_and_report_stale_cache(monkeypatch
     }
     monkeypatch.setattr(gate.importlib, "import_module", modules.__getitem__)
     assert gate.audit_scheduler() == {name}
-    receipt = json.loads(next(tmp_path.glob("incoming-*.json")).read_text())
-    assert receipt["weights"] == {name: gate.tensor_fingerprint(weight)}
-    assert receipt["stale_cached_parameters"] == ["stale"]
+    if diagnostic:
+        receipt = json.loads(next(tmp_path.glob("incoming-*.json")).read_text())
+        assert receipt["weights"] == {name: gate.tensor_fingerprint(weight)}
+        assert receipt["stale_cached_parameters"] == ["stale"]
+    else:
+        assert not list(tmp_path.glob("incoming-*.json"))
     assert torch.equal(weight, torch.ones_like(weight))
 
 
@@ -306,7 +311,9 @@ def test_buckets_preserve_every_name_and_force_gate_up_split_across_layers():
         assert all(torch.equal(t, torch.ones_like(t)) for t in state.values())
 
 
-def test_audit_includes_norm_parameters_without_quant_methods(monkeypatch, tmp_path):
+def test_audit_includes_norm_parameters_after_native_forward(monkeypatch, tmp_path):
+    monkeypatch.setenv("OI_MILES_PUBLICATION_DIAGNOSTICS", "0")
+
     class Model(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -316,6 +323,7 @@ def test_audit_includes_norm_parameters_without_quant_methods(monkeypatch, tmp_p
             return set()
 
         def forward(self):
+            assert not list(tmp_path.glob("audit-*.json")), "Strict gate must compute before hashing"
             return "native output"
 
     model = Model()
