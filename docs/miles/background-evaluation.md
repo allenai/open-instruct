@@ -302,13 +302,16 @@ The existing ordinary-panel context-budget issue is a separate evaluator fix.
 
 Resolved worker/image/protocol hashes enter task grouping and frozen receipts.
 The existing receipt claim prevents duplicate or ambiguous submission retries.
-The MILES runner holds its normal output lock, while native `--resume` keeps
-partial progress in canonical WEKA output. A successful native exit and complete
-category counts are required before a completion marker or W&B scores are
-committed. A failed/preempted attempt retains its native artifacts for a clean
-resume; successful completed groups reuse results without loading the model.
-The Beaker result remains `/output`, outside the input mount, and the parent
-wrapper copies artifacts on success or failure. No deletion or `--fresh` occurs.
+The MILES runner holds its normal output lock. The native shared-run supervisor
+retains progress and run identity on WEKA, while the evaluator writes results to
+local `/output/native-bfcl/<group-id>`. This requires the pinned evaluator's
+`retain_shared_history` API; an incompatible image fails before creating recovery
+state. Retries restore scored responses and preserve retired recovery files in
+history. A successful native exit and complete category counts are required
+before results are copied to canonical WEKA output and a completion marker or
+W&B scores are committed. Successful groups reuse results without loading the
+model. Beaker retains `/output`, outside the input mount; diagnostic artifacts
+remain available after failure. No remote history deletion or `--fresh` occurs.
 
 Native per-category metrics are published without replacing their contracts with
 a guessed pooled headline score. Requests/predictions and requested/effective

@@ -627,6 +627,12 @@ def run_native_bfcl(receipt, output, worker):
         except subprocess.CalledProcessError:
             print_failure_log(log_path)
             raise
+        # Native outputs are local; its retained supervisor owns durable WEKA progress.
+        # Publish only after a clean native exit, keeping existing MILES artifact layout.
+        local_native = worker.local_result_directory(receipt)
+        completed_scores(local_native, receipt["tasks"])
+        worker.validate_counts(local_native, receipt["tasks"])
+        shutil.copytree(local_native, native, dirs_exist_ok=True)
         values = completed_scores(native, receipt["tasks"])
         worker.validate_counts(native, receipt["tasks"])
         write_json(marker, {"tasks": receipt["tasks"], "worker": receipt["evaluation"]["worker"], "scores": values})

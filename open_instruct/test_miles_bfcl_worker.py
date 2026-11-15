@@ -1,5 +1,6 @@
 """Native BFCL dispatch, checkpoint ownership, full-category validity and resume boundaries."""
 
+import base64
 import copy
 import hashlib
 import json
@@ -7,6 +8,7 @@ import os
 import shlex
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -33,7 +35,7 @@ def receipt(run, tmp_path):
     return {
         "checkpoint": str(tmp_path / "checkpoint"),
         "update": 100,
-        "group_id": "native-bfcl",
+        "group_id": "1234567890abcdef",
         "tasks": tasks,
         "evaluation": bfcl.settings(config),
         "training": {"name": "test-bfcl", "wandb": {"mode": "offline"}},
@@ -60,7 +62,13 @@ def test_worker_groups_and_images_are_independent(run, tmp_path):
 def test_native_argv_uses_exact_checkpoint_tools_and_per_turn_budget(receipt, run, panel):
     receipt["tasks"] = [t for t in run.evaluation["tasks"] if t.get("worker") and bfcl.panel_for(t["task"]) == panel]
     script = bfcl.launch_command(receipt, Path("/weka/test/native"))
-    argv = shlex.split(script.splitlines()[-1])
+    supervisor = shlex.split(script.splitlines()[-1])
+    assert supervisor[-2] == "run-shared"
+    shared = json.loads(base64.b64decode(supervisor[-1]))
+    argv = shared["native_command"]
+    assert shared["local_results"] == "/output/native-bfcl/1234567890abcdef"
+    assert shared["recovery_root"] == "/weka/test/native-recovery"
+    assert "--output-dir" not in argv and "-O" not in argv
     assert argv[argv.index("--model") + 1] == receipt["checkpoint"]
     assert argv[argv.index("--harness") + 1] == bfcl.PROFILE["panels"][panel]["harness"]
     assert argv.count("--task") == (13 if panel == "single" else 4)
@@ -185,10 +193,12 @@ def test_native_failure_has_no_completion_claim_and_retry_resumes(receipt, tmp_p
     monkeypatch.setattr(bfcl, "validate_checkpoint", lambda *args: None)
     monkeypatch.setattr(runner.subprocess, "check_output", lambda *args, **kwargs: bfcl.PROFILE["evaluator_revision"])
     output = runner.result_directory(receipt)
+    local_native = tmp_path / "local-native"
+    monkeypatch.setattr(bfcl, "local_result_directory", lambda r: local_native)
 
     def native(argv, **kwargs):
         calls.append(argv)
-        write_native_results(output / "native", receipt["tasks"])
+        write_native_results(local_native, receipt["tasks"])
         if fail[0]:
             raise subprocess.CalledProcessError(143, argv)
 
@@ -204,10 +214,11 @@ def test_native_failure_has_no_completion_claim_and_retry_resumes(receipt, tmp_p
     with pytest.raises(subprocess.CalledProcessError):
         runner.run_evaluation(receipt)
     assert not (output / "native/worker-complete.json").exists()
-    assert (tmp_path / "beaker-output/native/metrics.json").exists()
+    assert not (tmp_path / "beaker-output/native/metrics.json").exists()
+    assert (local_native / "metrics.json").exists()
     fail[0] = False
     runner.run_evaluation(receipt)
-    assert len(calls) == 2 and "--resume" in calls[1][2]
+    assert len(calls) == 2 and "run-shared" in calls[1][2]
     assert (output / "native/worker-complete.json").is_file()
     runner.run_evaluation(receipt)
     assert len(calls) == 2  # Successful retry is reused without another model/runtime load.
@@ -230,12 +241,14 @@ def test_serialized_worker_runs_without_application_checkout(receipt, tmp_path):
     for name in ("evaluate.py", "evaluation.json", "bfcl_runtime.py"):
         setup = setup.replace("/tmp/" + name, str(tmp_path / name))
     probe = """
-import json, pathlib, runpy, shlex
+import base64, json, pathlib, runpy, shlex
 namespace = runpy.run_path(str(pathlib.Path.cwd() / 'evaluate.py'))
 receipt = json.loads(pathlib.Path('evaluation.json').read_text())
 worker = namespace['native_bfcl_worker'](receipt)
 command = worker.launch_command(receipt, pathlib.Path('/weka/test/native'))
-argv = shlex.split(command.splitlines()[-1])
+supervisor = shlex.split(command.splitlines()[-1])
+assert supervisor[-2] == 'run-shared'
+argv = json.loads(base64.b64decode(supervisor[-1]))['native_command']
 assert argv[argv.index('--model') + 1] == receipt['checkpoint']
 assert argv.count('--task') == 13
 assert 'open_instruct' not in command
@@ -277,3 +290,48 @@ def test_uv_lock_timeout_reaches_both_bootstrap_install_steps(receipt, run, pane
     script = "uv() { printf '%s\\n' \"$UV_LOCK_TIMEOUT\"; }\n" + export + "\n" + "\n".join(installs)
     result = subprocess.run(["bash", "-euc", script], env=env, capture_output=True, text=True, check=True)
     assert result.stdout.splitlines() == [expected, expected]
+
+
+def test_current56dc_api_fails_closed_before_creating_recovery(tmp_path, monkeypatch):
+    config = {
+        "recovery_root": str(tmp_path / "recovery"),
+        "local_results": str(tmp_path / "local"),
+        "run_uuid": "00000000-0000-0000-0000-000000000001",
+        "native_command": ["native", "--resume"],
+    }
+    config["recovery_root"] = str(tmp_path / "not-created")
+
+    def old_api(root, run_uuid, results, command):
+        raise AssertionError("Incompatible API must not be invoked")
+
+    monkeypatch.setattr(bfcl.importlib, "import_module", lambda name: types.SimpleNamespace(run_shared=old_api))
+    with pytest.raises(RuntimeError, match="new pinned evaluator image"):
+        bfcl.run_retained_shared(config)
+    assert not Path(config["recovery_root"]).exists()
+
+
+def test_compatible_supervisor_receives_explicit_retention_and_exact_native_command(tmp_path, monkeypatch):
+    config = {
+        "recovery_root": str(tmp_path / "recovery"),
+        "local_results": str(tmp_path / "local"),
+        "run_uuid": "00000000-0000-0000-0000-000000000001",
+        "native_command": ["native", "--resume"],
+    }
+    config["recovery_root"] = str(tmp_path / "recovery")
+    seen = []
+
+    def api(root, run_uuid, results, command, *, retain_shared_history=False):
+        seen.append((root, run_uuid, results, command, retain_shared_history))
+        return 143
+
+    monkeypatch.setattr(bfcl.importlib, "import_module", lambda name: types.SimpleNamespace(run_shared=api))
+    assert bfcl.run_retained_shared(config) == 143
+    assert seen == [
+        (
+            Path(config["recovery_root"]),
+            config["run_uuid"],
+            Path(config["local_results"]),
+            config["native_command"],
+            True,
+        )
+    ]

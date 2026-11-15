@@ -7,10 +7,13 @@ Checkpoint weights stay selected by MILES; this profile fixes serving/data seman
 import argparse
 import base64
 import hashlib
+import importlib
+import inspect
 import json
 import shlex
 import subprocess
 import time
+import uuid
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any
@@ -18,8 +21,8 @@ from typing import Any
 WORKER = "bfcl-native-h196-v1"
 PROFILE: dict[str, Any] = {
     "protocol_version": "bfcl-native-v1",
-    "image": "01M7CK4QK3MJ7Q9MZYRQTMTPYW",
-    "evaluator_revision": "56dc89212fc040a0b7fd957901c3b326b8a5cd11",
+    "image": "01M7GDE04Q1WDC56M9MVTDNJ20",
+    "evaluator_revision": "caacf96a90ca72b42a52a443af9bce394a636e61",
     "dataset_repo": "gorilla-llm/Berkeley-Function-Calling-Leaderboard",
     "dataset_revision": "61fc0608cfd831fcfbbaa676ebdfef0ed963eeda",
     "context_length": 65536,
@@ -328,9 +331,18 @@ def _command(p, checkpoint, output, panel, identity, cache_root):
             "thinking_prefilled": False,
         }.items():
             native.extend(["-o", key + "=" + json.dumps(value)])
-    native.extend(
-        ["--output-dir", output, "--save-predictions", "--save-requests", "--resume", "--no-upload", "--num-gpus", "1"]
-    )
+    native.extend(["--save-predictions", "--save-requests", "--resume", "--no-upload", "--num-gpus", "1"])
+    # Only the native supervisor supplies -O; progress/identity live separately on WEKA.
+    recovery = Path(output).parent / "native-recovery"
+    local_results = local_result_directory({"group_id": identity["group_id"]})
+    shared = {
+        **config,
+        "recovery_root": str(recovery),
+        "local_results": str(local_results),
+        "run_uuid": str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(identity, sort_keys=True) + output)),
+        "native_command": native,
+    }
+    shared_payload = base64.b64encode(json.dumps(shared, sort_keys=True).encode()).decode()
     lines = [
         "set -euo pipefail",
         "date +%s > /tmp/bfcl-bootstrap-start",
@@ -363,9 +375,28 @@ def _command(p, checkpoint, output, panel, identity, cache_root):
         "export TRITON_PTXAS_PATH=/tmp/bfcl-native-env/lib/python3.12/site-packages/triton/backends/nvidia/bin/ptxas",
         "export VLLM_PYTHON=/tmp/bfcl-native-env/bin/python",
         shlex.join(["/tmp/bfcl-native-env/bin/python", str(Path(__file__).resolve()), "record-runtime", encoded]),
-        shlex.join(native),
+        shlex.join(["/tmp/bfcl-native-env/bin/python", str(Path(__file__).resolve()), "run-shared", shared_payload]),
     ]
     return "\n".join(lines) + "\n"
+
+
+def local_result_directory(receipt):
+    group = receipt["group_id"]
+    if not isinstance(group, str) or len(group) != 16 or any(c not in "0123456789abcdef" for c in group):
+        raise ValueError("Invalid native BFCL group identity")
+    return Path("/output/native-bfcl") / group
+
+
+def run_retained_shared(config):
+    # This feature guard deliberately rejects the current frozen56dc runtime.
+    module = importlib.import_module("olmo_eval.launch.beaker.resume")
+    if "retain_shared_history" not in inspect.signature(module.run_shared).parameters:
+        raise RuntimeError("BFCL retained resume requires the compatible native API and a new pinned evaluator image")
+    root = Path(config["recovery_root"])
+    root.mkdir(parents=True, exist_ok=True)
+    return module.run_shared(
+        root, config["run_uuid"], Path(config["local_results"]), config["native_command"], retain_shared_history=True
+    )
 
 
 def record_runtime(config):
@@ -419,7 +450,11 @@ def record_runtime(config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Record the registered native BFCL runtime")
-    parser.add_argument("command", choices=("record-runtime",))
+    parser.add_argument("command", choices=("record-runtime", "run-shared"))
     parser.add_argument("payload")
     args = parser.parse_args()
-    record_runtime(json.loads(base64.b64decode(args.payload)))
+    payload = json.loads(base64.b64decode(args.payload))
+    if args.command == "record-runtime":
+        record_runtime(payload)
+    else:
+        raise SystemExit(run_retained_shared(payload))
