@@ -80,7 +80,8 @@ def test_no_policy_leaves_native_dispatch_untouched(monkeypatch):
     assert policy.install() is None
 
 
-def test_install_validates_all_targets_before_any_mutation(monkeypatch, tmp_path):
+@pytest.mark.parametrize("capability", [(10, 0), (10, 3)])
+def test_install_validates_all_targets_before_any_mutation(monkeypatch, tmp_path, capability):
     source = tmp_path / "kernel.py"
     source.write_text("immutable native source")
     (tmp_path / "config.json").write_bytes(source.read_bytes())
@@ -93,12 +94,12 @@ def test_install_validates_all_targets_before_any_mutation(monkeypatch, tmp_path
         modules[module_name] = SimpleNamespace(__file__=str(source), **{attr: SimpleNamespace(**{wrapper: tuner})})
         entries.append({**entry(), "target": target, "module_sha256": hashlib.sha256(source.read_bytes()).hexdigest()})
     modules["torch"] = SimpleNamespace(
-        cuda=SimpleNamespace(get_device_capability=lambda device: (10, 0), set_device=lambda device: None)
+        cuda=SimpleNamespace(get_device_capability=lambda device: capability, set_device=lambda device: None)
     )
     monkeypatch.setattr(policy.importlib, "import_module", modules.__getitem__)
     manifest = {
         "version": 1,
-        "device_capability": [10, 0],
+        "device_capability": list(capability),
         "serving_scope": {"quantization": "nvfp4_online", "kv_cache_dtype": "bf16"},
         "entries": entries,
         "runtime_lock_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
@@ -107,6 +108,17 @@ def test_install_validates_all_targets_before_any_mutation(monkeypatch, tmp_path
     path = tmp_path / "policy.json"
     args = SimpleNamespace(quantization="nvfp4_online", kv_cache_dtype="bf16", model_path=str(tmp_path))
     originals = [t.run for t in tuners]
+    manifest["device_capability"] = [10, 0] if capability == (10, 3) else [10, 3]
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="device mismatch"):
+        policy.install(path, server_args=args, gpu_id=1)
+    assert [t.run for t in tuners] == originals
+    manifest["device_capability"] = [9, 0]
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="Unsupported KDA policy version/device"):
+        policy.install(path, server_args=args, gpu_id=1)
+    assert [t.run for t in tuners] == originals
+    manifest["device_capability"] = list(capability)
     entries[1]["module_sha256"] = "bad"
     path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="kernel source"):

@@ -85,14 +85,18 @@ def install(path=None, *, server_args=None, gpu_id=None):
     raw = Path(path).read_bytes()
     policy_hash = hashlib.sha256(raw).hexdigest()
     policy = json.loads(raw)
-    if policy.get("version") != 1 or policy.get("device_capability") != [10, 0]:
+    if policy.get("version") != 1 or policy.get("device_capability") not in ([10, 0], [10, 3]):
         raise ValueError("Unsupported KDA policy version/device")
     torch = importlib.import_module("torch")
     if gpu_id is None:
         raise ValueError("KDA policy requires the scheduler GPU assignment")
     torch.cuda.set_device(gpu_id)
-    if tuple(torch.cuda.get_device_capability(gpu_id)) != (10, 0):
-        raise ValueError("KDA policy requires validated SM100 hardware")
+    actual_capability = tuple(torch.cuda.get_device_capability(gpu_id))
+    expected_capability = tuple(policy["device_capability"])
+    if actual_capability != expected_capability:
+        raise ValueError(
+            f"KDA policy device mismatch: expected {expected_capability}, actual {actual_capability}, GPU {gpu_id}"
+        )
     if hashlib.sha256(RUNTIME_LOCK.read_bytes()).hexdigest() != policy["runtime_lock_sha256"]:
         raise ValueError("KDA policy runtime lock mismatch")
     if server_args is None:
