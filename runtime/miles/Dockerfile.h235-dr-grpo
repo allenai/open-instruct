@@ -1,0 +1,7 @@
+FROM h235-coordinator-diagnostics:239a1528c
+ARG SOURCE_REVISION
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
+COPY open_instruct/miles/dr_grpo.py /opt/core-rl/open_instruct/miles/dr_grpo.py
+COPY tests/miles/test_dr_grpo.py /opt/core-rl/tests/miles/test_dr_grpo.py
+COPY configs/miles/experiments/h235-dr-grpo-20261115 /opt/core-rl/configs/miles/experiments/h235-dr-grpo-20261115
+RUN printf '%s\n' "$SOURCE_REVISION" > /opt/core-rl/source-revision
