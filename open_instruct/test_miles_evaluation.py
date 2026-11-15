@@ -661,3 +661,20 @@ def test_all_writers_define_training_and_background_axes():
         "perf/*": {"step_metric": "rollout/step", "step_sync": True},
         "eval/*": {"step_metric": "eval/checkpoint_update", "step_sync": False},
     }
+
+
+def test_explicit_evaluation_min_runtime_is_preserved(run):
+    document = run.to_dict()
+    document["evaluation"]["min_runtime"] = "30m"
+    spec = RunSpec.from_dict(document)
+    receipt = {
+        "evaluation": evaluation.runtime(spec, spec.compile().miles),
+        "training": {"name": spec.name},
+        "tasks": spec.evaluation["tasks"],
+        "update": 2,
+        "runner_sha256": hashlib.sha256(Path(evaluation_runner.__file__).read_bytes()).hexdigest(),
+    }
+    assert evaluation.specification(receipt)["tasks"][0]["context"]["minRuntime"] == 1800 * 10**9
+    document["evaluation"]["min_runtime"] = "1m"
+    with pytest.raises(InputError, match="between 5m and 8h"):
+        RunSpec.from_dict(document)

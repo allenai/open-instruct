@@ -7,6 +7,7 @@ from saved results.
 """
 
 import argparse
+import base64
 import fcntl
 import hashlib
 import importlib
@@ -24,6 +25,62 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib import error as urlerror
 from urllib import request
+
+SERVING_FILES = {
+    "oi_miles_serving/__init__.py",
+    "oi_miles_serving/kda_dispatch.py",
+    "oi_miles_serving/quantized_publication.py",
+    "oi_miles_serving/evaluator_startup_budget.py",
+    "runtime.lock.json",
+    "policy.json",
+}
+
+
+def serving_files(artifact):
+    """Validate a closed, hash-addressed source bundle before writing/importing it."""
+    if artifact.get("version") != 1 or set(artifact.get("files", {})) != SERVING_FILES:
+        raise ValueError("Unsupported evaluator serving artifact")
+    files = {}
+    for name, item in artifact["files"].items():
+        raw = base64.b64decode(item["base64"], validate=True)
+        if hashlib.sha256(raw).hexdigest() != item["sha256"]:
+            raise ValueError(f"Evaluator serving artifact hash mismatch: {name}")
+        files[name] = raw
+    policy = json.loads(files["policy.json"])
+    if hashlib.sha256(files["runtime.lock.json"]).hexdigest() != policy["runtime_lock_sha256"]:
+        raise ValueError("Evaluator policy/runtime lock mismatch")
+    return files
+
+
+def validate_serving_artifact(config):
+    artifact = config.get("serving_artifact")
+    if artifact is None:
+        if config.get("kda_policy"):
+            raise ValueError("Evaluator KDA policy is missing its frozen serving artifact")
+        return None
+    files = serving_files(artifact)
+    if hashlib.sha256(files["policy.json"]).hexdigest() != config.get("kda_policy", {}).get("sha256"):
+        raise ValueError("Evaluator policy/artifact hash mismatch")
+    return files
+
+
+def serving_environment(config):
+    files = validate_serving_artifact(config)
+    if files is None:
+        return {}
+    root = Path(tempfile.mkdtemp(prefix="oi-miles-serving-"))
+    for name, raw in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+    return {
+        "PYTHONPATH": str(root),
+        "OI_MILES_KDA_POLICY": str(root / "policy.json"),
+        "OI_MILES_KDA_RUNTIME_LOCK": str(root / "runtime.lock.json"),
+        "OLMO_SGLANG_CORE_COMPAT": config["kda_policy"]["core_compat"],
+        "SGLANG_RETURN_ORIGINAL_LOGPROB": "1",
+        "OLMO_EVAL_PROVIDER_INIT_TIMEOUT_SECONDS": "2400",
+    }
 
 
 def write_json(path, value):
@@ -71,6 +128,7 @@ def judge_harness_defaults(harness):
 
 
 def command(receipt, output):
+    files = validate_serving_artifact(receipt["evaluation"])
     checkpoint = receipt["checkpoint"]
     first = receipt["tasks"][0]
     if first.get("kind", "task") == "external":
@@ -102,7 +160,9 @@ def command(receipt, output):
         "provider.kind": "sglang",
         "provider.tokenizer": checkpoint,
         "provider.trust_remote_code": True,
-        "provider.kwargs.model_registration": "olmo_sglang:register",
+        "provider.kwargs.model_registration": (
+            "oi_miles_serving.kda_dispatch:register" if files is not None else "olmo_sglang:register"
+        ),
         "provider.kwargs.tensor_parallel_size": receipt["evaluation"]["gpus"],
         "provider.kwargs.profile": "auto",
         # The provider recommends a sequence budget after checking actual engine
@@ -119,6 +179,8 @@ def command(receipt, output):
             args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
         for key, value in task["scoring"].items():
             args.extend(["-o", f"{key}={value if isinstance(value, str) else json.dumps(value)}"])
+    if files is not None:
+        args = [sys.executable, "-m", "oi_miles_serving.evaluator_startup_budget", *args[1:]]
     return [*args, "--output-dir", str(output), "--save-predictions", "--save-requests"]
 
 
@@ -391,7 +453,16 @@ def resume_identity(receipt):
         **{key: receipt[key] for key in ("checkpoint", "update", "group_id", "tasks")},
         "evaluator": {
             key: config.get(key)
-            for key in ("revision", "image", "gpus", "provider_kwargs", "external_server_args", "worker")
+            for key in (
+                "revision",
+                "image",
+                "gpus",
+                "provider_kwargs",
+                "external_server_args",
+                "worker",
+                "kda_policy",
+                "serving_artifact",
+            )
         },
     }
 
@@ -468,7 +539,12 @@ def gpu_environments(receipt):
     visible = devices[policy_count:total] if external else devices[:total]
     evaluator = {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(visible)}
     # The independent evaluator/judge environments must not import training's source overlays.
-    evaluator.pop("PYTHONPATH", None)
+    for env in (policy, evaluator):
+        for key in ("PYTHONPATH", "OI_MILES_KDA_POLICY", "OI_MILES_KDA_RUNTIME_LOCK"):
+            env.pop(key, None)
+    serving = serving_environment(receipt["evaluation"])
+    policy.update(serving)
+    evaluator.update(serving)
     return policy, evaluator
 
 
@@ -554,6 +630,11 @@ def run_tasks(receipt, output):
 
 
 def run_evaluation(receipt):
+    files = validate_serving_artifact(receipt["evaluation"])
+    if files is not None:
+        expected = json.loads(files["policy.json"])["model_config_sha256"]
+        if hashlib.sha256((Path(receipt["checkpoint"]) / "config.json").read_bytes()).hexdigest() != expected:
+            raise ValueError("Evaluator snapshot configuration differs from the frozen KDA policy")
     with evaluation_output(receipt) as output:
         run_evaluation_locked(receipt, output)
 

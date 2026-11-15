@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 import traceback
+from concurrent import futures
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -92,6 +93,40 @@ def make_probes(tokenizer):
             raise ValueError("Invalid fixed-token probe encoding")
         probes.append(ids)
     return probes
+
+
+def full_cap_probes(tokenizer, path, expected_hash):
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != expected_hash:
+        raise ValueError("Full-cap training prompt snapshot hash mismatch")
+    rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    probes = []
+    for row in rows:
+        ids = tokenizer.encode(row["input"], add_special_tokens=False)
+        if ids != row["metadata"]["prompt_token_ids"]:
+            raise ValueError("Full-cap prompt/tokenizer mismatch")
+        if not 32 <= len(ids) <= 1465 or len(ids) + 16384 + 2 > 18432:
+            raise ValueError("Full-cap prompt exceeds approved RL context")
+        probes.append(ids)
+    if len(probes) < 16 or max(map(len, probes)) != 1465:
+        raise ValueError("Full-cap snapshot must cover the actual 1465-token maximum")
+    return sorted(probes, key=len, reverse=True)[:16]
+
+
+def verify_full_cap_outputs(outputs, count):
+    if not isinstance(outputs, list) or len(outputs) != count:
+        raise ValueError("Missing full-cap responses")
+    for output in outputs:
+        meta = output["meta_info"]
+        scores = meta.get("output_token_logprobs", [])
+        candidates = meta.get("output_top_logprobs", [])
+        if meta.get("completion_tokens") != 16384 or len(scores) != 16384 or len(candidates) != 16384:
+            raise ValueError("Full-cap output must contain exactly 16384 scored tokens")
+        if any(len(step) != 20 for step in candidates):
+            raise ValueError("Missing full-cap candidate20 coverage")
+        values = [entry[0] for entry in scores] + [entry[0] for step in candidates for entry in step]
+        if not torch.isfinite(torch.tensor(values)).all():
+            raise ValueError("Nonfinite full-cap logprobs/candidates")
 
 
 def save(path, value):
@@ -602,6 +637,8 @@ class Fleet:
             stream.close()
 
     def probe(self, label, probes):
+        if getattr(self.args, "full_cap_prompts", None):
+            return self.full_cap_probe(label, probes)
         result, audits = [], []
         with httpx.Client(timeout=600) as client:
             for engine, directory in zip(self.clients, self.directories, strict=True):
@@ -642,6 +679,92 @@ class Fleet:
                 audits.append(audit)
         save(self.args.output / f"{label}.json", {"outputs": result, "audits": audits})
         return result, audits
+
+    def full_cap_probe(self, label, probes):
+        # All three receivers run concurrently on their own approved GPUs. This
+        # is a correctness gate, never an inference throughput measurement.
+        references = self.args.full_cap_conditional_inputs
+
+        def receiver(index):
+            outputs, cases = [], []
+            with httpx.Client(timeout=1800) as client:
+                for count in (1, 8, 16):
+                    payload = {
+                        "input_ids": probes[:count],
+                        "sampling_params": {
+                            "temperature": 0,
+                            "max_new_tokens": 16384,
+                            "min_new_tokens": 16384,
+                            "ignore_eos": True,
+                        },
+                        "return_logprob": True,
+                        "logprob_start_len": 0,
+                        "top_logprobs_num": 20,
+                    }
+                    response = client.post(self.clients[index].server_url + "/generate", json=payload)
+                    response.raise_for_status()
+                    current = response.json()
+                    verify_full_cap_outputs(current, count)
+                    key = (index, count)
+                    if key not in references:
+                        if label != "initial":
+                            raise ValueError("Missing initial full-cap conditional tokens")
+                        references[key] = [
+                            prefix + [entry[1] for entry in output["meta_info"]["output_token_logprobs"]]
+                            for prefix, output in zip(probes[:count], current, strict=True)
+                        ]
+                    # Score the SAME baseline continuation after every changed,
+                    # repeated and restored publication and fresh server load.
+                    forced = client.post(
+                        self.clients[index].server_url + "/generate",
+                        json={
+                            "input_ids": references[key],
+                            "sampling_params": {"temperature": 0, "max_new_tokens": 1},
+                            "return_logprob": True,
+                            "logprob_start_len": 0,
+                        },
+                    )
+                    forced.raise_for_status()
+                    conditional = forced.json()
+                    if not isinstance(conditional, list) or len(conditional) != count:
+                        raise ValueError("Missing full-cap fixed-conditional scores")
+                    for output, scored, tokens in zip(current, conditional, references[key], strict=True):
+                        scores = scored["meta_info"]["input_token_logprobs"]
+                        if len(scores) != len(tokens) or [entry[1] for entry in scores] != tokens:
+                            raise ValueError("Full-cap conditional token alignment mismatch")
+                        output["meta_info"]["input_token_logprobs"] = scores
+                        # Retain exact candidate provenance without duplicating
+                        # millions of candidate triples in every comparison.
+                        top = output["meta_info"].pop("output_top_logprobs")
+                        output["meta_info"]["candidate20_sha256"] = hashlib.sha256(
+                            json.dumps(top).encode()
+                        ).hexdigest()
+                    outputs.extend(current)
+                    cases.append(
+                        {"concurrency": count, "input_lengths": list(map(len, probes[:count])), "output_tokens": 16384}
+                    )
+                    save(self.directories[index] / f"{label}-full-cap-progress.json", cases)
+            paths = sorted(self.directories[index].glob("audit-*.json"), key=lambda p: p.stat().st_mtime_ns)
+            if not paths:
+                raise ValueError("Missing full-cap serving tensor audit")
+            audit = json.loads(paths[-1].read_text())
+            if getattr(self.args, "nvfp4_kv", False):
+                pools = list(self.directories[index].glob("pool-audit-*.json"))
+                if len(pools) != 1:
+                    raise ValueError("Missing full-cap native KV audit")
+                qualify_math_nvfp4_kv.verify_audit(json.loads(pools[0].read_text()))
+                qualify_math_quantization.verify_inventory(
+                    [m for m in audit if m["class"] != "RadixAttention"], self.args.precision
+                )
+            else:
+                qualify_math_quantization.verify_inventory(audit, self.args.precision, kv_cache_dtype="bf16")
+            return outputs, audit
+
+        with futures.ThreadPoolExecutor(max_workers=3) as pool:
+            results = list(pool.map(receiver, range(3)))
+        outputs, audits = map(list, zip(*results, strict=True))
+        save(self.args.output / f"{label}.json", {"outputs": outputs, "audits": audits})
+        return outputs, audits
 
 
 def fresh_checkpoint(args, variant):
@@ -708,7 +831,12 @@ def run(args):
     tokenizer = importlib.import_module("transformers").AutoTokenizer.from_pretrained(
         args.model, trust_remote_code=True
     )
-    probes = make_probes(tokenizer)
+    probes = (
+        full_cap_probes(tokenizer, args.full_cap_prompts, args.full_cap_prompts_sha256)
+        if getattr(args, "full_cap_prompts", None)
+        else make_probes(tokenizer)
+    )
+    args.full_cap_conditional_inputs = {}
     with (args.model / "model.safetensors").open("rb") as stream:
         model_digest = hashlib.file_digest(stream, "sha256").hexdigest()
     save(
@@ -727,6 +855,7 @@ def run(args):
                 "provenance": "Pinned miles.ray.specs.train.compute_trainer_env_vars sender default; inherited by servers",
             },
             "probes": probes,
+            "full_cap_prompt_snapshot_sha256": getattr(args, "full_cap_prompts_sha256", None),
             "tolerances": TOLERANCES,
             "unchanged_bf16_tolerance": 0,
             "variants": [0, 1, 2, 2, 0],
@@ -823,8 +952,8 @@ def run(args):
             else None,
             "passed": True,
             "nvfp4_kv": getattr(args, "nvfp4_kv", False),
-            "full_cap_qualified": False,
-            "scope": "New strict short fixed-token publication gate; full-cap and training/resume gates remain required",
+            "full_cap_qualified": bool(getattr(args, "full_cap_prompts", None)),
+            "scope": "Repeated actual Core publication and fresh-server parity; optimizer/checkpoint/resume remains a separate gate",
         },
     )
     dist.destroy_process_group()
@@ -840,7 +969,11 @@ def main():
     parser.add_argument("--gpu", type=int)
     parser.add_argument("--port", type=int)
     parser.add_argument("--reuse-mutation-checkpoints", type=Path)
+    parser.add_argument("--full-cap-prompts", type=Path)
+    parser.add_argument("--full-cap-prompts-sha256")
     args = parser.parse_args()
+    if bool(args.full_cap_prompts) != bool(args.full_cap_prompts_sha256):
+        parser.error("Full-cap prompts require both snapshot path and sha256")
     if args.server:
         server(args)
     else:

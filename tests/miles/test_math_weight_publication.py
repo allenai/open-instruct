@@ -405,3 +405,41 @@ def test_prefill_trace_preserves_outputs_and_removes_hooks(monkeypatch, tmp_path
     with pytest.raises(RuntimeError, match="original failure"):
         gate.trace_forward(model, broken, (value,), {})
     assert not model.projection._forward_hooks
+
+
+def test_full_cap_prompt_gate_verifies_snapshot_tokenizer_and_actual_maximum(tmp_path):
+    rows = [{"input": str(i), "metadata": {"prompt_token_ids": [i] * (1465 - i)}} for i in range(16)]
+    path = tmp_path / "prompts.jsonl"
+    path.write_text("\n".join(json.dumps(row) for row in rows))
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    tokenizer = SimpleNamespace(encode=lambda text, **kw: rows[int(text)]["metadata"]["prompt_token_ids"])
+    probes = gate.full_cap_probes(tokenizer, path, digest)
+    assert len(probes) == 16 and len(probes[0]) == 1465
+    assert all(len(ids) + 16384 + 2 <= 18432 for ids in probes)
+    with pytest.raises(ValueError, match="snapshot hash"):
+        gate.full_cap_probes(tokenizer, path, "0" * 64)
+    with pytest.raises(ValueError, match="tokenizer mismatch"):
+        gate.full_cap_probes(SimpleNamespace(encode=lambda *a, **kw: [1]), path, digest)
+
+
+def test_full_cap_output_gate_requires_exact_lengths_finite_scores_and_candidate20():
+    output = {
+        "meta_info": {
+            "completion_tokens": 16384,
+            "output_token_logprobs": [[-1.0, 7]] * 16384,
+            "output_top_logprobs": [[[-1.0, 7]] * 20] * 16384,
+        }
+    }
+    gate.verify_full_cap_outputs([output], 1)
+    with pytest.raises(ValueError, match="Missing full-cap responses"):
+        gate.verify_full_cap_outputs([output], 8)
+    output["meta_info"]["completion_tokens"] = 16383
+    with pytest.raises(ValueError, match="exactly 16384"):
+        gate.verify_full_cap_outputs([output], 1)
+    output["meta_info"]["completion_tokens"] = 16384
+    output["meta_info"]["output_top_logprobs"][0] = [[-1.0, 7]] * 19
+    with pytest.raises(ValueError, match="candidate20"):
+        gate.verify_full_cap_outputs([output], 1)
+    output["meta_info"]["output_top_logprobs"][0] = [[float("nan"), 7]] * 20
+    with pytest.raises(ValueError, match="Nonfinite"):
+        gate.verify_full_cap_outputs([output], 1)

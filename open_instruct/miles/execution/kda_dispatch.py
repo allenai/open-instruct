@@ -14,9 +14,9 @@ import os
 from functools import wraps
 from pathlib import Path
 
-from open_instruct.miles.execution import quantized_publication
+from . import quantized_publication
 
-RUNTIME_LOCK = Path("/opt/core-rl/sources/runtime.lock.json")
+RUNTIME_LOCK = Path(os.environ.get("OI_MILES_KDA_RUNTIME_LOCK", "/opt/core-rl/sources/runtime.lock.json"))
 
 TARGETS = (
     "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel.fn",

@@ -18,8 +18,9 @@ import uuid
 from pathlib import Path
 
 from open_instruct import logger_utils
+from open_instruct.miles.configuration import validation
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.evaluation import evaluation_runner
+from open_instruct.miles.evaluation import evaluation_runner, serving_artifact
 from open_instruct.miles.infrastructure import artifacts as state
 from open_instruct.miles.infrastructure import infra_timeouts
 
@@ -51,6 +52,8 @@ def parse(value, launch):
         "timeout",
         "provider_kwargs",
         "external_server_args",
+        "kda_policy",
+        "min_runtime",
     }
     if "server_args" in value:
         raise InputError("evaluation.server_args was replaced by provider_kwargs; use SGLang Python option names")
@@ -88,6 +91,10 @@ def parse(value, launch):
     for key in ("cluster", "workspace", "budget", "timeout"):
         if not isinstance(value[key], str) or not value[key].strip():
             raise InputError(f"evaluation.{key} must be a nonempty string")
+    if "min_runtime" in value:
+        seconds = validation.duration(value["min_runtime"], "evaluation.min_runtime")
+        if seconds != 0 and not 300 <= seconds <= 28800:
+            raise InputError("evaluation.min_runtime must be zero or between 5m and 8h")
     secrets = value["secrets"]
     if not isinstance(secrets, dict) or any(
         not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or not isinstance(secret, str) or not secret
@@ -217,6 +224,22 @@ def parse(value, launch):
         if any(word in encoded for word in ("api_key", "password", "access_token", "api-key")):
             raise InputError("Use evaluation.secrets for credentials, not task overrides")
     validate_judge_credentials(value)
+    if "kda_policy" in value:
+        policy = value["kda_policy"]
+        if (
+            not isinstance(policy, dict)
+            or set(policy) != {"path", "sha256", "core_compat"}
+            or not isinstance(policy["path"], str)
+            or not Path(policy["path"]).is_absolute()
+            or not isinstance(policy["sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", policy["sha256"])
+            or policy["core_compat"] not in ("auto", "off")
+        ):
+            raise InputError(
+                "evaluation.kda_policy requires an absolute path, immutable sha256 and core_compat=auto/off"
+            )
+        if any(task.get("kind") == "external" for task in tasks):
+            raise InputError("evaluation.kda_policy currently supports native evaluator tasks only")
     return value
 
 
@@ -317,6 +340,11 @@ def plan(spec, options):
 def runtime(spec, options):
     return {
         **spec.evaluation,
+        **(
+            {"serving_artifact": serving_artifact.build(spec.evaluation["kda_policy"])}
+            if "kda_policy" in spec.evaluation
+            else {}
+        ),
         "root": spec.output["root"],
         "name": spec.name,
         "mounts": spec.launch["weka_mounts"],
@@ -326,6 +354,7 @@ def runtime(spec, options):
 
 def specification(receipt):
     config = receipt["evaluation"]
+    evaluation_runner.validate_serving_artifact(config)
     # Carry the committed runner to the independent evaluator image. No source
     # checkout, dependency resolution or moving branch is used at job startup.
     runner = Path(__file__).with_name("evaluation_runner.py").read_bytes()
@@ -362,7 +391,19 @@ def specification(receipt):
                     "sharedMemory": "32 GiB",
                 },
                 "constraints": {"cluster": [config["cluster"]]},
-                "context": {"priority": "high", "autoResume": True},
+                "context": {
+                    "priority": "high",
+                    "autoResume": True,
+                    **(
+                        {
+                            "minRuntime": int(
+                                validation.duration(config["min_runtime"], "evaluation.min_runtime") * 10**9
+                            )
+                        }
+                        if "min_runtime" in config
+                        else {}
+                    ),
+                },
                 "timeout": config["timeout"],
                 "envVars": sandbox_env
                 + [{"name": name, "secret": secret} for name, secret in config["secrets"].items()],
