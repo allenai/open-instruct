@@ -1,4 +1,4 @@
-FROM sha256:ac0c8cdd6904ee11912571f11f47f13871572ca01ec3d291bb41c28708b94074
+FROM gcr.io/ai2-beaker-core/public/dbrcnemrl4sc73aaif5g@sha256:8fdfb51182a716d3d288e246e85dab0c4f6a2e027aae1dffa7844c24596007f5
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.revision=$SOURCE_REVISION
 COPY open_instruct/miles/infrastructure/coordinator_diagnostics.py /opt/core-rl/open_instruct/miles/infrastructure/coordinator_diagnostics.py
