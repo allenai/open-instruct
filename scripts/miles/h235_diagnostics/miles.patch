@@ -11,7 +11,7 @@
  
      @init_once
      async def init(self) -> None:
-+        self._diagnostic_heartbeat = coordinator_diagnostics.start()
++        self._diagnostic_heartbeat = coordinator_diagnostics.start(directory=self.args.save)
          args = self.args
          if not args.debug_train_only or args.eval_num_gpus > 0:
              await resolve_router_addrs(args, router_providers=self._router_providers)

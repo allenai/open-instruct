@@ -329,6 +329,13 @@ def run(path):
             },
         )
         env = dict(os.environ)
+        if env.get("H235_ENABLE_RESOURCE_DIAGNOSTICS") == "1":
+            resource_env = dict(env, H235_RESOURCE_DIAGNOSTICS=str(root))
+            supervisor.start_task(
+                "resource-watch",
+                [sys.executable, "-m", "open_instruct.miles.infrastructure.resource_watch"],
+                resource_env,
+            )
         registry = judging.registry(spec.judges)
         for name, devices in judges.items():
             service = registry["judges"][name]

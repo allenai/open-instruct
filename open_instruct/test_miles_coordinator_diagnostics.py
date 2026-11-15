@@ -49,3 +49,24 @@ def test_phase_logs_success():
     ):
         pass
     assert log.call_count == 2
+
+
+def test_native_stack_is_written_directly_to_run_directory(tmp_path):
+    code = f"""
+import asyncio
+import faulthandler
+import time
+from open_instruct.miles.infrastructure import coordinator_diagnostics
+async def main():
+    task = coordinator_diagnostics.start(interval=0.05, directory={str(tmp_path)!r})
+    time.sleep(0.16)
+    faulthandler.cancel_dump_traceback_later()
+    task.cancel()
+asyncio.run(main())
+"""
+    result = subprocess.run([sys.executable, "-c", code], text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    files = list((tmp_path / "coordinator-diagnostics").glob("stacks-*.log"))
+    assert len(files) == 1
+    assert "in main" in files[0].read_text()
+    assert "Timeout" not in result.stderr

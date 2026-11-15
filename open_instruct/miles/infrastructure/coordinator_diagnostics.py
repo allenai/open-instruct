@@ -5,6 +5,7 @@ import faulthandler
 import os
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
 from open_instruct import logger_utils
 
@@ -25,12 +26,21 @@ async def heartbeat(interval=30):
         previous = now
 
 
-def start(interval=60):
+_STACK_FILES = []
+
+
+def start(interval=60, directory=None):
     # CPython's native watchdog can dump every Python thread even when Python
     # logging, the actor loop, or a Python watchdog cannot acquire the GIL.
     # stderr is retained in the Beaker run log. No response payloads are printed.
-    faulthandler.enable(all_threads=True)
-    faulthandler.dump_traceback_later(interval, repeat=True)
+    output = None
+    if directory is not None:
+        path = Path(directory) / "coordinator-diagnostics"
+        path.mkdir(parents=True, exist_ok=True)
+        output = (path / f"stacks-{os.getpid()}.log").open("a")
+        _STACK_FILES.append(output)
+    faulthandler.enable(file=output, all_threads=True)
+    faulthandler.dump_traceback_later(interval, repeat=True, file=output)
     logger.info(
         "Coordinator stack sampling enabled pid=%s unix=%.3f interval_s=%s", os.getpid(), time.time(), interval
     )
