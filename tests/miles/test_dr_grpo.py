@@ -14,8 +14,9 @@ from open_instruct.miles import dr_grpo
 
 
 @pytest.mark.parametrize("fixed_budget", [32768])
+@pytest.mark.parametrize("boolean_masks", [False, True])
 @pytest.mark.parametrize("skip_scoring", [False, True])
-def test_dr_grpo_packing_and_direct_reference(tmp_path, fixed_budget, skip_scoring):
+def test_dr_grpo_packing_and_direct_reference(tmp_path, fixed_budget, skip_scoring, boolean_masks):
     token_average = False
     dist.init_process_group("gloo", init_method=f"file://{tmp_path}/group", rank=0, world_size=1)
     previous = parallel._parallel_state
@@ -81,6 +82,8 @@ def test_dr_grpo_packing_and_direct_reference(tmp_path, fixed_budget, skip_scori
         }
         raw["loss_masks"][1][1] = 0
         raw["loss_masks"][2].zero_()  # clamped denominator for a completely masked response
+        if boolean_masks:
+            raw["loss_masks"] = [m.bool() for m in raw["loss_masks"]]
         torch.manual_seed(17)
         initial = [torch.randn(1, n, 11) * 0.3 for n in lengths]
         scores = [
@@ -107,7 +110,9 @@ def test_dr_grpo_packing_and_direct_reference(tmp_path, fixed_budget, skip_scori
             objective = 0
             for batch, ids in zip(batches, indices, strict=True):
                 if reference:
-                    batch["rollout_mask_sums"] = [m.new_tensor(fixed_budget) for m in batch["loss_masks"]]
+                    batch["rollout_mask_sums"] = [
+                        torch.tensor(fixed_budget, dtype=torch.float32, device=m.device) for m in batch["loss_masks"]
+                    ]
                 if skip_scoring:
                     batch.pop("log_probs")
                 logits = torch.cat([values[i] for i in ids], dim=1)
