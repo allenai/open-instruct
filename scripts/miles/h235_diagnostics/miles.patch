@@ -1,0 +1,93 @@
+--- a/miles/ray/rollout/rollout_executor.py
++++ b/miles/ray/rollout/rollout_executor.py
+@@ -1,4 +1,6 @@
+ import asyncio
++
++from open_instruct.miles.infrastructure import coordinator_diagnostics
+ import logging
+ import time
+ from collections import defaultdict
+@@ -83,6 +85,7 @@
+ 
+     @init_once
+     async def init(self) -> None:
++        self._diagnostic_heartbeat = coordinator_diagnostics.start()
+         args = self.args
+         if not args.debug_train_only or args.eval_num_gpus > 0:
+             await resolve_router_addrs(args, router_providers=self._router_providers)
+@@ -236,11 +239,13 @@
+                 trainer_model_id=trainer_model_id,
+             )
+         metrics_started = time.perf_counter()
++        logger.info("Coordinator preparation stage: metrics_begin rollout_id=%s", rollout_id)
+         log_rollout_data(
+             rollout_id, self.args, data, metrics, time.time() - start_time, trainer_model_id=trainer_model_id
+         )
+         if (stage := getattr(self.data_source, "stage_training_batch", None)) is not None:
+             stage(rollout_id, data)
++        logger.info("Coordinator preparation stage: conversion_begin rollout_id=%s", rollout_id)
+         conversion_started = time.perf_counter()
+         data = convert_samples_to_train_data(
+             self.args,
+@@ -249,6 +254,7 @@
+             custom_convert_samples_to_train_data_func=self.custom_convert_samples_to_train_data_func,
+             custom_reward_post_process_func=self.custom_reward_post_process_func,
+         )
++        logger.info("Coordinator preparation stage: conversion_end rollout_id=%s", rollout_id)
+         converted_at = time.perf_counter()
+         sample_indices = data.get("sample_indices")
+         if self.args.delay_split_train_data_by_dp:
+@@ -417,6 +423,7 @@
+ 
+     def set_weight_version(self, weight_version: int, trainer_model_id: str | None = None) -> None:
+         # warning instead of assert when use indep_dp ft
++        logger.info("Coordinator set_weight_version entered: version=%s model=%s", weight_version, trainer_model_id)
+         previous = self._weight_versions_of_model_id.get(trainer_model_id)
+         if previous is not None and weight_version < previous:
+             message = f"Engine weight version went backwards: {previous} -> {weight_version}"
+@@ -424,6 +431,7 @@
+             logger.warning(message)
+         self._weight_versions_of_model_id[trainer_model_id] = weight_version
+         self._rollouts_since_publish_of_model_id[trainer_model_id] = 0
++        logger.info("Coordinator set_weight_version completed: version=%s model=%s", weight_version, trainer_model_id)
+ 
+     def set_train_parallel_config(self, config: dict[str, Any], trainer_model_id: str | None = None) -> None:
+         self._train_parallel_configs_of_model_id[trainer_model_id] = config
+--- a/miles/ray/placement_group.py
++++ b/miles/ray/placement_group.py
+@@ -1,4 +1,6 @@
+ import asyncio
++
++from open_instruct.miles.infrastructure import coordinator_diagnostics
+ import logging
+ import socket
+ from typing import NamedTuple
+@@ -323,20 +325,24 @@
+     if rollout_id is not None:
+         await orchestration_executor.run_after_step(rollout_id=rollout_id)
+ 
+-    info: UpdatableEngines = await inference_controller.start_update_weights(model_id=trainer_model_id)
++    with coordinator_diagnostics.phase("start_update_weights", rollout_id=rollout_id):
++        info: UpdatableEngines = await inference_controller.start_update_weights(model_id=trainer_model_id)
+     try:
+-        weight_version = await actor_model.update_weights(info=info, rollout_id=rollout_id)
++        with coordinator_diagnostics.phase("transfer_weights", rollout_id=rollout_id):
++            weight_version = await actor_model.update_weights(info=info, rollout_id=rollout_id)
+     except BaseException:
+         await inference_controller.abort_update_weights()
+         raise
+-    await inference_controller.end_update_weights(snapshot_cell_id_to_hashes=info.snapshot_cell_id_to_hashes)
++    with coordinator_diagnostics.phase("end_update_weights", rollout_id=rollout_id):
++        await inference_controller.end_update_weights(snapshot_cell_id_to_hashes=info.snapshot_cell_id_to_hashes)
+ 
+     await _maybe_log_inference_engine_weight_checksums(
+         args, inference_controller=inference_controller, rollout_id=rollout_id, trainer_model_id=trainer_model_id
+     )
+ 
+     if weight_version is not None:
+-        await rollout_executor.set_weight_version(weight_version, trainer_model_id=trainer_model_id)
++        with coordinator_diagnostics.phase("coordinator_ack", version=weight_version, rollout_id=rollout_id):
++            await rollout_executor.set_weight_version(weight_version, trainer_model_id=trainer_model_id)
+ 
+ 
+ async def _maybe_log_inference_engine_weight_checksums(
