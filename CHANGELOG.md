@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed
+- Keep ordinary structured-output parse failures as completed zero-reward evidence, preserving parse diagnostics and infrastructure-failure validity (https://github.com/allenai/open-instruct/pull/2262).
 - Enable native MILES score-centering TIS/MIS in Core refresh runs, validate candidate settings before launch, and pin the complete-support precision fixes (https://github.com/allenai/open-instruct/pull/2229).
 - Organize MILES examples by model family and explicitly configure candidate policy evaluation sampling, including shared and OPD in-loop defaults (https://github.com/allenai/open-instruct/pull/2255).
 - Add the native Nemotron abstention QA adapter and named three-tier judge profile, preserving NVIDIA's rubric and answer extraction while keeping judge failures ungraded (https://github.com/allenai/open-instruct/pull/2252).
