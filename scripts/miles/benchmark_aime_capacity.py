@@ -11,6 +11,7 @@ import importlib
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -101,8 +102,17 @@ def command(receipt, output, capacity):
         f"batching.chunk_size={capacity}",
         "-o",
         f"batching.max_batch_sequences={capacity}",
+        "-o",
+        "provider.kwargs.log_level=info",
         *argv[task_index:],
     ]
+
+
+def startup_command(argv):
+    """Use the study's bounded readiness shim while retaining worker crash checks."""
+    if argv[:2] != ["olmo-eval", "run"]:
+        raise ValueError("Expected the pinned native evaluator command")
+    return [sys.executable, str(Path(__file__).with_name("evaluator_startup_budget.py")), *argv[1:]]
 
 
 def main():
@@ -125,10 +135,14 @@ def main():
         if revision != receipt["evaluation"]["revision"]:
             raise ValueError("Pinned evaluator revision mismatch")
         argv = command(receipt, output / "results", case["capacity"])
-        env = {**os.environ, "OLMO_AIME_CAPACITY_TELEMETRY": str(output)}
+        env = {
+            **os.environ,
+            "OLMO_AIME_CAPACITY_TELEMETRY": str(output),
+            "OLMO_EVAL_PROVIDER_INIT_TIMEOUT_SECONDS": "2400",
+        }
         with (output / "evaluator.log").open("w") as log:
             subprocess.run(
-                [*argv, *(["--dry-run"] if args.dry_run else [])],
+                [*startup_command(argv), *(["--dry-run"] if args.dry_run else [])],
                 env=env,
                 stdout=log,
                 stderr=subprocess.STDOUT,

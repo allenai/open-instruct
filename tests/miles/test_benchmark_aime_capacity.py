@@ -2,6 +2,8 @@
 
 import copy
 import json
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -72,3 +74,14 @@ def test_capacity_overrides_precede_task_selector(monkeypatch, tmp_path):
     )
     argv = pilot.command(receipt, tmp_path, 128)
     assert argv.index("batching.max_batch_sequences=128") < argv.index("--task")
+    assert argv.index("provider.kwargs.log_level=info") < argv.index("--task")
+
+
+def test_startup_wrapper_preserves_evaluator_arguments():
+    argv = ["olmo-eval", "run", "--model", "checkpoint", "--task", "aime_2024:pass_at_32"]
+    wrapped = pilot.startup_command(argv)
+    assert wrapped[0] == sys.executable
+    assert Path(wrapped[1]).name == "evaluator_startup_budget.py"
+    assert wrapped[2:] == argv[1:]
+    with pytest.raises(ValueError, match="pinned native"):
+        pilot.startup_command(["olmo-eval", "run-external"])
