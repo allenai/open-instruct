@@ -1,6 +1,7 @@
 """Offline fail-closed checks for the inference-only FP4 KV gate."""
 
 import copy
+from types import SimpleNamespace
 
 import pytest
 from scripts.miles import qualify_math_nvfp4_kv as gate
@@ -81,3 +82,38 @@ def test_finite_candidates_and_complete_short_generation():
             gate.verify_outputs([changed], 1)
     with pytest.raises(ValueError):
         gate.verify_outputs([output], 16)
+
+
+def test_audit_waits_for_scheduler_pool_and_backend_initialization(monkeypatch):
+    runner = SimpleNamespace()
+    observed = []
+
+    class Scheduler:
+        def __init__(self, marker):
+            # ModelRunner construction alone does not allocate a pool on these pins.
+            self.tp_worker = SimpleNamespace(model_runner=runner)
+            assert not hasattr(runner, "token_to_kv_pool")
+            runner.token_to_kv_pool = marker
+            runner.attn_backend = "initialized"
+
+    def inspect(completed):
+        observed.append((completed.token_to_kv_pool, completed.attn_backend))
+
+    monkeypatch.setattr(gate, "write_runner_audit", inspect)
+    gate.install_scheduler_audit(Scheduler)
+    Scheduler("pool")
+    assert observed == [("pool", "initialized")]
+
+
+def test_failed_native_initialization_does_not_emit_audit(monkeypatch):
+    observed = []
+
+    class Scheduler:
+        def __init__(self):
+            raise RuntimeError("native pool allocation failed")
+
+    monkeypatch.setattr(gate, "write_runner_audit", observed.append)
+    gate.install_scheduler_audit(Scheduler)
+    with pytest.raises(RuntimeError, match="native pool allocation failed"):
+        Scheduler()
+    assert observed == []

@@ -32,51 +32,59 @@ def backend_info(backend, seen=None):
     return result
 
 
+def write_runner_audit(runner):
+    pool = runner.token_to_kv_pool
+    full = pool.full_kv_pool
+    state = pool.mamba_pool.mamba_cache
+    modules = []
+    for name, module in runner.model.named_modules():
+        method = getattr(module, "quant_method", None)
+        if method is not None or name.endswith("lm_head"):
+            modules.append(
+                {
+                    "name": name,
+                    "class": type(module).__name__,
+                    "quant_method": type(method).__name__,
+                    "parameters": {key: tensor_info(value) for key, value in module.named_parameters(recurse=False)},
+                }
+            )
+    audit = {
+        "pool": type(pool).__name__,
+        "full_pool": type(full).__name__,
+        "kv_dtype": str(full.dtype),
+        "quant_method": type(full.quant_method).__name__,
+        "quant_name": full.quant_method.name,
+        "full_layer_count": pool.full_layer_nums,
+        "buffers": {
+            key: tensor_info(getattr(full, key, None))
+            for key in ("k_buffer", "v_buffer", "native_k_scale_buffer", "native_v_scale_buffer")
+        },
+        "recurrent_temporal": tensor_info(state.temporal),
+        "recurrent_conv": tensor_info(state.conv),
+        "backends": backend_info(runner.attn_backend),
+        "modules": modules,
+    }
+    Path(os.environ["OI_KV_GATE_OUTPUT"], f"pool-audit-{os.getpid()}.json").write_text(
+        json.dumps(audit, indent=2) + "\n"
+    )
+
+
+def install_scheduler_audit(scheduler_type):
+    # The pinned runtime allocates pools/backends AFTER ModelRunner.__init__.
+    # Observe the completed scheduler without changing native initialization.
+    original = scheduler_type.__init__
+
+    def init(scheduler, *args, **kwargs):
+        original(scheduler, *args, **kwargs)
+        write_runner_audit(scheduler.tp_worker.model_runner)
+
+    scheduler_type.__init__ = init
+
+
 def audited_scheduler(*args, **kwargs):
-    runner_type = importlib.import_module("sglang.srt.model_executor.model_runner").ModelRunner
-    original = runner_type.__init__
-
-    def init(runner, *init_args, **init_kwargs):
-        original(runner, *init_args, **init_kwargs)
-        pool = runner.token_to_kv_pool
-        full = pool.full_kv_pool
-        state = pool.mamba_pool.mamba_cache
-        modules = []
-        for name, module in runner.model.named_modules():
-            method = getattr(module, "quant_method", None)
-            if method is not None or name.endswith("lm_head"):
-                modules.append(
-                    {
-                        "name": name,
-                        "class": type(module).__name__,
-                        "quant_method": type(method).__name__,
-                        "parameters": {
-                            key: tensor_info(value) for key, value in module.named_parameters(recurse=False)
-                        },
-                    }
-                )
-        audit = {
-            "pool": type(pool).__name__,
-            "full_pool": type(full).__name__,
-            "kv_dtype": str(full.dtype),
-            "quant_method": type(full.quant_method).__name__,
-            "quant_name": full.quant_method.name,
-            "full_layer_count": pool.full_layer_nums,
-            "buffers": {
-                key: tensor_info(getattr(full, key, None))
-                for key in ("k_buffer", "v_buffer", "native_k_scale_buffer", "native_v_scale_buffer")
-            },
-            "recurrent_temporal": tensor_info(state.temporal),
-            "recurrent_conv": tensor_info(state.conv),
-            "backends": backend_info(runner.attn_backend),
-            "modules": modules,
-        }
-        Path(os.environ["OI_KV_GATE_OUTPUT"], f"pool-audit-{os.getpid()}.json").write_text(
-            json.dumps(audit, indent=2) + "\n"
-        )
-
-    runner_type.__init__ = init
-    return importlib.import_module("sglang.srt.managers.scheduler").run_scheduler_process(*args, **kwargs)
+    scheduler_module = importlib.import_module("sglang.srt.managers.scheduler")
+    install_scheduler_audit(scheduler_module.Scheduler)
+    return scheduler_module.run_scheduler_process(*args, **kwargs)
 
 
 def verify_audit(audit):
