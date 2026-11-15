@@ -76,7 +76,7 @@ echo SPEED-TRAIN-EXIT \$RC \$(date -u +%FT%TZ)
 exit \$RC"
 
 SPEC=$(mktemp -t speedspec.XXXXXX)
-CMD="$CMD" PRIORITY="${PRIORITY:-urgent}" NAME="$NAME" CFG_PATCH="${CFG_PATCH:-}" PROFILE="${PROFILE:-}" NNODES="$NNODES" IMAGE="$IMAGE" \
+CMD="$CMD" CLUSTER="${CLUSTER:-ai2/holmes}" PRIORITY="${PRIORITY:-urgent}" NAME="$NAME" CFG_PATCH="${CFG_PATCH:-}" PROFILE="${PROFILE:-}" NNODES="$NNODES" IMAGE="$IMAGE" \
 EXTRA_ENV_JSON="${EXTRA_ENV_JSON:-[]}" STEPS="$STEPS" OUT="$OUT" python3 - "$SPEC" <<'EOF'
 import json, os, sys
 e = os.environ
@@ -114,7 +114,7 @@ task = {
     "result": {"path": "/output"},
     "resources": {"gpuCount": 8, "sharedMemory": "10GiB"},
     "context": {"priority": e["PRIORITY"]},
-    "constraints": {"cluster": ["ai2/holmes"]},
+    "constraints": {"cluster": [e["CLUSTER"]]},
     "replicas": int(e["NNODES"]),
     "leaderSelection": True,
     "hostNetworking": True,
@@ -124,7 +124,7 @@ task = {
     "timeout": "2h",
 }
 spec = {"version": "v2", "budget": "ai2/oe-other",
-        "description": f"A4B SFT speed ladder {e['NAME']}: H203 recipe, {e['STEPS']} steps, {e['NNODES']}x8 B300, "
+        "description": f"A4B SFT speed ladder {e['NAME']}: H203 recipe, {e['STEPS']} steps, {e["NNODES"]}x8 {e["CLUSTER"]}, "
                        f"out {e['OUT']}, patch {e['CFG_PATCH'] or '-'}",
         "tasks": [task]}
 if int(e["NNODES"]) == 1:
