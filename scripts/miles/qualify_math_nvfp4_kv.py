@@ -87,23 +87,36 @@ def audited_scheduler(*args, **kwargs):
     return scheduler_module.run_scheduler_process(*args, **kwargs)
 
 
-def verify_audit(audit):
+def verify_audit(audit, *, bf16_kv_control=False):
     if (
         audit["pool"] != "HybridLinearKVPool"
         or audit["full_layer_count"] != 2
-        or audit["quant_name"] != "nvfp4"
-        or audit["kv_dtype"] != "torch.float4_e2m1fn_x2"
+        or audit["quant_name"] != ("unquantized" if bf16_kv_control else "nvfp4")
+        or audit["kv_dtype"] != ("torch.bfloat16" if bf16_kv_control else "torch.float4_e2m1fn_x2")
     ):
         raise ValueError("Unexpected hybrid KV pool/recipe/layers")
-    for key in ("k_buffer", "v_buffer", "native_k_scale_buffer", "native_v_scale_buffer"):
+    required = (
+        ("k_buffer", "v_buffer")
+        if bf16_kv_control
+        else ("k_buffer", "v_buffer", "native_k_scale_buffer", "native_v_scale_buffer")
+    )
+    for key in required:
         if not audit["buffers"][key]:
             raise ValueError("Missing physical packed KV/scales")
     for key in ("k_buffer", "v_buffer"):
-        if any(item["dtype"] != "torch.uint8" for item in audit["buffers"][key]):
+        if any(
+            item["dtype"] != ("torch.bfloat16" if bf16_kv_control else "torch.uint8") for item in audit["buffers"][key]
+        ):
             raise ValueError("Native packed KV storage must be uint8")
     if audit["recurrent_temporal"]["dtype"] != "torch.float32":
         raise ValueError("Recurrent temporal precision changed")
-    if '"uses_trtllm_gen_native_fp4": true' not in json.dumps(audit["backends"]):
+    if bf16_kv_control:
+        backend = audit["backends"].get("full_attn_backend", {})
+        if backend.get("class") != "TRTLLMHAAttnBackend" or backend.get("uses_trtllm_gen_native_fp4") is not False:
+            raise ValueError("Expected matching TRTLLM MHA BF16 KV control")
+        if any(audit["buffers"].get(key) for key in ("native_k_scale_buffer", "native_v_scale_buffer")):
+            raise ValueError("BF16 KV control must not allocate packed FP4 scales")
+    elif '"uses_trtllm_gen_native_fp4": true' not in json.dumps(audit["backends"]):
         raise ValueError("Native GenMHA FP4 backend not active")
     experts = [module for module in audit["modules"] if module["name"].endswith(".experts")]
     if len(experts) != 15 or any("fp4" not in module["quant_method"].lower() for module in experts):
@@ -136,6 +149,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--options", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--bf16-kv-control", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     options = json.loads(args.options.read_text())
@@ -177,7 +191,7 @@ def main():
         audits = list(args.output.glob("pool-audit-*.json"))
         if len(audits) != 1:
             raise ValueError("Expected one TP1 pool audit")
-        verify_audit(json.loads(audits[0].read_text()))
+        verify_audit(json.loads(audits[0].read_text()), bf16_kv_control=args.bf16_kv_control)
         engine.flush_cache()
         # Exact-length synthetic probe is isolated from accuracy samples.
         sentence = tokenizer.encode("Solve the following mathematics problem step by step. ", add_special_tokens=False)
@@ -198,6 +212,7 @@ def main():
                 {
                     "evaluation": True,
                     "accuracy_validation": False,
+                    "bf16_kv_control": args.bf16_kv_control,
                     "options": options,
                     "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     "short_requests": 16,

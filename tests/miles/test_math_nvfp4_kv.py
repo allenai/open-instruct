@@ -38,6 +38,31 @@ def test_valid_native_pool_scope():
     gate.verify_audit(audit())
 
 
+def test_matched_backend_bf16kv_control_rejects_cache_or_backend_substitution():
+    control = audit()
+    control.update(quant_name="unquantized", kv_dtype="torch.bfloat16")
+    control["backends"] = {"full_attn_backend": {"class": "TRTLLMHAAttnBackend", "uses_trtllm_gen_native_fp4": False}}
+    for key in ("k_buffer", "v_buffer"):
+        control["buffers"][key][0]["dtype"] = "torch.bfloat16"
+    for key in ("native_k_scale_buffer", "native_v_scale_buffer"):
+        control["buffers"][key] = None
+    gate.verify_audit(control, bf16_kv_control=True)
+    # Neither cache recipe can qualify as the other.
+    with pytest.raises(ValueError):
+        gate.verify_audit(control)
+    with pytest.raises(ValueError):
+        gate.verify_audit(audit(), bf16_kv_control=True)
+    for replacement in ("TritonAttnBackend", "FlashInferAttnBackend"):
+        changed = copy.deepcopy(control)
+        changed["backends"]["full_attn_backend"]["class"] = replacement
+        with pytest.raises(ValueError):
+            gate.verify_audit(changed, bf16_kv_control=True)
+    changed = copy.deepcopy(control)
+    changed["buffers"]["native_k_scale_buffer"] = audit()["buffers"]["native_k_scale_buffer"]
+    with pytest.raises(ValueError):
+        gate.verify_audit(changed, bf16_kv_control=True)
+
+
 @pytest.mark.parametrize(
     "key,value",
     [
