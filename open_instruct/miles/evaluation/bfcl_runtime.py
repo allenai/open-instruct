@@ -337,6 +337,7 @@ def _command(p, checkpoint, output, panel, identity, cache_root):
         'test "$(git -C /opt/olmo-eval rev-parse HEAD)" = ' + q(EVALUATOR_REVISION),
         "mkdir -p " + q(str(cache_root / "uv")) + " " + q(str(cache_root / "hf")),
         "export UV_CACHE_DIR=" + q(str(cache_root / "uv")),
+        'export UV_LOCK_TIMEOUT="${UV_LOCK_TIMEOUT:-1800}"',
         "export HF_HOME=" + q(str(cache_root / "hf")),
         "export HF_HUB_CACHE=" + q(str(cache_root / "hf/hub")),
         "export HF_DATASETS_CACHE=" + q(str(cache_root / "hf/datasets")),

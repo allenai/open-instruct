@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -256,3 +257,23 @@ def test_native_panel_rejects_mismatched_intervals_before_submission(run):
     next(t for t in document["evaluation"]["tasks"] if t.get("worker"))["interval"] = 100
     with pytest.raises(InputError, match="same evaluation interval"):
         RunSpec.from_dict(document)
+
+
+@pytest.mark.parametrize("override,expected", [(None, "1800"), ("2400", "2400")])
+@pytest.mark.parametrize("panel", ["single", "multi"])
+def test_uv_lock_timeout_reaches_both_bootstrap_install_steps(receipt, run, panel, override, expected):
+    receipt["tasks"] = [t for t in run.evaluation["tasks"] if t.get("worker") and bfcl.panel_for(t["task"]) == panel]
+    lines = bfcl.launch_command(receipt, Path("/weka/test/native")).splitlines()
+    export = next(line for line in lines if line.startswith("export UV_LOCK_TIMEOUT="))
+    installs = [line for line in lines if line.startswith("uv pip install ")]
+    assert len(installs) == 2
+    assert lines.index(export) < min(lines.index(line) for line in lines if line.startswith("uv "))
+    env = dict(os.environ)
+    env.pop("UV_LOCK_TIMEOUT", None)
+    if override is not None:
+        env["UV_LOCK_TIMEOUT"] = override
+    # Execute the actual rendered export and both install argv through a shell stub.
+    # No package manager, network, model or GPU is invoked.
+    script = "uv() { printf '%s\\n' \"$UV_LOCK_TIMEOUT\"; }\n" + export + "\n" + "\n".join(installs)
+    result = subprocess.run(["bash", "-euc", script], env=env, capture_output=True, text=True, check=True)
+    assert result.stdout.splitlines() == [expected, expected]
