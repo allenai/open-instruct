@@ -78,6 +78,8 @@ SMOKE_STEPS=30
 SMOKE_HOURS=1
 REF_TRANSFORMERS=4.57.6
 SEED_ROWS=""
+TOKREV=8b9717061fae09d5be814373d189919a62a9a00d
+KEEP_LAST=2
 DESC="ledger H161 GPU companion (draft)"
 case "$ARM" in
     b1r) MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
@@ -93,6 +95,23 @@ case "$ARM" in
          LR="${A4B_LR:-7.3e-5}"; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8 --loss_implementation fused_linear"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-gpu; DESC="ledger A4B half-epoch C12r (descriptive)"
          STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=72 ;;
+    a4b8) # ledger H228 (a4b8t-c12rf-2pass): the a4b arm on the 8T decay base, with H210's C12rf data (cache and
+         # tokenizer revision as the rfn arm), two passes, every permanent save kept (--keep_last_n_checkpoints -1:
+         # OLMo-core's max_checkpoints would otherwise delete the 0.5- and 1-pass states the read needs).
+         MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-8t-decay318k-causal/step321974/model_and_optim
+         HF_REF=/weka/oe-training-default/tanushy/checkpoints/olmo35-small-hero-decay318k-causal-321974/hf
+         CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=30; SMOKE_HOURS=1; REF_TRANSFORMERS=5.15.1
+         SEED_ROWS='[[100256, [14023, 771, 29]], [100266, [524, 27963, 29]]]'
+         F=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/rf
+         MIXER="$F/filtered/00000-dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet 1.0 \
+$F/filtered/00001-nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
+$F/filtered/00002-nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
+$F/filtered/00003-nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456 \
+$F/identity/identity.jsonl 1.0"
+         CACHE=8f9259b9cc-6068a350-rowaligned; TOKREV=03c29652a9d74902fe9d39bc0ad211748c7e7ae6; KEEP_LAST=-1
+         LR="${A4B_LR:?A4B_LR=<peak LR from the H228 LR rule>}"; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8 --loss_implementation fused_linear"
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-gpu; DESC="ledger H228 a4b8t-c12rf-2pass"
+         STEPS=63478; EPOCHS=2; CKPT=15870; HOURS=192 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
@@ -104,6 +123,8 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 # An LR arm (A4B_LR set) gets its own run name and output dir, so it can never resume from H203's a4bgpu-s<seed>.
 [[ "$ARM" == a4b && -n "${A4B_LR:-}" ]] && RUN_NAME="a4bgpu-lr${A4B_LR}-s${SEED}"
 [[ "$ARM" == a4b && -n "${A4B_LR:-}" && -n "${RESUME_FROM:-}" ]] && { echo "an LR arm starts from the base: RESUME_FROM is refused" >&2; exit 1; }
+[[ "$ARM" == a4b8 ]] && RUN_NAME="a4bgpu-8t-2pass-lr${A4B_LR}-s${SEED}"
+[[ "$ARM" == a4b8 && -n "${RESUME_FROM:-}" ]] && { echo "a4b8 starts from the base: RESUME_FROM is refused" >&2; exit 1; }
 case "$MODE" in
     smoke) STEPS=$SMOKE_STEPS; CKPT=1000000; SAVE_EVERY=1024; HOURS=$SMOKE_HOURS; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
@@ -118,13 +139,13 @@ OUTPUT_DIR="$OUT_ROOT/$RUN_NAME"
 DUMP_DIR="$OUTPUT_DIR/step1"
 
 ARGS="--model_name_or_path $MODEL --config_name $CONFIG \
---tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
+--tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision $TOKREV \
 --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
 --row_aligned_parts --document_boundaries_from_metadata --max_seq_length 65536 \
 --per_device_train_batch_size 1 --gradient_accumulation_steps 1 --learning_rate $LR --warmup_ratio 0.03 \
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs $EPOCHS --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
---checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
+--checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints $KEEP_LAST --dist_timeout_hours 2 \
 --no_save_async --with_tracking --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
 --local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR $EXTRA_ARGS"
@@ -192,7 +213,7 @@ else
 $TORCHRUN"
     # An LR arm must start from the base: its first attempt requires an output dir with no stepN and leaves a
     # marker, so a later auto-resume (marker present) continues from its own checkpoints.
-    if [[ "$ARM" == a4b && -n "${A4B_LR:-}" ]]; then
+    if [[ ( "$ARM" == a4b && -n "${A4B_LR:-}" ) || "$ARM" == a4b8 ]]; then
         CMD="if [ ! -e $OUTPUT_DIR/.a4b_fresh_start ]; then
   if ls -d $OUTPUT_DIR/step* >/dev/null 2>&1; then echo A4B-NOT-FRESH $OUTPUT_DIR; ls -d $OUTPUT_DIR/step*; exit 6; fi
   mkdir -p $OUTPUT_DIR && touch $OUTPUT_DIR/.a4b_fresh_start; echo A4B-FRESH-START $OUTPUT_DIR \$(date -u +%FT%TZ)
@@ -202,9 +223,18 @@ $CMD"
     EXTRA_ENV=""
 fi
 
+# H228's G2 receipt: the cache path and its statistics file's sha256, against H210's C12rf build. (The smoke already
+# logs H161-BH batch indices, compared with H210's G2 smoke for steps 1-20: same cache, replay and seed.)
+if [[ "$ARM" == a4b8 && "$MODE" == smoke ]]; then
+    CD=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/$CACHE
+    CMD="echo A4B8-CACHE $CD \$(readlink -f $CD)
+sha256sum $CD/dataset_statistics.json
+$CMD"
+fi
+
 # A4B takes its pretraining recipe's allocator setting: smoke 01M6XSN6K34KCM946JH8429T8X OOMed in the dry-run
 # backward needing 7.79 GiB with 7.57 GiB free and 31 GiB reserved but unallocated.
-[[ "$ARM" == a4b ]] && EXTRA_ENV="$EXTRA_ENV {\"name\": \"PYTORCH_CUDA_ALLOC_CONF\", \"value\": \"expandable_segments:True\"},"
+[[ "$ARM" == a4b || "$ARM" == a4b8 ]] && EXTRA_ENV="$EXTRA_ENV {\"name\": \"PYTORCH_CUDA_ALLOC_CONF\", \"value\": \"expandable_segments:True\"},"
 SPEC=$(mktemp -t h161spec.XXXXXX)
 CMD="$CMD" python3 - "$SPEC" <<EOF
 import json, os, sys
