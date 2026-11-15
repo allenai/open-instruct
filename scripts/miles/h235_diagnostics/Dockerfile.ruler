@@ -1,0 +1,4 @@
+# Same H235 qualified evaluator (Beaker 01M7CK4QK3MJ7Q9MZYRQTMTPYW),
+# with explicit permission for the already-planned 131072 serving context.
+FROM gcr.io/ai2-beaker-core/public/dbs1qhtp58ms739itbfg@sha256:cc6debcdc4fb22c025458cd5b886c15903e82bc1bb70f95309783b78293c6689
+ENV SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1
