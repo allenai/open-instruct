@@ -83,9 +83,9 @@ e = os.environ
 env = [
     {"name": "OLMO_SHARED_FS", "value": "1"},
     {"name": "EXPECTED_NUMPY_CACHE", "value": "bf82a8fab8-6068a350-rowaligned"},
-    {"name": "HF_HOME", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/huggingface"},
-    {"name": "HF_DATASETS_CACHE", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/huggingface"},
-    {"name": "HF_HUB_CACHE", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/hub"},
+    {"name": "HF_HOME", "value": "/tmp/hf_cache/huggingface"},
+    {"name": "HF_DATASETS_CACHE", "value": "/tmp/hf_cache/huggingface"},
+    {"name": "HF_HUB_CACHE", "value": "/tmp/hf_cache/hub"},
     {"name": "NCCL_DEBUG", "value": "ERROR"},
     {"name": "NCCL_SOCKET_IFNAME", "value": "ib"},
     {"name": "NCCL_IB_HCA", "value": "^=mlx5_bond_0"},
