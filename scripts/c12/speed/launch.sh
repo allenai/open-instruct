@@ -93,7 +93,7 @@ env = [
     {"name": "SPEED_SCHED_STEPS", "value": "18410"},
     {"name": "SPEED_NO_FINAL_SAVE", "value": "1"},
     {"name": "SPEED_MEM", "value": "1"},
-    {"name": "HF_TOKEN", "secret": "kevinfarhat_HF_TOKEN"},
+    {"name": "HF_TOKEN", "secret": "kevinfarhat_HF_TOKEN_fg"},
     {"name": "WANDB_API_KEY", "secret": "kevinfarhat_WANDB_API_KEY"},
     {"name": "BEAKER_TOKEN", "secret": "kevinfarhat_BEAKER_TOKEN"},
 ]
