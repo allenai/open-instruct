@@ -512,7 +512,7 @@
     ]
   },
   "miles": {
-    "async_data_buffer_capacity_factor": 16.0,
+    "async_data_buffer_capacity_factor": 8.0,
     "calculate_per_token_loss": true,
     "grpo_std_normalization": false,
     "http_post_actors_per_node": 16,
