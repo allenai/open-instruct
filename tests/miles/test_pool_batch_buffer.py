@@ -1,13 +1,18 @@
 """Run homogeneous packing through native stale filtering and capacity accounting."""
 
 import asyncio
+import contextlib
+import io
+import sys
 from types import SimpleNamespace
 
 import pytest
 from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput, DataBufferInput
+from miles.utils import arguments as native_arguments
 from miles.utils.types import Sample, WeightVersionSpan, WeightVersionsPerCall
 
-from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.configuration import arguments as core_arguments
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.rollout.pool_batch_buffer import PoolBatchDataBuffer
 
 
@@ -116,3 +121,23 @@ def test_partial_prepared_cancellation_restarts_a_complete_cohort():
         assert len(buffer.queue) == 0
 
     asyncio.run(asyncio.wait_for(scenario(), 5))
+
+
+@pytest.mark.parametrize("capacity", [8, 16])
+def test_native_parser_preserves_capacity_for_pool_validation(monkeypatch, capacity):
+    config = RunConfig(
+        CoreConfig(pool_batch_fraction=1, pool_batch_values=[str(i) for i in range(7)], max_policy_lag=12),
+        {
+            "hf_checkpoint": "model",
+            "rollout_batch_size": 64,
+            "n_samples_per_prompt": 8,
+            "global_batch_size": 512,
+            "fully_async": True,
+            "async_data_buffer_capacity_factor": capacity,
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["test", *config.arguments()])
+    with contextlib.redirect_stderr(io.StringIO()):
+        parsed = core_arguments.load_core_args(native_arguments.get_miles_extra_args_provider())
+    assert parsed.async_data_buffer_capacity_factor == capacity
+    assert parsed.custom_async_data_buffer_path == "open_instruct.miles.rollout.pool_batch_buffer.PoolBatchDataBuffer"

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from open_instruct.miles.configuration import constraints
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
@@ -125,3 +126,8 @@ def test_registered_h243_configs_compile(arm):
     assert config.miles["calculate_per_token_loss"] is True
     assert config.miles["global_batch_size"] == 512
     assert config.core.pool_batch_fraction == (0 if arm == "mixed-token" else 1)
+
+
+def test_runtime_validation_receives_explicit_buffer_capacity():
+    fields = constraints.native_values(SimpleNamespace(async_data_buffer_capacity_factor=8), set())
+    assert fields["async_data_buffer_capacity_factor"] == 8

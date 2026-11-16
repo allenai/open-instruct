@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "h243-pool-smoke-20261116",
+  "name": "h243-pool-smoke-r3-20261116",
   "model": {
     "format": "hf",
     "source": "/weka/olmo-3p5-post-checkpoints/abhishekr/s-c-gpu/s-c-noag-s34521/hf_step63494"
@@ -14,8 +14,8 @@
   },
   "output": {
     "export_hf": false,
-    "hf_dir": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/smoke/export-hf",
-    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/smoke"
+    "hf_dir": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/smoke-r3/export-hf",
+    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/smoke-r3"
   },
   "launch": {
     "workspace": "ai2/olmo-instruct",
@@ -72,7 +72,7 @@
     "enabled": true,
     "response_sample_rate": 0.05,
     "responses": "sample",
-    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/smoke/inference-records"
+    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/smoke-r3/inference-records"
   },
   "training": {
     "num_rollouts": 4,
@@ -100,7 +100,7 @@
     "fully_async": true
   },
   "tracking": {
-    "wandb_group": "H243-mechanics-s17",
+    "wandb_group": "H243-mechanics-r3-s17",
     "wandb_mode": "online",
     "wandb_project": "open-instruct-miles",
     "wandb_run_name": "pool-smoke",
@@ -140,7 +140,7 @@
     ]
   },
   "miles": {
-    "async_data_buffer_capacity_factor": 16.0,
+    "async_data_buffer_capacity_factor": 8.0,
     "calculate_per_token_loss": true,
     "grpo_std_normalization": false,
     "http_post_actors_per_node": 16,
