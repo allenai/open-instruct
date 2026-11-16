@@ -443,3 +443,24 @@ def test_full_cap_output_gate_requires_exact_lengths_finite_scores_and_candidate
     output["meta_info"]["output_top_logprobs"][0] = [[float("nan"), 7]] * 20
     with pytest.raises(ValueError, match="Nonfinite"):
         gate.verify_full_cap_outputs([output], 1)
+
+
+def test_fp8_refresh_options_preserve_qualified_precision_footprint():
+    args = SimpleNamespace(model=Path("/checkpoint"), port=30000, gpu=1, precision="fp8", nvfp4_kv=False)
+    options = gate.server_options(args)
+    assert options["quantization"] == "fp8"
+    assert options["moe_runner_backend"] == "triton"
+    assert options["kv_cache_dtype"] == "bf16"
+    assert options["enable_fp32_lm_head"] is True
+    assert "FLASHINFER" not in str(options)
+
+
+def test_fp8_own_server_scores_are_strict_but_cross_device_is_recorded():
+    with pytest.raises(ValueError, match="mismatch"):
+        gate.compare_scores(scores(0.1), scores(), "fp8", unchanged=True)
+    spread = gate.compare_scores(scores(0.1), scores(), "fp8")
+    assert spread["max_abs"] > 0
+    assert spread["numerical_equivalence_asserted"] is False
+    bad = scores(float("nan"))
+    with pytest.raises(ValueError, match="Nonfinite"):
+        gate.compare_scores(bad, scores(), "fp8")

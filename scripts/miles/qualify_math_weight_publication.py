@@ -28,7 +28,7 @@ from safetensors.torch import save_file
 from scripts.miles import diagnostic_native_config, qualify_math_nvfp4_kv, qualify_math_quantization
 from torch import distributed as dist
 
-from open_instruct.miles.execution import kda_dispatch, quantized_publication
+from open_instruct.miles.execution import fp8_publication, kda_dispatch, quantized_publication
 
 EXPERT = re.compile(r"^model\.layers\.(\d+)\.mlp\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$")
 # Preregistered tolerances on fixed-token conditional log probabilities. Full
@@ -187,6 +187,13 @@ def compare_scores(actual, expected, precision, *, unchanged=False):
     diff, ref = torch.tensor(differences), torch.tensor(references)
     if not diff.numel() or not torch.isfinite(diff).all() or not torch.isfinite(ref).all():
         raise ValueError("Nonfinite or missing scores")
+    if precision == "fp8" and not unchanged:
+        return {
+            "tokens": diff.numel(),
+            "max_abs": diff.abs().max().item(),
+            "numerical_equivalence_asserted": False,
+            "scope": "Finite aligned scores only; exact parameter/scale/layout parity checked independently",
+        }
     atol, rtol = (0.0, 0.0) if unchanged else TOLERANCES[precision]
     if not torch.all(diff.abs() <= atol + rtol * ref.abs()):
         raise ValueError(f"Publication/fresh score mismatch: max={diff.abs().max().item()}, atol={atol}, rtol={rtol}")
@@ -426,6 +433,7 @@ def audit_scheduler(*args, **kwargs):
     instrument_kda_inputs()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
     quantized_publication.install_nvfp4_publication_context(model_type)
+    fp8_publication.install_fp8_publication()
     original_load, original_forward = model_type.load_weights, model_type.forward
 
     def load(model, *values, **options):
@@ -462,6 +470,20 @@ def audit_scheduler(*args, **kwargs):
         result = None if diagnostic else original_forward(model, *values, **options)
         epoch = getattr(model, "_publication_audit_epoch", 0)
         if getattr(model, "_publication_audited_epoch", None) != epoch:
+            if getattr(model, "quant_config", None) is not None and model.quant_config.get_name() == "fp8":
+                storage = {name: tensor.data_ptr() for name, tensor in model.named_parameters()}
+                previous = getattr(model, "_fp8_gate_storage", storage)
+                if previous != storage:
+                    raise ValueError("FP8 publication changed graph-visible parameter addresses")
+                model._fp8_gate_storage = storage
+                save(
+                    Path(os.environ["OI_PUBLICATION_AUDIT"]) / f"storage-{epoch}.json",
+                    {
+                        "pointers": storage,
+                        "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+                        "allocated_bytes": torch.cuda.memory_allocated(),
+                    },
+                )
             inventory = []
             for name, module in model.named_modules():
                 method = getattr(module, "quant_method", None)
@@ -527,6 +549,8 @@ def server_options(args):
         enable_fp32_lm_head=True,
         kv_cache_dtype="bf16",
     )
+    if args.precision == "fp8":
+        options.update(quantization="fp8", moe_runner_backend="triton")
     if args.precision == "nvfp4":
         options.update(quantization="nvfp4_online", moe_runner_backend="flashinfer_trtllm_routed")
     if getattr(args, "nvfp4_kv", False):
@@ -543,6 +567,8 @@ def server_options(args):
 
 def server(args):
     os.environ["OLMO_SGLANG_CORE_COMPAT"] = "auto" if args.precision == "bf16" else "off"
+    if args.precision == "fp8":
+        os.environ["SGLANG_FP8_IGNORED_LAYERS"] = ",".join(qualify_math_quantization.FP8_EXCLUSIONS)
     importlib.import_module("olmo_sglang").register()
     server_args = importlib.import_module("sglang.srt.server_args").ServerArgs
     options = server_options(args)
@@ -646,7 +672,10 @@ class Fleet:
                     engine.server_url + "/generate",
                     json={
                         "input_ids": probes,
-                        "sampling_params": {"temperature": 0, "max_new_tokens": 1},
+                        "sampling_params": {
+                            "temperature": 0,
+                            "max_new_tokens": 4 if self.args.precision == "fp8" else 1,
+                        },
                         "return_logprob": True,
                         "logprob_start_len": 0,
                         "top_logprobs_num": 20,
@@ -719,7 +748,10 @@ class Fleet:
                         self.clients[index].server_url + "/generate",
                         json={
                             "input_ids": references[key],
-                            "sampling_params": {"temperature": 0, "max_new_tokens": 1},
+                            "sampling_params": {
+                                "temperature": 0,
+                                "max_new_tokens": 4 if self.args.precision == "fp8" else 1,
+                            },
                             "return_logprob": True,
                             "logprob_start_len": 0,
                         },
@@ -898,14 +930,14 @@ def run(args):
                     raise ValueError("Missing forced w1/w3 split-bucket coverage")
                 if variant == 0:
                     for actual, expected in zip(current[0], baseline[0], strict=True):
-                        compare_scores(actual, expected, args.precision, unchanged=args.precision == "bf16")
+                        compare_scores(actual, expected, args.precision, unchanged=args.precision in ("bf16", "fp8"))
                     if current[1] != baseline[1]:
                         raise ValueError("Unchanged/reverted publication changed serving weights")
                 if variant in observed and current[1] != observed[variant][1]:
                     raise ValueError("Repeated publication changed scales/layout/weights")
                 if variant in observed:
                     for actual, expected in zip(current[0], observed[variant][0], strict=True):
-                        compare_scores(actual, expected, args.precision, unchanged=args.precision == "bf16")
+                        compare_scores(actual, expected, args.precision, unchanged=args.precision in ("bf16", "fp8"))
                 observed[variant] = current
                 report = {
                     "version": version,
@@ -963,7 +995,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--precision", choices=("bf16", "nvfp4"), required=True)
+    parser.add_argument("--precision", choices=("bf16", "nvfp4", "fp8"), required=True)
     parser.add_argument("--nvfp4-kv", action="store_true")
     parser.add_argument("--server", action="store_true")
     parser.add_argument("--gpu", type=int)
