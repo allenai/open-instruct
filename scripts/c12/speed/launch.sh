@@ -97,7 +97,7 @@ echo SPEED-TRAIN-EXIT \$RC \$(date -u +%FT%TZ)
 exit \$RC"
 
 SPEC=$(mktemp -t speedspec.XXXXXX)
-CMD="$CMD" MIN_RUNTIME="${MIN_RUNTIME:-2h}" CLUSTER="${CLUSTER:-ai2/holmes}" PRIORITY="${PRIORITY:-urgent}" NAME="$NAME" CFG_PATCH="${CFG_PATCH:-}" PROFILE="${PROFILE:-}" NNODES="$NNODES" IMAGE="$IMAGE" \
+CMD="$CMD" SYNC_TIMEOUT="${SYNC_TIMEOUT:-10m}" MIN_RUNTIME="${MIN_RUNTIME:-2h}" CLUSTER="${CLUSTER:-ai2/holmes}" PRIORITY="${PRIORITY:-urgent}" NAME="$NAME" CFG_PATCH="${CFG_PATCH:-}" PROFILE="${PROFILE:-}" NNODES="$NNODES" IMAGE="$IMAGE" \
 EXTRA_ENV_JSON="${EXTRA_ENV_JSON:-[]}" STEPS="$STEPS" OUT="$OUT" python3 - "$SPEC" <<'EOF'
 import json, os, sys
 e = os.environ
@@ -141,7 +141,7 @@ task = {
     "hostNetworking": True,
     "propagateFailure": True,
     "propagatePreemption": True,
-    "synchronizedStartTimeout": "10m",
+    "synchronizedStartTimeout": e.get("SYNC_TIMEOUT", "10m"),
     "timeout": "2h",
 }
 spec = {"version": "v2", "budget": "ai2/oe-other",
