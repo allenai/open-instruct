@@ -26,6 +26,10 @@
 #          --local_cache_dir is patched to the post-checkpoints build dir (never oe-adapt), and before torchrun the job
 #          checks that dir/numpy_sft/C15_CACHE is built and its dataset_statistics.json has sha256 C15_STATS_SHA256
 #          (exit 7 otherwise); EXPECTED_NUMPY_CACHE then pins the name, so the trainer reads that cache, never tokenizes.
+#   ttn    ledger H242 (c12rf-tt): c15n with only Terminal and ToolMind added (CP and Math-v4 left out; H242_CACHE names
+#          the cache h242_cache.sh built, H242_STATS_SHA256 its dataset_statistics.json sha256, checked as c15n's).
+#          S_R=<S_a from H242 R4'>; the two-pass schedule over S_a with the permanent save at S_a/2, and in train mode
+#          HARD_STOP=S_a/2 is required, so the run ends after that save with the schedule unchanged.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -50,7 +54,9 @@
 # MAX_RETRIES (default 0, 1 for resume: Beaker reruns a task that failed, which then resumes the same way),
 # RESUME_FROM=<other dir>/stepNNNN to start from a checkpoint outside OUTPUT_DIR (ignored once OUTPUT_DIR holds one),
 # WAIT_FOR_BASE=<minutes> (default 0: the job waits that long for the base's RECEIPT.json, then
-# exits 3 without training; for a smoke queued while the conversion job is still running), DRY_RUN=1.
+# exits 3 without training; for a smoke queued while the conversion job is still running), DRY_RUN=1,
+# HARD_STOP=<step> (train only: olmo-core's TrainerConfig.hard_stop, patched into the image's olmo_core_finetune.py in
+# the container; training ends after that step without changing max_steps, so the LR schedule is unchanged).
 #
 # Before the first launch, the cache must resolve inside a Beaker job: setup_tokenizer_and_cache forces
 # --local_cache_dir to the oe-adapt deletable cache when BEAKER_JOB_ID is set, so that dir holds a symlink
@@ -147,6 +153,25 @@ $A/math/c14f-math-d2da451e.parquet 1.0"
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/c15-gpu; DESC="ledger H213 c15"
          STEPS="${S_R:?S_R=<steps from H213 R4 prime>}"; EPOCHS=2; CKPT=$((STEPS / 2)); HOURS=48 ;;
+    ttn) B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
+         MODEL=$B/olmo35-small-mm-ckpt2-256k-noagentic/step21159-lm-olmocore/model_and_optim
+         HF_REF=$H/olmo35-small-mm-ckpt2-256k-noagentic-step21159-base-h149-c12seed
+         [[ "$SEED" == 34521 ]] || { echo "c12rf-tt runs seed 34521 only" >&2; exit 1; }
+         F=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/rf; A=/weka/olmo-3p5-post-checkpoints/abhishekr/c14f/addons-fixed
+         MIXER="$F/filtered/00000-dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet 1.0 \
+$F/filtered/00001-nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
+$F/filtered/00002-nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
+$F/filtered/00003-nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456 \
+$F/identity/identity.jsonl 1.0 \
+$A/terminal/c14f-terminal-79656c43.parquet 1.0 \
+$A/toolmind/c14f-toolmind-bf051c7f.parquet 1.0"
+         CACHE="${H242_CACHE:?H242_CACHE=<the cache name from h242_cache.sh>}"; TOKREV=03c29652a9d74902fe9d39bc0ad211748c7e7ae6
+         CDIR=/weka/olmo-3p5-post-checkpoints/abhishekr/h242/build/cache
+         C15_STATS_SHA256="${H242_STATS_SHA256:?H242_STATS_SHA256=<sha256 of the cache dataset_statistics.json>}"
+         EXCLUDE_HOSTS="${EXCLUDE_HOSTS:-holmes-cs-aus-544}"
+         LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/c12rf-tt-gpu; DESC="ledger H242 c12rf-tt"
+         STEPS="${S_R:?S_R=<S_a from H242 R4 prime>}"; EPOCHS=2; CKPT=$((STEPS / 2)); HOURS=48 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
@@ -160,6 +185,7 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == c14f ]] && RUN_NAME="c14f-s${SEED}"
 [[ "$ARM" == rfn ]] && RUN_NAME="c12rf-noag-s${SEED}"
 [[ "$ARM" == c15n ]] && RUN_NAME="c15-noag-s${SEED}"
+[[ "$ARM" == ttn ]] && RUN_NAME="c12rf-tt-noag-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
@@ -196,13 +222,26 @@ if [[ "$ARM" == c14f ]]; then
 grep -c 'if not require_metadata and int(tokens' open_instruct/olmo_core_finetune.py || exit 6
 sha256sum open_instruct/olmo_core_finetune.py"
 fi
-if [[ "$ARM" == c15n ]]; then
+if [[ "$ARM" == c15n || "$ARM" == ttn ]]; then
     PATCH="sed -i 's#^        dataset_config.local_cache_dir = \"/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache\"#        dataset_config.local_cache_dir = \"$CDIR\"#' open_instruct/olmo_core_utils.py
 grep -c 'local_cache_dir = \"$CDIR\"' open_instruct/olmo_core_utils.py || exit 7
 C=$CDIR/numpy_sft/$CACHE
 [ -s \$C/dataset_statistics.json ] && ls \$C/token_ids_part_*.npy >/dev/null || { echo NUMPY-CACHE-MISSING \$C; exit 7; }
 [ \"\$(sha256sum \$C/dataset_statistics.json | cut -d' ' -f1)\" = $C15_STATS_SHA256 ] || { echo NUMPY-CACHE-SHA-MISMATCH; exit 7; }
 echo NUMPY-CACHE-CHECK path=\$C stats_sha256=$C15_STATS_SHA256"
+fi
+if [[ "$ARM" == ttn && "$MODE" == train && "${HARD_STOP:-}" != "$CKPT" ]]; then
+    echo "ttn train needs HARD_STOP=$CKPT (S_R/2)" >&2; exit 1
+fi
+if [[ -n "${HARD_STOP:-}" ]]; then
+    [[ "$MODE" == train && "$HARD_STOP" =~ ^[0-9]+$ ]] || { echo "HARD_STOP is a step number, train mode only" >&2; exit 1; }
+    # Exit 8 if the anchor moved or this olmo-core has no TrainerConfig.hard_stop.
+    PATCH="$PATCH
+sed -i 's/^        max_duration=max_duration,\$/        max_duration=max_duration, hard_stop=Duration.steps($HARD_STOP),/' open_instruct/olmo_core_finetune.py
+grep -c 'hard_stop=Duration.steps($HARD_STOP),' open_instruct/olmo_core_finetune.py || exit 8
+python -c 'import sys, dataclasses; sys.modules[\"torchvision\"] = None; from olmo_core.train import TrainerConfig; assert \"hard_stop\" in {f.name for f in dataclasses.fields(TrainerConfig)}' || exit 8
+sha256sum open_instruct/olmo_core_finetune.py
+echo HARD-STOP-PATCHED $HARD_STOP"
 fi
 WAIT="$PATCH
 for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
