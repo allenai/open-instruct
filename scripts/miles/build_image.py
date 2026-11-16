@@ -6,6 +6,7 @@ Instruct with its separately pinned GPU dependencies.
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -36,6 +37,7 @@ def main():
             f"BASE_IMAGE={options.base_image}",
             "--build-arg",
             f"SOURCE_REVISION={revision}",
+            *(["--secret", "id=github_token,env=GH_TOKEN"] if os.environ.get("GH_TOKEN") else []),
             "--target",
             options.target,
             "--tag",

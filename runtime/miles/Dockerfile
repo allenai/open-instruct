@@ -4,7 +4,11 @@ ARG BASE_IMAGE=open-instruct-miles-binary-base:20261027
 FROM ${BASE_IMAGE} AS runtime-base
 COPY runtime/miles/runtime.lock.json /opt/core-rl/build/runtime/miles/runtime.lock.json
 COPY scripts/miles/prepare_runtime.py /opt/core-rl/build/scripts/miles/prepare_runtime.py
-RUN python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources
+# Optional host credential is a BuildKit secret, never an ARG or image layer.
+RUN --mount=type=secret,id=github_token \
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper \
+    GIT_CONFIG_VALUE_0='!f() { printf "username=x-access-token\npassword="; cat /run/secrets/github_token; }; f' \
+    python /opt/core-rl/build/scripts/miles/prepare_runtime.py /opt/core-rl/sources
 COPY runtime/miles/runtime.lock.json /opt/core-rl/runtime/miles/runtime.lock.json
 # Install metadata/entrypoints; the existing source overlay does not load optional Rust extensions.
 # Keep isolated-build downloads out of the runtime image.

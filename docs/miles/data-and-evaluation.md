@@ -1192,3 +1192,45 @@ bytes, rows, pending reads, disk reads, and cache hits.
 Replay-enabled pools still scan identities at startup and retain identity-to-row
 maps, but retrieve replay prompt payloads from disk too. This is additional
 identity bookkeeping, not a second copy of the prompt population.
+
+### Single-pool optimizer batches (experimental)
+
+`core.pool_batch_fraction` controls the fraction of optimizer batches packed from
+one pool (0, the default, keeps the ordinary FIFO buffer; 1 makes every batch
+homogeneous). Declare the complete set of labels in `core.pool_batch_values` and
+the metadata path in `core.pool_batch_field` (default `sampling_pool`; dotted
+paths are supported). For example:
+
+```toml
+[core]
+pool_batch_fraction = 1.0
+pool_batch_field = "sampling_pool"
+pool_batch_values = ["instruction", "math", "code"]
+
+[miles]
+async_data_buffer_capacity_factor = 8.0
+```
+
+This groups **accepted complete prompt groups**, after asynchronous generation
+and dynamic filtering, into optimizer batches. It does not replace the prompt
+provider: shuffle, uniform/weighted pools and priority ordering keep their
+existing draw policies. The oldest pool with enough accepted groups goes first;
+partial pools remain queued without being dropped or balanced by upsampling.
+A larger buffer is required: capacity must cover
+`number_of_pools * (groups_per_update - 1) + 1 + groups_per_update` prompt groups,
+including room for a prepared batch. Validation rejects smaller capacities.
+
+The initial implementation requires fully asynchronous, single-turn collections
+with one optimizer update per collection. Native stale rejection, retries,
+disposition records and prepared-batch capacity accounting remain active. A
+fraction between 0 and 1 uses a seeded decision per policy version, so it is an
+expected fraction, not an exact finite-run percentage. A resumed run regenerates
+pending groups using the existing cursor checkpoint; completion order and pool
+packing can change after regeneration, as with ordinary asynchronous runs.
+
+This preserves the prompt draw policy, **not exact consumed source proportions
+at a finite checkpoint**. Partial cohorts, stale retries and dynamic filtering
+can shift exposure. Compare consumed source/tier proportions, queue leftovers,
+policy age and token cost alongside eval accuracy. The queue metrics report
+formed/homogeneous batches and queued groups per pool. Native inference records
+remain the source for filtering and consumption audits.

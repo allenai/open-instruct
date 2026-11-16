@@ -195,3 +195,4 @@ All notable changes to this project will be documented in this file.
 - Raise a `ValueError` naming the packed instance count, global batch size, and epoch count when `olmo_core_finetune.py` computes fewer than one training step, instead of letting an undersized dataset surface as a bare `ZeroDivisionError` from olmo-core's LR scheduler (https://github.com/allenai/open-instruct/pull/1796).
 - Track the CUDA 12 image suffix in the merge-queue Beaker workflow and allow enough time for the larger image build and upload (https://github.com/allenai/open-instruct/pull/1783).
 - Exclude nested virtualenvs (e.g. `oe-eval-internal/.venv/`) from the Docker build context, so a uv venv inside a nested clone no longer fails the image build on a dangling host-interpreter symlink (https://github.com/allenai/open-instruct/pull/1786).
+- Add experimental single-pool accepted optimizer batches for MILES, preserving the existing prompt draw policy (PR link pending).

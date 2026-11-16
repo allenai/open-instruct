@@ -90,6 +90,11 @@ export MILES_BASE_IMAGE=miles-core-base
 python -m open_instruct.miles run runs/my-grpo.toml
 ```
 
+If pinned sources require authentication, supply `GH_TOKEN` from your authenticated
+GitHub session when building (for example `GH_TOKEN="$(gh auth token)"`). The
+builder forwards it as an ephemeral BuildKit secret, rather than an image build
+argument or persistent Git configuration.
+
 The builder checks the loaded Docker image ID against the lock, builds the source
 overlay, uploads it to Beaker, then submits. The base already contains FA2, FA3
 and FA4; this path does not compile attention kernels. It reuses a matching image when one

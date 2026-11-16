@@ -1,0 +1,578 @@
+{
+  "schema_version": 1,
+  "name": "h243-mixed-token-20261116",
+  "model": {
+    "format": "hf",
+    "source": "/weka/olmo-3p5-post-checkpoints/abhishekr/s-c-gpu/s-c-noag-s34521/hf_step63494"
+  },
+  "data": {
+    "over_length": "exclude",
+    "prompt_data": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h196-dolci-control-20261113/inputs/dolci.jsonl.gz",
+    "reward_config": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h196-dolci-control-20261113/inputs/verifiers.json",
+    "seed": 17,
+    "shuffle": true
+  },
+  "output": {
+    "export_hf": true,
+    "hf_dir": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/mixed-token/export-hf",
+    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/mixed-token"
+  },
+  "launch": {
+    "workspace": "ai2/olmo-instruct",
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "priority": "normal",
+    "min_runtime": "2h",
+    "auto_resume": true,
+    "max_retries": -1,
+    "memory": "512 GiB",
+    "shared_memory": "128 GiB",
+    "timeout": "24h",
+    "coordination": {
+      "heartbeat_timeout": 120,
+      "startup_timeout": 1200
+    },
+    "env": {
+      "NCCL_IB_HCA": "^=mlx5_bond_0",
+      "NCCL_SOCKET_IFNAME": "ib",
+      "OI_MILES_CODE_FAILURE_POLICY": "zero",
+      "OI_MILES_JUDGE_FAILURE_POLICY": "zero",
+      "OI_MILES_RAY_CPUS": "64",
+      "SGLANG_TIMEOUT_KEEP_ALIVE": "60"
+    },
+    "gpus_per_replica": 8,
+    "secrets": {
+      "BEAKER_TOKEN": "robertb_BEAKER_TOKEN",
+      "CODE_EXECUTION_TOKEN": "robertb_MILES_PR2178_CODE_EXECUTION_TOKEN",
+      "HF_TOKEN": "robertb_RL_QUALIFICATION_HF_TOKEN",
+      "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    },
+    "weka_mounts": [
+      {
+        "mount_path": "/weka/oe-training-default",
+        "weka": "oe-training-default"
+      },
+      {
+        "mount_path": "/weka/oe-adapt-default",
+        "weka": "oe-adapt-default"
+      },
+      {
+        "mount_path": "/weka/olmo-3p5-post-checkpoints",
+        "weka": "olmo-3p5-post-checkpoints"
+      }
+    ]
+  },
+  "conversion": {
+    "hf_output": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/mixed-token/prepared/hf"
+  },
+  "compiler_cache": {
+    "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+  },
+  "records": {
+    "enabled": true,
+    "response_sample_rate": 0.05,
+    "responses": "sample",
+    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/mixed-token/inference-records"
+  },
+  "evaluation": {
+    "budget": "ai2/oe-other",
+    "cluster": "ai2/holmes",
+    "external_server_args": [],
+    "final": true,
+    "gpus": 1,
+    "image": "01M7CK4QK3MJ7Q9MZYRQTMTPYW",
+    "initial": false,
+    "interval": 100,
+    "mode": "background",
+    "provider_kwargs": {
+      "profile": "olmo3.5-12.5b",
+      "context_length": 34816
+    },
+    "revision": "56dc89212fc040a0b7fd957901c3b326b8a5cd11",
+    "secrets": {
+      "HF_TOKEN": "robertb_RL_QUALIFICATION_HF_TOKEN",
+      "WANDB_API_KEY": "robertb_WANDB_API_KEY"
+    },
+    "submit_timeout": 120,
+    "tasks": [
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 32,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "aime_2022:pass_at_32"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 32,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "aime_2023:pass_at_32"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 32,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "aime_2024:pass_at_32"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 32,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "aime_2025:pass_at_32"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 32,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "aime_2026:pass_at_32"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 32,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "hmmt_nov_2025:pass_at_32"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 32,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "hmmt_feb_2026:pass_at_32"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "gpqa_diamond:cot"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "gpqa_main:cot"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "ifeval"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "ifeval_mt_wildchat_unused_withRewrite"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "ifeval_mt_ood_wildchat_unused_withRewrite"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "ifeval_ood"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "omega_500:hillclimb"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "omega_500_out"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "harness": {
+          "sandboxes.0.inject_swerex": true
+        },
+        "harness_preset": "codex_python",
+        "interval": 100,
+        "scoring": {},
+        "task": "livecodebench:lite"
+      },
+      {
+        "arguments": {
+          "fit_max_tokens_to_context": true,
+          "h5py_host_path": "/weka/oe-training-default/robertb/open-instruct/data/rl-dataset-qualification/eval-assets/scicode-48b0272a88b1/test_data.h5",
+          "max_tokens": 32768,
+          "split": "validation",
+          "temperature": 1.0
+        },
+        "generation": {},
+        "interval": 100,
+        "kind": "external",
+        "scoring": {},
+        "task": "scicode"
+      },
+      {
+        "auxiliary_gpus": 1,
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "harness": {
+          "auxiliary_providers.wg_judge.kind": "vllm_server",
+          "auxiliary_providers.wg_judge.kwargs.add_bos_token": true,
+          "auxiliary_providers.wg_judge.model": "allenai/wildguard"
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "do_anything_now:wg_judge_thinking"
+      },
+      {
+        "auxiliary_gpus": 1,
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "harness": {
+          "auxiliary_providers.wg_judge.kind": "vllm_server",
+          "auxiliary_providers.wg_judge.kwargs.add_bos_token": true,
+          "auxiliary_providers.wg_judge.model": "allenai/wildguard"
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "harmbench:wg_judge_thinking"
+      },
+      {
+        "auxiliary_gpus": 1,
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "harness": {
+          "auxiliary_providers.wg_judge.kind": "vllm_server",
+          "auxiliary_providers.wg_judge.kwargs.add_bos_token": true,
+          "auxiliary_providers.wg_judge.model": "allenai/wildguard"
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "wildguardtest:wg_judge_thinking"
+      },
+      {
+        "auxiliary_gpus": 1,
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "harness": {
+          "auxiliary_providers.wg_judge.kind": "vllm_server",
+          "auxiliary_providers.wg_judge.kwargs.add_bos_token": true,
+          "auxiliary_providers.wg_judge.model": "allenai/wildguard"
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "wildjailbreak:wg_judge_thinking"
+      },
+      {
+        "auxiliary_gpus": 1,
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "harness": {
+          "auxiliary_providers.wg_judge.kind": "vllm_server",
+          "auxiliary_providers.wg_judge.kwargs.add_bos_token": true,
+          "auxiliary_providers.wg_judge.model": "allenai/wildguard"
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "xstest:wg_judge_thinking"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "wmdp:mcq"
+      },
+      {
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "bbq:mcq"
+      },
+      {
+        "auxiliary_gpus": 1,
+        "generation": {
+          "fit_max_tokens_to_context": true,
+          "max_tokens": 32768,
+          "num_samples": 1,
+          "temperature": 1.0,
+          "top_p": 1.0
+        },
+        "harness": {
+          "auxiliary_providers.sr_judge.kind": "vllm_server",
+          "auxiliary_providers.sr_judge.kwargs.add_bos_token": true,
+          "auxiliary_providers.sr_judge.kwargs.enable_lora": true,
+          "auxiliary_providers.sr_judge.kwargs.lora_modules": [
+            "strongreject=qylu4156/strongreject-15k-v1"
+          ],
+          "auxiliary_providers.sr_judge.model": "google/gemma-2b",
+          "auxiliary_providers.sr_judge.tokenizer": "qylu4156/strongreject-15k-v1"
+        },
+        "interval": 100,
+        "scoring": {},
+        "task": "strongreject:sr_judge_thinking"
+      }
+    ],
+    "timeout": "12h",
+    "workspace": "ai2/olmo-instruct"
+  },
+  "training": {
+    "num_rollouts": 400,
+    "save_interval": 100
+  },
+  "trainer": {
+    "expert_parallel_size": 2,
+    "gpus": 2,
+    "packing_max_tokens": 34816,
+    "sequence_packing": true
+  },
+  "inference": {
+    "global_batch_size": 512,
+    "gpus": 5,
+    "max_context_length": 34816,
+    "max_response_length": 32768,
+    "placement_mode": "disaggregated",
+    "profile": "olmo35-b300-12.5@0.8",
+    "rollout_batch_size": 64,
+    "samples_per_prompt": 8
+  },
+  "optimizer": {},
+  "async": {
+    "async_max_concurrent_samples": 1024,
+    "fully_async": true
+  },
+  "tracking": {
+    "wandb_group": "H243-mixed-token-s17",
+    "wandb_mode": "online",
+    "wandb_project": "open-instruct-miles",
+    "wandb_run_name": "mixed-token",
+    "wandb_team": "ai2-llm",
+    "wandb_random_suffix": false
+  },
+  "runtime": {},
+  "core": {
+    "checkpoint_keep_every": 100,
+    "checkpoint_keep_last": 2,
+    "engine_drain_timeout": 900.0,
+    "max_policy_lag": 12,
+    "max_run_final": false,
+    "max_run_seconds": 79200,
+    "pipeline_observation_interval": 2.0,
+    "prompt_priority_field": "reward_priority_olmo35_sft_hero",
+    "prompt_provider": "priority",
+    "publication_mode": "refresh",
+    "reward_final_answer_only": true,
+    "reward_reasoning_mode": "required",
+    "reward_zero_truncated": true,
+    "router_aux_loss_weight": 0.0,
+    "router_z_loss_weight": 0.0,
+    "save_final_checkpoint": true,
+    "scoring_check_interval": 0,
+    "scoring_pass_required": false,
+    "pool_batch_fraction": 0,
+    "pool_batch_field": "workbench.source.candidate_id",
+    "pool_batch_values": [
+      "dolci-code",
+      "dolci-general",
+      "dolci-general-ref",
+      "dolci-if-full",
+      "dolci-math",
+      "dolci-science",
+      "dolci-stdio"
+    ]
+  },
+  "miles": {
+    "async_data_buffer_capacity_factor": 16.0,
+    "calculate_per_token_loss": true,
+    "grpo_std_normalization": false,
+    "http_post_actors_per_node": 16,
+    "http_post_num_cpus": 1.0,
+    "pause_generation_mode": "in_place",
+    "rollout_executor_num_cpus": 2.0,
+    "rollout_temperature": 1.0,
+    "rollout_top_k": -1,
+    "rollout_top_p": 1.0,
+    "router_disable_circuit_breaker": true,
+    "router_disable_health_check": true,
+    "router_disable_retries": true,
+    "router_policy": "round_robin",
+    "sglang_enable_metrics": true,
+    "train_env_vars": {
+      "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"
+    },
+    "use_distributed_post": true,
+    "use_miles_router": false,
+    "use_rollout_routing_replay": true
+  },
+  "judges": {
+    "general": {
+      "backend": "sglang",
+      "chat_template": "qwen3-no-thinking",
+      "context_extension": "qwen3-yarn-128k",
+      "cuda_graphs": true,
+      "gpus": 1,
+      "max_concurrent_calls": 32,
+      "max_context_length": 131072,
+      "mode": "managed",
+      "model": "Qwen/Qwen3-32B",
+      "prepared_dir": "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge",
+      "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+      "tensor_parallel_size": 1,
+      "timeout": 600
+    }
+  },
+  "rubrics": {
+    "quality": {
+      "max_response_tokens": 2048,
+      "profile": "open-instruct/general-quality",
+      "temperature": 1.0
+    },
+    "reference_quality": {
+      "max_response_tokens": 2048,
+      "profile": "open-instruct/general-quality_ref",
+      "temperature": 1.0
+    }
+  },
+  "judging": {
+    "bindings": {
+      "wb_6f03833c91e17e0568b3d089ad5c2b0100a91fe6e9402e63119bc8e6d804b68d": {
+        "judge": "general",
+        "rubric": "reference_quality"
+      },
+      "wb_ea066c35a7a5568b4cb168aff3382d4dd2694f5ce6ad5574c7ce649ac6b61224": {
+        "judge": "general",
+        "rubric": "quality"
+      }
+    }
+  }
+}

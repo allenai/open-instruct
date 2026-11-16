@@ -126,6 +126,11 @@ class CoreConfig:
     records_responses: str = "off"
     records_response_sample_rate: float | None = None
     # Prompt selection; ReMind uses scored outcomes from inference records.
+    # Group accepted prompt groups into single-pool optimizer batches. Selection
+    # remains owned by the existing prompt provider.
+    pool_batch_fraction: float = 0.0
+    pool_batch_field: str = "sampling_pool"
+    pool_batch_values: tuple[str, ...] = ()
     prompt_provider: str = "shuffle"
     prompt_mixture: str | None = None
     prompt_priority_field: str | None = None
@@ -147,6 +152,14 @@ class CoreConfig:
 
     def __post_init__(self):
         validation.choice(self.reward_reasoning_mode, "core.reward_reasoning_mode", ("required", "none"))
+        validation.number(self.pool_batch_fraction, "core.pool_batch_fraction", maximum=1)
+        validation.text(self.pool_batch_field, "core.pool_batch_field")
+        if (
+            not isinstance(self.pool_batch_values, (tuple, list))
+            or any(not isinstance(value, str) or not value for value in self.pool_batch_values)
+            or len(set(self.pool_batch_values)) != len(self.pool_batch_values)
+        ):
+            raise constraints.error("core.pool_batch_values must contain unique nonempty pool labels")
         validation.boolean(self.prompt_replay_enabled, "core.prompt_replay_enabled")
         validation.boolean(self.prompt_replay_answer_probe, "core.prompt_replay_answer_probe")
         validation.number(self.prompt_replay_fraction, "core.prompt_replay_fraction", maximum=1)
@@ -495,6 +508,18 @@ class RunConfig:
         ):
             raise constraints.error("Zero-truncation rewards cannot be combined with reward exclusion/postprocessing")
         validation.runtime_values(options)
+        if self.core.pool_batch_fraction:
+            if not self.core.pool_batch_values:
+                raise constraints.error("Pool batches require explicit core.pool_batch_values")
+            groups = options.get("rollout_batch_size", 1)
+            if not options.get("fully_async") or groups * options.get("n_samples_per_prompt", 1) != options.get(
+                "global_batch_size"
+            ):
+                raise constraints.error("Pool batches require fully_async and one optimizer update per collection")
+            minimum = len(self.core.pool_batch_values) * (groups - 1) + 1 + groups
+            capacity = int(options.get("async_data_buffer_capacity_factor", 4) * groups)
+            if capacity < minimum:
+                raise constraints.error(f"Pool batches require completed-buffer capacity >= {minimum} prompt groups")
         if options.get("pause_generation_mode", "retract") not in ("retract", "in_place"):
             raise constraints.error("Core weight publication supports retract or in_place pause mode")
         if options.get("sglang_radix_cache_backend") == validation.POLICY_CACHE_BACKEND and (

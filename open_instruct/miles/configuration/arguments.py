@@ -37,5 +37,11 @@ def load_core_args(extra_args_provider):
             if core.publication_mode == "refresh"
             else "miles.backends.core_utils.rollout.async_buffer.HomogeneousPolicyDataBuffer"
         )
+        if core.pool_batch_fraction:
+            if args.rollout_batch_size * args.n_samples_per_prompt != args.global_batch_size:
+                raise ValueError("Pool batches require one optimizer update per rollout collection")
+            args.custom_async_data_buffer_path = "open_instruct.miles.rollout.pool_batch_buffer.PoolBatchDataBuffer"
+    elif core.pool_batch_fraction:
+        raise ValueError("Pool batches require fully_async inference")
     args.data_source_path = "open_instruct.miles.rollout.data_source.DashboardDrainingRolloutDataSource"
     return args
