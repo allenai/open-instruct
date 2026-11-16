@@ -433,7 +433,8 @@ def audit_scheduler(*args, **kwargs):
     instrument_kda_inputs()
     model_type = importlib.import_module("olmo_sglang.models.olmo3_moe").Olmo3MoeForCausalLM
     quantized_publication.install_nvfp4_publication_context(model_type)
-    fp8_publication.install_fp8_publication()
+    if getattr(args[0] if args else kwargs.get("server_args"), "quantization", None) == "fp8":
+        fp8_publication.install_fp8_publication()
     original_load, original_forward = model_type.load_weights, model_type.forward
 
     def load(model, *values, **options):
