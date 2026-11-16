@@ -1,0 +1,6 @@
+ARG BASE_IMAGE=h235-noise-base
+FROM ${BASE_IMAGE}
+ARG SOURCE_REVISION
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
+COPY scripts/miles/diagnostics /opt/core-rl/scripts/miles/diagnostics
+RUN python /opt/core-rl/scripts/miles/diagnostics/install_gradient_noise.py /opt/core-rl/sources/miles/miles/backends/core_utils/actor.py
