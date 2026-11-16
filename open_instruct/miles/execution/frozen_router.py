@@ -35,7 +35,9 @@ def install(backend):
             return original(args, common=common, **kwargs)
         expected = freeze(common["model"])
         module = original(args, common=common, **kwargs)
-        actual = router_parameters(module.model)
+        # Core wraps the materialized model in MultiGroupDistributedDataParallel.
+        # Compare its underlying model names to the pre-parallelization names.
+        actual = router_parameters(getattr(module.model, "module", module.model))
         if set(actual) != set(expected) or any(param.requires_grad for param in actual.values()):
             raise RuntimeError("Core model materialization changed the frozen router parameter set")
         owned = {id(param) for group in module.optim.param_groups for param in group["named_params"].values()}

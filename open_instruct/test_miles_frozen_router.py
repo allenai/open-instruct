@@ -37,14 +37,18 @@ def test_freeze_preserves_input_gradients_and_updates_other_weights():
             assert not torch.equal(param, before[name])
 
 
-def test_hook_freezes_meta_model_before_materialization_and_optimizer(tmp_path):
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_hook_freezes_meta_model_before_materialization_and_optimizer(tmp_path, wrapped):
     model = Model("meta")
 
     def build(args, *, common):
         assert not common["model"].routed_experts_router.weight.requires_grad
         common["model"].to_empty(device="cpu")
         groups = [{"named_params": {n: p for n, p in model.named_parameters() if p.requires_grad}}]
-        return SimpleNamespace(model=model, optim=SimpleNamespace(param_groups=groups))
+        materialized = nn.Module() if wrapped else model
+        if wrapped:
+            materialized.add_module("module", model)
+        return SimpleNamespace(model=materialized, optim=SimpleNamespace(param_groups=groups))
 
     backend = SimpleNamespace(build_train_module=build)
     frozen_router.install(backend)
