@@ -94,3 +94,25 @@ def test_waits_for_matching_pool_without_admitting_mixed_batch():
 def test_rejects_deadlock_prone_capacity():
     with pytest.raises(ValueError, match="capacity"):
         PoolBatchDataBuffer(DataBufferConstructorInput(args(async_data_buffer_capacity_factor=2), lambda group: None))
+
+
+def test_partial_prepared_cancellation_restarts_a_complete_cohort():
+    async def scenario():
+        buffer = PoolBatchDataBuffer(DataBufferConstructorInput(args(), lambda group: None))
+        i1, i2, m1, m2 = entry("if", 1), entry("if", 2), entry("math", 3), entry("math", 4)
+        for item in [i1, i2, m1, m2]:
+            await buffer.put(item)
+        assert await buffer.get(current_version=1) is i1
+        buffer.retain_prepared_capacity()
+        # The producer returns i1's pristine prompt to the source on cancellation.
+        await buffer.release_prepared_capacity(1)
+        assert not buffer.queue.cohort
+        assert await buffer.get(current_version=1) is m1
+        assert await buffer.get(current_version=1) is m2
+        regenerated = entry("if", 1)
+        await buffer.put(regenerated)
+        assert await buffer.get(current_version=1) is i2
+        assert await buffer.get(current_version=1) is regenerated
+        assert len(buffer.queue) == 0
+
+    asyncio.run(asyncio.wait_for(scenario(), 5))

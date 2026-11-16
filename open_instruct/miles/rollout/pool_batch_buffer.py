@@ -41,6 +41,13 @@ class PoolBatchDataBuffer:
     def __getattr__(self, name):
         return getattr(self.buffer, name)
 
+    async def release_prepared_capacity(self, count):
+        # A cancelled reservation may have dequeued only part of a cohort. Its
+        # prompts are requeued by the producer; remaining completed groups must
+        # be eligible for a newly assembled full batch, never a partial cohort.
+        self.queue.cohort.clear()
+        await self.buffer.release_prepared_capacity(count)
+
     def get_metrics(self, trainer_model_id=None):
         return {
             **self.buffer.get_metrics(trainer_model_id),
