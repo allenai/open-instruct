@@ -100,3 +100,27 @@ python -m scripts.miles.diagnostics.watch_gradient_noise \
   --final 01M7HCTKZ6AS868RTXGP7YWEGV \
   --output runs/h235-gradient-noise-20261116
 ```
+
+## Retry after constructor failure
+
+Both original pilots started on November 16 and failed before measurements:
+OLMoDDPOptimizer requires `lr > 0` during construction. The corrected actor calls
+`build_frozen_module`, which temporarily supplies 1e-6 only while constructing the
+module, then restores args.lr=0 before the actor initializes CoreLRScheduler.
+No forward/backward or optimizer update occurs during that constructor window.
+Regression tests cover restoration on success/failure and unchanged weights under
+zero scheduled LR. The collector now retries transient Beaker API failures.
+
+Corrected source revision: `03ea19bbe`; immutable dataset:
+`01M7JJJVCJKF2629F418424XZH`; manifest SHA256:
+`53ca37cbd6489a81a1aef99f32ffc624a8295c3bd319300cc98c527a649c251e`.
+Native-image CPU qualification `01M7JJM37KC06CQQTWVAG1QHKA` passed all ten
+probe tests and validated both zero-LR configs/checkpoints. Local tests: 136 pass.
+The original failed attempts and roots are retained; retries use `sft-r2` and
+`final512-r2` under the same diagnostic parent.
+
+1. SFT retry: https://beaker.org/ex/01M7JJNWMKETJNWZ93BH5QPNHK
+2. Final B512 retry: https://beaker.org/ex/01M7JJP9Q9C1R6FMXS69GFQP4F
+
+Collector output: `runs/h235-gradient-noise-20261116-r2/`. Only these retry IDs
+should be used when checking for new measurements; the initial IDs are failed.
