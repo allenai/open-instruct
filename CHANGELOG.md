@@ -1,4 +1,5 @@
 # Changelog
+- Restore online FP8 loading buffers and preserve serving storage during weight refresh (https://github.com/allenai/open-instruct/pull/2274).
 
 All notable changes to this project will be documented in this file.
 

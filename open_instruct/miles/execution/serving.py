@@ -9,7 +9,7 @@ from functools import partial
 
 from miles.utils.compiler_cache import startup_cache
 
-from open_instruct.miles.execution import kda_dispatch, quantized_publication
+from open_instruct.miles.execution import fp8_publication, kda_dispatch, quantized_publication
 
 
 def configure_specs(args, specs):
@@ -39,6 +39,7 @@ def main():
     importlib.import_module("miles.utils.compiler_cache.hf_module_cache").prime_serving_modules(sys.argv[1:])
     importlib.import_module("olmo_sglang.kda.backend").register_olmo_kda_backend()
     quantized_publication.install_nvfp4_publication_context()
+    fp8_publication.install_fp8_publication()
     if os.environ.get("OI_MILES_KDA_POLICY"):
         http_server = importlib.import_module("sglang.srt.entrypoints.http_server")
         original_launch = http_server.launch_server
