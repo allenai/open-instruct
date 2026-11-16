@@ -1,6 +1,6 @@
 """Freeze candidate native dispatch membership; this does not qualify numerics.
 
-Run inside the exact pinned runtime. The supplied candidate has the same two
+Run inside the exact pinned runtime. The supplied candidate has the same
 native target/cache fields as the retained causal receipts. It is evidence for
 selection, not a diagnostic hook used by the serving policy.
 """
@@ -24,7 +24,7 @@ def prepare(candidate, *, precision, kv_cache_dtype, model):
     entries = []
     for source in [data, *data.get("additional_interventions", [])]:
         target = source["target"]
-        if target not in kda_dispatch.TARGETS:
+        if target not in (*kda_dispatch.TARGETS, *kda_dispatch.OPTIONAL_TARGETS):
             raise ValueError("Unsupported native target")
         module_name, attribute, wrapper = target.rsplit(".", 2)
         module = importlib.import_module(module_name)
@@ -42,8 +42,7 @@ def prepare(candidate, *, precision, kv_cache_dtype, model):
             raise ValueError("Candidate autotuner source differs from installed runtime")
         kda_dispatch.prepare(tuner, entry, "preflight-only")
         entries.append(entry)
-    if len(entries) != 2 or {e["target"] for e in entries} != set(kda_dispatch.TARGETS):
-        raise ValueError("Require both native targets exactly once")
+    kda_dispatch.validate_targets(entries)
     scope = {
         "quantization": "nvfp4_online" if precision == "nvfp4" else None,
         "kv_cache_dtype": kv_cache_dtype,

@@ -81,15 +81,17 @@ def test_no_policy_leaves_native_dispatch_untouched(monkeypatch):
 
 
 @pytest.mark.parametrize("capability", [(10, 0), (10, 3)])
-def test_install_validates_all_targets_before_any_mutation(monkeypatch, tmp_path, capability):
+@pytest.mark.parametrize("include_inter_solve", [False, True])
+def test_install_validates_all_targets_before_any_mutation(monkeypatch, tmp_path, capability, include_inter_solve):
     source = tmp_path / "kernel.py"
     source.write_text("immutable native source")
     (tmp_path / "config.json").write_bytes(source.read_bytes())
     monkeypatch.setattr(policy, "RUNTIME_LOCK", source)
-    tuners = [Tuner(), Tuner()]
+    targets = (*policy.TARGETS, *policy.OPTIONAL_TARGETS) if include_inter_solve else policy.TARGETS
+    tuners = [Tuner() for _ in targets]
     modules = {}
     entries = []
-    for target, tuner in zip(policy.TARGETS, tuners, strict=True):
+    for target, tuner in zip(targets, tuners, strict=True):
         module_name, attr, wrapper = target.rsplit(".", 2)
         modules[module_name] = SimpleNamespace(__file__=str(source), **{attr: SimpleNamespace(**{wrapper: tuner})})
         entries.append({**entry(), "target": target, "module_sha256": hashlib.sha256(source.read_bytes()).hexdigest()})
@@ -137,6 +139,12 @@ def test_install_validates_all_targets_before_any_mutation(monkeypatch, tmp_path
     path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="Cannot replace"):
         policy.install(path, server_args=args, gpu_id=1)
+
+
+def test_policy_requires_original_targets_and_rejects_duplicate_or_unknown_extensions():
+    for targets in [policy.TARGETS[:1], (*policy.TARGETS, policy.TARGETS[0]), (*policy.TARGETS, "unknown.kernel.fn")]:
+        with pytest.raises(ValueError, match="both required native targets"):
+            policy.validate_targets([{"target": target} for target in targets])
 
 
 def test_evaluator_registration_uses_application_scheduler(monkeypatch):

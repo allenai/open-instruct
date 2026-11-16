@@ -22,6 +22,17 @@ TARGETS = (
     "fla.ops.kda.chunk_intra_token_parallel.chunk_kda_fwd_kernel_intra_token_parallel.fn",
     "fla.ops.kda.gate.kda_gate_chunk_cumsum_vector_kernel.fn",
 )
+OPTIONAL_TARGETS = ("fla.ops.kda.chunk_intra.chunk_kda_fwd_kernel_inter_solve_fused.fn",)
+
+
+def validate_targets(entries):
+    targets = [entry["target"] for entry in entries]
+    if (
+        len(targets) != len(set(targets))
+        or not set(TARGETS).issubset(targets)
+        or not set(targets).issubset((*TARGETS, *OPTIONAL_TARGETS))
+    ):
+        raise ValueError("KDA policy must cover both required native targets and only supported optional targets once")
 
 
 def runtime_key(tuner, args, kwargs):
@@ -108,8 +119,7 @@ def install(path=None, *, server_args=None, gpu_id=None):
         if getattr(server_args, name, None) != expected:
             raise ValueError(f"Unsupported KDA policy serving scope: {name}")
     entries = policy["entries"]
-    if len(entries) != len(TARGETS) or {e["target"] for e in entries} != set(TARGETS):
-        raise ValueError("KDA policy must cover both approved native targets exactly once")
+    validate_targets(entries)
     installs = []
     for entry in entries:
         module_name, attribute, wrapper = entry["target"].rsplit(".", 2)
