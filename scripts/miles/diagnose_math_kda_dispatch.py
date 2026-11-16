@@ -142,11 +142,18 @@ def main():
     parser.add_argument("--bisect-configs", action="store_true")
     parser.add_argument("--inspect-only", action="store_true", help="Write CPU input/state comparison without GPU use")
     parser.add_argument("--expected-recurrence-index", type=int)
+    parser.add_argument("--receivers", nargs="+", help="Explicit matched subset of two or three captured receivers")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     records = []
+    if args.receivers is not None and (
+        len(args.receivers) not in (2, 3) or len(set(args.receivers)) != len(args.receivers)
+    ):
+        raise ValueError("Require two or three distinct captured receivers")
     for directory in sorted(args.capture.glob("gpu*")):
         receiver = directory.name
+        if args.receivers is not None and receiver not in args.receivers:
+            continue
         if args.expected_recurrence_index is not None:
             nested = directory / f"recurrence-{args.expected_recurrence_index}"
             if nested.is_dir():
@@ -155,7 +162,10 @@ def main():
         (inputs_path,) = directory.glob("kda-inputs-*.pt")
         (output_path,) = directory.glob("kda-output-*.pt")
         records.append((receiver, json.loads(receipt_path.read_text()), inputs_path, output_path))
-    if len(records) != 3:
+    if args.receivers is not None:
+        if {record[0] for record in records} != set(args.receivers):
+            raise ValueError("Requested captured receiver is missing")
+    elif len(records) != 3:
         raise ValueError("Require all three captured application receivers")
     captured = [torch.load(record[2], map_location="cpu", weights_only=True) for record in records]
 
@@ -251,7 +261,7 @@ def main():
             "single_config_interventions": interventions,
             "config_pair_differences": [
                 {"a": records[0][0], "b": records[index][0], **difference(outputs[0], outputs[index])}
-                for index in (1, 2)
+                for index in range(1, len(records))
             ],
         },
     )

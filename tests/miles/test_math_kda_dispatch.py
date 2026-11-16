@@ -138,3 +138,42 @@ def test_inspect_only_cli_records_confounds_without_initializing_cuda(tmp_path, 
     assert not report["causal_replay_allowed"]
     assert len(report["pairs"]) == 3
     assert all(pair["unequal_input_paths"] == ["inputs.initial_state"] for pair in report["pairs"])
+
+
+def test_explicit_receiver_subset_excludes_confounded_receiver(tmp_path, monkeypatch):
+    for index in (1, 2, 3):
+        directory = tmp_path / "captures" / f"gpu{index}"
+        directory.mkdir(parents=True)
+        torch.save({"initial_state": torch.tensor([float(index == 1)])}, directory / "kda-inputs-1.pt")
+        torch.save(torch.tensor([float(index)]), directory / "kda-output-1.pt")
+        (directory / "kda-receipt-1.json").write_text(
+            json.dumps(
+                {"prefill_recurrence_index": 2, "core_compat": True, "allow_neg_eigval": False, "fla_dispatch": {}}
+            )
+        )
+    argv = [
+        "diagnostic",
+        "--capture",
+        str(tmp_path / "captures"),
+        "--output",
+        str(tmp_path / "inspection"),
+        "--inspect-only",
+        "--expected-recurrence-index",
+        "2",
+        "--receivers",
+        "gpu2",
+        "gpu3",
+    ]
+    monkeypatch.setattr(torch.cuda, "set_device", lambda *_: pytest.fail("CPU inspection must not initialize CUDA"))
+    monkeypatch.setattr(sys, "argv", argv)
+    replay.main()
+    report = json.loads((tmp_path / "inspection/capture-inspection.json").read_text())
+    assert report["causal_replay_allowed"]
+    assert report["pairs"][0]["receivers"] == ["gpu2", "gpu3"]
+    assert report["pairs"][0]["output_comparison"]["max_abs"] == 1.0
+    for receivers, message in [(["gpu2", "gpu2"], "distinct"), (["gpu2", "gpu4"], "missing")]:
+        attempt = [*argv[:-2], *receivers]
+        attempt[attempt.index("--output") + 1] = str(tmp_path / message)
+        monkeypatch.setattr(sys, "argv", attempt)
+        with pytest.raises(ValueError, match=message):
+            replay.main()
