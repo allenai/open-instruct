@@ -97,7 +97,7 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     assert producer_budget < capacity["global_http_slots"]
     assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
     assert config.miles["n_samples_per_prompt"] == 8
-    assert config.miles["global_batch_size"] == 1024
+    assert config.miles["global_batch_size"] == 512
     assert config.core.max_policy_lag == 12
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
     assert config.miles["sglang_max_total_tokens"] == 512 * 34816
@@ -123,7 +123,7 @@ def test_learning_template_still_requires_scores_for_multiple_optimizer_steps():
     ).compile()
     decision = config.plan()["scoring_pass"]
     assert decision["standalone"] is True
-    assert decision["optimizer_steps_per_collection"] == 8
+    assert decision["optimizer_steps_per_collection"] == 4
     assert decision["check_interval"] == 0
 
 
