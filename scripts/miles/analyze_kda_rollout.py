@@ -11,6 +11,10 @@ def summarize(root):
     result = {"status": "IN PROGRESS", "precisions": {}}
     for precision in ("bf16", "combined"):
         folder = root / "speed/kda-throughput-20261116" / precision
+        provenance = root / "prepared/kda-throughput-provenance.json"
+        if provenance.exists():
+            cases = json.loads(provenance.read_text())["cases"]
+            folder = Path(next(case["output_root"] for case in cases if case["precision"] == precision))
         modes = {}
         for mode in ("pinned", "native"):
             path = folder / mode

@@ -29,6 +29,11 @@ def save(path, value):
     temporary.replace(path)
 
 
+def plain_receipt(value):
+    """Scheduler replies cross a pickle IPC boundary before HTTP serialization."""
+    return json.loads(json.dumps(value, default=str))
+
+
 def resolve(target):
     module, attribute, wrapper = target.rsplit(".", 2)
     return getattr(getattr(importlib.import_module(module), attribute), wrapper)
@@ -68,7 +73,7 @@ def audit_scheduler(*args, **kwargs):
         result.internal_state["kda_benchmark"] = {
             "targets": targets,
             "loader_context_fix": True,
-            "server_args": vars(instance.server_args),
+            "server_args": plain_receipt(vars(instance.server_args)),
             "gpu_name": torch.cuda.get_device_name(),
             "free_total_bytes": torch.cuda.mem_get_info(),
             "allocated_bytes": torch.cuda.memory_allocated(),
