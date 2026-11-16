@@ -271,7 +271,7 @@ scoring_check_interval = 0
 # Keep active-request KV/recurrent state across weight updates; the preset disables prefix reuse.
 pause_generation_mode = "in_place"
 # Keep response weighting independent of generation length.
-calculate_per_token_loss = false
+calculate_per_token_loss = true
 # Trainer ranks only; do not change the serving allocator.
 train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }
 # Rust response transport; Core owns request retries and weight-ready membership.

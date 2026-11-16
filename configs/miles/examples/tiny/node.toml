@@ -130,7 +130,7 @@ http_post_actors_per_node = 16
 http_post_num_cpus = 1.0
 rollout_executor_num_cpus = 2.0
 # Keep response weighting independent of generation length.
-calculate_per_token_loss = false
+calculate_per_token_loss = true
 # Trainer ranks only; do not change the serving allocator.
 train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }
 sglang_enable_metrics = true

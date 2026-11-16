@@ -20,8 +20,8 @@ these TOMLs. Run `plan` on your copy to inspect the resolved settings and unused
 
 **The demo configs are the baseline for configuration options unless otherwise
 stated.** Start a validation run from the applicable demo and record intentional
-differences. In particular, keep per-response loss weighting
-(`miles.calculate_per_token_loss=false`) and zero reward for truncated responses
+differences. In particular, keep token-mean loss weighting
+(`miles.calculate_per_token_loss=true`) and zero reward for truncated responses
 (`core.reward_zero_truncated=true`) and presented-response grading
 (`core.reward_final_answer_only=true`). The examples declare
 `core.reward_reasoning_mode="required"`; use `"none"` explicitly for a non-thinking

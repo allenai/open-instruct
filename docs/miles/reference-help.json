@@ -94,7 +94,7 @@
     "async_save": "Asynchronous native checkpoint writes; Core requires false.",
     "attn_implementation": "Inherited FSDP attention selector; Core rejects it in favor of core.attention_backend.",
     "bf16": "Inherited FSDP BF16 precision flag; Core precision is selected by core.param_dtype.",
-    "calculate_per_token_loss": "Default false (per response), matching the demo baseline. Explicit true uses token-count normalization and changes weighting across response lengths; document it as an objective change.",
+    "calculate_per_token_loss": "The maintained examples explicitly set true (token mean), using token-count normalization across response lengths. The omitted library default remains false (response mean) for compatibility; record departures from the example objective.",
     "check_weight_update_equal": "Startup serving-weight snapshot/reset/equality qualification; enabled in mechanics examples, opt-in for qualified learning runs. Required publication acknowledgments remain.",
     "ci_check_model_hash": "Inherited CI model-hash verification; not an ordinary Core training check.",
     "ci_disable_kl_checker": "Inherited CI switch disabling the KL checker; does not disable Core policy checks.",
