@@ -82,3 +82,21 @@ into the container-local application tree and the guarded actor call is patched
 there; the runtime image, lock, original application source and existing runs
 remain untouched. The launch receipt records both immutable image and overlay
 pins. The Dockerfile remains an alternative for packaging a dedicated image.
+
+Pilot submissions (normal priority, 45m protection / 90m timeout):
+
+1. SFT: https://beaker.org/ex/01M7HCT6CTE9KDK20V2T60FKNJ
+2. Final B512: https://beaker.org/ex/01M7HCTKZ6AS868RTXGP7YWEGV
+
+Both were queued at 05:23 UTC on November 16. Scheduler events report insufficient
+node slots and higher-ranked pending work. No GPU measurements were available at
+that check. The local collector records latest attempts and scheduler events,
+fetches only `run/gradient-noise.jsonl` after success, checks all eight steps and
+full-model parameter coverage, and writes per-stage `summary.json` files:
+
+```bash
+python -m scripts.miles.diagnostics.watch_gradient_noise \
+  --sft 01M7HCT6CTE9KDK20V2T60FKNJ \
+  --final 01M7HCTKZ6AS868RTXGP7YWEGV \
+  --output runs/h235-gradient-noise-20261116
+```
