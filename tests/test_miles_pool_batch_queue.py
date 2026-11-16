@@ -1,10 +1,12 @@
 """Pool packing must survive out-of-order completion without losing groups."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rollout.pool_batch_queue import PoolBatchQueue
 
@@ -110,7 +112,16 @@ def test_dotted_source_metadata():
         version=lambda: 0,
         stale=lambda entry: False,
     )
-    for i in range(2):
+    for _ in range(2):
         q.append(SimpleNamespace(group=[SimpleNamespace(metadata={"workbench": {"source": {"candidate_id": "if"}}})]))
     assert q
     assert q.pool(q.pop(0)) == "if"
+
+
+@pytest.mark.parametrize("arm", ["mixed-token", "pool-token", "smoke"])
+def test_registered_h243_configs_compile(arm):
+    path = Path(__file__).resolve().parents[1] / "configs/miles/experiments/h243-pool-batches-20261116" / f"{arm}.json"
+    config = RunSpec.load(path).compile()
+    assert config.miles["calculate_per_token_loss"] is True
+    assert config.miles["global_batch_size"] == 512
+    assert config.core.pool_batch_fraction == (0 if arm == "mixed-token" else 1)

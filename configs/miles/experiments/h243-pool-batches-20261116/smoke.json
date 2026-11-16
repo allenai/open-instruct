@@ -128,7 +128,7 @@
     "scoring_check_interval": 0,
     "scoring_pass_required": false,
     "pool_batch_fraction": 1,
-    "pool_batch_field": "workbench.source.candidate_id",
+    "pool_batch_field": "source_name",
     "pool_batch_values": [
       "dolci-code",
       "dolci-general",
