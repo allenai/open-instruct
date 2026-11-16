@@ -159,6 +159,27 @@ if PROFILE or MEM:
 
     olmo_core_utils.build_base_callbacks = _build_base_callbacks
 
+# --- Ulysses context parallelism for the OLMoDDP path ----------------------------------------------------------
+# olmo_core_finetune.py asserts cp_config is None for OLMoDDPModel, so build_cp_config returns None here and the CP
+# config is injected into the DDP train-module config instead; pass --cp_degree N --cp_strategy ulysses so the script
+# sizes the data-parallel world (and the global batch) as world_size / N. Normal-parameter reduce-scatter is turned
+# off because OLMo-core does not support it with CP (gradients then all-reduce; same math).
+SPEED_CP = int(os.environ.get("SPEED_CP", "0"))
+if SPEED_CP > 1:
+    from olmo_core.train.train_module.transformer.config import TransformerContextParallelConfig
+
+    olmo_core_utils.build_cp_config = lambda training: None
+    _orig_build_ddp = olmo_core_utils.build_ddp_train_module_config
+
+    def _build_ddp_with_cp(*args, **kwargs):
+        cfg = _orig_build_ddp(*args, **kwargs)
+        cfg.cp_config = TransformerContextParallelConfig.ulysses(degree=SPEED_CP)
+        cfg.dp_config.use_reduce_scatter = False
+        _log(f"OLMoDDP train module: Ulysses CP degree {SPEED_CP}, use_reduce_scatter False")
+        return cfg
+
+    olmo_core_utils.build_ddp_train_module_config = _build_ddp_with_cp
+
 # --- optimizer update statistics -------------------------------------------------------------------------------
 UPD_STEPS = int(os.environ.get("SPEED_UPDATE_STATS", "0"))
 if UPD_STEPS:
