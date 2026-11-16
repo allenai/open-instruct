@@ -97,7 +97,7 @@ echo SPEED-TRAIN-EXIT \$RC \$(date -u +%FT%TZ)
 exit \$RC"
 
 SPEC=$(mktemp -t speedspec.XXXXXX)
-CMD="$CMD" CLUSTER="${CLUSTER:-ai2/holmes}" PRIORITY="${PRIORITY:-urgent}" NAME="$NAME" CFG_PATCH="${CFG_PATCH:-}" PROFILE="${PROFILE:-}" NNODES="$NNODES" IMAGE="$IMAGE" \
+CMD="$CMD" MIN_RUNTIME="${MIN_RUNTIME:-2h}" CLUSTER="${CLUSTER:-ai2/holmes}" PRIORITY="${PRIORITY:-urgent}" NAME="$NAME" CFG_PATCH="${CFG_PATCH:-}" PROFILE="${PROFILE:-}" NNODES="$NNODES" IMAGE="$IMAGE" \
 EXTRA_ENV_JSON="${EXTRA_ENV_JSON:-[]}" STEPS="$STEPS" OUT="$OUT" python3 - "$SPEC" <<'EOF'
 import json, os, sys
 e = os.environ
@@ -134,7 +134,7 @@ task = {
                  ("oe-adapt-default", "oe-training-default", "olmo-3p5-checkpoints", "olmo-3p5-post-checkpoints")],
     "result": {"path": "/output"},
     "resources": {"gpuCount": 8, "sharedMemory": "10GiB"},
-    "context": {"priority": e["PRIORITY"]},
+    "context": {"priority": e["PRIORITY"], "minRuntime": e["MIN_RUNTIME"]},
     "constraints": {"cluster": [e["CLUSTER"]]},
     "replicas": int(e["NNODES"]),
     "leaderSelection": True,
