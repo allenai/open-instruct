@@ -16,6 +16,13 @@
 #   scb    the same on B1 (step20000, b1r's base and HF reference): S-C on B1, the owner's 2026-11-06 order.
 #   nh     scn at half an epoch (b1r's form: --num_epochs 1, S_R=<steps> from H182 R4'), its own output dir: the noag
 #          65K control for H194's c12r-long-noag.
+#   tt     ledger H240 (atomic tool tags): nh with only the reserved-slot list changed, to '<think>' '</think>'
+#          '<tool_call>' '</tool_call>' '<tool_response>' '</tool_response>' (think first, so it keeps 100256/100266),
+#          and what that change requires: the cache h240_cache.sh built with that list (TT_CACHE names it, under
+#          h240/build/cache; in the container olmo_core_utils.py's Beaker override of --local_cache_dir is patched to
+#          that dir, never oe-adapt, and the job checks the cache's dataset_statistics.json sha256 TT_STATS_SHA256, exit 7
+#          otherwise), the G2 HF reference with the four new rows seeded (h240seed), S_R from H240's R4', its own output
+#          dir. Placement excludes holmes-cs-aus-544 (EXCLUDE_HOSTS).
 #   c14f   ledger H202 (c14f-b1): b1r with the fixed C14 add-on cache as a second extra dir, before the replay
 #          (C14F_ADDONS, the cache c14f_tok.sh wrote, then H202's 10% replay dir); S_R=<steps> from H202 R4'.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
@@ -67,6 +74,8 @@ $P/nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
 $P/nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
 /weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/if/nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456"
 CACHE=bf82a8fab8-6068a350-rowaligned
+SLOTS="'<think>' '</think>'"
+EXCLUDE_HOSTS="${EXCLUDE_HOSTS:-}"
 I_C12=449487
 EPOCH_STEPS=$((I_C12 / 16))   # 28,092
 OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h161-gpu
@@ -86,7 +95,7 @@ case "$ARM" in
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs ${C14F_ADDONS:-$C/cache/numpy_sft/7ea1dfa878-6068a350-rowaligned} $C/replay"
          OUT_ROOT=$C; DESC="ledger H202 c14f-b1"
          STEPS="${S_R:?S_R=<steps from H202 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=18 ;;
-    sct|scn|scb|nh) B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
+    sct|scn|scb|nh|tt) B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
          if [[ "$ARM" == scb ]]; then
              MODEL=$B/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
              HF_REF=$B/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed
@@ -116,6 +125,16 @@ if [[ "$ARM" == nh ]]; then
     EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14; OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/noag-half-gpu
     DESC="ledger noag 65K control (H182's recipe on noag, half an epoch)"; RUN_NAME="noag-c12r-half-s${SEED}"
 fi
+if [[ "$ARM" == tt ]]; then
+    EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14; OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h240-gpu
+    DESC="ledger H240 atomic tool tags (nh with six reserved-slot tags)"; RUN_NAME="tooltag-noag-half-s${SEED}"
+    SLOTS="'<think>' '</think>' '<tool_call>' '</tool_call>' '<tool_response>' '</tool_response>'"
+    HF_REF=/weka/olmo-3p5-post-checkpoints/abhishekr/h240/hf/olmo35-small-mm-ckpt2-256k-noagentic-step21159-base-h240seed
+    CACHE="${TT_CACHE:?TT_CACHE=<the H240 cache name from h240_cache.sh>}"
+    CDIR=/weka/olmo-3p5-post-checkpoints/abhishekr/h240/build/cache
+    TT_STATS_SHA256="${TT_STATS_SHA256:?TT_STATS_SHA256=<sha256 of the cache dataset_statistics.json>}"
+    EXCLUDE_HOSTS="${EXCLUDE_HOSTS:-holmes-cs-aus-544}"
+fi
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
@@ -131,7 +150,7 @@ DUMP_DIR="$OUTPUT_DIR/step1"
 
 ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
 --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision 8b9717061fae09d5be814373d189919a62a9a00d \
---chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
+--chat_template_name olmo35 --reserved_slot_tokens $SLOTS \
 --row_aligned_parts --document_boundaries_from_metadata --max_seq_length 65536 \
 --per_device_train_batch_size 1 --gradient_accumulation_steps 1 --learning_rate $LR --warmup_ratio 0.03 \
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs $EPOCHS --max_train_steps $STEPS --attn_implementation flash_2 \
@@ -151,6 +170,14 @@ if [[ "$ARM" == c14f ]]; then
     PATCH="sed -i 's/^        if int(tokens\[-1\]) != tokenizer.eos_token_id:/        if not require_metadata and int(tokens[-1]) != tokenizer.eos_token_id:/' open_instruct/olmo_core_finetune.py
 grep -c 'if not require_metadata and int(tokens' open_instruct/olmo_core_finetune.py || exit 6
 sha256sum open_instruct/olmo_core_finetune.py"
+fi
+if [[ "$ARM" == tt ]]; then
+    PATCH="sed -i 's#^        dataset_config.local_cache_dir = \"/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache\"#        dataset_config.local_cache_dir = \"$CDIR\"#' open_instruct/olmo_core_utils.py
+grep -c 'local_cache_dir = \"$CDIR\"' open_instruct/olmo_core_utils.py || exit 7
+C=$CDIR/numpy_sft/$CACHE
+[ -s \$C/dataset_statistics.json ] && ls \$C/token_ids_part_*.npy >/dev/null || { echo NUMPY-CACHE-MISSING \$C; exit 7; }
+[ \"\$(sha256sum \$C/dataset_statistics.json | cut -d' ' -f1)\" = $TT_STATS_SHA256 ] || { echo NUMPY-CACHE-SHA-MISMATCH; exit 7; }
+echo NUMPY-CACHE-CHECK path=\$C stats_sha256=$TT_STATS_SHA256"
 fi
 WAIT="$PATCH
 for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
@@ -216,7 +243,14 @@ $TORCHRUN"
 fi
 
 SPEC=$(mktemp -t h161spec.XXXXXX)
-CMD="$CMD" python3 - "$SPEC" <<EOF
+HOSTS=""
+if [[ -n "$EXCLUDE_HOSTS" ]]; then
+    HOSTS=$(beaker cluster nodes ai2/holmes --format json | python3 -c "import json, sys
+ex = sys.argv[1].split()
+print(' '.join(sorted(h for h in (n['hostname'] for n in json.load(sys.stdin)) if h.split('.')[0] not in ex)))" "$EXCLUDE_HOSTS")
+    [[ -n "$HOSTS" ]] || { echo "no holmes hosts left after excluding $EXCLUDE_HOSTS" >&2; exit 1; }
+fi
+HOSTS="$HOSTS" CMD="$CMD" python3 - "$SPEC" <<EOF
 import json, os, sys
 env = [
     {"name": "OLMO_SHARED_FS", "value": "1"},
@@ -243,7 +277,7 @@ task = {
     "result": {"path": "/output"},
     "resources": {"gpuCount": 8, "sharedMemory": "10GiB"},
     "context": {"priority": "${PRIORITY:-high}", "minRuntime": "$MIN_RUNTIME", "autoResume": "$AUTO_RESUME" == "1"},
-    "constraints": {"cluster": ["ai2/holmes"]},
+    "constraints": {"hostname": os.environ["HOSTS"].split()} if os.environ["HOSTS"] else {"cluster": ["ai2/holmes"]},
     "replicas": 2,
     "leaderSelection": True,
     "hostNetworking": True,
