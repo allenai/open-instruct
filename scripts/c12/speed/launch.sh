@@ -65,7 +65,9 @@ $TAIL_ARGS ${EXTRA:-}"
 SRC_SHA=$(git -C "$HERE" rev-parse HEAD)
 RDZV="--node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME"
 [[ "$NNODES" == 1 ]] && RDZV=""
-WRAP=$(COPYFILE_DISABLE=1 tar --no-xattrs -C "$HERE" -czf - speed_wrap.py trace_summary.py | base64 | tr -d '\n')
+PAYLOAD="speed_wrap.py trace_summary.py"
+if [[ -n "${OC_PATCH:-}" ]]; then cp "$OC_PATCH" "$HERE/oc.patch"; PAYLOAD="$PAYLOAD oc.patch"; fi
+WRAP=$(COPYFILE_DISABLE=1 tar --no-xattrs -C "$HERE" -czf - $PAYLOAD | base64 | tr -d '\n')
 CMD="set -uo pipefail
 mkdir -p /tmp/speed && printf %s '$WRAP' | base64 -d | tar -C /tmp/speed -xzf -
 sha256sum /tmp/speed/*.py
@@ -81,6 +83,11 @@ if [ \"${RUNTIME_ENV:-}\" = compat ]; then
   if ! ls /usr/local/cuda/compat/libcuda.so* >/dev/null 2>&1; then (apt-get update -qq && apt-get install -y -qq cuda-compat-\$CV) > /tmp/apt.log 2>&1 || tail -20 /tmp/apt.log; fi
   export LD_LIBRARY_PATH=/usr/local/cuda/compat:\${LD_LIBRARY_PATH:-}; ls /usr/local/cuda/compat
   python -c 'import torch; print(\"torch\", torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())' || exit 9
+fi
+if [ -n \"${OC_PATCH:-}\" ]; then
+  SP=\$(python -c 'import olmo_core, os; print(os.path.dirname(os.path.dirname(olmo_core.__file__)))'); echo olmo_core site \$SP
+  (cd \$SP && (patch -p2 --forward < /tmp/speed/oc.patch || git apply -p2 --verbose /tmp/speed/oc.patch)) || exit 10
+  echo SPEED-OC-PATCHED \$(sha256sum /tmp/speed/oc.patch | cut -c1-16)
 fi
 echo SPEED-JOB-START \$(date -u +%FT%TZ) job \$BEAKER_JOB_ID replica \${BEAKER_REPLICA_RANK:-0} host \$(hostname) pwd \$(pwd)
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1
