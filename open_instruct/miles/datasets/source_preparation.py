@@ -20,6 +20,7 @@ from jsonschema.exceptions import SchemaError
 from open_instruct import ifeval_constraints, tokenizer_utils
 from open_instruct.miles.datasets import long_context, tool_conversations, toolrl
 from open_instruct.miles.rewards import (
+    abstention,
     complete_code,
     litmus,
     nemo_tool_calls,
@@ -30,6 +31,7 @@ from open_instruct.miles.rewards import (
 from open_instruct.miles.rewards import deterministic_verifiers as local
 
 FACTORIES = {
+    "abstention": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
     "long_context": "open_instruct.miles.rewards.long_context.LongContextVerifier",
     "toolrl": "open_instruct.miles.rewards.toolrl.ToolRLVerifier",
     "single_step_tool": "open_instruct.miles.rewards.nemo_tool_calls.SingleStepToolVerifier",
@@ -353,6 +355,17 @@ def adapt(raw, kind, options=None):
             raise ValueError("proof_requires_judged_contract")
         target = str(target).strip()
         name, stratum = "math", kind
+    elif kind == "nemo_abstention_v1":
+        target = {"kind": abstention.KIND, "question": raw["question"], "answer": raw["answer"]}
+        abstention.validate_target(target)
+        if [m["role"] for m in ms] != ["system", "user"] or ms[-1]["content"] != target["question"]:
+            raise ValueError("Abstention requires the original system/user question")
+        if raw.get("tools") or (raw.get("responses_create_params") or {}).get("tools"):
+            raise ValueError("Abstention is a closed-book QA contract")
+        # The published HotpotQA component omits domain and source; infer it only
+        # for its known hexadecimal source IDs, not every future missing domain.
+        inferred = "HotpotQA" if re.fullmatch(r"[a-f0-9]{24}", str(raw.get("id", ""))) else "Unknown"
+        name, stratum = "abstention", raw.get("domain") or inferred
     elif kind == "reference_judge_v1":
         target = raw[options.get("reference_field", "expected_answer")]
         if not isinstance(target, str) or not target.strip():
@@ -451,7 +464,7 @@ def prepare(plan_path, output, tokenizer):
                         except (TypeError, ValueError) as error:
                             raise PlanError(f"Invalid code_service plan configuration: {error}") from error
                         registry[verifier]["config"] = dataclasses.asdict(config)
-                    if verifier == "reference_judge":
+                    if verifier in {"reference_judge", "abstention"}:
                         registry[verifier]["config"] = {"name": verifier}
                     row = {
                         "input": text,
@@ -495,7 +508,7 @@ def prepare(plan_path, output, tokenizer):
                         counts["transformed_constraints"] += len(changes)
                     if template_options:
                         row["metadata"]["tools"] = template_options["tools"]
-                    if verifier == "reference_judge":
+                    if verifier in {"reference_judge", "abstention"}:
                         row["metadata"]["judge_query"] = json.dumps(ms, ensure_ascii=False)
                     rows.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
                     counts["prepared_rows"] += 1

@@ -572,3 +572,7 @@ comparator, preserving ToolRL partial credit. Empty-schema parameters keep the
 native string spelling. Structured-output grading still validates the entire
 final instance against its full schema; invalid source references still fail
 preparation admission independently of response parsing.
+
+## Abstention-aware factoid QA
+
+Use `nemo_abstention_v1` for Nemotron-RL-QA-Abstention-v1. It preserves system/user inputs and factual references and requires the named `nvidia/qa-abstention-v1` rubric. See [abstention QA](abstention.md) for reward semantics, service configuration and qualification limits.

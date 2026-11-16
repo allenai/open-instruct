@@ -23,6 +23,7 @@ def fixture(tmp_path, *, cache_rows=8, cache_bytes=8192):
                 "metadata": {
                     "sampling_pool": "math" if i % 3 else "code",
                     "run_prompt_tokens": i + 1,
+                    "priority": 4 - i % 4,
                     "sample_id": f"{source}-{i}",
                     "verifiers": [{"name": "math", "target": str(i)}],
                     "payload": [{"x": [i] * 16}] * 8,
@@ -159,3 +160,42 @@ def test_many_pools_do_not_churn_prefetch_cache(tmp_path):
         assert catalog.reads <= 2100 + catalog.cache_rows
     finally:
         provider.close()
+
+
+@pytest.mark.parametrize("policy", ["uniform", "exposure"])
+@pytest.mark.parametrize("shuffle", [False, True])
+def test_priority_disk_order_matches_memory_and_resumes(tmp_path, policy, shuffle):
+    catalog, samples, pools = fixture(tmp_path)
+    options = dict(
+        pools=pools,
+        seed=17,
+        shuffle=shuffle,
+        identity="same-content",
+        sampling={"policy": policy, "priority": {"field": "priority"}},
+    )
+    try:
+        codes = catalog.priority_codes("priority")
+        assert codes.dtype.itemsize == 1 and len(codes) == len(catalog)
+        before = catalog.metrics()
+        assert before["disk_reads"] == 0
+        assert before["priority_scan_reads"] == len(catalog)
+        assert catalog.priority_codes("priority") is codes
+        assert catalog.metrics() == before
+        disk = pool_provider.PoolPromptProvider(catalog, **options)
+        memory = pool_provider.PoolPromptProvider(samples, **options)
+        first = disk.next_samples(13)
+        assert first == memory.next_samples(13)
+        state = disk.state_dict()
+        expected = disk.next_samples(7)
+        disk.load_state_dict(state)
+        assert disk.next_samples(7) == expected == memory.next_samples(7)
+        tail = disk.next_samples(28)
+        assert tail == memory.next_samples(28)
+        for pool in pools:
+            values = [
+                row.metadata["priority"] for row in first + expected + tail if row.metadata["sampling_pool"] == pool
+            ]
+            assert values == sorted(values)
+        assert not disk.available()
+    finally:
+        catalog.close()

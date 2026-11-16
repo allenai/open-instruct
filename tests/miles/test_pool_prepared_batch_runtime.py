@@ -18,9 +18,10 @@ args = test_prompt_provider.args
 harness = prepared.harness
 
 
-@pytest.fixture
-def pooled_harness(harness, args, tmp_path):
-    test_pool_provider.setup(args, tmp_path, "uniform")
+@pytest.fixture(params=[("uniform", False), ("uniform", True), ("exposure", True)])
+def pooled_harness(harness, args, tmp_path, request):
+    policy, priority = request.param
+    test_pool_provider.setup(args, tmp_path, policy, priority=priority)
     core = args.olmo_core
     vars(args).update(vars(prepared.config()))
     args.olmo_core = replace(core, publication_mode="refresh")
