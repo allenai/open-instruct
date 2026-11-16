@@ -63,3 +63,22 @@ priority, 45 minutes allocated protection, 90-minute timeout and no automatic
 retry; this is a bounded diagnostic, not an eight-hour training allocation.
 Inspect scheduler events if queued. Record the image, experiment IDs, sample
 coverage, numerical/finite checks, and timing before interpreting the estimates.
+
+## First pilot: immutable source overlay
+
+The first pilot avoids a 27 GB local image download by using the same immutable
+image with a content-addressed source overlay. Source dataset
+`01M7HCPYZ0FM7V1HXQRXTN566H` contains the committed Python files from
+`434d49bcc`; its manifest SHA256 is
+`8d29a722fa8d01689802f7bc0ea4efd0f4c5f81b8b2d404a8a22b2c3266e3e1d`.
+CPU qualification `01M7HCRN5TBEAGP2V5YCZ0V7YW` materialized the overlay in its
+own WEKA directory, passed all eight tests in the pinned image, and verified
+both configs and checkpoints. Its output includes the patched actor hash.
+
+The committed configs pin the manifest digest and use `BASH_ENV` to verify and
+install the overlay into each disposable diagnostic container before native
+startup. Only these jobs receive that environment variable. Files are copied
+into the container-local application tree and the guarded actor call is patched
+there; the runtime image, lock, original application source and existing runs
+remain untouched. The launch receipt records both immutable image and overlay
+pins. The Dockerfile remains an alternative for packaging a dedicated image.
