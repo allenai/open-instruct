@@ -10,7 +10,13 @@ from scripts.miles.diagnostics import summarize_gradient_noise
 
 
 def command(*arguments):
-    return subprocess.check_output(["beaker", *arguments], text=True)
+    for attempt in range(5):
+        try:
+            return subprocess.check_output(["beaker", *arguments], text=True, timeout=120)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            if attempt == 4:
+                raise
+            time.sleep(2**attempt)
 
 
 def latest_jobs(experiment):
@@ -87,7 +93,15 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--once", action="store_true")
     options = parser.parse_args()
-    monitor({"sft": options.sft, "final512": options.final}, options.output, once=options.once)
+    while True:
+        try:
+            monitor({"sft": options.sft, "final512": options.final}, options.output, once=options.once)
+            return
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            print(f"Transient Beaker failure; retrying in 60s: {error}", flush=True)
+            if options.once:
+                raise
+            time.sleep(60)
 
 
 if __name__ == "__main__":

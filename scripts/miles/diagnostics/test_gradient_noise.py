@@ -121,3 +121,36 @@ def test_compare_applies_expert_scale_and_replica_weight(monkeypatch):
     monkeypatch.setattr(probe.dist, "all_reduce", lambda _: None)
     # Replicated entries count half on each rank; experts get EP scaling squared.
     assert probe.compare(None, first) == [19.0, 11.0, 11.0, 2.0]
+
+
+def test_zero_lr_restored_before_scheduler_and_step():
+    args = SimpleNamespace(lr=0.0)
+    group = {"lr": None}
+
+    def constructor(options):
+        assert options.lr > 0  # Exact constraint from the failed native constructor.
+        group["lr"] = options.lr
+        return group
+
+    optimizer = probe.build_frozen_module(args, constructor)
+    assert args.lr == 0.0
+    optimizer["lr"] = args.lr  # Native scheduler initialization before first update.
+    parameter = torch.nn.Parameter(torch.tensor([2.0]))
+    native_optimizer = torch.optim.AdamW([parameter], lr=1e-6, weight_decay=0.1)
+    native_optimizer.param_groups[0]["lr"] = optimizer["lr"]
+    for _ in range(3):
+        parameter.grad = torch.ones_like(parameter)
+        native_optimizer.step()
+    torch.testing.assert_close(parameter, torch.tensor([2.0]), rtol=0, atol=0)
+
+
+def test_zero_lr_restored_on_constructor_failure():
+    args = SimpleNamespace(lr=0.0)
+
+    def fail(options):
+        assert options.lr > 0
+        raise RuntimeError("construction failed")
+
+    with pytest.raises(RuntimeError, match="construction failed"):
+        probe.build_frozen_module(args, fail)
+    assert args.lr == 0.0

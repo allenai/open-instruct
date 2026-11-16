@@ -14,6 +14,13 @@ def install(path):
                 metrics = gradient_noise.measure(self, step_batches, objective, self._replay_context)"""
     if source.count(before) != 1:
         raise ValueError("Pinned actor boundary changed; refusing an ambiguous runtime patch")
+    initialization = "self.train_module, self.hf_config, self.model_config = models.build_train_module(args)"
+    if source.count(initialization) != 1:
+        raise ValueError("Pinned optimizer initialization boundary changed")
+    source = source.replace(
+        initialization,
+        "self.train_module, self.hf_config, self.model_config = gradient_noise.build_frozen_module(args, models.build_train_module)",
+    )
     source = source.replace(before, after)
     source = source.replace("import ray\n", "from scripts.miles.diagnostics import gradient_noise\n\nimport ray\n", 1)
     path.write_text(source)

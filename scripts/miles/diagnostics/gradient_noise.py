@@ -20,6 +20,21 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
+def build_frozen_module(args, builder):
+    """Satisfy Core's positive constructor LR, then restore zero for its scheduler.
+
+    No forward/backward or optimizer update occurs during construction. The
+    actor creates CoreLRScheduler immediately afterwards using restored args.lr.
+    """
+    if args.lr != 0:
+        raise ValueError("Fixed-weight noise diagnostics require zero scheduled LR")
+    args.lr = 1e-6
+    try:
+        return builder(args)
+    finally:
+        args.lr = 0.0
+
+
 def partition(indices_by_rank, siblings, seed):
     groups = Counter(index // siblings for indices in indices_by_rank for index in indices)
     if len(groups) % 2 or not groups or any(count != siblings for count in groups.values()):
