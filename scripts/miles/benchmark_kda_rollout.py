@@ -418,6 +418,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--order", nargs=2, choices=("pinned", "native"), default=["pinned", "native"])
     parser.add_argument("--seconds", type=int, default=3500)
+    parser.add_argument(
+        "--shared-deadline", action="store_true", help="Let cold startup use the remaining total budget"
+    )
     parser.add_argument("--preflight", action="store_true")
     parsed = parser.parse_args()
     assert set(parsed.order) == {"native", "pinned"}
@@ -450,7 +453,9 @@ def main():
     deadline = time.monotonic() + parsed.seconds
     for condition in parsed.order:
         args.save = str(parsed.output / condition)
-        condition_deadline = min(deadline, time.monotonic() + parsed.seconds / 2)
+        condition_deadline = (
+            deadline if parsed.shared_deadline else min(deadline, time.monotonic() + parsed.seconds / 2)
+        )
         run_condition(args, condition, rows, parsed.output / condition, parsed.policy, condition_deadline)
     save(parsed.output / "completed.json", {"passed": True, "finished_unix": time.time()})
 
