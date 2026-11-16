@@ -158,9 +158,9 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
-The three-node throughput candidate uses 128 prompts × 8 samples per collection
-and one 1,024-sample optimizer batch with policy lag 12. It admits 3,840 unfinished samples, keeps up
-to 512 completed prompt groups (4,096 samples), and runs 16 HTTP actors per node
+The three-node throughput candidate uses 64 prompts × 8 samples per collection
+and one 512-sample optimizer batch with policy lag 12. It admits 3,840 unfinished samples, keeps up
+to 256 completed prompt groups (2,048 samples), and runs 16 HTTP actors per node
 with one Ray CPU each. The rollout executor reserves two Ray CPUs and each node
 advertises 64 logical Ray CPUs through `launch.env.OI_MILES_RAY_CPUS` (default
 32 when omitted). The node example uses the same worker counts and reservations.
@@ -260,10 +260,10 @@ explicit limits would give 6,144 for node and 15,360 for three-node. Generic
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-Both learning examples use 128 prompts × 8 responses, batch 1,024 and lag 12.
+Both learning examples use 64 prompts × 8 responses, batch 512 and lag 12.
 Node buffers one completed batch; three-node buffers four. The three-node
-unfinished-sample budget represents 3.75 batches;
-adding the completed buffer gives 7.75 nominal batches. Sample backfill can retain
+unfinished-sample budget represents 7.5 batches;
+adding the completed buffer gives 11.5 nominal batches. Sample backfill can retain
 additional finished siblings, so this arithmetic is not an age guarantee. It is headroom, not
 a measured optimum or a guarantee of steady throughput. Full-recipe
 collection and judging can limit throughput even with spare engine capacity.
