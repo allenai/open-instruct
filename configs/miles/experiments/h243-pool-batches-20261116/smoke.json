@@ -74,30 +74,6 @@
     "responses": "sample",
     "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h243-pool-batches-20261116/smoke/inference-records"
   },
-  "evaluation": {
-    "budget": "ai2/oe-other",
-    "cluster": "ai2/holmes",
-    "external_server_args": [],
-    "final": false,
-    "gpus": 1,
-    "image": "01M7CK4QK3MJ7Q9MZYRQTMTPYW",
-    "initial": false,
-    "interval": 0,
-    "mode": "background",
-    "provider_kwargs": {
-      "profile": "olmo3.5-12.5b",
-      "context_length": 34816
-    },
-    "revision": "56dc89212fc040a0b7fd957901c3b326b8a5cd11",
-    "secrets": {
-      "HF_TOKEN": "robertb_RL_QUALIFICATION_HF_TOKEN",
-      "WANDB_API_KEY": "robertb_WANDB_API_KEY"
-    },
-    "submit_timeout": 120,
-    "tasks": [],
-    "timeout": "12h",
-    "workspace": "ai2/olmo-instruct"
-  },
   "training": {
     "num_rollouts": 4,
     "save_interval": 2
