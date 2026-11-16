@@ -28,6 +28,12 @@
 #          step10 in OUTPUT_DIR and continues at step 11, replaying steps 11-19. No step-1 dump, no HF reference.
 #          MAX_RETRIES defaults to 1 here, so a hold that expires unpreempted (exit 3) still exercises the resume
 #          path, through Beaker's retry instead of its preemption requeue. Timeout 2 h.
+#   A4B_GAS=6 (a4b8 only; the ledger's A4B big-batch arms): --gradient_accumulation_steps 6, so one update is 96 rows
+#          (16 DP ranks x 6 one-row micro-batches) and update k consumes the 16-row batches 6k-5..6k of H228's order.
+#          The two-pass schedule is floor(N / 96) x 2 = 10,578 updates (warmup 0.03 of that); the permanent save is at
+#          update 2,645 (= H228's step 15,870, the half pass), ephemeral every 142 updates (~852 micro-steps), and
+#          train requires HARD_STOP=2645, so the run ends after that save with the schedule unchanged. The smoke runs
+#          5 updates (30 micro-steps: H228's smoke rows) with 2 h. Unset, every a4b8 spec is H228's.
 #   train  the run. Permanent checkpoint at the end of epoch 1 (hero) or half way (ctrl), plus the final one;
 #          ephemeral every SAVE_EVERY steps (default 1000: ~30 min at H111's 1.80 s/step; set from the smoke's mean).
 #
@@ -41,6 +47,8 @@
 # AUTO_RESUME (default 1 for resume and train, 0 for smoke: Beaker requeues the task after a preemption),
 # MAX_RETRIES (default 0, 1 for resume: Beaker reruns a task that failed, which then resumes the same way),
 # RESUME_FROM=<other dir>/stepNNNN to start from a checkpoint outside OUTPUT_DIR (ignored once OUTPUT_DIR holds one),
+# HARD_STOP=<step> (train only: olmo-core's TrainerConfig.hard_stop, patched into the image's olmo_core_finetune.py in
+# the container; the job exits 8 if the patch anchor or the field is missing), A4B_GAS (above),
 # WAIT_FOR_BASE=<minutes> (default 0: the job waits that long for the base's RECEIPT.json, then
 # exits 3 without training; for a smoke queued while the conversion job is still running), DRY_RUN=1.
 #
@@ -116,6 +124,12 @@ $F/identity/identity.jsonl 1.0"
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
 esac
+GAS=1
+if [[ -n "${A4B_GAS:-}" ]]; then
+    [[ "$ARM" == a4b8 && "$A4B_GAS" == 6 ]] || { echo "A4B_GAS is wired for a4b8 at 6 only" >&2; exit 1; }
+    GAS=6; STEPS=10578; CKPT=2645; HOURS=72; SMOKE_STEPS=5; SMOKE_HOURS=2; SAVE_EVERY="${SAVE_EVERY:-142}"
+    DESC="ledger H244 a4b-bigbatch (96 rows per update)"
+fi
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == b1r ]] && RUN_NAME="h182gpu-s${SEED}"
@@ -124,6 +138,7 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == a4b && -n "${A4B_LR:-}" ]] && RUN_NAME="a4bgpu-lr${A4B_LR}-s${SEED}"
 [[ "$ARM" == a4b && -n "${A4B_LR:-}" && -n "${RESUME_FROM:-}" ]] && { echo "an LR arm starts from the base: RESUME_FROM is refused" >&2; exit 1; }
 [[ "$ARM" == a4b8 ]] && RUN_NAME="a4bgpu-8t-2pass-lr${A4B_LR}-s${SEED}"
+[[ "$GAS" != 1 ]] && RUN_NAME="a4bgpu-8t-gas${GAS}-lr${A4B_LR}-s${SEED}"
 [[ "$ARM" == a4b8 && -n "${RESUME_FROM:-}" ]] && { echo "a4b8 starts from the base: RESUME_FROM is refused" >&2; exit 1; }
 case "$MODE" in
     smoke) STEPS=$SMOKE_STEPS; CKPT=1000000; SAVE_EVERY=1024; HOURS=$SMOKE_HOURS; RUN_NAME="${RUN_NAME}-smoke"
@@ -135,6 +150,9 @@ case "$MODE" in
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
 esac
 TIMEOUT="${TIMEOUT:-${HOURS}h}"
+if [[ "$GAS" != 1 && "$MODE" == train && "${HARD_STOP:-}" != "$CKPT" ]]; then
+    echo "A4B_GAS train needs HARD_STOP=$CKPT (the half pass)" >&2; exit 1
+fi
 OUTPUT_DIR="$OUT_ROOT/$RUN_NAME"
 DUMP_DIR="$OUTPUT_DIR/step1"
 
@@ -142,7 +160,7 @@ ARGS="--model_name_or_path $MODEL --config_name $CONFIG \
 --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision $TOKREV \
 --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
 --row_aligned_parts --document_boundaries_from_metadata --max_seq_length 65536 \
---per_device_train_batch_size 1 --gradient_accumulation_steps 1 --learning_rate $LR --warmup_ratio 0.03 \
+--per_device_train_batch_size 1 --gradient_accumulation_steps $GAS --learning_rate $LR --warmup_ratio 0.03 \
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs $EPOCHS --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints $KEEP_LAST --dist_timeout_hours 2 \
@@ -152,7 +170,17 @@ ARGS="--model_name_or_path $MODEL --config_name $CONFIG \
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
 
 BASE_RECEIPT="$(dirname "$MODEL")/RECEIPT.json"
-WAIT="for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
+PATCH=""
+if [[ -n "${HARD_STOP:-}" ]]; then
+    [[ "$MODE" == train && "$HARD_STOP" =~ ^[0-9]+$ ]] || { echo "HARD_STOP is a step number, train mode only" >&2; exit 1; }
+    # Exit 8 if the anchor moved or this olmo-core has no TrainerConfig.hard_stop.
+    PATCH="sed -i 's/^        max_duration=max_duration,\$/        max_duration=max_duration, hard_stop=Duration.steps($HARD_STOP),/' open_instruct/olmo_core_finetune.py
+grep -c 'hard_stop=Duration.steps($HARD_STOP),' open_instruct/olmo_core_finetune.py || exit 8
+python -c 'import sys, dataclasses; sys.modules[\"torchvision\"] = None; from olmo_core.train import TrainerConfig; assert \"hard_stop\" in {f.name for f in dataclasses.fields(TrainerConfig)}' || exit 8
+echo HARD-STOP-PATCHED $HARD_STOP
+"
+fi
+WAIT="${PATCH}for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
 [ -f $BASE_RECEIPT ] || { echo H161-NO-BASE $BASE_RECEIPT; exit 3; }
 sha256sum $BASE_RECEIPT"
 TORCHRUN="torchrun --nnodes=2 --node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
