@@ -62,12 +62,20 @@ $COMPILE_FLAG $AC_ARGS \
 --extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r \
 $TAIL_ARGS ${EXTRA:-}"
 
+SRC_SHA=$(git -C "$HERE" rev-parse HEAD)
 RDZV="--node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME"
 [[ "$NNODES" == 1 ]] && RDZV=""
 WRAP=$(COPYFILE_DISABLE=1 tar --no-xattrs -C "$HERE" -czf - speed_wrap.py trace_summary.py | base64 | tr -d '\n')
 CMD="set -uo pipefail
 mkdir -p /tmp/speed && printf %s '$WRAP' | base64 -d | tar -C /tmp/speed -xzf -
 sha256sum /tmp/speed/*.py
+if [ \"${RUNTIME_ENV:-}\" = cu12 ]; then
+  T0=\$(date +%s); mkdir -p /tmp/proj && cd /tmp/proj
+  for f in pyproject.toml uv.lock; do curl -sSfL -o \$f https://raw.githubusercontent.com/allenai/open-instruct/$SRC_SHA/\$f || exit 7; done
+  UV_PROJECT_ENVIRONMENT=/tmp/venv12 uv sync --frozen --no-default-groups --group cuda12 --no-install-project > /tmp/uv_sync.log 2>&1 || { tail -50 /tmp/uv_sync.log; exit 8; }
+  tail -3 /tmp/uv_sync.log; cd /stage; export PATH=/tmp/venv12/bin:\$PATH; export VIRTUAL_ENV=/tmp/venv12
+  echo SPEED-CU12-VENV ready in \$((\$(date +%s)-T0))s; python -c 'import torch; print(\"torch\", torch.__version__, torch.version.cuda, torch.cuda.is_available())'
+fi
 echo SPEED-JOB-START \$(date -u +%FT%TZ) job \$BEAKER_JOB_ID replica \${BEAKER_REPLICA_RANK:-0} host \$(hostname) pwd \$(pwd)
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1
 torchrun --nnodes=$NNODES $RDZV \
