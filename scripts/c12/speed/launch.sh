@@ -37,12 +37,12 @@ COMPILE_FLAG="--no_compile_model"
 # MODEL_KIND=7b: OLMo 3 7B dense (H089's GPU reference leg 01M5ASJZ1S4E88BC1DE3Y1D3PA: HF base, olmo3_7B, YaRN x8,
 # compile, selected_modules AC) on the same C12r data and batch shape; GA keeps 16 instances per step.
 MODEL_KIND="${MODEL_KIND:-a4b}"
-GA=$((16 / (8 * NNODES)))
+GA=$(( NNODES >= 2 ? 1 : 2 ))
 MODEL_ARGS="--model_name_or_path $MODEL --config_name scripts/c12/a4b_sft_config.json"
 AC_ARGS="--activation_checkpointing_mode budget --activation_memory_budget 1"
 TAIL_ARGS="--expert_parallel_degree $EP --loss_implementation fused_linear"
 if [[ "$MODEL_KIND" == 7b ]]; then
-  GA=$((16 / (8 * NNODES)))
+  GA=$(( NNODES >= 2 ? 1 : 2 ))
   MODEL_ARGS="--model_name_or_path /weka/olmo-3p5-post-checkpoints/bases/olmo3-7b-1025/hf-a81bae42 --config_name olmo3_7B --rope_scaling_factor 8"
   AC_ARGS="${AC_ARGS_7B:---activation_checkpointing_mode selected_modules}"
   TAIL_ARGS="${TAIL_7B:-}"
