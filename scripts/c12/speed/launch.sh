@@ -76,6 +76,12 @@ if [ \"${RUNTIME_ENV:-}\" = cu12 ]; then
   tail -3 /tmp/uv_sync.log; cd /stage; export PATH=/tmp/venv12/bin:\$PATH; export VIRTUAL_ENV=/tmp/venv12
   echo SPEED-CU12-VENV ready in \$((\$(date +%s)-T0))s; python -c 'import torch; print(\"torch\", torch.__version__, torch.version.cuda, torch.cuda.is_available())'
 fi
+if [ \"${RUNTIME_ENV:-}\" = compat ]; then
+  ls /usr/local/cuda/compat 2>&1 | head; CV=\$(ls -d /usr/local/cuda-* | head -1 | sed 's/.*cuda-//; s/\\./-/'); echo cuda \$CV
+  if ! ls /usr/local/cuda/compat/libcuda.so* >/dev/null 2>&1; then (apt-get update -qq && apt-get install -y -qq cuda-compat-\$CV) > /tmp/apt.log 2>&1 || tail -20 /tmp/apt.log; fi
+  export LD_LIBRARY_PATH=/usr/local/cuda/compat:\${LD_LIBRARY_PATH:-}; ls /usr/local/cuda/compat
+  python -c 'import torch; print(\"torch\", torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())' || exit 9
+fi
 echo SPEED-JOB-START \$(date -u +%FT%TZ) job \$BEAKER_JOB_ID replica \${BEAKER_REPLICA_RANK:-0} host \$(hostname) pwd \$(pwd)
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1
 torchrun --nnodes=$NNODES $RDZV \
