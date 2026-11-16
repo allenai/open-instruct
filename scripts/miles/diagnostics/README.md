@@ -124,3 +124,21 @@ The original failed attempts and roots are retained; retries use `sft-r2` and
 
 Collector output: `runs/h235-gradient-noise-20261116-r2/`. Only these retry IDs
 should be used when checking for new measurements; the initial IDs are failed.
+
+## Urgent allocated replacements
+
+At Robert's request, replace the 45m-protected normal-priority pilots with urgent
+allocated jobs, each protected for its entire 2h timeout (`min_runtime=2h`,
+`timeout=2h`). Graceful stop budget is 110m. Source overlay and estimator remain
+unchanged. The SFT predecessor was scheduler-preempted after five measurements;
+the final-checkpoint predecessor was explicitly stopped before these submissions.
+Partial r2 measurements remain in their original roots and local partial JSONs.
+No in-flight batch resume is claimed: these jobs each collect eight fresh batches
+from the same frozen checkpoint under fresh `*-urgent-r3` output roots.
+
+1. SFT: https://beaker.org/ex/01M7JQ7NCBAREFQ3NTQHA7PK1R
+2. Final B512: https://beaker.org/ex/01M7JQ7PB67XTAY2GH8QE8T339
+
+Collector output: `runs/h235-gradient-noise-20261116-r3/`. Local verification:
+136 tests pass; diagnostic Ruff lint/format checks pass. The earlier collector
+was stopped; the replacement follows these IDs only.
