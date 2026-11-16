@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "h235-gradient-noise-final512-20261116-r2",
+  "name": "h235-gradient-noise-final512-20261116-urgent-r3",
   "model": {
     "format": "hf",
     "source": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h196-batch-normalization-20261114/B512-Noff/eval-snapshots/update-00000400/hf"
@@ -13,20 +13,20 @@
     "shuffle": true
   },
   "output": {
-    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h235-gradient-noise-20261116/final512-r2",
+    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h235-gradient-noise-20261116/final512-urgent-r3",
     "export_hf": false
   },
   "launch": {
     "workspace": "ai2/olmo-instruct",
     "budget": "ai2/oe-other",
     "cluster": "ai2/holmes",
-    "priority": "normal",
-    "min_runtime": "45m",
+    "priority": "urgent",
+    "min_runtime": "2h",
     "auto_resume": false,
     "max_retries": 0,
     "memory": "512 GiB",
     "shared_memory": "128 GiB",
-    "timeout": "90m",
+    "timeout": "2h",
     "coordination": {
       "heartbeat_timeout": 120,
       "startup_timeout": 1200
@@ -65,7 +65,7 @@
     ]
   },
   "conversion": {
-    "hf_output": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h235-gradient-noise-20261116/final512-r2/prepared/hf"
+    "hf_output": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h235-gradient-noise-20261116/final512-urgent-r3/prepared/hf"
   },
   "compiler_cache": {
     "shared_root": "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
@@ -74,7 +74,7 @@
     "enabled": true,
     "response_sample_rate": 0.05,
     "responses": "sample",
-    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h235-gradient-noise-20261116/final512-r2/inference-records"
+    "root": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h235-gradient-noise-20261116/final512-urgent-r3/inference-records"
   },
   "evaluation": {},
   "training": {
@@ -114,7 +114,7 @@
     "engine_drain_timeout": 900.0,
     "max_policy_lag": 12,
     "max_run_final": false,
-    "max_run_seconds": 4200,
+    "max_run_seconds": 6600,
     "pipeline_observation_interval": 2.0,
     "prompt_priority_field": "reward_priority_olmo35_sft_hero",
     "prompt_provider": "priority",
