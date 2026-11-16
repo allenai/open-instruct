@@ -116,6 +116,10 @@ if [[ "$ARM" == nh ]]; then
     EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14; OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/noag-half-gpu
     DESC="ledger noag 65K control (H182's recipe on noag, half an epoch)"; RUN_NAME="noag-c12r-half-s${SEED}"
 fi
+# One-factor arms of a recipe: LOSS_IMPL adds --loss_implementation (e.g. fused_linear); RUN_SUFFIX gives the arm its
+# own output dir so it never resumes from the control's. Both unset leaves every spec unchanged.
+if [[ -n "${LOSS_IMPL:-}" ]]; then EXTRA_ARGS="$EXTRA_ARGS --loss_implementation $LOSS_IMPL"; fi
+RUN_NAME="${RUN_NAME}${RUN_SUFFIX:-}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
