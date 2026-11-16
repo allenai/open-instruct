@@ -58,7 +58,8 @@ def verify_inventory(modules, precision, *, kv_cache_dtype=None):
         # Its name does not describe the cache's storage dtype or weight precision.
         if method == "fp8kvcachemethod" and module["class"] == "RadixAttention":
             parameters = module["parameters"]
-            if kv_cache_dtype not in ("bf16", "bfloat16") or parameters != {
+            storage = {key: {field: value[field] for field in ("dtype", "shape")} for key, value in parameters.items()}
+            if kv_cache_dtype not in ("bf16", "bfloat16") or storage != {
                 key: {"dtype": "torch.float32", "shape": []} for key in ("k_scale", "v_scale")
             }:
                 raise ValueError(f"Unverified BF16 KV scale loader: {name}")

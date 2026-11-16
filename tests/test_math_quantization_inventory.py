@@ -48,3 +48,10 @@ def test_other_quantized_nonexpert_still_rejected():
     modules.append({"name": "lm_head", "class": "Linear", "quant_method": "Fp8LinearMethod"})
     with pytest.raises(ValueError, match="Unexpected quantized non-expert"):
         qualifier.verify_inventory(modules, "fp8", kv_cache_dtype="bf16")
+
+
+def test_scale_tensor_hashes_preserved_by_transport_audit_are_not_storage_fields():
+    modules = inventory()
+    for value in modules[-1]["parameters"].values():
+        value["sha256"] = "e00e5eb9444182f352323374ef4e08ebcb784725fdd4fd612d7730540b3e0c8c"
+    assert qualifier.verify_inventory(modules, "fp8", kv_cache_dtype="bf16")["routed_expert_modules"] == 15
