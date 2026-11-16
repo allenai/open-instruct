@@ -96,3 +96,31 @@ def test_resume_rejects_incompatible_or_incomplete_receipts(tmp_path, failure):
         path.write_text(json.dumps(row))
     with pytest.raises(ValueError):
         resume.load_publications(folder, model, precision, lock)
+
+
+def test_full_cap_resume_reuses_exact_long_conditional_tokens_and_rejects_drift():
+    probes = [[i, i + 1] for i in range(16)]
+    rows = []
+    for count in (1, 8, 16):
+        for prefix in probes[:count]:
+            rows.append(
+                {
+                    "meta_info": {
+                        "input_token_logprobs": [[None, token] for token in prefix + [42] * 16384],
+                        "completion_tokens": 16384,
+                        "candidate20_sha256": "retained-candidate-provenance",
+                    }
+                }
+            )
+    cases = resume.saved_full_cap_inputs(rows, probes)
+    assert list(map(len, cases)) == [1, 8, 16]
+    assert cases[2][15] == probes[15] + [42] * 16384
+    rows[9]["meta_info"]["input_token_logprobs"][0][1] = 999
+    with pytest.raises(ValueError, match="provenance"):
+        resume.saved_full_cap_inputs(rows, probes)
+    with pytest.raises(ValueError, match="Missing"):
+        resume.saved_full_cap_inputs(rows[:-1], probes)
+    rows[9]["meta_info"]["input_token_logprobs"][0][1] = probes[0][0]
+    rows[24]["meta_info"]["completion_tokens"] = 16383
+    with pytest.raises(ValueError, match="provenance"):
+        resume.saved_full_cap_inputs(rows, probes)

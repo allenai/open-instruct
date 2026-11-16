@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 
+import httpx
 import torch
 from scripts.miles import qualify_math_weight_publication as gate
 
@@ -81,6 +82,70 @@ def load_publications(folder, model, precision, runtime_lock):
     return protocol, observed, {str(p): digest(p) for p in paths}
 
 
+def saved_full_cap_inputs(outputs, probes):
+    """Recover exact frozen conditional requests; never regenerate continuations."""
+    if len(outputs) != 25 or len(probes) != 16:
+        raise ValueError("Missing full-cap cases or prompt snapshot")
+    cases, offset = [], 0
+    for count in (1, 8, 16):
+        requests = []
+        for output, prefix in zip(outputs[offset : offset + count], probes[:count], strict=True):
+            meta = output["meta_info"]
+            tokens = [entry[1] for entry in meta["input_token_logprobs"]]
+            if (
+                meta["completion_tokens"] != 16384
+                or not meta.get("candidate20_sha256")
+                or tokens[: len(prefix)] != prefix
+                or len(tokens) != len(prefix) + 16384
+            ):
+                raise ValueError("Invalid saved full-cap conditional provenance")
+            requests.append(tokens)
+        cases.append(requests)
+        offset += count
+    return cases
+
+
+def probe_saved_full_cap(fleet, label, observed, probes):
+    """Score the original c1/8/16 long inputs on fresh servers, without decoding."""
+    outputs, audits = [], []
+    with httpx.Client(timeout=1800) as client:
+        for index, (engine, directory) in enumerate(zip(fleet.clients, fleet.directories, strict=True)):
+            rows = []
+            cases = saved_full_cap_inputs(observed["outputs"][index], probes)
+            for tokens in cases:
+                response = client.post(
+                    engine.server_url + "/generate",
+                    json={
+                        "input_ids": tokens,
+                        "sampling_params": {"temperature": 0, "max_new_tokens": 1},
+                        "return_logprob": True,
+                        "logprob_start_len": 0,
+                    },
+                )
+                response.raise_for_status()
+                current = response.json()
+                if not isinstance(current, list) or len(current) != len(tokens):
+                    raise ValueError("Missing saved-conditional diagnostic responses")
+                for output, request in zip(current, tokens, strict=True):
+                    if [x[1] for x in output["meta_info"]["input_token_logprobs"]] != request:
+                        raise ValueError("Saved-conditional diagnostic token alignment mismatch")
+                rows.extend(current)
+            outputs.append(rows)
+            paths = sorted(directory.glob("audit-*.json"), key=lambda path: path.stat().st_mtime_ns)
+            audit = json.loads(paths[-1].read_text())
+            if getattr(fleet.args, "nvfp4_kv", False):
+                pools = list(directory.glob("pool-audit-*.json"))
+                if len(pools) != 1:
+                    raise ValueError("Missing actual native KV/recurrent audit")
+                gate.qualify_math_nvfp4_kv.verify_audit(json.loads(pools[0].read_text()))
+                gate.qualify_math_quantization.verify_inventory(
+                    [module for module in audit if module["class"] != "RadixAttention"], fleet.args.precision
+                )
+            audits.append(audit)
+    gate.save(fleet.args.output / f"{label}.json", {"outputs": outputs, "audits": audits})
+    return outputs, audits
+
+
 def run(args):
     args.output.mkdir(parents=True, exist_ok=False)
     if getattr(args, "native_config_receipt", None):
@@ -101,14 +166,26 @@ def run(args):
             "runtime_pins_unchanged": True,
             "tolerances_unchanged": gate.TOLERANCES,
             "diagnostic_only": True,
+            "saved_full_cap_scores": getattr(args, "saved_full_cap_scores", False),
+            "nvfp4_kv": getattr(args, "nvfp4_kv", False),
         },
     )
     changed = {0: args.model, **{v: gate.fresh_checkpoint(args, v) for v in (1, 2)}}
     checks, failures = [], []
     for variant in args.fresh_variants:
         with gate.Fleet(args, changed[variant], f"fresh-{variant}") as fleet:
-            reference, audits = fleet.probe(f"fresh-{variant}", protocol["probes"])
-            repeated, repeated_audits = fleet.probe(f"fresh-{variant}-repeat", protocol["probes"])
+            if getattr(args, "saved_full_cap_scores", False):
+                if not protocol.get("full_cap_prompt_snapshot_sha256"):
+                    raise ValueError("Saved full-cap prompt provenance missing")
+                reference, audits = probe_saved_full_cap(
+                    fleet, f"fresh-{variant}", observed[variant], protocol["probes"]
+                )
+                repeated, repeated_audits = probe_saved_full_cap(
+                    fleet, f"fresh-{variant}-repeat", observed[variant], protocol["probes"]
+                )
+            else:
+                reference, audits = fleet.probe(f"fresh-{variant}", protocol["probes"])
+                repeated, repeated_audits = fleet.probe(f"fresh-{variant}-repeat", protocol["probes"])
         if getattr(args, "native_config_receipt", None):
             for directory in fleet.directories:
                 source = json.loads(args.native_config_receipt.read_text())
@@ -164,6 +241,8 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--precision", choices=("bf16", "nvfp4"), required=True)
     parser.add_argument("--native-config-receipt", type=Path)
+    parser.add_argument("--saved-full-cap-scores", action="store_true")
+    parser.add_argument("--nvfp4-kv", action="store_true")
     parser.add_argument("--fresh-variants", type=int, choices=(0, 1, 2), nargs="+", default=[0, 1, 2])
     args = parser.parse_args()
     args.gpu, args.port = None, None
