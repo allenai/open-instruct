@@ -6,6 +6,7 @@ It leaves both draft PRs open and changes no registered metric or decision rule.
 """
 
 import argparse
+import fcntl
 import json
 import os
 import subprocess
@@ -113,6 +114,8 @@ def main():
     options = parser.parse_args()
     ledger, state = Path(options.ledger), Path(options.state)
     state.mkdir(parents=True, exist_ok=True)
+    controller_lock = (state / "controller.lock").open("a")
+    fcntl.flock(controller_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     if command("git", "rev-parse", "HEAD").strip() != options.launch_revision:
         raise RuntimeError("Submission checkout revision changed")
     if command("git", "status", "--porcelain").strip():
@@ -136,6 +139,7 @@ def main():
             if status.get("canceledCode") in (1, 2, 6, 9, 10, 11):
                 if canceled_attempt != current["id"]:
                     canceled_attempt, canceled_at = current["id"], time.monotonic()
+                assert canceled_at is not None
                 if time.monotonic() - canceled_at < 135:
                     time.sleep(45)
                     continue
@@ -176,6 +180,10 @@ def main():
                     raise RuntimeError("Existing canonical arm receipt has different provenance")
                 write(path, receipt)
             else:
+                ledger_path = next((ledger / "hypotheses").glob("H243-*.md"))
+                registration = yaml.safe_load(ledger_path.read_text().split("---", 2)[1])
+                if any(run["arm"] == arm for run in registration["runs"]):
+                    raise RuntimeError("Ledger already records this arm; recover its receipt before restarting")
                 env = os.environ | {"MILES_EXISTING_IMAGE": options.image}
                 output = command(
                     "bash",
