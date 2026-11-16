@@ -58,3 +58,45 @@ def test_scheduler_receipt_removes_unpickleable_runtime_configs():
     receipt = benchmark_kda_rollout.plain_receipt(raw)
     assert pickle.loads(pickle.dumps(receipt))["max_running_requests"] == 32
     assert isinstance(receipt["model_config"], str)
+
+
+def test_window_metrics_exclude_warmup_and_separate_processing(tmp_path):
+    timeline = [
+        {"monotonic": 9, "unix": 109, "metrics": 'sglang:num_running_reqs{rank="0"} 99\n'},
+        {
+            "monotonic": 11,
+            "unix": 111,
+            "metrics": 'sglang:num_running_reqs{rank="0"} 32\nsglang:num_queue_reqs{rank="0"} 16\n',
+        },
+    ]
+    (tmp_path / "engine-timeline.jsonl").write_text("\n".join(json.dumps(r) for r in timeline))
+    sample = {
+        "submitted": 10,
+        "admitted": 10.5,
+        "response_processed": 11,
+        "assembled": 12,
+        "reward_seconds": 0.25,
+        "prompt_tokens": 128,
+        "output_tokens": 4096,
+    }
+    row = {
+        "samples": [sample],
+        "seconds": 2,
+        "responses": 1,
+        "groups": [{"tail_seconds": 1}],
+        "time_origin_monotonic": 10,
+    }
+    result = analyze_kda_rollout.window_details(row, tmp_path)
+    assert result["engine_gauges"]["num_running_reqs"]["mean"] == 32
+    assert result["admission_seconds"]["mean"] == 0.5
+    assert result["processed_to_group_assembled_seconds"]["mean"] == 1
+    assert result["reward_seconds"]["mean"] == 0.25
+
+
+def test_audit_rejects_native_with_installed_policy(tmp_path):
+    state = {
+        "internal_states": [{"kda_benchmark": {"loader_context_fix": True, "targets": [{"installed_policy": "hash"}]}}]
+    }
+    (tmp_path / "warmed-state.json").write_text(json.dumps(state))
+    with pytest.raises(ValueError, match="Actual policy"):
+        analyze_kda_rollout.runtime_audit(tmp_path, "native")
