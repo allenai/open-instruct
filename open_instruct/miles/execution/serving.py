@@ -18,7 +18,7 @@ def configure_specs(args, specs):
             spec.model_copy(
                 update={"worker_class": "open_instruct.miles.execution.frozen_router_actor.FrozenRouterTrainActor"}
             )
-            if spec.worker_class == "miles.backends.core_utils.actor.OLMoCoreTrainRayActor"
+            if getattr(spec, "worker_class", None) == "miles.backends.core_utils.actor.OLMoCoreTrainRayActor"
             else spec
             for spec in configured
         ]
