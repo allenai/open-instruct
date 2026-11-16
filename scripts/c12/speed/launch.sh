@@ -97,7 +97,7 @@ echo SPEED-TRAIN-EXIT \$RC \$(date -u +%FT%TZ)
 exit \$RC"
 
 SPEC=$(mktemp -t speedspec.XXXXXX)
-CMD="$CMD" SYNC_TIMEOUT="${SYNC_TIMEOUT:-10m}" MIN_RUNTIME="${MIN_RUNTIME:-2h}" CLUSTER="${CLUSTER:-ai2/holmes}" PRIORITY="${PRIORITY:-urgent}" NAME="$NAME" CFG_PATCH="${CFG_PATCH:-}" PROFILE="${PROFILE:-}" NNODES="$NNODES" IMAGE="$IMAGE" \
+CMD="$CMD" RETRIES="${RETRIES:-0}" SYNC_TIMEOUT="${SYNC_TIMEOUT:-10m}" MIN_RUNTIME="${MIN_RUNTIME:-2h}" CLUSTER="${CLUSTER:-ai2/holmes}" PRIORITY="${PRIORITY:-urgent}" NAME="$NAME" CFG_PATCH="${CFG_PATCH:-}" PROFILE="${PROFILE:-}" NNODES="$NNODES" IMAGE="$IMAGE" \
 EXTRA_ENV_JSON="${EXTRA_ENV_JSON:-[]}" STEPS="$STEPS" OUT="$OUT" python3 - "$SPEC" <<'EOF'
 import json, os, sys
 e = os.environ
@@ -148,6 +148,8 @@ spec = {"version": "v2", "budget": "ai2/oe-other",
         "description": f"A4B SFT speed ladder {e['NAME']}: H203 recipe, {e['STEPS']} steps, {e["NNODES"]}x8 {e["CLUSTER"]}, "
                        f"out {e['OUT']}, patch {e['CFG_PATCH'] or '-'}",
         "tasks": [task]}
+if int(e.get("RETRIES", "0")):
+    spec["retry"] = {"allowedTaskRetries": int(e["RETRIES"])}
 if int(e["NNODES"]) == 1:
     for k in ("replicas", "leaderSelection", "propagateFailure", "propagatePreemption", "synchronizedStartTimeout"):
         task.pop(k)
