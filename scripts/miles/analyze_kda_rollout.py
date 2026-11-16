@@ -173,6 +173,7 @@ def summarize(root):
         "MILES rollout components include native admission, HTTP workers, candidate20/behavior decoding, application reward and group assembly. No learner, 3-server fleet or real weight publication is measured.",
         "Natural-stopping lengths can differ with native autotuning. Their throughput is descriptive and is never used as a kernel speed ratio.",
         "Triton/Inductor/CUDA/XDG caches are fresh per condition; the image-inherited TILELANG_CACHE_DIR is shared. No cache directory isolation is claimed for TileLang.",
+        "The combined image resolves FlashInfer autotune to /root/.cache/sglang/flashinfer/autotune despite XDG_CACHE_HOME; that non-KDA cache is shared within the allocation. Startup is excluded, and target KDA caches are isolated and audited separately.",
         "Occupancy is sampled engine request occupancy, not SM utilization. No separate pure prefill/decode GPU timer was collected; fixed-token duration includes the full MILES response path.",
         "Warmup and load/compile/autotune are outside fixed-window timing. Native finite behavior/candidate outputs are required; bitwise equality is not a gate.",
     ]
