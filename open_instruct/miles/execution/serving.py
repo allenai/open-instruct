@@ -8,6 +8,8 @@ from functools import partial
 
 from miles.utils.compiler_cache import startup_cache
 
+from open_instruct.miles.execution import quantized_publication
+
 
 def configure_specs(args, specs):
     configured = startup_cache.configure_specs(args, specs)
@@ -35,6 +37,7 @@ def main():
     # model discovery otherwise happens after the radix capability check.
     importlib.import_module("miles.utils.compiler_cache.hf_module_cache").prime_serving_modules(sys.argv[1:])
     importlib.import_module("olmo_sglang.kda.backend").register_olmo_kda_backend()
+    quantized_publication.install_nvfp4_publication_context()
     runpy.run_module("sglang.launch_server", run_name="__main__")
 
 
