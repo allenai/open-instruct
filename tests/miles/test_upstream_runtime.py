@@ -240,3 +240,18 @@ def test_cache_fingerprints_packaged_application_root(tmp_path):
     assert args.olmo_core_startup_cache["sources"]["open-instruct"] == startup_cache.cache.core_application_source(
         root / "open_instruct"
     )
+
+
+def test_spawned_scheduler_installs_fp8_before_model_construction(monkeypatch):
+    events = []
+    monkeypatch.setattr(serving.fp8_publication, "install_fp8_publication", lambda: events.append("fp8"))
+
+    def scheduler(*args, **kwargs):
+        assert events == ["fp8"]
+        events.append("scheduler")
+        assert args == ("server-args",) and kwargs == {"gpu_id": 2}
+        return "result"
+
+    monkeypatch.setattr(serving.kda_dispatch, "run_scheduler_process", scheduler)
+    assert serving.run_scheduler_process("server-args", gpu_id=2) == "result"
+    assert events == ["fp8", "scheduler"]
