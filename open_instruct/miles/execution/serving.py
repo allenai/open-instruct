@@ -13,6 +13,15 @@ from open_instruct.miles.execution import fp8_publication, kda_dispatch, quantiz
 
 def configure_specs(args, specs):
     configured = startup_cache.configure_specs(args, specs)
+    if getattr(getattr(args, "olmo_core", None), "freeze_router", False):
+        configured = [
+            spec.model_copy(
+                update={"worker_class": "open_instruct.miles.execution.frozen_router_actor.FrozenRouterTrainActor"}
+            )
+            if spec.worker_class == "miles.backends.core_utils.actor.OLMoCoreTrainRayActor"
+            else spec
+            for spec in configured
+        ]
     return [
         spec.model_copy(update={"launch_command": partial(_serving_command, spec)})
         if spec.name.startswith("inference-engine-")

@@ -93,6 +93,7 @@ class CoreConfig:
     expert_parallel_size: int = 1
     attention_backend: str = "torch"
     fp32_lm_head: bool = False
+    freeze_router: bool = False
     activation_checkpointing: bool = True
     compile_model: bool = False
     compile_optimizer: bool = False
@@ -250,6 +251,7 @@ class CoreConfig:
             "stream_moe_export",
             "activation_checkpointing",
             "fp32_lm_head",
+            "freeze_router",
             "compile_model",
             "compile_optimizer",
             "use_reduce_scatter",
