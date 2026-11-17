@@ -1,4 +1,5 @@
 # Changelog
+- Add opt-in Core sender-side FP8/NVFP4 weight export configuration and its candidate MILES runtime pin (https://github.com/allenai/open-instruct/pull/2275).
 
 All notable changes to this project will be documented in this file.
 
