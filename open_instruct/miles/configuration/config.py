@@ -121,6 +121,8 @@ class CoreConfig:
     # Publication layout for routed experts: per-expert HF slices, or one stacked
     # tensor per layer and projection in the serving engine's fused layout.
     expert_publication: str = "per_expert"
+    # Quantize publication tensors to the serialized rollout checkpoint recipe.
+    quantized_export: bool = False
     # Append every scored training group, kept or filtered, to this shared store.
     records_root: str | None = None
     records_responses: str = "off"
@@ -222,6 +224,10 @@ class CoreConfig:
             raise constraints.error("core.row_specialization must be static or dynamic")
         if self.expert_publication not in ("per_expert", "fused"):
             raise constraints.error("core.expert_publication must be per_expert or fused")
+        if self.quantized_export and (not self.stream_moe_export or self.expert_publication != "per_expert"):
+            raise constraints.error("core.quantized_export requires streaming per_expert publication")
+        if self.quantized_export and self.weight_sync_mode != "flattened":
+            raise constraints.error("core.quantized_export requires flattened byte transport")
         for name in ("diagnostic_interval", "scoring_check_interval", "layer_profile_interval"):
             validation.integer(getattr(self, name), f"core.{name}", minimum=0)
         validation.number(self.pipeline_observation_interval, "core.pipeline_observation_interval")
@@ -248,6 +254,7 @@ class CoreConfig:
             "compiler_cache_tilelang",
             "replay_diagnostics",
             "stream_moe_export",
+            "quantized_export",
             "activation_checkpointing",
             "fp32_lm_head",
             "compile_model",
