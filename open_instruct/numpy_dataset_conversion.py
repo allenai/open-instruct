@@ -345,84 +345,92 @@ def convert_hf_to_numpy_sft(
         current_position = 0
 
     total_samples = len(train_dataset)
-    logger.info("Collecting tokens from dataset...")
 
-    if start_idx > 0:
-        train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))
+    if start_idx >= total_samples:
+        logger.info(
+            f"All {total_samples:,} samples already collected in partial files (start_idx={start_idx:,}); "
+            "skipping collect loop and proceeding directly to aggregation."
+        )
     else:
-        train_dataset_iter = train_dataset
+        logger.info("Collecting tokens from dataset...")
 
-    train_dataset_iter = train_dataset_iter.with_format("numpy")
+        train_dataset_iter = train_dataset.select(range(start_idx, total_samples)) if start_idx > 0 else train_dataset
 
-    input_ids_key = dataset_transformation.INPUT_IDS_KEY
-    labels_key = dataset_transformation.LABELS_KEY
-    attention_mask_key = dataset_transformation.ATTENTION_MASK_KEY
+        train_dataset_iter = train_dataset_iter.with_format("numpy")
 
-    progress = tqdm(
-        desc="Collecting tokens",
-        file=sys.stdout,
-        bar_format="{l_bar}{bar}{r_bar}\n",
-        mininterval=10.0,
-        initial=start_idx,
-        total=total_samples,
-    )
+        input_ids_key = dataset_transformation.INPUT_IDS_KEY
+        labels_key = dataset_transformation.LABELS_KEY
+        attention_mask_key = dataset_transformation.ATTENTION_MASK_KEY
 
-    collect_start = time.perf_counter()
-    utils.maybe_update_beaker_description(current_step=start_idx, total_steps=total_samples, start_time=collect_start)
-    last_description_update = collect_start
-    idx = start_idx - 1
-    with (
-        tokens_path.open("ab") as tokens_fh,
-        labels_path.open("ab") as labels_fh,
-        boundaries_path.open("ab") as boundaries_fh,
-    ):
-        for batch in train_dataset_iter.iter(batch_size=batch_size):
-            batch_input_ids = batch[input_ids_key]
-            batch_labels = batch[labels_key]
-            batch_attention = batch[attention_mask_key]
+        progress = tqdm(
+            desc="Collecting tokens",
+            file=sys.stdout,
+            bar_format="{l_bar}{bar}{r_bar}\n",
+            mininterval=10.0,
+            initial=start_idx,
+            total=total_samples,
+        )
 
-            for sample_tokens, sample_labels, sample_attention in zip(batch_input_ids, batch_labels, batch_attention):
-                idx += 1
-                sample_length = len(sample_tokens)
-                if row_aligned_parts and sample_length == 0:
-                    raise ValueError(
-                        f"--row_aligned_parts cannot write empty row {idx}: "
-                        "each row must contain at least one token to have a metadata boundary."
+        collect_start = time.perf_counter()
+        utils.maybe_update_beaker_description(
+            current_step=start_idx, total_steps=total_samples, start_time=collect_start
+        )
+        last_description_update = collect_start
+        idx = start_idx - 1
+        with (
+            tokens_path.open("ab") as tokens_fh,
+            labels_path.open("ab") as labels_fh,
+            boundaries_path.open("ab") as boundaries_fh,
+        ):
+            for batch in train_dataset_iter.iter(batch_size=batch_size):
+                batch_input_ids = batch[input_ids_key]
+                batch_labels = batch[labels_key]
+                batch_attention = batch[attention_mask_key]
+
+                for sample_tokens, sample_labels, sample_attention in zip(
+                    batch_input_ids, batch_labels, batch_attention
+                ):
+                    idx += 1
+                    sample_length = len(sample_tokens)
+                    if row_aligned_parts and sample_length == 0:
+                        raise ValueError(
+                            f"--row_aligned_parts cannot write empty row {idx}: "
+                            "each row must contain at least one token to have a metadata boundary."
+                        )
+
+                    tokens_arr = np.asarray(sample_tokens, dtype=token_dtype)
+                    labels_arr = np.asarray(sample_labels)
+                    labels_mask = (labels_arr != -100).astype(np.uint8)
+
+                    tokens_arr.tofile(tokens_fh)
+                    labels_mask.tofile(labels_fh)
+                    np.array([current_position, current_position + sample_length], dtype=_BOUNDARIES_DTYPE).tofile(
+                        boundaries_fh
+                    )
+                    current_position += sample_length
+
+                    assert (sample_attention == 1).all(), (
+                        f"Expected all attention mask values to be 1, but found: {sample_attention}"
                     )
 
-                tokens_arr = np.asarray(sample_tokens, dtype=token_dtype)
-                labels_arr = np.asarray(sample_labels)
-                labels_mask = (labels_arr != -100).astype(np.uint8)
+                progress.update(len(batch_input_ids))
+                _flush_partial_files(tokens_fh, labels_fh, boundaries_fh)
 
-                tokens_arr.tofile(tokens_fh)
-                labels_mask.tofile(labels_fh)
-                np.array([current_position, current_position + sample_length], dtype=_BOUNDARIES_DTYPE).tofile(
-                    boundaries_fh
-                )
-                current_position += sample_length
+                now = time.perf_counter()
+                if now - last_description_update >= 30.0:
+                    utils.maybe_update_beaker_description(
+                        current_step=idx + 1, total_steps=total_samples, start_time=collect_start
+                    )
+                    last_description_update = now
 
-                assert (sample_attention == 1).all(), (
-                    f"Expected all attention mask values to be 1, but found: {sample_attention}"
-                )
-
-            progress.update(len(batch_input_ids))
-            _flush_partial_files(tokens_fh, labels_fh, boundaries_fh)
-
-            now = time.perf_counter()
-            if now - last_description_update >= 30.0:
-                utils.maybe_update_beaker_description(
-                    current_step=idx + 1, total_steps=total_samples, start_time=collect_start
-                )
-                last_description_update = now
-
-    progress.close()
-    utils.maybe_update_beaker_description(
-        current_step=total_samples, total_steps=total_samples, start_time=collect_start
-    )
-    collect_elapsed = time.perf_counter() - collect_start
-    samples_processed = max(0, total_samples - start_idx)
-    rate = samples_processed / collect_elapsed if collect_elapsed > 0 else 0.0
-    logger.info(f"Collect loop: {samples_processed:,} samples in {collect_elapsed:.2f}s ({rate:.1f} samples/s)")
+        progress.close()
+        utils.maybe_update_beaker_description(
+            current_step=total_samples, total_steps=total_samples, start_time=collect_start
+        )
+        collect_elapsed = time.perf_counter() - collect_start
+        samples_processed = max(0, total_samples - start_idx)
+        rate = samples_processed / collect_elapsed if collect_elapsed > 0 else 0.0
+        logger.info(f"Collect loop: {samples_processed:,} samples in {collect_elapsed:.2f}s ({rate:.1f} samples/s)")
 
     total_tokens = current_position
     logger.info("Aggregating per-dataset statistics from disk...")
