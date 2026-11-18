@@ -65,6 +65,8 @@ OLMO_SGLANG_CORE_COMPAT = "rounding"
 [launch.secrets]
 BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
 HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
+# Beaker secret name, not the token value; required by the H196 code verifier.
+CODE_EXECUTION_TOKEN = "YOUR_USERNAME_CODE_EXECUTION_TOKEN"
 
 [data]
 # Exclude over-budget training prompts and record per-source counts.
@@ -131,9 +133,13 @@ engine_update_timeout = 1800.0
 pipeline_observation_interval = 2.0
 router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0
-scoring_check_interval = 0
+# Repeat the standalone/training score check during this qualification run.
+scoring_check_interval = 1
 
 [miles]
+# Compare the initial publication against the engine's original HF weights.
+# This adds qualification overhead; timing recipes leave the audit disabled.
+check_weight_update_equal = true
 # Keep active-request KV/recurrent state across weight updates.
 pause_generation_mode = "in_place"
 # Keep response weighting independent of generation length.

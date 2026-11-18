@@ -22,8 +22,12 @@ Measured MILES RL layouts for OLMo 3.5 Small ("Hero Small", A4B,
   (`/weka/olmo-3p5-post-checkpoints/robertb/miles/h196-dolci-control-20261113/inputs/`,
   84,577 rendered rows). Its rendering was made for Tiny but uses the same tokenizer and chat
   template as this export. There is no held-out split, so do not set `training.eval_interval`.
-- Code verifier needs `CODE_EXECUTION_TOKEN`. Without it, code samples are excluded as
-  ungraded and their groups dropped (3-36 groups per update).
+- Code verifier needs `CODE_EXECUTION_TOKEN`. Each recipe maps it to a placeholder
+  Beaker secret name under `[launch.secrets]`; replace that name with a secret in the
+  selected workspace. Never put the token value in the TOML. The historical timing
+  runs omitted this credential: code samples were ungraded and their groups dropped
+  (3-36 groups per update). Runs with code grading enabled have a different effective
+  workload; remeasure throughput rather than assuming the historical timings apply.
 
 ## Layout and memory
 
@@ -56,6 +60,13 @@ Measured MILES RL layouts for OLMo 3.5 Small ("Hero Small", A4B,
   `async_max_concurrent_samples` = 96 × engines.
 - Judge: `timeout = 600` and `chat_template = "qwen3-no-thinking"`. The judge bindings use the
   hashed verifier ids in the H196 `verifiers.json`.
+- `two-node-mech` enables the initial serving-weight comparison and repeats the
+  standalone/training scoring check every update. These qualification checks add
+  overhead relative to the original mechanics run and remain off in timing recipes
+  (which retain the default startup scoring check).
+- The four/eight-node recipes request 4h/3h of protected runtime, respectively,
+  based on historical startup and update times plus headroom, with an 8h timeout.
+  Revisit these budgets when enabling code grading or other additional work.
 
 ## Results
 
@@ -74,7 +85,11 @@ Updates 10-29 unless noted, 128 prompts × 8 samples, max response 32,768 tokens
   tokens, truncation is 0-6%, and about 25% of groups are zero-std.
 - Startup to the end of update 0: 1,953-2,429 s on 4 nodes, 1,543 s on 8 nodes.
 - timing8 completed all 30 updates, then exited 1 at teardown because the final generation drain
-  hit its 900 s timeout.
+  hit its 900 s timeout. Terminal refresh cleanup now cancels unused generation through
+  the existing backend shutdown API before closing weight transport and disposing
+  servers. This change has CPU runtime regression coverage; a clean Small GPU run
+  is still required. Evaluation and final HF export retain their generation-drain
+  boundaries because they may reuse live serving resources.
 
 ## What did not work or was not tested
 
@@ -86,12 +101,40 @@ Updates 10-29 unless noted, 128 prompts × 8 samples, max response 32,768 tokens
 
 ## Code and runtime
 
-No open-instruct code changes were needed. timing4 ran on image
+The original timing runs needed no Small-specific adapter or weight-sync changes. timing4 ran on image
 01M7A0QM57N9499PGFAT73SMF0 (open-instruct a87a0feac). timing4n and r64 ran on image
 01M7GA94Q6GKMP2MV2N36YE83Q, built from open-instruct 5c6645da. That is main 28c18166 plus an
 SGLang pin with an Olmo 3 sliding-window KV backport, which Small (no sliding-window layers)
 does not use. `plan` on main resolves the timing4n config identically to 5c6645da. These
 examples have not been run on an image built from main.
+
+## Qualification before a learning run
+
+Copy `two-node-mech.toml` to ignored `runs/`, set a fresh output path and the actual
+workspace/secret names, then inspect `python -m open_instruct.miles plan runs/small-mech.toml`
+and `python -m open_instruct.miles validate runs/small-mech.toml` before using the
+[committed-image launcher](launching.md). Build the image from the revision being
+qualified; `plan` equality cannot establish runtime equality.
+
+Retain the Beaker experiment link, image ID, submitted TOML and completion artifacts.
+Verify all four updates, successful code grading, passing initial weight comparison,
+standalone/training score agreement, publication acknowledgments and a clean exit.
+Inspect `refresh_scores` for mixed-version responses and their historical-prefix and
+latest-forward log-ratio diagnostics; see [Core diagnostics](core.md) and
+[mixed-policy refresh](async-pipeline.md#mixed-policy-refresh). Those ratios include
+policy drift and are not an isolated numerical-parity measurement.
+
+For publication debugging, enable `core.diagnostic_interval = 1` with
+`miles.check_weight_update_equal = true` in the run copy to exercise the existing
+snapshot/reset/republish checks after optimizer updates. This adds a second transfer
+and extra gradient/update diagnostics. The check detects incomplete transfers over
+its selected tensors; it does not independently prove the export mapping. Keep a
+separate Core-versus-serving score comparison on identical tokens, prefixes and
+weights as a qualification requirement. HF-versus-SGLang greedy agreement and an
+always-zero training metric do not establish that comparison.
+
+Longer learning runs additionally need native checkpoint/save-resume and evaluation
+checks. The timing recipes deliberately disable saving and have no held-out split.
 
 ## Open items
 

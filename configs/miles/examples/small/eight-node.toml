@@ -34,7 +34,8 @@ workspace = "ai2/olmo-instruct"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "high"
-min_runtime = "8h"
+# About 2h including measured startup and 30 updates; retain scheduling headroom.
+min_runtime = "3h"
 timeout = "8h"
 auto_resume = false
 gpus_per_replica = 8
@@ -73,6 +74,8 @@ SGLANG_MOE_CONFIG_DIR = "/opt/core-rl/configs/miles/moe_configs"
 [launch.secrets]
 BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
 HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
+# Beaker secret name, not the token value; required by the H196 code verifier.
+CODE_EXECUTION_TOKEN = "YOUR_USERNAME_CODE_EXECUTION_TOKEN"
 
 [data]
 # Exclude over-budget training prompts and record per-source counts.

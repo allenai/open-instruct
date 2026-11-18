@@ -13,11 +13,13 @@ from open_instruct.miles.execution import driver
 @pytest.mark.parametrize("provider", ["shuffle", "pools"])
 @pytest.mark.parametrize("mode", ["refresh", "barrier"])
 @pytest.mark.parametrize("failure", [None, "initial", "update", "timeout", "training"])
-def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider):
+@pytest.mark.parametrize("with_export", [False, True])
+def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider, with_export):
     events = []
     manager = SimpleNamespace(get=AsyncMock(return_value={}), dispose=AsyncMock())
     learner = SimpleNamespace(train=AsyncMock(), execute_workers=AsyncMock(), dispose=AsyncMock())
     inference = SimpleNamespace(prepare_rollout=AsyncMock(), dispose=AsyncMock())
+    learner.export_hf = AsyncMock(side_effect=lambda *_args: events.append(("export",)))
     args = SimpleNamespace(
         olmo_core=SimpleNamespace(
             publication_mode=mode,
@@ -41,8 +43,10 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider):
 
     async def boundary(begin, **kwargs):
         events.append(("boundary", begin, kwargs))
-        # A refresh publication must succeed even if admission RPCs never respond.
-        if mode == "refresh" and not any(e[0] == "publish" for e in events):
+        # Unused requests may never finish even after successful training. Both
+        # publication and terminal cleanup must avoid waiting for that work.
+        terminal = not with_export or ("export",) in events or failure is not None
+        if mode == "refresh" and terminal and not kwargs.get("abort"):
             await asyncio.Event().wait()
 
     async def update_weights(*_args, rollout_id=None):
@@ -99,23 +103,25 @@ def test_publication_and_failure_cleanup(monkeypatch, mode, failure, provider):
         if failure:
             error = TimeoutError if failure == "timeout" else RuntimeError
             with pytest.raises(error):
-                await driver.train(args)
+                await driver.train(args, export_hf="final" if with_export else None)
         else:
-            result = await driver.train(args)
+            result = await driver.train(args, export_hf="final" if with_export else None)
             assert result["completed_rollout_ids"] == [0]
 
     asyncio.run(asyncio.wait_for(scenario(), 3))
     boundaries = [e for e in events if e[0] == "boundary"]
     if mode == "refresh":
-        assert boundaries == [("boundary", True, {"abort": True} if failure else {})]
+        export_boundary = [("boundary", True, {})] if with_export and failure is None else []
+        assert boundaries == [*export_boundary, ("boundary", True, {"abort": True})]
         assert events[0] == ("publish", None)
     else:
         assert boundaries[0] == ("boundary", True, {})
         assert boundaries[-1] == ("boundary", True, {})
-        expected_boundaries = {"initial": 2, "training": 3, "update": 4, "timeout": 4, None: 5}
+        expected_boundaries = {"initial": 2, "training": 3, "update": 4, "timeout": 4, None: 5 + int(with_export)}
         assert len(boundaries) == expected_boundaries[failure]
     assert learner.train.await_count == (0 if failure == "initial" else 1)
     assert manager.get.await_count == learner.train.await_count
+    assert learner.export_hf.await_count == int(with_export and failure is None)
     assert manager.core_commit_exposure.await_count == int(
         provider == "pools" and failure not in {"initial", "training"}
     )
