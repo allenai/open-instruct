@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Experimental linear TITO v2 agent refresh for Olmo 3.5 Tiny: CPU provenance, session assembly/transport, tool masks, expert routes and lifecycle tests pass. Agent GPU training remains unqualified. The MILES revision is a local feature-branch commit pending publication; source builds require publishing it first. Binary base and other source pins unchanged.",
+  "status": "Experimental linear TITO v2 agent refresh for Olmo 3.5 Tiny: CPU provenance, session assembly/transport, tool masks, expert routes and lifecycle tests pass. Agent GPU training remains unqualified. The MILES feature-branch revision is published for paired application validation. Binary base and other source pins unchanged.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
