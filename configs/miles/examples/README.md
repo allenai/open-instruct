@@ -2,17 +2,27 @@
 
 These templates provide reviewable starting points for MILES training and policy
 evaluation. Choose a model-family directory, then adapt its paths and topology
-before launching. The `small` family currently contains only a copied dev starter.
+before launching. The `small` family holds measured OLMo 3.5 Small
+(A4B) B300 layouts; see [OLMo 3.5 Small on MILES](../../../docs/miles/olmo35-small.md).
 
 | Config | Purpose |
 |---|---|
 | [tiny/dev.toml](tiny/dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
 | [tiny/node.toml](tiny/node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
 | [tiny/three-node.toml](tiny/three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+| [small/two-node-mech.toml](small/two-node-mech.toml) | OLMo 3.5 Small mechanics check: 8 trainer GPUs (EP8), 7 engines, 1 judge; 4 updates |
+| [small/four-node.toml](small/four-node.toml) | Olmo 3.5 Small timing layout: 8 trainer GPUs (EP8), 23 engines (R=96), 1 judge; audited timing4n median ~302 s/update |
+| [small/eight-node.toml](small/eight-node.toml) | Olmo 3.5 Small timing layout: 16 trainer GPUs (2 × EP8), 47 engines (R=96), 1 judge; audited late-window median ~185 s/update |
 
-`tiny/` holds the existing recipes. `small/dev.toml` currently copies the settings
-of `tiny/dev.toml`, providing a starting file for upcoming model/topology work;
-it does not qualify a larger model on the one-GPU smoke-test layout.
+Use `tiny/dev.toml` for a single-GPU Tiny mechanics check and
+`small/two-node-mech.toml` for Small mechanics. Small has no single-GPU training
+recipe; the two-node layout is its smallest tested configuration.
+
+All three Small recipes use the Tiny learning baseline from
+[PR #2271](https://github.com/allenai/open-instruct/pull/2271): 256 prompts × 8
+responses, batch 2,048, constant LR 6e-6 with no warmup, and token-mean loss.
+The reported Small timings used batch 1,024, LR 1e-6 and response-mean loss;
+see the [Small audit](../../../docs/miles/olmo35-small.md#recipe-alignment).
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from
@@ -117,10 +127,10 @@ the template does not provision a code service.
 See [datasets and verifiers](../../../docs/miles/data-and-evaluation.md) and
 [managed judges](../../../docs/miles/managed-judges.md).
 
-The former two-GPU `small` example is retired; use `dev` for the mechanics check
-and `node` for disaggregated learning. A single-GPU run with the full policy needs
-its combined trainer/inference memory footprint checked before replacing the
-`dev` checkpoint; single-GPU inference alone does not establish that fit.
+The former topology tier named `small` is retired. For Tiny, use `tiny/dev.toml`
+for mechanics and `tiny/node.toml` for disaggregated learning. These are distinct
+from the Olmo 3.5 Small model recipes above. Single-GPU inference alone does not
+establish that a policy's combined trainer/inference memory footprint fits.
 
 `three-node` uses a three-node, 24-GPU footprint. The nodes contain 8 training
 GPUs, 8 inference GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs

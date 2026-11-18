@@ -177,7 +177,7 @@ def analyze(root, *, warmup=3, allow_incomplete_workflow=False):
 
 def terminal_unused_work(lifecycle, *, delivered_tokens, stale_dropped_tokens):
     """Do not mistake unobserved final buffers for empty buffers."""
-    if not lifecycle or lifecycle[-1]["event"] != "shutdown_complete":
+    if not lifecycle or lifecycle[-1]["event"] not in ("shutdown_complete", "shutdown_aborted"):
         return None
     terminal = lifecycle[-1]
     sections = [terminal.get(key) for key in ("completed_queue", "producer_ready", "shutdown_unqueued")]

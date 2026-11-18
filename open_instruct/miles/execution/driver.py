@@ -393,11 +393,10 @@ async def train(args, *, export_hf=None):
             # both sides collectively destroy the weight-update NCCL group.
             (
                 manager if args.fully_async else None,
-                # A failed refresh can leave engines paused or partly updated.
-                # Cancel owned work instead of waiting for it to generate more.
-                lambda: manager.core_publication_boundary(
-                    True, **({"abort": True} if refresh and failure is not None else {})
-                ),
+                # Terminal refresh cleanup has no consumer for unfinished work.
+                # Cancel it even on success; draining long responses here can
+                # time out after every requested training update has completed.
+                lambda: manager.core_publication_boundary(True, **({"abort": True} if refresh else {})),
                 (
                     args.olmo_core.engine_drain_timeout + args.olmo_core.engine_update_timeout
                     if rolling or refresh

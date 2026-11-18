@@ -342,10 +342,11 @@ def test_hardware_roles_follow_observed_ips_not_replica_order(tmp_path):
     assert throughput_occupancy.node_roles(tmp_path) == {"0": nodes[1], "1": nodes[0]}
 
 
-def test_terminal_unused_work_requires_final_boundary_and_uses_entire_run():
+@pytest.mark.parametrize("terminal_event", ["shutdown_complete", "shutdown_aborted"])
+def test_terminal_unused_work_requires_final_boundary_and_uses_entire_run(terminal_event):
     assert analyze_throughput.terminal_unused_work(None, delivered_tokens=80, stale_dropped_tokens=10) is None
     record = {
-        "event": "shutdown_complete",
+        "event": terminal_event,
         "completed_queue": dict(groups=2, samples=8, response_tokens=20),
         "producer_ready": dict(groups=0, samples=0, response_tokens=0),
         "shutdown_unqueued": dict(groups=1, samples=4, response_tokens=10),
