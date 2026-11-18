@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Ulysses CP candidate: MILES response/loss integration and Core Scalable-Softmax support. CPU argument, replay-padding, loss-gradient and Scalable-Softmax checks pass. GPU qualification pending; first attempts stopped at native replay-flag validation before CP execution. Serving and binary base unchanged.",
+  "status": "Ulysses CP candidate: MILES response/loss integration, distinct replay padding, and Core Scalable-Softmax support. CPU argument, replay-padding, loss-gradient and Scalable-Softmax checks pass. GPU qualification pending. Serving and binary base unchanged.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "b193ef4408392a76ca6528269e2ac5796448f1e8"
+      "revision": "20248369ad5a92fe0eb982963413362de3a9ca82"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
