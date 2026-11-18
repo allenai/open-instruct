@@ -545,20 +545,7 @@ def test_submission_script_accepts_frozen_json(tmp_path, monkeypatch):
     monkeypatch.setattr(
         submit.argparse.ArgumentParser,
         "parse_args",
-        lambda parser: type(
-            "Args",
-            (),
-            {
-                "image": IMAGE_ID,
-                "config": path,
-                "overrides": [],
-                "render_only": False,
-                "check_data": False,
-                "data_path": [],
-                "preflight_only": False,
-                "debug": False,
-            },
-        )(),
+        lambda parser: type("Args", (), {"image": IMAGE_ID, "config": path, "overrides": [], "render_only": False})(),
     )
     submit.main()
     assert calls == [(IMAGE_ID, run.to_dict())]

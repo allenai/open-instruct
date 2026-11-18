@@ -13,7 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib import request
 
-from open_instruct.miles.rewards import abstention, general_judge, judge_data, judging
+from open_instruct.miles.errors import InputError
+from open_instruct.miles.rewards import abstention, general_judge, judging
 
 
 def registry():
@@ -67,8 +68,30 @@ def resolve_request(args, name, query, prediction, target, *, extract_answer=Tru
     return config, prompt, digest, parser, binding, digest
 
 
-def validate_data(prepared, value, *, verifiers=None):
-    return judge_data.validate_data(prepared, value, verifiers=verifiers)
+def validate_data(prepared, value):
+    paths = [*prepared.get("train_sources", [prepared["prompt_data"]]), *prepared.get("eval_prompt_data", [])[1::2]]
+    verifiers = json.loads(Path(prepared["reward_config"]).read_text()) if prepared.get("reward_config") else {}
+    for path in paths:
+        with Path(path).open() as stream:
+            for line in stream:
+                row = json.loads(line)
+                metadata = row.get("metadata", {})
+                for verifier in metadata.get("verifiers", []):
+                    name = verifier["name"]
+                    judging.require_binding(name, value["bindings"], verifiers.get(name))
+                    if name not in value["bindings"]:
+                        continue
+                    if not isinstance(metadata.get("judge_query"), str) or not metadata["judge_query"]:
+                        raise InputError("Judged data requires the preserved full metadata.judge_query")
+                    profile = value["rubrics"][value["bindings"][name]["rubric"]]["profile"]
+                    target = verifier.get("target")
+                    is_abstention = isinstance(target, dict) and target.get("kind") == abstention.KIND
+                    if (profile == abstention.PROFILE) != is_abstention:
+                        raise InputError("Abstention target and rubric must be bound together")
+                    if is_abstention:
+                        abstention.validate_target(target)
+                    if profile != "open-instruct/general-quality" and verifier.get("target") in (None, ""):
+                        raise InputError(f"{name} requires reference targets")
 
 
 async def probe(output):

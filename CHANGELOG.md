@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed
+- Allow unused MILES judge bindings when a dataset subset omits their verifiers, preserving required-binding and active grading checks (https://github.com/allenai/open-instruct/pull/2286).
 - Use 2,048-response optimizer batches at constant LR 6e-6 in Tiny MILES learning examples and token-mean loss in all maintained MILES examples, preserving omitted library defaults (https://github.com/allenai/open-instruct/pull/2271).
 - Align every Small MILES recipe with the Tiny baseline from #2271: 2,048-response batches at constant LR 6e-6 with no warmup and token-mean loss; retain historical timing provenance (https://github.com/allenai/open-instruct/pull/2280).
 - Retain terminal unused-work accounting after MILES refresh cancellation and audit Small timing recipes against the original Beaker artifacts, including the completed R160 trial and corrected score diagnostics (https://github.com/allenai/open-instruct/pull/2280).
@@ -44,7 +45,6 @@ All notable changes to this project will be documented in this file.
 - MILES retains the strict standalone/training scoring check: drift above `core.scoring_check_tolerance` (default 0.001) stops training; eager scoring uses the same activation arithmetic as training (https://github.com/allenai/open-instruct/pull/2187).
 
 ### Added
-- Add a CPU-only MILES prepared-data preflight to catch missing or unused judge bindings before GPU submission (https://github.com/allenai/open-instruct/pull/2286).
 - Add opt-in MILES historical-priority sampling that visits groups 1–4 in order each epoch, with deterministic within-group shuffle, optional source weights inside the active group, validated labels, and recoverable epoch cursors (https://github.com/allenai/open-instruct/pull/2251).
 - Add opt-in MILES training prompt exclusion with recorded source counts, preserved mixture weights, and empty-source protection (https://github.com/allenai/open-instruct/pull/2244).
 - Add versioned long-context dataset adapters and deterministic reward contracts, for consuming Workbench-prepared DocQA-RL and GoLongRL sources; preserve routed adapter identity and external pool assignments (https://github.com/allenai/open-instruct/pull/2199).

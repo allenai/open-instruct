@@ -10,8 +10,7 @@ import json
 from pathlib import Path
 
 from open_instruct.miles.configuration import specs
-from open_instruct.miles.errors import InputError
-from open_instruct.miles.execution import data_preflight, launch
+from open_instruct.miles.execution import launch
 
 
 def main():
@@ -20,30 +19,14 @@ def main():
     parser.add_argument("config", type=Path)
     parser.add_argument("--set", dest="overrides", action="append", default=[])
     parser.add_argument("--render-only", action="store_true")
-    parser.add_argument("--check-data", action="store_true")
-    parser.add_argument("--data-path", action="append", default=[], metavar="CONFIGURED_PATH=LOCAL_PATH")
-    parser.add_argument(
-        "--preflight-only", action="store_true", help="Validate without looking up or building an image"
-    )
-    parser.add_argument("--debug", action="store_true", help="Show a full traceback for input errors")
     options = parser.parse_args()
-    if options.data_path and not options.check_data:
-        parser.error("--data-path requires --check-data")
-    try:
-        execute(options)
-    except InputError as error:
-        if options.debug:
-            raise
-        parser.error(f"{options.config}: {error}")
-
-
-def execute(options):
-    spec = specs.load(options.config, options.overrides)
-    spec.plan()
-    if options.check_data:
-        print(json.dumps(data_preflight.check(spec, options.data_path), indent=2))
-    if options.preflight_only:
-        return
+    spec = (
+        specs.from_dict(
+            json.loads(options.config.read_text()), config_path=options.config, overrides=options.overrides
+        )
+        if options.config.suffix == ".json"
+        else specs.load(options.config, options.overrides)
+    )
     if options.render_only:
         print(json.dumps(launch.specification(options.image, spec), indent=2))
     else:

@@ -54,18 +54,6 @@ def main() -> None:
         help="Override a setting with a TOML value; repeatable, quote strings",
     )
     parser.add_argument("--debug", action="store_true", help="Show a full traceback for input errors")
-    parser.add_argument(
-        "--check-data",
-        action="store_true",
-        help="Scan prepared inputs for judge binding errors on CPU before validate/run",
-    )
-    parser.add_argument(
-        "--data-path",
-        action="append",
-        default=[],
-        metavar="CONFIGURED_PATH=LOCAL_PATH",
-        help="Map an input path or directory to a verified local copy for --check-data; repeatable",
-    )
     options = parser.parse_args()
     try:
         execute(parser, options)
@@ -76,10 +64,6 @@ def main() -> None:
 
 
 def execute(parser, options):
-    if options.check_data and options.command not in ("validate", "run"):
-        parser.error("--check-data is supported by validate and run")
-    if options.data_path and not options.check_data:
-        parser.error("--data-path requires --check-data")
     payload = validation.read_document(options.config)
     structured = "schema_version" in payload or "model" in payload
     config = (
@@ -87,11 +71,6 @@ def execute(parser, options):
         if structured
         else RunConfig.from_dict(payload, options.overrides)
     )
-    if options.check_data:
-        if not structured or isinstance(config, opd_config.OPDRunSpec):
-            parser.error("--check-data requires a schema_version=1 GRPO run file")
-        preflight = importlib.import_module("open_instruct.miles.execution.data_preflight")
-        print(json.dumps(preflight.check(config, options.data_path), indent=2))
     if options.command == "plan":
         planned = config.plan()
         advisories.emit(planned)
@@ -119,15 +98,7 @@ def execute(parser, options):
         if structured:
             planned_spec = config.plan()  # Validate physical allocation as well as trainer options.
             advisories.emit(planned_spec)
-            print(
-                "Run schema, topology and MILES/Core options validated; "
-                + (
-                    "prepared-input judge bindings checked; model/runtime checks remain during train."
-                    if options.check_data
-                    else "inputs and runtime checked during train. "
-                    "Use --check-data to check prepared-input judge bindings before submission."
-                )
-            )
+            print("Run schema, topology and MILES/Core options validated; inputs and runtime checked during train")
         else:
             workflow.parse_runtime(config)
             print("MILES arguments validated for OLMo-core")
