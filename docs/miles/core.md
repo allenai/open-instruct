@@ -68,7 +68,8 @@ adapter aligns replay by document/token/layer and retains it across backward
 recomputation. Each sample's final unscored token has an explicit synthetic tail;
 that convention is not a claim of Megatron auxiliary-loss equivalence.
 Expert-parallel ranks receive the routing information needed by their local
-forward; trainer PP/TP/CP greater than one are rejected, not implicitly supported.
+forward; trainer PP/TP greater than one are rejected. Opt-in [Ulysses CP](context-parallel.md)
+shares packs across CP partners while retaining EP weight sharding.
 A replay match verifies supplied assignments; it does not measure what the trainer
 would have selected without replay.
 
