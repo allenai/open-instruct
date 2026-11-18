@@ -20,8 +20,8 @@ these TOMLs. Run `plan` on your copy to inspect the resolved settings and unused
 
 **The demo configs are the baseline for configuration options unless otherwise
 stated.** Start a validation run from the applicable demo and record intentional
-differences. In particular, keep per-response loss weighting
-(`miles.calculate_per_token_loss=false`) and zero reward for truncated responses
+differences. In particular, keep token-mean loss weighting
+(`miles.calculate_per_token_loss=true`) and zero reward for truncated responses
 (`core.reward_zero_truncated=true`) and presented-response grading
 (`core.reward_final_answer_only=true`). The examples declare
 `core.reward_reasoning_mode="required"`; use `"none"` explicitly for a non-thinking
@@ -158,9 +158,9 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
-The three-node throughput candidate uses 128 prompts × 8 samples per collection
-and one 1,024-sample optimizer batch with policy lag 12. It admits 3,840 unfinished samples, keeps up
-to 512 completed prompt groups (4,096 samples), and runs 16 HTTP actors per node
+The three-node throughput candidate uses 256 prompts × 8 samples per collection
+and one 2,048-sample optimizer batch at constant LR 6e-6 with policy lag 12. It admits
+3,840 unfinished samples and keeps up to 1,024 completed prompt groups (8,192 samples), and runs 16 HTTP actors per node
 with one Ray CPU each. The rollout executor reserves two Ray CPUs and each node
 advertises 64 logical Ray CPUs through `launch.env.OI_MILES_RAY_CPUS` (default
 32 when omitted). The node example uses the same worker counts and reservations.
@@ -260,10 +260,11 @@ explicit limits would give 6,144 for node and 15,360 for three-node. Generic
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-Both learning examples use 128 prompts × 8 responses, batch 1,024 and lag 12.
+Both Tiny learning examples use 256 prompts × 8 responses, batch 2,048,
+constant LR 6e-6 and lag 12.
 Node buffers one completed batch; three-node buffers four. The three-node
-unfinished-sample budget represents 3.75 batches;
-adding the completed buffer gives 7.75 nominal batches. Sample backfill can retain
+unfinished-sample budget represents 1.875 batches;
+adding the completed buffer gives 5.875 nominal batches. Sample backfill can retain
 additional finished siblings, so this arithmetic is not an age guarantee. It is headroom, not
 a measured optimum or a guarantee of steady throughput. Full-recipe
 collection and judging can limit throughput even with spare engine capacity.

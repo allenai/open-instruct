@@ -88,7 +88,7 @@ batch semantics and the opt-out.
 ## Truncated responses
 
 The demo configs are the baseline for configuration choices unless a run explicitly
-states otherwise. GRPO uses **per-response loss weighting** and **zero reward for
+states otherwise. The examples use **token-mean loss weighting** and **zero reward for
 length-truncated responses**. The Core reward default also scores truncations zero,
 so omitting the field does not silently change the objective. The examples make
 these choices explicit:
@@ -98,7 +98,7 @@ these choices explicit:
 reward_zero_truncated = true
 
 [miles]
-calculate_per_token_loss = false
+calculate_per_token_loss = true
 ```
 
 This works with every verifier, managed judges included. It cannot be combined

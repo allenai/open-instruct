@@ -1,4 +1,4 @@
-"""Maintained recipes and omitted objective settings share the demo baseline."""
+"""Maintained token-mean recipes preserve compatible omitted library defaults."""
 
 from pathlib import Path
 
@@ -9,17 +9,21 @@ from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 
 
-@pytest.mark.parametrize("name,batch,lag,buffer", [("node", 1024, 12, 1), ("three-node", 1024, 12, 4)])
+@pytest.mark.parametrize("name,batch,lag,buffer", [("node", 2048, 12, 1), ("three-node", 2048, 12, 4)])
 def test_learning_baseline_and_worker_controls(name, batch, lag, buffer):
     config = RunSpec.load(f"configs/miles/examples/tiny/{name}.toml").compile()
     options = config.resolved_miles()
     assert options["n_samples_per_prompt"] == 8
     assert options["global_batch_size"] == batch
+    assert options["rollout_batch_size"] == 256
+    assert options["lr"] == 6e-6
+    assert options["lr_decay_style"] == "constant"
+    assert options["lr_warmup_iters"] == 0
     assert config.core.max_policy_lag == lag
     assert options["async_data_buffer_capacity_factor"] == buffer
     assert config.core.reward_zero_truncated is True
-    assert options["calculate_per_token_loss"] is False
-    assert "--calculate-per-token-loss" not in config.arguments()
+    assert options["calculate_per_token_loss"] is True
+    assert "--calculate-per-token-loss" in config.arguments()
     assert options["use_distributed_post"] is True
     assert options["http_post_actors_per_node"] == 16
     assert options["http_post_num_cpus"] == 1
@@ -41,7 +45,7 @@ def test_learning_demos_share_training_parameters(section, topology_fields):
     assert parameters[0] == parameters[1]
 
 
-def test_omitted_settings_cannot_revert_the_objective(tmp_path):
+def test_omitted_library_settings_preserve_response_mean_compatibility(tmp_path):
     config = RunSpec.from_dict(
         dict(
             schema_version=1,
@@ -61,7 +65,8 @@ def test_omitted_settings_cannot_revert_the_objective(tmp_path):
 def test_explicit_experiments_remain_possible():
     config = RunSpec.load(
         Path("configs/miles/examples/tiny/node.toml"),
-        ["core.reward_zero_truncated=false", "miles.calculate_per_token_loss=true"],
+        ["core.reward_zero_truncated=false", "miles.calculate_per_token_loss=false"],
     ).compile()
     assert config.core.reward_zero_truncated is False
-    assert "--calculate-per-token-loss" in config.arguments()
+    assert config.miles["calculate_per_token_loss"] is False
+    assert "--calculate-per-token-loss" not in config.arguments()
