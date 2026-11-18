@@ -42,7 +42,7 @@
 # numpy_sft/bf82a8fab8-6068a350-rowaligned -> the frozen C12 cache (made 2026-10-30). EXPECTED_NUMPY_CACHE makes any
 # other resolution die before tokenizing or touching a GPU.
 set -euo pipefail
-ARM="${1:?hero or ctrl}"
+ARM="${1:?hero, ctrl, b1r, h247off or h247on}"
 SEED="${2:?data loader seed 34521 or 34522}"
 MODE="${3:?smoke or train}"
 case "$SEED" in 34521|34522) ;; *) echo "seed must be 34521 or 34522" >&2; exit 1 ;; esac
@@ -68,7 +68,7 @@ LR=5e-5
 EXTRA_ARGS=""
 DESC="ledger H161 GPU companion (draft)"
 case "$ARM" in
-    b1r) MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
+    b1r|h247off|h247on) MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
          HF_REF=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h182-gpu; DESC="ledger H182 b1-c12r-gpu"
@@ -80,6 +80,23 @@ esac
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == b1r ]] && RUN_NAME="h182gpu-s${SEED}"
+H247_NORMALIZE_REF=0
+H247_ENV=""
+SECRET_OWNER=abhishekr
+if [[ "$ARM" == h247off || "$ARM" == h247on ]]; then
+    RUN_NAME="H247-b1-c12r-${ARM#h247}-s${SEED}"
+    OUT_ROOT=/weka/olmo-3p5-post-checkpoints/chrisg/h247
+    DESC="ledger H247 Tiny embedding normalization"
+    SECRET_OWNER=chrisg
+    EXTRA_ARGS="$EXTRA_ARGS --embedding_diagnostics"
+    if [[ "$ARM" == h247on ]]; then
+        EXTRA_ARGS="$EXTRA_ARGS --normalize_input_embeddings"
+        H247_NORMALIZE_REF=1
+    fi
+    if [[ -n "${TRACKING_URL:-}" ]]; then
+        EXTRA_ARGS="$EXTRA_ARGS --tracking_url $TRACKING_URL"
+    fi
+fi
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
@@ -89,6 +106,11 @@ case "$MODE" in
     train) MIN_RUNTIME="${MIN_RUNTIME:-1h}"; ENTRY=open_instruct/olmo_core_finetune.py; AUTO_RESUME="${AUTO_RESUME:-1}" ;;
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
 esac
+if [[ "$ARM" == h247off || "$ARM" == h247on ]]; then
+    H247_ENV='{"name": "WANDB_RUN_GROUP", "value": "'$RUN_NAME'"},
+    {"name": "H247_NORMALIZE_REF", "value": "'$H247_NORMALIZE_REF'"},
+    {"name": "H247_TOKENIZER_LIMIT", "value": "100278"},'
+fi
 TIMEOUT="${TIMEOUT:-${HOURS}h}"
 OUTPUT_DIR="$OUT_ROOT/$RUN_NAME"
 DUMP_DIR="$OUTPUT_DIR/step1"
@@ -153,7 +175,7 @@ if [ \"\$BEAKER_REPLICA_RANK\" = 0 ]; then
       if [ -z \"\$PX\" ]; then uv venv -q --python 3.12 /tmp/nvcc13 && uv pip install -q --python /tmp/nvcc13/bin/python 'nvidia-cuda-nvcc==13.0.*'; PX=\$(find /tmp/nvcc13 -name ptxas -type f | head -1); chmod +x \"\$PX\"; fi
       echo PTXAS \$PX; export TRITON_PTXAS_PATH=\$PX
     fi
-    cd /tmp && CUDA_VISIBLE_DEVICES=0 uv run --no-project --python 3.12 --index \$IDX --index-strategy unsafe-best-match --with torch==2.9.1 --with transformers==4.57.6 --with numpy --with accelerate --with flash-linear-attention python /tmp/h161_refce.py $DUMP_DIR $HF_REF $DUMP_DIR/refce.json
+    export PYTHONPATH=\$PWD; cd /tmp && CUDA_VISIBLE_DEVICES=0 uv run --no-project --python 3.12 --index \$IDX --index-strategy unsafe-best-match --with torch==2.9.1 --with transformers==4.57.6 --with numpy --with accelerate --with flash-linear-attention python /tmp/h161_refce.py $DUMP_DIR $HF_REF $DUMP_DIR/refce.json
     RR=\$?; echo H161-REFCE-EXIT \$RR
     [ \"\$RC\" = 0 ] && [ \"\$RR\" != 0 ] && RC=4
   else
@@ -182,9 +204,10 @@ env = [
     {"name": "NCCL_SOCKET_IFNAME", "value": "ib"},
     {"name": "NCCL_IB_HCA", "value": "^=mlx5_bond_0"},
     $EXTRA_ENV
-    {"name": "HF_TOKEN", "secret": "abhishekr_HF_TOKEN"},
-    {"name": "WANDB_API_KEY", "secret": "abhishekr_WANDB_API_KEY"},
-    {"name": "BEAKER_TOKEN", "secret": "abhishekr_BEAKER_TOKEN"},
+    $H247_ENV
+    {"name": "HF_TOKEN", "secret": "${SECRET_OWNER}_HF_TOKEN"},
+    {"name": "WANDB_API_KEY", "secret": "${SECRET_OWNER}_WANDB_API_KEY"},
+    {"name": "BEAKER_TOKEN", "secret": "${SECRET_OWNER}_BEAKER_TOKEN"},
 ]
 task = {
     "name": "$RUN_NAME",

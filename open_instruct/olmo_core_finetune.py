@@ -52,7 +52,15 @@ from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, te
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
 
-from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, utils
+from open_instruct import (
+    dataset_transformation,
+    embedding_normalization,
+    logger_utils,
+    model_utils,
+    numpy_dataset_conversion,
+    olmo_core_utils,
+    utils,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -410,6 +418,10 @@ class SFTConfig:
     With this set, packing, the attention mask and EMO document pools (if the model routes with
     EMO) follow the rows exactly. Requires
     `row_aligned_parts`, and an OLMo-core with `use_array_if_local` (allenai/OLMo-core#843)."""
+    normalize_input_embeddings: bool = False
+    """Unit-normalize untied input embedding rows once, after promoted-token initialization."""
+    embedding_diagnostics: bool = False
+    """Log input-embedding hashes, norm distributions and sampled one-step updates."""
     extra_numpy_dirs: list[str] = dataclasses.field(default_factory=list)
     """Local pretokenized numpy dirs to train on alongside the chat cache, in the converter's layout:
     `token_ids_part_XXXX.npy` (raw tokens in the dtype OLMo-core picks for the vocab, uint32 for Olmo)
@@ -417,6 +429,54 @@ class SFTConfig:
     follow the cache's and are packed the same way, one source file at a time, so an instance never
     mixes extra docs with chat rows; docs longer than max_seq_length are truncated. Checked at
     startup, which logs token and loss-token totals for the cache and the extras."""
+
+
+class EmbeddingDiagnostics(callbacks.Callback):
+    """Report norms and effective updates on the replicated DDP input tensor."""
+
+    def __init__(self, weight, promoted_ids, last_step):
+        self.weight = weight
+        self.promoted_ids = promoted_ids
+        self.sample_steps = {1, 10, 100, 1000, last_step // 2, last_step}
+        self.before = None
+
+    def _report(self, kind, values, keep):
+        promoted = torch.zeros_like(keep)
+        promoted[self.promoted_ids] = True
+        for label, mask in (("inherited", ~promoted), ("promoted", promoted)):
+            subset = values[mask & keep]
+            if subset.numel():
+                quantiles = subset.quantile(subset.new_tensor([0, 0.01, 0.5, 0.99, 1])).tolist()
+                logger.info(
+                    f"H247 step {self.step} {kind} {label}: n={subset.numel()} "
+                    f"mean={subset.mean().item()} std={subset.std(unbiased=False).item()} "
+                    f"min/p01/p50/p99/max={quantiles}"
+                )
+
+    @torch.no_grad()
+    def pre_train(self):
+        norms = torch.linalg.vector_norm(self.weight, dim=1, dtype=torch.float64)
+        self._report("initial-norm", norms, norms.ne(0))
+
+    @torch.no_grad()
+    def pre_optim_step(self):
+        if self.step in self.sample_steps:
+            self.before = self.weight.detach().clone()
+
+    @torch.no_grad()
+    def post_step(self):
+        if self.before is None:
+            return
+        old, new = self.before.float(), self.weight.float()
+        norms = torch.linalg.vector_norm(old, dim=1, dtype=torch.float64)
+        active = norms.ne(0)
+        self._report("norm", torch.linalg.vector_norm(new, dim=1, dtype=torch.float64), active)
+        updates = torch.linalg.vector_norm(new - old, dim=1, dtype=torch.float64)
+        self._report("relative-update", updates / norms.masked_fill(~active, 1), active)
+        self.before = None
+
+    def post_checkpoint_saved(self, path):
+        logger.info(f"H247 saved input embedding at {path}: {embedding_normalization.tensor_sha256(self.weight)}")
 
 
 @dataclasses.dataclass
@@ -729,6 +789,24 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         # LR schedule position, data order).
         trainer.load_checkpoint(args.model.model_name_or_path, load_trainer_state=False, load_optim_state=False)
 
+    if args.sft.normalize_input_embeddings or args.sft.embedding_diagnostics:
+        weight = train_module.model.embeddings.weight
+        if not isinstance(train_module.model, ddp_model_lib.OLMoDDPModel):
+            raise ValueError("The embedding normalization probe requires the OLMo DDP training path")
+        if train_module.model.tie_word_embeddings:
+            raise ValueError("Input embedding normalization requires an untied LM head")
+        decays = [
+            group["weight_decay"]
+            for group in train_module.optim.param_groups
+            if any(param is weight for param in group["named_params"].values())
+        ]
+        if decays != [0.0]:
+            raise ValueError(f"Expected one zero-decay optimizer group for the input embedding, got {decays}")
+        if global_rank == 0:
+            logger.info(f"H247 embedding weight decay: {decays[0]}")
+            if resumed:
+                logger.info(f"H247 restored input embedding: {embedding_normalization.tensor_sha256(weight)}")
+
     # Last point at which the base weights are settled: the HF path loaded them before the
     # trainer was built, the olmo-core path just above, and the trainer is configured with
     # LoadStrategy.never so fit() loads nothing of its own. Skipped when resuming, since those
@@ -736,9 +814,26 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     if not resumed:
         row_check = olmo_core_utils.PromotedRowStepCheck.before_seeding(train_module, tc.tokenizer)
         olmo_core_utils.initialize_promoted_token_embeddings(train_module, tc.tokenizer)
+        if args.sft.normalize_input_embeddings:
+            vocab_limit = max(tc.tokenizer.get_vocab().values()) + 1
+            if global_rank == 0:
+                logger.info(f"H247 input before normalization: {embedding_normalization.tensor_sha256(weight)}")
+            zero_rows = embedding_normalization.normalize_input_rows(weight, vocab_limit)
+            olmo_core_utils.sync_optimizer_main_params(train_module.optim, [weight])
+            if global_rank == 0:
+                logger.info(
+                    f"H247 input after normalization: {embedding_normalization.tensor_sha256(weight)}; "
+                    f"vocabulary limit {vocab_limit}; unchanged zero rows {zero_rows}"
+                )
+        if args.sft.embedding_diagnostics and global_rank == 0:
+            logger.info(f"H247 initialized input embedding: {embedding_normalization.tensor_sha256(weight)}")
         if row_check is not None:
             row_check.record_seeded()
             trainer.add_callback("promoted_row_step_check", row_check)
+
+    if args.sft.embedding_diagnostics and global_rank == 0:
+        promoted_ids = [target for target, _ in model_utils.promoted_token_rows(tc.tokenizer)]
+        trainer.add_callback("embedding_diagnostics", EmbeddingDiagnostics(weight, promoted_ids, effective_steps))
 
     logger.info("Starting training...")
     trainer.fit()

@@ -20,6 +20,8 @@ import numpy as np
 import torch
 from transformers import AutoModelForCausalLM
 
+from open_instruct import embedding_normalization
+
 D, HF, OUT = sys.argv[1:4]
 paths = sorted(glob.glob(os.path.join(D, "rank*.npz")))
 rows = []
@@ -38,6 +40,8 @@ for r in rows:
     ntok += int(r["lm"][1:].sum())
 print("LOSS-TOKENS", ntok, "CROSS-BOUNDARY", cross, flush=True)
 m = AutoModelForCausalLM.from_pretrained(HF, dtype=torch.bfloat16, trust_remote_code=True).cuda().eval()
+if os.environ.get("H247_NORMALIZE_REF") == "1":
+    embedding_normalization.normalize_input_rows(m.get_input_embeddings().weight, int(os.environ["H247_TOKENIZER_LIMIT"]))
 W = m.lm_head.weight
 tot, n_in, per_row, t0 = 0.0, 0, [], time.time()
 with torch.no_grad():
