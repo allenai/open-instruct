@@ -70,8 +70,7 @@ def test_refresh_rejects_unqualified_contracts(change, match):
 def test_refresh_supports_tp2_without_expanding_engine_drain_scope(decode):
     config = configured()
     config = dataclasses.replace(
-        config,
-        miles=config.miles | {"rollout_num_gpus_per_engine": 2, "sglang_cuda_graph_backend_decode": decode},
+        config, miles=config.miles | {"rollout_num_gpus_per_engine": 2, "sglang_cuda_graph_backend_decode": decode}
     )
     config.validate()
     with pytest.raises(ValueError, match="TP1 serving"):
