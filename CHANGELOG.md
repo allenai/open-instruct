@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-- Add experimental linear TITO agent episodes for Olmo 3.5 Tiny with Core refresh, preserving tool masks and mixed-policy provenance across weight updates. Runtime publication and GPU qualification are pending.
+- Add experimental linear TITO agent episodes for Olmo 3.5 Tiny with Core refresh, preserving tool masks and mixed-policy provenance across weight updates (https://github.com/allenai/open-instruct/pull/2281).
 
 
 ### Removed
