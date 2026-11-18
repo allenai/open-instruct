@@ -65,3 +65,14 @@ grouped-query attention. `scripts/miles/cp_contract.sh` runs this bounded two-GP
 committed MILES image. `tests/miles/configs/cp2-smoke.toml` exercises a Tiny
 EP2/CP2 trainer and a TP1 engine with synthetic rewards, four updates and no
 checkpoint/export. It is not a Small throughput or learning-quality recipe.
+
+The initial [two-GPU comparison](https://beaker.org/ex/01M7RFN4CWNQM1Z3BT1QWYQWEF)
+passed all eight cases. Across dense, expert and router parameter groups, the
+largest relative L2 differences were 0.242% for first Adam moments, 0.563% for
+second moments and 0.0214% for master parameters. The
+[Tiny integration smoke](https://beaker.org/ex/01M7RFN575RPX8JB55AXGQGTQN)
+completed four updates and clean teardown with startup weight equality, routing
+replay and zero difference between scoring and training forwards. Both ran on
+Holmes B300s at high priority with zero minimum runtime (unallocated).
+Full Small training, long-context capacity, CP4 model execution and checkpoint
+resume remain unqualified by these checks.

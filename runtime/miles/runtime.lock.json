@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Ulysses CP candidate: MILES response/loss integration, distinct replay padding, and Core Scalable-Softmax support. CPU argument, replay-padding, loss-gradient and Scalable-Softmax checks pass. GPU qualification pending. Serving and binary base unchanged.",
+  "status": "Ulysses CP2 mechanics validated on Holmes B300s: Small-style hybrid EP2/CP1-vs-CP2 Adam-state matrix and four-update Tiny EP2/CP2 plus TP1 serving smoke both exited 0 (01M7RFN4CWNQM1Z3BT1QWYQWEF, 01M7RFN575RPX8JB55AXGQGTQN). Full Small, long-context capacity, CP4 model execution and checkpoint resume remain unqualified. Serving and binary base unchanged.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
