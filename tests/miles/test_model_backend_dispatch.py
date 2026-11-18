@@ -102,7 +102,10 @@ def test_checkpoint_row_mode_rollback_and_legacy_manifest():
 
 
 def test_row_mode_initialization_covers_named_blocks_and_overrides():
-    blocks = [SimpleNamespace(routed_experts=SimpleNamespace(row_specialization="static")) for _ in range(3)]
+    blocks = [
+        SimpleNamespace(routed_experts=SimpleNamespace(row_specialization="static", fused_no_grad_activation=True))
+        for _ in range(3)
+    ]
     config = SimpleNamespace(block={"kda": blocks[0], "attention": blocks[1]}, block_overrides={7: blocks[2]})
     moe_models.prepare_model_config(config, SimpleNamespace(layer_types=[]), CoreConfig(row_specialization="dynamic"))
     assert all(block.routed_experts.row_specialization == "dynamic" for block in blocks)

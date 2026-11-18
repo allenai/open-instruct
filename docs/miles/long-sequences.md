@@ -57,8 +57,9 @@ long-sequence runs instead of retaining a short-sequence concurrency blindly.
 Keep collection and optimizer batch sizes fixed while studying engine admission.
 Reducing admission queues requests; reducing samples per prompt changes the GRPO
 recipe. EP distributes expert parameters/work, not the token sequence itself.
-The current adapter does not offer trainer TP/PP/CP greater than one as a remedy
-for a single sequence that does not fit.
+Trainer TP/PP remain unsupported. Opt-in [Ulysses CP](context-parallel.md)
+distributes sequence work and activations, with an initial MoE GRPO mechanics
+scope. Its capacity at the intended length/topology needs qualification.
 
 ## Current limits and serving considerations
 

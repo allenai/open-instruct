@@ -81,7 +81,7 @@ ADAPTER_OWNED_OPTIONS = (
     "custom_async_data_buffer_path",
 )
 
-TRAINER_PARALLEL_OPTIONS = ("tensor_model_parallel_size", "pipeline_model_parallel_size", "context_parallel_size")
+TRAINER_PARALLEL_OPTIONS = ("tensor_model_parallel_size", "pipeline_model_parallel_size")
 UNIMPLEMENTED_OPTIONS = ("use_critic", "multi_lora", "indep_dp", "use_opd", "use_routing_replay")
 OFFLOAD_OPTIONS = ("offload", "fsdp_cpu_offload", "optimizer_cpu_offload", "stream_optimizer_state_to_disk")
 
@@ -398,7 +398,7 @@ def native_descriptions():
     descriptions.update(
         {
             name: Constraint(
-                "Required value: 1; trainer TP/PP/CP > 1 is not implemented", Category.NOT_IMPLEMENTED
+                "Required value: 1; trainer TP/PP > 1 is not implemented", Category.NOT_IMPLEMENTED
             ).describe()
             for name in TRAINER_PARALLEL_OPTIONS
         }
