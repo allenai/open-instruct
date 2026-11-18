@@ -4,7 +4,7 @@ set -euo pipefail
 cd /opt/core-rl
 root=${1:-/output/cp-contract}
 torchrun --standalone --nproc-per-node=2 tests/miles/cp_loss_contract.py
-python tests/miles/ep_contract.py bootstrap "$root"
+python tests/miles/ep_contract.py bootstrap "$root" --small-features
 # Capture fixed replay routes with the existing single-rank reference fixture.
 torchrun --standalone --nproc-per-node=1 tests/miles/ep_contract.py run "$root" --mode policy
 for averaging in token response; do

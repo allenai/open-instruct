@@ -2,6 +2,7 @@
 
 Uses the existing hybrid fixture and MILES' actual GRPO loss and CP helpers.
 Uneven document lengths, masked response tokens and replay cross shard boundaries.
+The fixture includes Small-style Scalable-Softmax and nonunit per-head Q/K gains.
 """
 
 import argparse
