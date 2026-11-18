@@ -695,7 +695,7 @@ class RunConfig:
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
             raise constraints.error("Async training requires an explicit positive core.max_policy_lag")
 
-    def _validate_engine_drain(self, options, collection, samples):
+    def _validate_engine_drain(self, options, collection, samples, *, allow_agent=False):
         if not options.get("fully_async", False):
             raise constraints.error("engine_drain requires miles.fully_async=true")
         if options.get("rollout_num_gpus_per_engine", 1) != 1:
@@ -763,6 +763,8 @@ class RunConfig:
             "rollout_sample_filter_path",
             "rollout_router_url",
         ):
+            if name == "custom_generate_function_path" and allow_agent:
+                continue
             if name == "rollout_sample_filter_path" and self.core.expert_balanced_packing:
                 continue  # resolved_miles admits only our managed hook.
             if options.get(name):
@@ -775,9 +777,12 @@ class RunConfig:
         # The first qualification shares the independent publisher's resident
         # TP1/single-turn restrictions, without its immutable snapshots.
         try:
-            self._validate_engine_drain(options, collection, samples)
+            agentic = options.get("custom_generate_function_path") == constraints.AGENT_GENERATOR
+            self._validate_engine_drain(options, collection, samples, allow_agent=agentic)
         except InputError as error:
             raise InputError(str(error).replace("engine_drain", "refresh")) from error
+        if agentic:
+            self._validate_agent_refresh(options)
         if not (options.get("use_tis", False) or score_centering.uses_importance_sampling(options)) or options.get(
             "use_rollout_logprobs", False
         ):
@@ -815,6 +820,24 @@ class RunConfig:
             raise constraints.error(
                 "refresh qualification requires rollout_top_k=-1", constraints.Category.NOT_VALIDATED
             )
+
+    def _validate_agent_refresh(self, options):
+        if options.get("pause_generation_mode") != "in_place":
+            raise constraints.error("Core agent refresh requires pause_generation_mode=in_place")
+        if options.get("use_session_server") != "v2" or options.get("tito_model") != "olmo35":
+            raise constraints.error("Core agent refresh requires use_session_server=v2 and tito_model=olmo35")
+        if not options.get("custom_agent_function_path"):
+            raise constraints.error("Core agent refresh requires custom_agent_function_path")
+        if options.get("apply_chat_template", False):
+            raise constraints.error("Core agent refresh requires unrendered messages; disable apply_chat_template")
+        for name, supported in constraints.AGENT_SESSION_HOOKS.items():
+            if options.get(name) not in (None, supported):
+                raise constraints.error(f"Core agent refresh does not support miles.{name}")
+        if options.get("group_rm"):
+            raise constraints.error("Core agent refresh does not support miles.group_rm")
+        length = options.get("max_seq_len")
+        if type(length) is not int or not 0 < length <= self.core.max_sequence_length:
+            raise constraints.error("Core agent refresh requires max_seq_len within core.max_sequence_length")
 
     def arguments(self) -> list[str]:
         """Compile without importing CUDA, MILES, Core, or downloading models."""

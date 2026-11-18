@@ -12,6 +12,23 @@ from enum import Enum
 
 from open_instruct.miles.errors import InputError
 
+AGENT_GENERATOR = "miles.rollout.generate_hub.agentic_tool_call.generate"
+AGENT_SESSION_HOOKS = {
+    "session_sample_picker_path": "miles.rollout.session.v2.picker_hub.drop_same_prompt_retries",
+    "session_sample_postprocessor_path": "miles.rollout.session.v2.postprocessor_hub.default_postprocess",
+}
+AGENT_VALIDATION_OPTIONS = frozenset(AGENT_SESSION_HOOKS) | frozenset(
+    {
+        "apply_chat_template",
+        "custom_agent_function_path",
+        "max_seq_len",
+        "pause_generation_mode",
+        "sglang_disable_radix_cache",
+        "sglang_radix_cache_backend",
+        "tito_model",
+    }
+)
+
 
 class Category(str, Enum):
     INVALID = "Invalid configuration"
@@ -282,9 +299,14 @@ def external_rollout(options):
 
 def native_values(args, supplied_flags):
     """Select native arguments for the same validator used by CPU planning."""
-    fields = {
-        name: value for name in sorted(NATIVE_VALIDATION_OPTIONS) if (value := getattr(args, name, None)) is not None
-    }
+    agentic = getattr(args, "custom_generate_function_path", None) == AGENT_GENERATOR
+    names = NATIVE_VALIDATION_OPTIONS | AGENT_VALIDATION_OPTIONS if agentic else NATIVE_VALIDATION_OPTIONS
+    fields = {name: value for name in sorted(names) if (value := getattr(args, name, None)) is not None}
+    # Native MILES also accepts True as the v1 session-server alias and False
+    # for no sessions. The declarative option encoder represents enabled modes
+    # as strings, so normalize that parser-only alias at this boundary.
+    if agentic and (session_mode := getattr(args, "use_session_server", None)):
+        fields["use_session_server"] = "v1" if session_mode is True else session_mode
     # Upstream fills in its internal provider path after deriving this boolean.
     # Do not reinterpret that generated default as a user-supplied external pool.
     if getattr(args, "rollout_external", None) is False:
@@ -310,6 +332,7 @@ STRUCTURED_FIELDS = {
         "pools",
         "sampling",
         "over_length",
+        "agentic",
     },
     "launch": {
         "auto_resume",

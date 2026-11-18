@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from miles.backends.fsdp_utils import arguments as fsdp_arguments
+from miles.rollout.generate_hub import agentic_tool_call
 from miles.utils import arguments
 
 from open_instruct.miles.configuration import options
@@ -23,6 +24,10 @@ def snapshot():
     # SGLang probes parser construction with incomplete argv; suppress its handled usage errors.
     with contextlib.redirect_stderr(io.StringIO()):
         parser = fsdp_arguments.build_fsdp_parser(arguments.get_miles_extra_args_provider())
+    # Generator-specific options are normally registered from argv. Include the
+    # supported agent contract in CPU planning even when snapshotting default argv.
+    if "--custom-agent-function-path" not in parser._option_string_actions:
+        agentic_tool_call.generate.add_arguments(parser)
     parser.add_argument("--olmo-core-config", required=True)
     root = Path(__file__).resolve().parents[2]
     lock = json.loads((root / "runtime/miles/runtime.lock.json").read_text())

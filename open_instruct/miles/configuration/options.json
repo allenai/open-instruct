@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sources": {"megatron-bridge":{"repository":"https://github.com/radixark/Megatron-Bridge.git","revision":"8cd3466d14d2337c8492827b3712482c2b3e4866"},"megatron-lm":{"repository":"https://github.com/radixark/Megatron-LM.git","revision":"235952df607b3820716e5e67728a5ab470ca33ae"},"miles":{"repository":"https://github.com/allenai/miles-olmo-core.git","revision":"22d2fb4ca0f87255b56ec0cd733f487cca22ebc7"},"olmo-core":{"repository":"https://github.com/allenai/Olmo-core.git","revision":"903e57d46cc2c62cb5611e49c4d0e2052eb798d2"},"olmo-sglang":{"repository":"https://github.com/allenai/olmo-sglang.git","revision":"069dc0a3cf0e28bd9f03d035aa98fc2bd5e8896a"},"sglang":{"repository":"https://github.com/sgl-project/sglang.git","revision":"b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"}},
+  "sources": {"megatron-bridge":{"repository":"https://github.com/radixark/Megatron-Bridge.git","revision":"8cd3466d14d2337c8492827b3712482c2b3e4866"},"megatron-lm":{"repository":"https://github.com/radixark/Megatron-LM.git","revision":"235952df607b3820716e5e67728a5ab470ca33ae"},"miles":{"repository":"https://github.com/allenai/miles-olmo-core.git","revision":"b0da4217085381ef517daf7916655c2c717b26b6"},"olmo-core":{"repository":"https://github.com/allenai/Olmo-core.git","revision":"903e57d46cc2c62cb5611e49c4d0e2052eb798d2"},"olmo-sglang":{"repository":"https://github.com/allenai/olmo-sglang.git","revision":"069dc0a3cf0e28bd9f03d035aa98fc2bd5e8896a"},"sglang":{"repository":"https://github.com/sgl-project/sglang.git","revision":"b84bec5761a6cdc8b1df86b9b89ead80a7a9bb02"}},
   "options": [
   {"dest":"config","type":"str"},
   {"dest":"optimizer","type":"str"},
@@ -1482,7 +1482,7 @@
   {"dest":"session_server_ip","type":"str"},
   {"dest":"session_server_external_host","type":"str"},
   {"dest":"session_server_port","type":"int"},
-  {"choices":["deepseekv4","deepseekv41","default","glm47","glm53","inkling","kimi25","kimi26","minimax_m25","minimax_m27","nemotron3","qwen3","qwen35","qwen36","qwen38small","qwen4exp","qwennext"],"dest":"tito_model","type":"str"},
+  {"choices":["deepseekv4","deepseekv41","default","glm47","glm53","inkling","kimi25","kimi26","minimax_m25","minimax_m27","nemotron3","olmo35","qwen3","qwen35","qwen36","qwen38small","qwen4exp","qwennext"],"dest":"tito_model","type":"str"},
   {"dest":"session_message_matcher","type":"str"},
   {"dest":"session_sample_picker_path","type":"str"},
   {"dest":"session_sample_postprocessor_path","type":"str"},
@@ -1532,6 +1532,9 @@
   {"dest":"custom_config_path","type":"str"},
   {"dest":"megatron_config","type":"str"},
   {"dest":"padded_vocab_size","type":"int"},
+  {"dest":"custom_agent_function_path","type":"str"},
+  {"choices":["inline","subproc"],"dest":"custom_agent_function_mode"},
+  {"dest":"max_seq_len","type":"int"},
   {"dest":"olmo_core_config"}
   ]
 }

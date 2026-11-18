@@ -20,7 +20,7 @@ from pathlib import Path
 
 from open_instruct import ifeval_constraints, logger_utils
 from open_instruct.miles.configuration import validation
-from open_instruct.miles.datasets import mixture, pools, synlogic
+from open_instruct.miles.datasets import agent_data, mixture, pools, synlogic
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.rewards import grading, judging, task_verifiers
 from open_instruct.miles.rollout import pool_sampling
@@ -200,6 +200,7 @@ def validate_data(data):
         "prompt_data",
         "eval_prompt_data",
         "reward_config",
+        "agentic",
     }
     if unknown:
         raise InputError(
@@ -215,7 +216,10 @@ def validate_data(data):
         raise InputError("eval_prompt_data and reward_config belong to prepared prompt_data mode")
     if "recipe" in modes:
         raise InputError("Named data recipes are not yet ported; use tasks or an immutable rl_manifest")
-    if "prompt_data" in modes and not data.get("reward_config"):
+    validation.boolean(data.get("agentic", False), "data.agentic")
+    if data.get("agentic") and (modes != ["prompt_data"] or data.get("reward_config")):
+        raise InputError("data.agentic requires prompt_data without a verifier reward_config")
+    if "prompt_data" in modes and not data.get("reward_config") and not data.get("agentic"):
         raise InputError("Prepared prompt_data requires a trusted reward_config")
     resolved_pools = pools.resolve(data)
     if "sampling" in data and not resolved_pools:
@@ -418,6 +422,10 @@ def _prepared_warning_sources(data, result):
 
 
 def _verify_resumed_data(result, hf_checkpoint, data):
+    if data.get("agentic"):
+        # The preparation contract already checks tokenizer and artifact hashes.
+        # Agent rewards and rendering belong to the runtime TITO session.
+        return
     # One JSON parse per row: training gets IF + template checks; evaluation gets
     # template checks only. Old caches are validated without editing/retokenizing.
     registry = _read_json_object(result["reward_config"], {})
@@ -508,8 +516,8 @@ def _adopt(data, tokenizer, template, inputs):
 
 
 def _prepared(data, inputs):
-    registry = _read_json_object(data["reward_config"], inputs)
-    if not isinstance(registry, dict) or not registry:
+    registry = {} if data.get("agentic") else _read_json_object(data["reward_config"], inputs)
+    if not isinstance(registry, dict) or (not registry and not data.get("agentic")):
         raise InputError("Trusted reward registry must be a nonempty mapping")
     for name, spec in registry.items():
         if (
@@ -536,7 +544,7 @@ def _prepared(data, inputs):
         ):
             raise InputError("Evaluation names must be unique safe identifiers distinct from train")
         partitions[name] = _JsonlRows(path, inputs)
-    return partitions, {"already_rendered": True}, registry
+    return partitions, {"already_rendered": not data.get("agentic", False)}, registry
 
 
 def _sample_indices(rng, size, train_count, eval_count):
@@ -815,24 +823,33 @@ def prepare_data(
                                 judging.require_binding(name, registry_overrides, known.get(name))
                 if resolved_pools and split in training and not isinstance(rows, _JsonlRows):
                     pools.annotate(row, resolved_pools, source_pool=source_pools.get(split), labels=pool_labels)
-                _verify_row(
-                    row,
-                    tokenizer,
-                    max_prompt_length,
-                    known,
-                    exclude_over_length=exclude_over_length and split in training,
-                    training=split in training,
-                )
+                if data.get("agentic"):
+                    agent_data.verify_row(
+                        row,
+                        tokenizer,
+                        max_prompt_length,
+                        exclude_over_length=exclude_over_length and split in training,
+                    )
+                else:
+                    _verify_row(
+                        row,
+                        tokenizer,
+                        max_prompt_length,
+                        known,
+                        exclude_over_length=exclude_over_length and split in training,
+                        training=split in training,
+                    )
                 # Only _prepared returns _JsonlRows. Task/adopt rendering records
                 # its template in provenance rather than per-row metadata.
                 if (
                     isinstance(rows, _JsonlRows)
+                    and not data.get("agentic")
                     and row["metadata"].get("rendering_template_sha256") is None
                     and not warned_missing
                 ):
                     _warn_missing_rendering_template(rows.path)
                     warned_missing = True
-                if split in training:
+                if split in training and not data.get("agentic"):
                     _verify_if_training_row(row, if_verifiers)
             except InputError as error:
                 raise InputError(f"{split} row {index}: {error}") from error
@@ -866,7 +883,8 @@ def prepare_data(
                     excluded.add(index)
             if isinstance(rows, _JsonlRows) and index not in excluded:
                 rows.remember_validation(index, row)
-            (train_prompts if split in training else eval_prompts).add(_sha(row["input"].encode()))
+            prompt_bytes = _encoded(row["input"]) if data.get("agentic") else row["input"].encode()
+            (train_prompts if split in training else eval_prompts).add(_sha(prompt_bytes))
             identity = row["metadata"].get("prepared_sample_id")
             if identity:
                 (train_ids if split in training else eval_ids).add(identity)

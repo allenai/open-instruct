@@ -14,6 +14,7 @@ on a small run first. For starting settings see [development defaults](developme
 | Dense Olmo 3 | Separate Core/FSDP adapter with save, resume, HF export and serving reload | Learning behavior is less explored than the MoE path |
 | Hybrid MoE | Checkpoint conversion, EP training and TP1 serving with [Core-compatible rounding](core-compatible-serving.md) | See [hybrid MoE support](moe-model-support.md) |
 | Async and replay | Bounded policy lag with TIS, mixed-policy refresh, packing with replay | Refresh keeps historical behavior probabilities; a resumed run does not reproduce the exact future samples |
+| Agent episodes | Experimental [linear TITO episodes](agent-rollout.md) with Tiny and Core refresh | One trajectory per sample; branching, arbitrary generators and DPPO/OPD recipe parity are not supported; GPU qualification is separate |
 | Packing and compute | Document-isolated packing, activation recomputation, dynamic SwiGLU rows, guarded scoring-pass skip | Auxiliary loss defaults to pack-local token averaging; see [router auxiliary objectives](core.md#router-auxiliary-objectives) |
 | Serving | Multiple TP1 engines, independent inference GPU counts, multi-node startup, radix and cache-aware routing | TP>1 engines with cache/replay combinations are untested |
 | Data and rewards | Math, GSM8K, IF, function and stdio code execution, named judge rubrics | The code executor is an external service |
