@@ -29,14 +29,16 @@ from transformers import AutoModelForCausalLM
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 
 
-def bootstrap(root):
+def bootstrap(root, *, small_features=False):
     root.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(173)
     _register_olmo3moe_auto_classes()
     hf = Olmo3MoeConfig(
         vocab_size=256,
         hidden_size=128,
-        attention_hidden_size=128,
+        # Eight BF16 scale values preserve grouped-MM's 16-byte alignment in
+        # Core's flattened parameter buffer; four values would shift later weights.
+        attention_hidden_size=512 if small_features else 128,
         head_dim=64,
         dense_mlp_intermediate_size=256,
         dense_mlp_uses_shared_experts=True,
@@ -45,9 +47,11 @@ def bootstrap(root):
         n_routed_experts=4,
         num_experts_per_tok=2,
         num_hidden_layers=2,
-        num_attention_heads=2,
+        num_attention_heads=8 if small_features else 2,
         num_key_value_heads=2,
         use_head_qk_norm=True,
+        qk_norm_per_head_gains=small_features,
+        scalable_softmax=small_features,
         use_rope=False,
         attention_gate_type="elementwise",
         linear_num_key_heads=8,
@@ -65,6 +69,10 @@ def bootstrap(root):
         for name, value in model.named_parameters():
             if name.endswith(("A_log", "dt_bias")):
                 value.zero_()
+            elif small_features and name.endswith("ssmax_scale"):
+                value.copy_(torch.linspace(0.75, 1.25, value.numel()).reshape_as(value))
+            elif small_features and name.endswith(("q_norm.weight", "k_norm.weight")):
+                value.copy_(torch.linspace(0.8, 1.2, value.numel()).reshape_as(value))
     model.save_pretrained(root / "hf")
     (root / "prompts.jsonl").write_text('{"input": "fixture", "label": "fixture"}\n')
 
@@ -384,9 +392,10 @@ def main():
     parser.add_argument("root", type=Path)
     parser.add_argument("--mode", choices=("policy", "auxiliary", "combined"), default="combined")
     parser.add_argument("--checkpointing", action="store_true")
+    parser.add_argument("--small-features", action="store_true")
     args = parser.parse_args()
     if args.command == "bootstrap":
-        bootstrap(args.root)
+        bootstrap(args.root, small_features=args.small_features)
     elif args.command == "run":
         run(args.root, args.mode, args.checkpointing)
     else:

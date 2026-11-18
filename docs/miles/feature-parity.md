@@ -10,7 +10,7 @@ on a small run first. For starting settings see [development defaults](developme
 | Area | Available | Limits |
 |---|---|---|
 | Researcher workflow | Structured TOML, CPU plan/validate, committed-image launch, preparation, receipts/status, native passthrough help | No named recipe catalog; express tasks or adopt an immutable manifest |
-| MoE training | Core MoE adapter with expert parallelism, router replay and router auxiliary-loss controls | Trainer TP/PP/CP greater than one and microbatch sizes above one are rejected; full-model colocation is not supported |
+| MoE training | Core MoE adapter with expert parallelism, router replay, router auxiliary-loss controls and opt-in [Ulysses CP](context-parallel.md) | Trainer TP/PP and microbatch sizes above one are rejected; CP initially requires GRPO, packing and zero router auxiliaries; full-model colocation is not supported |
 | Dense Olmo 3 | Separate Core/FSDP adapter with save, resume, HF export and serving reload | Learning behavior is less explored than the MoE path |
 | Hybrid MoE | Checkpoint conversion, EP training and TP1 serving with [Core-compatible rounding](core-compatible-serving.md) | See [hybrid MoE support](moe-model-support.md) |
 | Async and replay | Bounded policy lag with TIS, mixed-policy refresh, packing with replay | Refresh keeps historical behavior probabilities; a resumed run does not reproduce the exact future samples |

@@ -360,6 +360,8 @@ class RunConfig:
     def resolved_miles(self) -> dict[str, Any]:
         """Resolve Core router, precision and group-filter settings for all entry points."""
         options = cli_options.normalize_options(self.miles)
+        if options.get("context_parallel_size", 1) > 1:
+            options.setdefault("allgather_cp", True)
         options.setdefault("calculate_per_token_loss", False)
         score_centering.validate(options, fp32_lm_head=self.core.fp32_lm_head)
         if not options.get("use_miles_router", False):
@@ -599,6 +601,30 @@ class RunConfig:
         if any(type(n) is not int or n < 1 for n in (nodes, gpus)):
             raise constraints.error("Trainer nodes and GPUs per node must be positive integers")
         world = nodes * gpus
+        cp = options.get("context_parallel_size", 1)
+        if type(cp) is not int or cp not in (1, 2, 4) or world % cp:
+            raise constraints.error("Core Ulysses requires CP1, CP2 or CP4 dividing trainer world size")
+        if cp > 1:
+            if not self.core.sequence_packing or self.core.use_reduce_scatter:
+                raise constraints.error("Core Ulysses requires sequence_packing=true and use_reduce_scatter=false")
+            if self.core.expert_balanced_packing:
+                raise constraints.error("Core Ulysses does not support expert-balanced packing")
+            if (
+                options.get("loss_type", "policy_loss") != "policy_loss"
+                or options.get("advantage_estimator", "grpo") != "grpo"
+            ):
+                raise constraints.error("Core Ulysses currently supports the GRPO policy loss")
+            if self.core.router_aux_loss_weight or self.core.router_z_loss_weight:
+                raise constraints.error("Core Ulysses qualification requires zero router auxiliary losses")
+            if options.get("custom_loss_function_path") or options.get("normalize_advantages", False):
+                raise constraints.error(
+                    "Core Ulysses does not yet qualify custom loss overrides or advantage whitening"
+                )
+            if options.get("allgather_cp") is False:
+                raise constraints.error("Core Ulysses requires miles.allgather_cp=true for contiguous output shards")
+            # Core's contiguous Ulysses outputs use the existing MILES CP
+            # response redistribution, rather than zigzag model input shards.
+            options["allgather_cp"] = True
         if self.core.expert_balanced_packing:
             if not 1 < self.core.expert_parallel_size < world:
                 raise constraints.error("expert_balanced_packing requires world > expert_parallel_size > 1")
