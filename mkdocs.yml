@@ -112,6 +112,7 @@ nav:
         - Long sequences: miles/long-sequences.md
         - Sequence packing: miles/sequence-packing.md
         - Async queues: miles/async-pipeline.md
+        - Agent episodes: miles/agent-rollout.md
         - Engine drain: miles/engine-drain.md
         - Experimental OPD: miles/opd.md
       - Data and evaluation:

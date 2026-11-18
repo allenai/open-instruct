@@ -12,6 +12,8 @@ from enum import Enum
 
 from open_instruct.miles.errors import InputError
 
+AGENT_GENERATOR = "miles.rollout.generate_hub.agentic_tool_call.generate"
+
 
 class Category(str, Enum):
     INVALID = "Invalid configuration"
@@ -310,6 +312,7 @@ STRUCTURED_FIELDS = {
         "pools",
         "sampling",
         "over_length",
+        "agentic",
     },
     "launch": {
         "auto_resume",

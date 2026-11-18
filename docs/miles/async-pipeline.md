@@ -61,7 +61,9 @@ trainer scoring supplies the PPO anchor. Replay routes describe the final forwar
 not the historical expert choice for every previously sampled token.
 
 Refresh requires resident disaggregated TP1 engines, one optimizer update per
-collection, the managed single-turn producer, MILES router metadata and TIS.
+collection, a managed producer with token-level provenance, and TIS. The default
+producer is single-turn; the experimental [agent path](agent-rollout.md) uses
+native TITO v2 for linear multi-turn episodes.
 Keep `use_rollout_logprobs=false`; it is independent of retaining original behavior
 probabilities for TIS. Full decode CUDA graphs or disabled graphs are accepted;
 prefill graphs, speculative decoding, serving prefill/decode disaggregation and

@@ -645,6 +645,18 @@ class RunSpec:
             for target in ("core.max_sequence_length", "miles.sglang_context_length", "miles.rollout_max_context_len"):
                 put(target, length, origin)
         length = core.setdefault("max_sequence_length", miles.get("rollout_max_context_len", 6144))
+        if self.data.get("agentic"):
+            if not asynchronous or core.get("publication_mode") != "refresh":
+                raise InputError("data.agentic requires async.fully_async=true and core.publication_mode=refresh")
+            if miles.get("custom_generate_function_path") != constraints.AGENT_GENERATOR:
+                raise InputError("data.agentic requires the native agentic_tool_call.generate generator")
+            miles.setdefault("use_session_server", "v2")
+            miles.setdefault("tito_model", "olmo35")
+            miles.setdefault("pause_generation_mode", "in_place")
+            miles.setdefault("max_seq_len", length)
+            miles.setdefault("custom_rm_path", "open_instruct.miles.rollout.agent.episode_reward")
+        elif miles.get("custom_generate_function_path") == constraints.AGENT_GENERATOR:
+            raise InputError("Native agent episodes require data.agentic=true and unrendered messages")
         miles.setdefault("rollout_max_context_len", length)
         miles.setdefault("sglang_context_length", length)
         miles.setdefault("rollout_max_response_len", min(4096, length // 2 if length <= 4096 else 4096))

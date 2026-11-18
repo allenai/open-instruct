@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
+- Add experimental linear TITO agent episodes for Olmo 3.5 Tiny with Core refresh, preserving tool masks and mixed-policy provenance across weight updates. Runtime publication and GPU qualification are pending.
+
 
 ### Removed
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
