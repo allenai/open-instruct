@@ -2,13 +2,17 @@
 
 These templates provide reviewable starting points for MILES training and policy
 evaluation. Choose a model-family directory, then adapt its paths and topology
-before launching. The `small` family currently contains only a copied dev starter.
+before launching. The `small` family holds a copied dev starter and measured OLMo 3.5 Small
+(A4B) B300 layouts; see [OLMo 3.5 Small on MILES](../../../docs/miles/olmo35-small.md).
 
 | Config | Purpose |
 |---|---|
 | [tiny/dev.toml](tiny/dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
 | [tiny/node.toml](tiny/node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
 | [tiny/three-node.toml](tiny/three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+| [small/two-node-mech.toml](small/two-node-mech.toml) | OLMo 3.5 Small mechanics check: 8 trainer GPUs (EP8), 7 engines, 1 judge; 4 updates |
+| [small/four-node.toml](small/four-node.toml) | OLMo 3.5 Small timing layout: 8 trainer GPUs (EP8), 23 engines (R=96), 1 judge; measured 299-309 s/update |
+| [small/eight-node.toml](small/eight-node.toml) | OLMo 3.5 Small timing layout: 16 trainer GPUs (2 × EP8), 47 engines (R=96), 1 judge; ~181 s/update steady |
 
 `tiny/` holds the existing recipes. `small/dev.toml` currently copies the settings
 of `tiny/dev.toml`, providing a starting file for upcoming model/topology work;

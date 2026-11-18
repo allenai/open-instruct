@@ -107,6 +107,7 @@ nav:
       - Models and training:
         - Models and checkpoints: miles/models-and-checkpoints.md
         - Hybrid MoE support: miles/moe-model-support.md
+        - OLMo 3.5 Small on B300: miles/olmo35-small.md
         - Core-compatible serving: miles/core-compatible-serving.md
         - Topology and capacity: miles/topology.md
         - Long sequences: miles/long-sequences.md
