@@ -743,6 +743,10 @@ class RunSpec:
             "wandb_dir": str(root / "wandb"),
             "async_save": False,
         }
+        if self.data.get("agentic"):
+            # Native TITO agents do not require a label column. Keep MILES's
+            # None default unless the caller explicitly selects a label key.
+            defaults.pop("label_key")
         for key, value in defaults.items():
             miles.setdefault(key, value)
         if miles.get("num_epoch") is not None:

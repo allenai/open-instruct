@@ -5,7 +5,11 @@ import copy
 import json
 from types import SimpleNamespace
 
+from miles.utils.data import Dataset
 from scripts.miles import agent_smoke
+
+from open_instruct.miles.configuration import constraints
+from open_instruct.miles.configuration.run_spec import RunSpec
 
 
 class Message:
@@ -76,3 +80,38 @@ def test_probe_preserves_tool_history_and_records_both_calls(monkeypatch, tmp_pa
     assert result["agent_metrics"]["turns"] == 2
     assert result["agent_metrics"]["tool_calls"] == 1
     assert json.loads(next(tmp_path.glob("*.json")).read_text())["task_id"] == "task-1"
+
+
+def test_compiled_agent_data_loads_without_a_label_column(tmp_path):
+    path = tmp_path / "episodes.jsonl"
+    messages = [{"role": "user", "content": "Read the value"}]
+    path.write_text(json.dumps({"input": messages, "metadata": {"task_id": "task-1"}}) + "\n")
+    spec = RunSpec.from_dict(
+        {
+            "schema_version": 1,
+            "name": "native-agent-data",
+            "model": {"source": "tiny"},
+            "output": {"root": str(tmp_path / "run")},
+            "data": {"agentic": True, "prompt_data": str(path)},
+            "inference": {"placement_mode": "disaggregated", "gpus": 1},
+            "async": {"fully_async": True},
+            "core": {"publication_mode": "refresh"},
+            "miles": {
+                "custom_generate_function_path": constraints.AGENT_GENERATOR,
+                "custom_agent_function_path": "scripts.miles.agent_smoke.run",
+            },
+        },
+        config_path=tmp_path / "run.json",
+    )
+    options = spec.compile().miles
+    data = Dataset(
+        options["prompt_data"],
+        tokenizer=object(),
+        processor=None,
+        max_length=None,
+        prompt_key=options["input_key"],
+        label_key=options.get("label_key"),
+        metadata_key=options["metadata_key"],
+    )
+    assert data[0].prompt == messages
+    assert data[0].label is None

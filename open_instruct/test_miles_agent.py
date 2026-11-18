@@ -88,6 +88,8 @@ def test_structured_agent_run_selects_native_sessions_and_episode_rewards(tmp_pa
     assert config.miles["max_seq_len"] == config.core.max_sequence_length
     assert config.miles["custom_rm_path"] == "open_instruct.miles.rollout.agent.episode_reward"
     assert not config.miles.get("apply_chat_template")
+    assert "label_key" not in config.miles
+    assert "--label-key" not in config.arguments()
 
 
 class AgentTokenizer:
