@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 
 ### Removed
+- Remove the Small `dev.toml` placeholder that used a Tiny checkpoint; direct Small mechanics checks to the tested two-node recipe (https://github.com/allenai/open-instruct/pull/2280).
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed

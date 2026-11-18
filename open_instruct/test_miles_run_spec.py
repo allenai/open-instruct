@@ -406,7 +406,6 @@ def test_all_researcher_examples_compile_to_native_arguments():
         "tiny/dev.toml",
         "tiny/node.toml",
         "tiny/three-node.toml",
-        "small/dev.toml",
         "small/two-node-mech.toml",
         "small/four-node.toml",
         "small/eight-node.toml",
