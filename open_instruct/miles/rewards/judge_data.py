@@ -47,6 +47,8 @@ def data_rows(path):
     try:
         with opener(path, "rt", encoding="utf-8") as stream:
             for index, line in enumerate(stream, 1):
+                if not line.strip():
+                    continue
                 try:
                     row = json.loads(line)
                     metadata = row.get("metadata", {})

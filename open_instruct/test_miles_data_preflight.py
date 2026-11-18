@@ -3,6 +3,7 @@
 import copy
 import gzip
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,8 +12,10 @@ import pytest
 
 from open_instruct.miles import __main__ as cli
 from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.execution import data_preflight, launch, submit
+from open_instruct.miles.rewards import judge_data
 
 
 @pytest.fixture
@@ -158,14 +161,18 @@ def test_run_checks_before_invoking_image_wrapper(document, tmp_path, monkeypatc
     assert not Path(document["output"]["root"]).exists()
 
 
-def test_direct_submission_checks_before_beaker(document, tmp_path, monkeypatch):
+def test_direct_submission_checks_before_beaker(document, tmp_path, monkeypatch, capsys):
     document["judging"]["bindings"]["unused"] = {"judge": "general", "rubric": "quality"}
     path = tmp_path / "run.json"
     path.write_text(json.dumps(document))
     monkeypatch.setattr(sys, "argv", ["submit", "unused-image", str(path), "--check-data"])
     monkeypatch.setattr(submit.launch, "submit", lambda *_: pytest.fail("Beaker must not be called"))
-    with pytest.raises(InputError, match="Judge bindings absent"):
+    with pytest.raises(SystemExit) as error:
         submit.main()
+    assert error.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "Judge bindings absent" in stderr
+    assert "Traceback" not in stderr
 
 
 def test_validate_with_mapping_checks_without_loading_policy(document, tmp_path, monkeypatch, capsys):
@@ -216,3 +223,123 @@ def test_preflight_works_without_site_packages(document, tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert '"status": "passed"' in result.stdout
+
+
+@pytest.mark.parametrize("compressed", [False, True])
+def test_blank_lines_match_training_reader_behavior(document, tmp_path, compressed):
+    original = Path(document["data"]["prompt_data"]).read_text()
+    path = tmp_path / ("with-blanks.jsonl.gz" if compressed else "with-blanks.jsonl")
+    opener = gzip.open if compressed else open
+    with opener(path, "wt") as stream:
+        stream.write("\n  \t\n" + original + "\n\n")
+    document["data"]["prompt_data"] = str(path)
+    assert data_preflight.check(RunSpec.from_dict(document))["rows"] == 1
+
+
+@pytest.mark.parametrize("mode", ["symlink", "dotdot"])
+def test_mapping_normalizes_configured_paths_too(document, tmp_path, mode):
+    alias = tmp_path / "alias"
+    alias.symlink_to(tmp_path, target_is_directory=True)
+    prefix = alias if mode == "symlink" else tmp_path / "unused" / ".."
+    document["data"] = {"prompt_data": str(prefix / "train.jsonl"), "reward_config": str(prefix / "verifiers.json")}
+    assert data_preflight.check(RunSpec.from_dict(document), [f"{prefix}={tmp_path}"])["rows"] == 1
+
+
+def test_unmatched_mapping_fails_instead_of_reading_original_file(document):
+    with pytest.raises(InputError, match="does not match any configured input path"):
+        data_preflight.check(RunSpec.from_dict(document), ["/typo-prefix=/some-copy"])
+
+
+@pytest.mark.parametrize("configured_equals,local_equals", [(True, False), (False, True), (True, True)])
+def test_equals_in_mapping_paths(document, tmp_path, configured_equals, local_equals):
+    prefix = Path("/unmounted/split=train" if configured_equals else "/unmounted/data")
+    local = tmp_path / ("local=copy" if local_equals else "local-copy")
+    local.mkdir()
+    for name in ("train.jsonl", "verifiers.json"):
+        (local / name).write_bytes((tmp_path / name).read_bytes())
+    document["data"] = {"prompt_data": str(prefix / "train.jsonl"), "reward_config": str(prefix / "verifiers.json")}
+    result = data_preflight.check(RunSpec.from_dict(document), [f"{prefix}={local}"])
+    assert result["rows"] == 1
+    assert result["paths"] == [str(local / "train.jsonl")]
+
+
+@pytest.mark.parametrize(
+    "registry",
+    [
+        {},
+        {"quality": {}},
+        {"quality": {"factory": "NoModule"}},
+        {"quality": {"factory": "module.Class", "grading": {"scope": "invalid"}}},
+    ],
+)
+def test_registry_validation_matches_preparation(document, registry):
+    Path(document["data"]["reward_config"]).write_text(json.dumps(registry))
+    with pytest.raises(InputError) as training:
+        run_data._prepared(document["data"], {})
+    with pytest.raises(InputError, match=str(training.value)):
+        data_preflight.check(RunSpec.from_dict(document))
+
+
+@pytest.mark.parametrize("entrypoint", ["validate", "run", "submit"])
+def test_bad_topology_fails_before_scanning_rows(document, tmp_path, monkeypatch, capsys, entrypoint):
+    document["launch"] = {"gpus_per_replica": 1}
+    document["trainer"] = {"gpus": 1, "expert_parallel_size": 1}
+    document["inference"] = {"gpus": 1, "placement_mode": "disaggregated"}
+    document["judges"]["general"] = {
+        "mode": "managed",
+        "model": "Qwen/Qwen3-32B",
+        "gpus": 2,
+        "tensor_parallel_size": 2,
+        "revision": "a" * 40,
+        "prepared_dir": str(tmp_path / "judge"),
+    }
+    path = tmp_path / "bad-topology.json"
+    path.write_text(json.dumps(document))
+    RunSpec.from_dict(document).compile()  # Allocation validation is a separate plan() check.
+    monkeypatch.setattr(judge_data, "data_rows", lambda *_: pytest.fail("must validate topology before scanning data"))
+    args = (
+        ["submit", "unused-image", str(path), "--check-data"]
+        if entrypoint == "submit"
+        else ["miles", entrypoint, str(path), "--check-data"]
+    )
+    monkeypatch.setattr(sys, "argv", args)
+    with pytest.raises(SystemExit) as error:
+        (submit.main if entrypoint == "submit" else cli.main)()
+    assert error.value.code == 2
+    assert "Each managed judge must fit within one replica" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("existing_image", [False, True])
+def test_wrapper_rejects_data_before_any_image_build_or_lookup(document, tmp_path, existing_image):
+    document["judging"]["bindings"]["unused"] = {"judge": "general", "rubric": "quality"}
+    config = tmp_path / "bad data.json"
+    config.write_text(json.dumps(document))
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    forbidden = tmp_path / "external-command-called"
+    for name in ("git", "beaker", "docker"):
+        program = (
+            "import sys\n"
+            if name == "git"
+            else f"from pathlib import Path\nPath({str(forbidden)!r}).touch()\nraise SystemExit(99)\n"
+        )
+        target = tools / name
+        target.write_text(f"#!{sys.executable}\n" + program)
+        target.chmod(0o755)
+    (tools / "python").symlink_to(sys.executable)
+    env = {**os.environ, "PATH": str(tools) + os.pathsep + os.defpath, "MILES_BASE_IMAGE": "unused-base"}
+    env.pop("MILES_EXISTING_IMAGE", None)
+    if existing_image:
+        env["MILES_EXISTING_IMAGE"] = "01M2931KARFP3Y2W2FPADGRFEP"
+    result = subprocess.run(
+        ["/bin/bash", "scripts/train/build_image_and_launch.sh", "--miles", str(config), "--check-data"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2, result.stderr
+    assert "Judge bindings absent" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not forbidden.exists()

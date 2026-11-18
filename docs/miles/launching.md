@@ -396,8 +396,12 @@ python -m open_instruct.miles validate runs/my-grpo.toml --check-data \
 ```
 
 `--data-path CONFIGURED_PATH=LOCAL_PATH` is repeatable and accepts individual
-files or directory prefixes; the most specific prefix wins. It changes only
-the paths read by the check, preserving the submitted config's remote paths.
+files or directory prefixes; the most specific prefix wins. Both configured and
+mapped paths are normalized, including symlinks and `..`. Mappings that match
+no configured input fail instead of silently reading the original path. Paths
+may contain `=`; ambiguous mappings fail with a request for a more specific path.
+It changes only the paths read by the check, preserving the submitted config's
+remote paths.
 Missing or unreadable files fail the check. Verify that local copies match the
 remote data; mapping does not verify remote checksums. Task, recipe and raw
 manifest inputs must be prepared first and are rejected by this check.
@@ -412,7 +416,11 @@ MILES_EXISTING_IMAGE=IMMUTABLE_IMAGE_ID \
   ./scripts/train/build_image_and_launch.sh --miles runs/my-grpo.toml --check-data
 ```
 
-This direct-wrapper check runs before Beaker submission. The check is opt-in;
+The direct wrapper validates before image lookup, build or upload, then checks
+again before Beaker submission. Fast configuration/topology checks precede data
+scans, and input errors exit with code 2 without a traceback (`--debug` shows
+the traceback). Blank lines are skipped as in training, and registry syntax is
+validated by the same helper used during preparation. The check is opt-in;
 ordinary schema validation does not scan dataset contents. Runtime validation
 remains in place because preparation, prompt-length admission or changed remote
 files can affect the eventual training inputs.

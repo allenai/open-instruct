@@ -555,6 +555,8 @@ def test_submission_script_accepts_frozen_json(tmp_path, monkeypatch):
                 "render_only": False,
                 "check_data": False,
                 "data_path": [],
+                "preflight_only": False,
+                "debug": False,
             },
         )(),
     )

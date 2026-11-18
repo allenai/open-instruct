@@ -9,6 +9,13 @@ if [[ -n "$(git status --porcelain)" ]]; then
     echo "Commit the current changes before building and launching a MILES experiment."
     exit 1
 fi
+# Fail a requested data check before image lookups, Docker builds or pushes.
+for argument in "$@"; do
+    if [[ "$argument" == "--check-data" ]]; then
+        python -m open_instruct.miles.execution.submit pending-build "$@" --preflight-only
+        break
+    fi
+done
 if [[ -n "${MILES_EXISTING_IMAGE:-}" ]]; then
     if [[ ! "$MILES_EXISTING_IMAGE" =~ ^[0-9A-HJKMNP-TV-Z]{26}$ ]]; then
         echo "MILES_EXISTING_IMAGE must be an immutable Beaker image ID, not an alias."

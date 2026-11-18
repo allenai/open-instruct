@@ -20,9 +20,9 @@ from pathlib import Path
 
 from open_instruct import ifeval_constraints, logger_utils
 from open_instruct.miles.configuration import validation
-from open_instruct.miles.datasets import mixture, pools, synlogic
+from open_instruct.miles.datasets import mixture, pools, reward_registry, synlogic
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import grading, judging, task_verifiers
+from open_instruct.miles.rewards import judging, task_verifiers
 from open_instruct.miles.rollout import pool_sampling
 
 logger = logger_utils.setup_logger(__name__)
@@ -509,20 +509,7 @@ def _adopt(data, tokenizer, template, inputs):
 
 def _prepared(data, inputs):
     registry = _read_json_object(data["reward_config"], inputs)
-    if not isinstance(registry, dict) or not registry:
-        raise InputError("Trusted reward registry must be a nonempty mapping")
-    for name, spec in registry.items():
-        if (
-            not isinstance(name, str)
-            or not isinstance(spec, dict)
-            or not isinstance(spec.get("factory"), str)
-            or "." not in spec["factory"]
-        ):
-            raise InputError("Trusted registry entries require explicit factory paths")
-        try:
-            grading.validate_spec(spec)
-        except ValueError as error:
-            raise InputError(f"Verifier {name!r}: {error}") from error
+    reward_registry.validate(registry)
     evaluation = data.get("eval_prompt_data", [])
     if not isinstance(evaluation, list) or len(evaluation) % 2:
         raise InputError("eval_prompt_data must alternate dataset names and paths")
