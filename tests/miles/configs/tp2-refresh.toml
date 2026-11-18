@@ -1,5 +1,6 @@
 # Four-GPU mechanics test: EP2 Tiny trainer plus one TP2 inference engine.
 # This deliberately small batch checks refresh machinery, not Small throughput.
+# Synthetic sibling rewards ensure nonzero gradients despite capped responses.
 # Replace YOUR_USERNAME and inspect `plan` before launching.
 schema_version = 1
 name = "tp2-refresh-smoke"
@@ -95,10 +96,11 @@ scoring_check_interval = 1
 router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0
 reward_reasoning_mode = "required"
-reward_zero_truncated = true
+reward_zero_truncated = false
 max_run_seconds = 2400
 
 [miles]
+custom_rm_path = "scripts.miles.tp2_smoke_reward.score"
 pause_generation_mode = "in_place"
 calculate_per_token_loss = true
 use_rollout_routing_replay = true
