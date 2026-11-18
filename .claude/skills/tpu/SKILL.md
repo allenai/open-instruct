@@ -27,10 +27,19 @@ Rules an agent follows:
 - **Stop a run by deactivating its Kueue workload** (`spec.active=false`, command in the guide). Suspending the JobSet
   does nothing while it is admitted.
 - **Pick the mesh from the guide's measured table** (Changing the recipe). On the `8x8x8`, a short sweep of the
-  parallelism split, batch, vocab tiling and XLA collective flags found only data 8 x fsdp 8 faster for tiny (+8%), and
-  small fits only its one config. Don't set `--xla_tpu_enable_async_ragged_all_to_all`: it corrupts an MoE router
-  gate's gradient (~1e33) while the forward loss stays normal, every few steps on the `8x8x8` (guide: Changing the recipe). Run any
-  new slice well past step 20 before trusting it. A new slice or mesh needs an xprof of one TPU step first (in-loop
+  parallelism split, batch, vocab tiling and XLA collective flags found only data 8 x fsdp 8 faster for tiny (+8%).
+  For small at 16 rows, the post-training MaxText notes
+  ([doc](https://docs.google.com/document/d/1tqr-61buACTuGTBEQkVwb644o_QseqwpYipyE9aza4w/edit), 2026-11-17) measured
+  drop-free 6.6 s/step on a `4x4x8` (fsdp 16 x expert 8) and 4.1 s/step on the `8x8x8` (data 4 x fsdp 4 x expert 32),
+  plus host-loop and checkpoint fixes; copy its config but not its `LIBTPU_INIT_ARGS` (below). Don't set
+  `--xla_tpu_enable_async_ragged_all_to_all`: it corrupts an MoE router gate's gradient (~1e33) while the forward loss
+  stays normal, every few steps on the `8x8x8` (guide: Changing the recipe). Run any new slice well past step 20 before
+  trusting it.
+- **Size the MoE buffer for a trained router.** On SFT data, dropping nothing needs `ragged_buffer_factor` of about 7 at
+  expert 8 and about 14 at expert 32; 3.0 drops tokens. Log `REQUIRED_RBF` and keep the factor above its maximum.
+- **An inf grad norm can be finite garbage.** Without the async ragged flag, a patched small run on the `8x8x8` had
+  routed-expert `wi_0` gradients of ~1e31 on 7 of 8 steps (every element finite, forward loss normal), so the fp32
+  norm overflowed. When the norm is inf or huge, print each leaf's max |grad| before blaming the data. A new slice or mesh needs an xprof of one TPU step first (in-loop
   all-gathers cost 140x once), and its own same-slice control.
 - **Stream `REQUIRED_RBF` from JAX process 0 from step 1** (`kubectl logs -f` on that pod) when a rule needs every step.
   Polling `kubectl logs` loses steps at kubelet's log rotation, and the agent account cannot read Cloud Logging.
