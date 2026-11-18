@@ -15,6 +15,7 @@ from open_instruct.miles.configuration import (
     async_capacity,
     constraints,
     graph_config,
+    refresh_deployment,
     score_centering,
     throughput,
     validation,
@@ -505,9 +506,8 @@ class RunConfig:
             raise constraints.error(
                 'Policy cache backend currently requires non-colocated serving and miles.pause_generation_mode="in_place"'
             )
-        # This preflight checks top-level settings. Refresh/engine_drain reject
-        # sglang_config below; barrier-mode server-group overrides are resolved
-        # and cache-validated by Core at actor startup.
+        # Refresh permits only a checkpoint-path override with the same TP1
+        # topology; arbitrary server-group overrides remain barrier-only.
         if options.get("pause_generation_mode") == "in_place":
             if options.get("colocate"):
                 raise constraints.error("Core in_place publication requires non-colocated serving")
@@ -756,9 +756,10 @@ class RunConfig:
             raise constraints.error(
                 "engine_drain supports only the built-in reward-group filters", constraints.Category.NOT_IMPLEMENTED
             )
+        if options.get("sglang_config"):
+            refresh_deployment.validate(options)
         for name in (
             "custom_generate_function_path",
-            "sglang_config",
             "load_debug_rollout_data",
             "rollout_function_path",
             "eval_function_path",

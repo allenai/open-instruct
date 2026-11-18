@@ -1,4 +1,8 @@
 # Changelog
+
+- Allow background evaluation to serve block-FP8 exports while preserving the original snapshot (https://github.com/allenai/open-instruct/pull/2275).
+
+- Allow checkpoint-only TP1 deployment overrides with Core refresh while retaining topology and cache restrictions (https://github.com/allenai/open-instruct/pull/2275).
 - Restore online FP8 loading buffers and preserve serving storage during weight refresh (https://github.com/allenai/open-instruct/pull/2274).
 
 All notable changes to this project will be documented in this file.

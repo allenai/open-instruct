@@ -129,7 +129,7 @@ def judge_harness_defaults(harness):
 
 def command(receipt, output):
     files = validate_serving_artifact(receipt["evaluation"])
-    checkpoint = receipt["checkpoint"]
+    checkpoint = receipt.get("serving_checkpoint", receipt["checkpoint"])
     first = receipt["tasks"][0]
     if first.get("kind", "task") == "external":
         if len(receipt["tasks"]) != 1:
@@ -629,6 +629,53 @@ def run_tasks(receipt, output):
         raise failures[0][1]
 
 
+def quantized_snapshot(receipt, output):
+    """Convert only serving weights; retain the original snapshot in provenance."""
+    if receipt["evaluation"].get("quantized_export") != "fp8":
+        return receipt
+    target = output / "serialized-fp8"
+    marker = output / "serialized-fp8-complete.json"
+    source = Path(receipt["checkpoint"])
+    digest = hashlib.sha256((source / "config.json").read_bytes()).hexdigest()
+    if not marker.exists():
+        if target.exists():
+            raise ValueError("Uncommitted quantized evaluation snapshot; inspect before retry")
+        subprocess.run(
+            [
+                sys.executable,
+                "/opt/core-rl/sources/miles/tools/convert_core_hf_quantized.py",
+                "--model-dir",
+                str(source),
+                "--save-dir",
+                str(target),
+                "--format",
+                "fp8",
+                "--device",
+                "cuda",
+            ],
+            check=True,
+        )
+        write_json(marker, {"source": str(source), "config_sha256": digest})
+    if json.loads(marker.read_text()) != {"source": str(source), "config_sha256": digest}:
+        raise ValueError("Quantized snapshot provenance mismatch")
+    original = json.loads((source / "config.json").read_text())
+    converted = json.loads((target / "config.json").read_text())
+    quant = converted.pop("quantization_config")
+    if converted != original or quant.get("weight_block_size") != [128, 128]:
+        raise ValueError("Quantized evaluator changed model configuration or block recipe")
+    config = dict(receipt["evaluation"])
+    files = validate_serving_artifact(config)
+    if files is not None:
+        policy = json.loads(files["policy.json"])
+        policy["model_config_sha256"] = hashlib.sha256((target / "config.json").read_bytes()).hexdigest()
+        raw = json.dumps(policy, sort_keys=True).encode()
+        item = {"sha256": hashlib.sha256(raw).hexdigest(), "base64": base64.b64encode(raw).decode()}
+        artifact = config["serving_artifact"]
+        config["serving_artifact"] = {**artifact, "files": {**artifact["files"], "policy.json": item}}
+        config["kda_policy"] = {**config["kda_policy"], "sha256": item["sha256"]}
+    return {**receipt, "serving_checkpoint": str(target), "evaluation": config}
+
+
 def run_evaluation(receipt):
     files = validate_serving_artifact(receipt["evaluation"])
     if files is not None:
@@ -669,7 +716,8 @@ def run_evaluation_locked(receipt, output):
         ).strip()
         if revision != receipt["evaluation"]["revision"]:
             raise ValueError("Evaluator revision does not match the pinned receipt")
-        checkpoint = receipt["checkpoint"]
+        receipt = quantized_snapshot(receipt, output)
+        checkpoint = receipt.get("serving_checkpoint", receipt["checkpoint"])
         for name in ("config.json", "tokenizer_config.json"):
             if not (Path(checkpoint) / name).is_file():
                 raise ValueError(f"Incomplete HF snapshot: missing {name}")

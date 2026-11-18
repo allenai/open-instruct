@@ -51,6 +51,7 @@ def parse(value, launch):
         "submit_timeout",
         "timeout",
         "provider_kwargs",
+        "quantized_export",
         "external_server_args",
         "kda_policy",
         "min_runtime",
@@ -59,7 +60,11 @@ def parse(value, launch):
         raise InputError("evaluation.server_args was replaced by provider_kwargs; use SGLang Python option names")
     if set(value) - allowed:
         raise InputError(f"Unknown evaluation fields: {sorted(set(value) - allowed)}")
+    if value.get("quantized_export") not in (None, "fp8"):
+        raise InputError("evaluation.quantized_export supports only fp8")
     mode = value.setdefault("mode", "shared")
+    if value.get("quantized_export") and mode != "background":
+        raise InputError("evaluation.quantized_export requires background evaluation")
     if mode not in ("shared", "background"):
         raise InputError("evaluation.mode must be shared or background")
     if mode == "shared":

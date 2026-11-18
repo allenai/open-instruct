@@ -14,8 +14,6 @@ import os
 from functools import wraps
 from pathlib import Path
 
-from . import quantized_publication
-
 RUNTIME_LOCK = Path(os.environ.get("OI_MILES_KDA_RUNTIME_LOCK", "/opt/core-rl/sources/runtime.lock.json"))
 
 TARGETS = (
@@ -143,7 +141,6 @@ def run_scheduler_process(*args, **kwargs):
         server_args=args[0] if args else kwargs.get("server_args"),
         gpu_id=args[2] if len(args) > 2 else kwargs.get("gpu_id"),
     )
-    quantized_publication.install_nvfp4_publication_context()
     scheduler = importlib.import_module("sglang.srt.managers.scheduler")
     return scheduler.run_scheduler_process(*args, **kwargs)
 
