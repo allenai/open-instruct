@@ -44,6 +44,7 @@ All notable changes to this project will be documented in this file.
 - MILES retains the strict standalone/training scoring check: drift above `core.scoring_check_tolerance` (default 0.001) stops training; eager scoring uses the same activation arithmetic as training (https://github.com/allenai/open-instruct/pull/2187).
 
 ### Added
+- Add a CPU-only MILES prepared-data preflight to catch missing or unused judge bindings before GPU submission (PR link pending).
 - Add opt-in MILES historical-priority sampling that visits groups 1–4 in order each epoch, with deterministic within-group shuffle, optional source weights inside the active group, validated labels, and recoverable epoch cursors (https://github.com/allenai/open-instruct/pull/2251).
 - Add opt-in MILES training prompt exclusion with recorded source counts, preserved mixture weights, and empty-source protection (https://github.com/allenai/open-instruct/pull/2244).
 - Add versioned long-context dataset adapters and deterministic reward contracts, for consuming Workbench-prepared DocQA-RL and GoLongRL sources; preserve routed adapter identity and external pool assignments (https://github.com/allenai/open-instruct/pull/2199).

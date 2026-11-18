@@ -369,3 +369,50 @@ at runtime. Never put a bearer-token value in `launch.env`, a dataset row,
 verifier configuration, build argument or image. Existing published image digests
 must be rebuilt to acquire these dependencies. The binary base and CUDA stack
 remain pinned.
+
+## Check prepared-data judge bindings before allocating GPUs
+
+For runs using prepared JSONL (`data.prompt_data` or prepared `data.sources`),
+run the CPU-only data preflight before submission:
+
+```bash
+python -m open_instruct.miles validate runs/my-grpo.toml --check-data
+```
+
+This streams every training and inline evaluation row and applies the same
+judge-binding, preserved-query and target/rubric checks used during training
+startup. It rejects both missing bindings and configured bindings absent from
+all inputs, including unused bindings copied from a broader dataset. An entry
+in `verifiers.json` alone does not establish that a binding is used. Inputs can
+be plain or gzip-compressed JSONL. No model, tokenizer, training runtime or
+judge service is loaded, and no Beaker resources are allocated by validation.
+
+On a submitting host without the Weka mount, use verified local copies and map
+the configured input directory to that copy:
+
+```bash
+python -m open_instruct.miles validate runs/my-grpo.toml --check-data \
+  --data-path /weka/oe-training-default/me/data=/local/verified-data
+```
+
+`--data-path CONFIGURED_PATH=LOCAL_PATH` is repeatable and accepts individual
+files or directory prefixes; the most specific prefix wins. It changes only
+the paths read by the check, preserving the submitted config's remote paths.
+Missing or unreadable files fail the check. Verify that local copies match the
+remote data; mapping does not verify remote checksums. Task, recipe and raw
+manifest inputs must be prepared first and are rejected by this check.
+
+To make validation a gate in the launch command, add `--check-data` (and any
+local mappings) to `python -m open_instruct.miles run CONFIG`. The check runs
+before the image wrapper. The committed-image wrapper also accepts these flags
+when called directly:
+
+```bash
+MILES_EXISTING_IMAGE=IMMUTABLE_IMAGE_ID \
+  ./scripts/train/build_image_and_launch.sh --miles runs/my-grpo.toml --check-data
+```
+
+This direct-wrapper check runs before Beaker submission. The check is opt-in;
+ordinary schema validation does not scan dataset contents. Runtime validation
+remains in place because preparation, prompt-length admission or changed remote
+files can affect the eventual training inputs.
