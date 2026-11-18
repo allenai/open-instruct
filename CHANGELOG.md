@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed
+- Enable TP2 resident MILES refresh and pin Core-compatible sharded expert rounding; add bounded serving and refresh smoke recipes (https://github.com/allenai/open-instruct/pull/2282).
 - Use 2,048-response optimizer batches at constant LR 6e-6 in Tiny MILES learning examples and token-mean loss in all maintained MILES examples, preserving omitted library defaults (https://github.com/allenai/open-instruct/pull/2271).
 - Align every Small MILES recipe with the Tiny baseline from #2271: 2,048-response batches at constant LR 6e-6 with no warmup and token-mean loss; retain historical timing provenance (https://github.com/allenai/open-instruct/pull/2280).
 - Retain terminal unused-work accounting after MILES refresh cancellation and audit Small timing recipes against the original Beaker artifacts, including the completed R160 trial and corrected score diagnostics (https://github.com/allenai/open-instruct/pull/2280).
