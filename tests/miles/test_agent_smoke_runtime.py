@@ -41,8 +41,19 @@ def test_probe_preserves_tool_history_and_records_both_calls(monkeypatch, tmp_pa
         async def __aexit__(self, *args):
             pass
 
-        async def create(self, **kwargs):
-            requests.append(copy.deepcopy(kwargs))
+        async def create(self, *, model, messages, tools, max_tokens, extra_body, tool_choice=None):
+            requests.append(
+                copy.deepcopy(
+                    dict(
+                        model=model,
+                        messages=messages,
+                        tools=tools,
+                        max_tokens=max_tokens,
+                        extra_body=extra_body,
+                        tool_choice=tool_choice,
+                    )
+                )
+            )
             return SimpleNamespace(choices=[replies[len(requests) - 1]])
 
     monkeypatch.setattr(agent_smoke, "AsyncOpenAI", Client)
@@ -51,13 +62,16 @@ def test_probe_preserves_tool_history_and_records_both_calls(monkeypatch, tmp_pa
         agent_smoke.run(
             "http://session",
             [{"role": "user", "content": "Read the value"}],
-            {"max_tokens": 256},
+            {"max_tokens": 256, "temperature": 1.0, "no_stop_trim": True, "skip_special_tokens": False},
             {"task_id": "task-1", "value": 42},
         )
     )
     assert requests[1]["messages"][-1] == {"role": "tool", "tool_call_id": "call1", "content": "42"}
     assert requests[1]["messages"][-2]["tool_calls"][0]["id"] == "call1"
     assert requests[1]["tool_choice"] == "none"
+    assert requests[1]["max_tokens"] == 256
+    assert requests[1]["extra_body"]["no_stop_trim"] is True
+    assert requests[1]["extra_body"]["skip_special_tokens"] is False
     assert result["reward"] == 1
     assert result["agent_metrics"]["turns"] == 2
     assert result["agent_metrics"]["tool_calls"] == 1

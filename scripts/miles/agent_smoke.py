@@ -38,9 +38,13 @@ async def run(base_url, prompt, request_kwargs, metadata, **kwargs):
     delay = float(metadata.get("tool_delay_seconds", 0))
     metrics = {"turns": 0, "tool_calls": 0, "total_tool_time": 0.0}
     reward = 0.0
+    generation = dict(request_kwargs)
+    max_tokens = generation.pop("max_tokens", None)
     async with AsyncOpenAI(base_url=openai_session_url(base_url), api_key="EMPTY", timeout=900) as client:
         first = (
-            await client.chat.completions.create(model="model", messages=messages, tools=TOOLS, **request_kwargs)
+            await client.chat.completions.create(
+                model="model", messages=messages, tools=TOOLS, max_tokens=max_tokens, extra_body=generation
+            )
         ).choices[0]
         metrics["turns"] += 1
         messages.append(first.message.model_dump(exclude_none=True))
@@ -61,7 +65,12 @@ async def run(base_url, prompt, request_kwargs, metadata, **kwargs):
                 )
             final = (
                 await client.chat.completions.create(
-                    model="model", messages=messages, tools=TOOLS, tool_choice="none", **request_kwargs
+                    model="model",
+                    messages=messages,
+                    tools=TOOLS,
+                    tool_choice="none",
+                    max_tokens=max_tokens,
+                    extra_body=generation,
                 )
             ).choices[0]
             metrics["turns"] += 1
