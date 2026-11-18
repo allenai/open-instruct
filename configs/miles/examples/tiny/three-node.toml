@@ -60,6 +60,7 @@ prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-
 reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/dolci-think-rl-7b/verifiers.json"
 
 [training]
+learning_rate = 6e-6
 num_rollouts = 200
 save_interval = 25
 
@@ -236,9 +237,9 @@ packing_max_tokens = 34816
 [inference]
 placement_mode = "disaggregated"
 gpus = 15
-rollout_batch_size = 64
+rollout_batch_size = 256
 samples_per_prompt = 8
-global_batch_size = 512
+global_batch_size = 2048
 max_response_length = 32768
 max_context_length = 34816
 # Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
@@ -270,7 +271,7 @@ scoring_check_interval = 0
 [miles]
 # Keep active-request KV/recurrent state across weight updates; the preset disables prefix reuse.
 pause_generation_mode = "in_place"
-# Keep response weighting independent of generation length.
+# Weight contributing tokens equally across responses.
 calculate_per_token_loss = true
 # Trainer ranks only; do not change the serving allocator.
 train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }
@@ -284,7 +285,7 @@ use_distributed_post = true
 http_post_actors_per_node = 16
 http_post_num_cpus = 1.0
 rollout_executor_num_cpus = 2.0
-# Four collections: 512 complete prompt groups / 4,096 samples.
+# Four collections: 1,024 complete prompt groups / 8,192 samples.
 async_data_buffer_capacity_factor = 4.0
 sglang_enable_metrics = true
 use_rollout_routing_replay = true

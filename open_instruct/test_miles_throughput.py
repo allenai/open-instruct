@@ -97,7 +97,7 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     assert producer_budget < capacity["global_http_slots"]
     assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
     assert config.miles["n_samples_per_prompt"] == 8
-    assert config.miles["global_batch_size"] == 512
+    assert config.miles["global_batch_size"] == 2048
     assert config.core.max_policy_lag == 12
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
     assert config.miles["sglang_max_total_tokens"] == 512 * 34816
@@ -117,9 +117,9 @@ def test_dev_retains_weight_qualification():
 
 def test_learning_template_still_requires_scores_for_multiple_optimizer_steps():
     with pytest.raises(ValueError, match="refresh currently requires one optimizer step"):
-        RunSpec.load("configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=128"])
+        RunSpec.load("configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=512"])
     config = RunSpec.load(
-        "configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=128", 'core.publication_mode="barrier"']
+        "configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=512", 'core.publication_mode="barrier"']
     ).compile()
     decision = config.plan()["scoring_pass"]
     assert decision["standalone"] is True

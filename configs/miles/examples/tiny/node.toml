@@ -45,6 +45,7 @@ prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-i
 reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/verifiers.json"
 
 [training]
+learning_rate = 6e-6
 num_rollouts = 200
 save_interval = 25
 
@@ -90,9 +91,9 @@ packing_max_tokens = 34816
 [inference]
 placement_mode = "disaggregated"
 gpus = 6
-rollout_batch_size = 64
+rollout_batch_size = 256
 samples_per_prompt = 8
-global_batch_size = 512
+global_batch_size = 2048
 max_response_length = 32768
 max_context_length = 34816
 # Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
@@ -129,7 +130,7 @@ use_distributed_post = true
 http_post_actors_per_node = 16
 http_post_num_cpus = 1.0
 rollout_executor_num_cpus = 2.0
-# Keep response weighting independent of generation length.
+# Weight contributing tokens equally across responses.
 calculate_per_token_loss = true
 # Trainer ranks only; do not change the serving allocator.
 train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }

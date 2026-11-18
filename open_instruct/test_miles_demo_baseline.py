@@ -9,12 +9,16 @@ from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 
 
-@pytest.mark.parametrize("name,batch,lag,buffer", [("node", 512, 12, 1), ("three-node", 512, 12, 4)])
+@pytest.mark.parametrize("name,batch,lag,buffer", [("node", 2048, 12, 1), ("three-node", 2048, 12, 4)])
 def test_learning_baseline_and_worker_controls(name, batch, lag, buffer):
     config = RunSpec.load(f"configs/miles/examples/tiny/{name}.toml").compile()
     options = config.resolved_miles()
     assert options["n_samples_per_prompt"] == 8
     assert options["global_batch_size"] == batch
+    assert options["rollout_batch_size"] == 256
+    assert options["lr"] == 6e-6
+    assert options["lr_decay_style"] == "constant"
+    assert options["lr_warmup_iters"] == 0
     assert config.core.max_policy_lag == lag
     assert options["async_data_buffer_capacity_factor"] == buffer
     assert config.core.reward_zero_truncated is True

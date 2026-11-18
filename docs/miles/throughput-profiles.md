@@ -275,9 +275,9 @@ whole groups (or one collection, whichever is larger). The examples explicitly
 use 1,024 unfinished samples for node and 3,840 for three-node. Without those
 limits their presets would resolve to 6,144 and 15,360 respectively.
 Generic configurations with omitted budgets give 1,024/1,920 for those topologies.
-Explicit budgets win. Both learning examples use 64 prompts × 8 responses,
-batch 512 and lag 12. One full wave across six
-512-slot engines represents six batches, but keeping those slots occupied is a
+Explicit budgets win. Both Tiny learning examples use 256 prompts × 8 responses,
+batch 2,048, constant LR 6e-6 and lag 12. One full wave across six
+512-slot engines represents 1.5 optimizer batches, but keeping those slots occupied is a
 different objective from keeping the trainer supplied. Neither batch-equivalents
 nor a static lag limit predicts drain time or actual policy age.
 Measure useful consumption, queue age/discards and publication latency in the
@@ -407,8 +407,8 @@ metadata. Decoding remains synchronous within each HTTP actor; it does not
 remove batch preparation from the coordinator, and converted samples still
 hold their token, mask and logprob lists. The earlier transport runs used a completed
 buffer of eight optimizer batches (512 groups / 4,096 samples) with a
-policy-lag limit of six. The current three-node template uses the same group
-capacity, now four batches of 1,024 samples, with lag 12. Capacity alone does
+policy-lag limit of six. The current three-node template buffers four batches
+of 2,048 samples (1,024 groups / 8,192 samples), with lag 12. Capacity alone does
 not guarantee all queued work stays usable.
 
 The three-node template gives the trainer a full node (8 GPUs, EP8) and runs
