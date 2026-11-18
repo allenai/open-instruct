@@ -30,7 +30,7 @@ def run(root, cp, *, checkpointing, token_average):
     rank, world = int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
     dist.init_process_group("nccl")
-    gloo = dist.new_group(backend="gloo")
+    gloo = actor.distributed_utils.init_gloo_group()
     try:
         group, trivial = GroupInfo(rank, world, dist.group.WORLD, gloo), GroupInfo(0, 1, None)
         parallel.set_parallel_state(
@@ -82,9 +82,8 @@ def run(root, cp, *, checkpointing, token_average):
         args = arguments.parse_args()
         worker = actor.OLMoCoreTrainRayActor.__new__(actor.OLMoCoreTrainRayActor)
         worker.args = args
-        with mock.patch.object(actor.distributed_utils, "get_gloo_group", return_value=gloo):
-            worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
-            worker.train_parallel_config = context_parallel.configure(worker.train_module)
+        worker.train_module, worker.hf_config, worker.model_config = models.build_train_module(args)
+        worker.train_parallel_config = context_parallel.configure(worker.train_module)
         worker.model, worker.optimizer = worker.train_module.model, worker.train_module.optim
         worker.lr_scheduler = scheduler.CoreLRScheduler(args, worker.optimizer)
         worker._observed_response_tokens = 0
@@ -103,10 +102,7 @@ def run(root, cp, *, checkpointing, token_average):
         rollout["rollout_log_probs"] = worker._score(
             worker.train_module, [batch for step in packs for batch in step], use_replay=True
         )
-        with (
-            mock.patch.object(actor.distributed_utils, "get_gloo_group", return_value=gloo),
-            mock.patch.object(actor.miles_data, "get_rollout_data", return_value=(rollout, contextlib.nullcontext())),
-        ):
+        with mock.patch.object(actor.miles_data, "get_rollout_data", return_value=(rollout, contextlib.nullcontext())):
             worker.train(0, None)
         result = ep_contract.full_optimizer_state(worker)
         if rank == 0:
