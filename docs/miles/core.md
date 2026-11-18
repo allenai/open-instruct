@@ -81,6 +81,15 @@ On a failed refresh run, cleanup cancels outstanding producer work instead of
 draining requests that may be waiting on paused engines. Shared-engine evaluation
 and successful shutdown retain their separate generation-drain boundaries.
 
+Refresh supports TP1 and TP2 resident serving. For TP2, set
+`inference.rollout_tensor_parallel_size = 2`, allocate an even `inference.gpus`,
+and pass `OLMO_SGLANG_CORE_COMPAT = "rounding"` in `launch.env` for compatible
+Olmo MoE execution. The trainer's expert parallelism is independent. The shared
+transport broadcasts each full HF weight bucket to every engine TP rank; each
+rank's loader selects its shard. Independent `engine_drain` publication remains
+TP1. A short mechanics recipe is `tests/miles/configs/tp2-refresh.toml`; it uses
+Tiny to check publication with four GPUs and does not tune Small concurrency.
+
 SGLang starts from HF config/tokenizer/weights. Core imports those weights into
 its native training representation. Updated policies are streamed directly as
 serving tensors; no HF directory or Megatron conversion is written per update.
