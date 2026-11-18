@@ -214,6 +214,7 @@ NATIVE_VALIDATION_OPTIONS = (
         (
             "actor_num_gpus_per_node",
             "actor_num_nodes",
+            "allgather_cp",
             "advantage_estimator",
             "balance_data",
             "calculate_per_token_loss",
@@ -266,6 +267,7 @@ NATIVE_VALIDATION_OPTIONS = (
             "use_fault_tolerance",
             "use_miles_router",
             "use_rollout_indexer_replay",
+            "use_rollout_routing_replay",
             "use_rollout_logprobs",
             "use_tis",
         )

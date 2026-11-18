@@ -2,10 +2,11 @@
 
 import dataclasses
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from open_instruct.miles.configuration import specs
+from open_instruct.miles.configuration import constraints, specs
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 
 
@@ -44,6 +45,15 @@ def test_smoke_compiles_cp_without_changing_inference_tp():
     assert config.resolved_miles()["allgather_cp"]
 
 
+def test_native_validation_keeps_replay_and_cp_response_layout():
+    config = configured()
+    args = SimpleNamespace(**(config.miles | {"use_rollout_routing_replay": True, "allgather_cp": True}))
+    fields = constraints.native_values(args, set())
+    assert fields["use_rollout_routing_replay"]
+    assert fields["allgather_cp"]
+    RunConfig(dataclasses.replace(config.core, replay_diagnostics=True), fields).validate()
+
+
 @pytest.mark.parametrize(
     "change,match",
     [
@@ -52,6 +62,8 @@ def test_smoke_compiles_cp_without_changing_inference_tp():
         ({"tensor_model_parallel_size": 2}, "tensor_model_parallel_size"),
         ({"pipeline_model_parallel_size": 2}, "pipeline_model_parallel_size"),
         ({"advantage_estimator": "gspo"}, "GRPO"),
+        ({"custom_loss_function_path": "fixture.loss"}, "custom loss"),
+        ({"normalize_advantages": True}, "advantage whitening"),
     ],
 )
 def test_unqualified_parallel_contracts_fail_offline(change, match):

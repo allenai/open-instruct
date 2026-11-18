@@ -40,7 +40,8 @@ response vectors only and count each CP-shared sample once.
 
 Initial scope is MoE GRPO policy loss, sequence packing and zero router auxiliary
 losses. Dense trainers, trainer TP/PP, reduce-scatter, expert-balanced packing and
-forced-exit training are outside this qualification. CP degree must divide the
+forced-exit training, custom loss overrides and global advantage whitening are
+outside this qualification. CP degree must divide the
 relevant head counts; Core validates model geometry. The full underlying Core
 feature surface is broader than this adapter boundary.
 

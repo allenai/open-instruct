@@ -616,6 +616,10 @@ class RunConfig:
                 raise constraints.error("Core Ulysses currently supports the GRPO policy loss")
             if self.core.router_aux_loss_weight or self.core.router_z_loss_weight:
                 raise constraints.error("Core Ulysses qualification requires zero router auxiliary losses")
+            if options.get("custom_loss_function_path") or options.get("normalize_advantages", False):
+                raise constraints.error(
+                    "Core Ulysses does not yet qualify custom loss overrides or advantage whitening"
+                )
             if options.get("allgather_cp") is False:
                 raise constraints.error("Core Ulysses requires miles.allgather_cp=true for contiguous output shards")
             # Core's contiguous Ulysses outputs use the existing MILES CP
