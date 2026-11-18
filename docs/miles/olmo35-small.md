@@ -4,8 +4,10 @@ Measured MILES RL layouts for OLMo 3.5 Small ("Hero Small", A4B,
 `olmo35-small-e256k8-sh2x`) on `ai2/holmes` B300 nodes. Configs:
 [two-node-mech](../../configs/miles/examples/small/two-node-mech.toml),
 [four-node](../../configs/miles/examples/small/four-node.toml) and
-[eight-node](../../configs/miles/examples/small/eight-node.toml). These are timing runs
-(30 updates, no checkpoints), not learning results.
+[eight-node](../../configs/miles/examples/small/eight-node.toml). The current recipes
+use the Tiny batch/LR/loss baseline from PR #2271; historical measurements below
+used the earlier settings. They run four mechanics or 30 timing updates without
+checkpoints and do not establish learning quality.
 
 ## Model and start checkpoint
 
@@ -131,18 +133,29 @@ policy age, stale/unused work and judge time before selecting a production topol
 
 ### Recipe alignment
 
-The checked-in four/eight-node recipes compile to the same training and serving
-settings as their submitted timing4n/timing8 configurations, excluding run-specific
-paths, names and the documented credential/runtime-budget changes. The mechanics
-recipe additionally enables the startup weight audit and per-update scoring checks.
+All three Small recipes, including mechanics, now use the Tiny learning baseline
+from [PR #2271](https://github.com/allenai/open-instruct/pull/2271):
 
-All three Small recipes retain the historical **128 prompts × 8 = 1,024 responses**
-and **response-mean loss**. These match the Tiny learning recipes on main at
-`28c181666`, but differ from the newer example update in
-[PR #2271](https://github.com/allenai/open-instruct/pull/2271): **64 × 8 = 512 responses**
-and **token-mean loss**. Adopting that baseline requires fresh measurements. At batch
-512, unchanged producer and completed-buffer settings also represent a different
-number of optimizer batches; retune their budgets and inspect actual policy age.
+| Setting | Current Small baseline | Historical Small measurements |
+|---|---|---|
+| Prompts × responses per prompt | 256 × 8 | 128 × 8 |
+| Responses per optimizer update | 2,048 | 1,024 |
+| Learning rate | 6e-6, constant, no warmup | 1e-6, constant, no warmup |
+| Loss weighting | Token mean | Response mean |
+| Group-standard-deviation normalization | Off | Off |
+
+This is the starting baseline for Small; the historical throughput results do not
+measure this combination. The serving geometry remains the submitted timing4n/timing8
+geometry. Paths, credentials, runtime budgets and mechanics qualification controls
+also have the documented changes above.
+
+The completed-buffer factor stays four: 1,024 prompt groups / 8,192 responses.
+Unfinished producer budgets remain 672, 2,208 and 4,512 for the two/four/eight-node
+layouts, respectively (0.328, 1.078 and 2.203 optimizer batches). The nominal sum
+of unfinished budget plus completed-buffer capacity is therefore 4.328, 5.078 and
+6.203 batches. Finished siblings can live outside that accounting; these figures
+are not policy-age guarantees. Inspect measured age and useful throughput when
+tuning the new baseline.
 Do not copy Tiny's 12.5B inference preset, evaluator profile or cache geometry into
 Small: those are model-specific. Checkpoint/export/evaluation differences here are
 intentional for disposable timing runs, not a learning-run baseline.

@@ -18,11 +18,11 @@ Use `tiny/dev.toml` for a single-GPU Tiny mechanics check and
 `small/two-node-mech.toml` for Small mechanics. Small has no single-GPU training
 recipe; the two-node layout is its smallest tested configuration.
 
-Small recipes retain their measured 1,024-response batches and response-mean loss.
-They have not adopted the newer 512-response/token-mean example update in
-[PR #2271](https://github.com/allenai/open-instruct/pull/2271). See the
-[Small audit](../../../docs/miles/olmo35-small.md#recipe-alignment) before using them
-as a current learning baseline.
+All three Small recipes use the Tiny learning baseline from
+[PR #2271](https://github.com/allenai/open-instruct/pull/2271): 256 prompts × 8
+responses, batch 2,048, constant LR 6e-6 with no warmup, and token-mean loss.
+The reported Small timings used batch 1,024, LR 1e-6 and response-mean loss;
+see the [Small audit](../../../docs/miles/olmo35-small.md#recipe-alignment).
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from

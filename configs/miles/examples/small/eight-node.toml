@@ -6,7 +6,8 @@
 #   trainer ~6.0K tok/s/GPU, peak reserved 169.7 GiB; publication ~18 s to 47 engines.
 #   Teardown only: final generation drain hit its 900 s timeout (exit 1 after all 30 updates).
 #   Terminal cleanup now cancels surplus work; the fix has not yet been GPU-qualified.
-# Historical recipe: 1,024-response batches and response-mean loss; see the docs' recipe-alignment audit.
+# Baseline matches Tiny: 256 prompts x 8, batch 2,048, LR 6e-6, token-mean loss.
+# Timing results above used batch 1,024, LR 1e-6 and response-mean loss; see the docs audit.
 # Start checkpoint: H203 SFT export hf_step18410 (emo_* fields null; HF vocab 100278, Core pads to 100352).
 # Same serving/judge settings as four-node.toml (trtllm_mha, tuned MoE tiles, rounding mode,
 # R=96 with 128 KDA slots, server concurrency 192, CUDA graph bs 96, judge timeout 600 +
@@ -89,6 +90,7 @@ seed = 17
 shuffle = true
 
 [training]
+learning_rate = 6e-6
 # Zero-std group filtering stays on (default), as in the measured runs.
 # Timing run length; raise num_rollouts and enable checkpoints for a learning run.
 num_rollouts = 30
@@ -105,9 +107,9 @@ trainer_num_nodes = 2
 [inference]
 placement_mode = "disaggregated"
 gpus = 47
-rollout_batch_size = 128
+rollout_batch_size = 256
 samples_per_prompt = 8
-global_batch_size = 1024
+global_batch_size = 2048
 max_response_length = 32768
 max_context_length = 34816
 profile = "generic"
@@ -152,8 +154,8 @@ scoring_check_interval = 0
 [miles]
 # Keep active-request KV/recurrent state across weight updates.
 pause_generation_mode = "in_place"
-# Keep response weighting independent of generation length.
-calculate_per_token_loss = false
+# Weight contributing tokens equally across responses.
+calculate_per_token_loss = true
 # Trainer ranks only; do not change the serving allocator.
 train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }
 # Rust response transport; Core owns request retries and weight-ready membership.
@@ -166,6 +168,7 @@ use_distributed_post = true
 http_post_actors_per_node = 16
 http_post_num_cpus = 1.0
 rollout_executor_num_cpus = 2.0
+# Four collections: 1,024 complete prompt groups / 8,192 samples.
 async_data_buffer_capacity_factor = 4.0
 sglang_enable_metrics = true
 use_rollout_routing_replay = true
