@@ -2,9 +2,11 @@
 
 import dataclasses
 import json
+from types import SimpleNamespace
 
 import pytest
 
+from open_instruct.miles.configuration import constraints, refresh_deployment
 from open_instruct.test_miles_policy_refresh import configured
 
 
@@ -33,6 +35,12 @@ def test_refresh_accepts_only_checkpoint_change(tmp_path):
     run.validate()
     assert run.core.publication_mode == "refresh"
     assert '"publication_mode": "refresh"' in run.arguments()[-1]
+
+
+def test_native_validation_preserves_rollout_gpu_count(tmp_path):
+    run = config(tmp_path, deployment())
+    fields = constraints.native_values(SimpleNamespace(**run.miles), set())
+    refresh_deployment.validate(fields)
 
 
 @pytest.mark.parametrize("change", ["frozen", "tp", "cache", "gpus", "extra_model", "placeholder", "unknown"])

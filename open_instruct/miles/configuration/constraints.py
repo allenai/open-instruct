@@ -248,6 +248,7 @@ NATIVE_VALIDATION_OPTIONS = (
             "rollout_external_engine_addrs",
             "custom_inference_engine_provider_path",
             "rollout_function_path",
+            "rollout_num_gpus",
             "rollout_num_gpus_per_engine",
             "rollout_sample_filter_path",
             "rollout_temperature",
