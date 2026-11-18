@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Block FP8 exporter passed 44 CPU and 3 one-B300 native loading/refresh tests at backend 5b7ff4a; full RL candidate includes independent names-only Olmo loader backport. Other dependency pins unchanged.",
+  "status": "Block FP8 exporter passed 44 CPU and 3 one-B300 native loading/refresh tests at backend 5b7ff4a; full RL candidate includes independent names-only Olmo loader backport. Other dependency pins unchanged. Offline conversion reuses one shard reader; 45 focused CPU tests pass; quantization math unchanged.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "0c93626b409b18b8fecd970dc70f00abc130261d"
+      "revision": "acfd084df389675d594c56924ab2dda60eefec04"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
