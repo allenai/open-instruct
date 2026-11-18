@@ -9,7 +9,9 @@ Triton fused-MoE tiles for OLMo 3.5 Small (A4B: 256 routed experts, top-8,
   (01M7CQZXJFJJANTT9ESVCVC04H, image 01M7A0QM57N9499PGFAT73SMF0). The tuner needed a local
   patch so that `Olmo3MoeForCausalLM` uses `latent_moe_dim` as the GEMM K dimension.
 - This copy was rebuilt from the tuner job's per-batch-size log lines (the values SGLang
-  loaded from the original file), not copied byte-for-byte.
+  loaded from the original file), not copied byte-for-byte. A subsequent audit fetched
+  the original JSON from that experiment's result dataset and confirmed identical
+  parsed contents for every batch-size entry.
 - The image copies `configs/miles` to `/opt/core-rl/configs/miles`, so the Small examples set
   `SGLANG_MOE_CONFIG_DIR = "/opt/core-rl/configs/miles/moe_configs"`. The server logs
   "Using MoE kernel config from ...", then reports that the `_down` file is missing and

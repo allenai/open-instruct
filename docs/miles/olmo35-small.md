@@ -53,8 +53,8 @@ Measured MILES RL layouts for OLMo 3.5 Small ("Hero Small", A4B,
   [moe_configs](../../configs/miles/moe_configs/README.md)): kernel -9% at batch 96, decode
   +1.6% at R=96. The tiles only take effect in an image built with this branch's
   `configs/miles`; an older image has no file at that path.
-- `OLMO_SGLANG_CORE_COMPAT = "rounding"`. HF vs SGLang greedy parity: mean |Δlogprob|
-  0.014-0.019, argmax agreement 98-99%.
+- `OLMO_SGLANG_CORE_COMPAT = "rounding"`. The attention trial's HF vs SGLang
+  samples have mean |Δlogprob| 0.0155-0.0223 and argmax agreement 98.2-99.4%.
 - Admission R=96: `sglang_max_running_requests` 96, `sglang_max_mamba_cache_size` 128,
   `sglang_server_concurrency` 192, `sglang_cuda_graph_max_bs_decode` 96, producer budget
   `async_max_concurrent_samples` = 96 × engines.
@@ -70,14 +70,82 @@ Measured MILES RL layouts for OLMo 3.5 Small ("Hero Small", A4B,
 
 ## Results
 
-Updates 10-29 unless noted, 128 prompts × 8 samples, max response 32,768 tokens.
+The table below was independently recomputed from retained Beaker artifacts on
+November 18, 2026. Updates 10-29 unless noted, 128 prompts × 8 samples, max response
+32,768 tokens. A cycle starts at `generation_wait.started_unix` and ends at
+`publication.started_unix + publication.seconds` for the same update. Startup,
+final drain and checkpoint/evaluation work are excluded. Each column is its own
+median; component medians need not sum to the cycle median. Earlier headline cycle
+figures (299/309/399/139 seconds) were not reproduced by this definition.
 
 | Run | Layout | s/update (wall median) | Gen wait | Train | Publication | Engine tok/s | Notes |
 |---|---|---|---|---|---|---|---|
-| timing4 | 4-node, R=96 | 298.6 (u10-24) | 109.6 | 171.2 | 8.9 | 2,528 | Failed at update 25: `/weka/oe-training-default` full |
-| timing4n | 4-node, R=96 | 309.0 | 125.7 | 174.7 | 9.1 | 2,524 | 30/30, clean exit |
-| timing4n-r64 | 4-node, R=64 | 398.9 | 217.5 | 163.8 | 7.2 | 1,946 | 29% slower than R=96 |
-| timing8 | 8-node, R=96 | 138.8 overall; ~181 steady | 0.3 | 97.5 | 18.0 | 2,371 | u10-23 trainer-bound on buffered work (~121 s); u24-29 generation-bound (median 181 s) |
+| [timing4](https://beaker.org/ex/01M7EWK861JCP5Z0G5514S5XJ5) | 4-node, R=96 | 276.2 (u10-24) | 109.6 | 171.2 | 8.9 | 2,528 | Failed at update 25: `/weka/oe-training-default` full |
+| [timing4n](https://beaker.org/ex/01M7HF4C8M7XC7ZPVC9QMD8X36) | 4-node, R=96 | 301.7 | 125.7 | 174.7 | 9.1 | 2,524 | 30/30, clean exit |
+| [timing4n-r64](https://beaker.org/ex/01M7J0V7M8VHN4X1PJ43BQ9JZQ) | 4-node, R=64 | 396.4 | 217.5 | 163.8 | 7.2 | 1,946 | 31% slower cycle median than R=96 |
+| [timing8](https://beaker.org/ex/01M7FV0QBE1CJ2656N5DA0JYY6), u10-23 | 8-node, R=96 | 116.0 | 0.3 | 98.1 | 17.7 | 2,371 | Drains buffered work; not a steady-state topology result |
+| timing8, u24-29 | 8-node, R=96 | 185.5 | 73.8 | 96.0 | 18.3 | — | Only six late updates; shutdown subsequently failed |
+| [timing4n-r160](https://beaker.org/ex/01M7NHRMV28ZX4S3HXD4BWAQVJ), u10-29 | 4-node, R=160 | 182.7 | 0.3 | 163.8 | 10.0 | — | Early buffered work; 50 updates total |
+| timing4n-r160, u30-49 | 4-node, R=160 | 248.9 | 64.8 | 173.3 | 9.8 | — | Later window; shutdown subsequently failed |
+
+The engine token rates above retain the original serving summaries; cycle and stage
+durations were audited directly. `driver_timing.jsonl`, `rollout_flow.jsonl`,
+`pipeline_occupancy.jsonl`, `publication.jsonl`, all-rank `training_contract_rank*.jsonl`
+and actor metric events are in each experiment's `run/checkpoints/` results.
+The R96 and R64 runs pass `scripts/miles/analyze_throughput.py` with `warmup=10`,
+including all eight trainer ranks and completed workflow checks. All 16 timing8
+ranks and all eight R160 ranks completed their requested 30/50 optimizer steps,
+respectively, without skipped updates; those experiments still failed at shutdown.
+
+### Topology interpretation
+
+- Four-node R96: trainer rollout-wait share is **35.5%** of measured driver-stage
+  time over u10-29. R64 increases it to **54.2%**. The R96 trial delivers about
+  30.6K useful response tokens/s versus 22.4K for R64, a 37% improvement under the
+  strict analyzer. Publication is about 9 seconds/update and is not the largest cost.
+- Eight-node R96: early compilation and slow trainer updates build a generation
+  backlog. Median completed queue depth falls from 384 groups over u10-23 to zero
+  over u24-29. Late trainer wait is **36.5%**; doubling both trainer and inference
+  capacity did not eliminate rollout starvation. Late stale-token discard fraction
+  is **9.3%** of delivered plus stale-discarded response tokens. Mean sample policy
+  age has a per-update median of 8.0 versions in u10-23 and 4.9 in u24-29, versus
+  2.2 for four-node R96. These are different operating regimes.
+- Four-node R160: the later u30-49 window reduces wait to **24.9%**, with median
+  sample age 3.3 versions and no stale-token discards in that window. Its early
+  near-zero wait is not a steady-state result. This is a promising next candidate,
+  not a qualified replacement: it failed the same final-drain boundary and has not
+  been repeated with code grading or newer batch/loss settings.
+- HTTP permit wait and generation-admission wait are zero at the median in these
+  windows; unfinished work is near its configured budget. This does not isolate
+  the judge's contribution. Rollout wait includes production, filtering and grading,
+  and cannot be attributed entirely to policy GPU inference without more evidence.
+- Even the successful four-node R96 run drains for 741 seconds at shutdown and
+  leaves 29.4M completed response tokens unused (10.5% of accounted delivered plus
+  stale-discarded plus terminal-unused tokens). Warm-cycle throughput is not a
+  complete job-cost metric.
+
+The optimization evidence supports the attention backend, tuned tiles and increasing
+admission above 64. It does not establish an optimal trainer/engine split. Compare
+longer runs with the same workload and objective, useful tokens per allocated GPU-hour,
+policy age, stale/unused work and judge time before selecting a production topology.
+
+### Recipe alignment
+
+The checked-in four/eight-node recipes compile to the same training and serving
+settings as their submitted timing4n/timing8 configurations, excluding run-specific
+paths, names and the documented credential/runtime-budget changes. The mechanics
+recipe additionally enables the startup weight audit and per-update scoring checks.
+
+All three Small recipes retain the historical **128 prompts × 8 = 1,024 responses**
+and **response-mean loss**. These match the Tiny learning recipes on main at
+`28c181666`, but differ from the newer example update in
+[PR #2271](https://github.com/allenai/open-instruct/pull/2271): **64 × 8 = 512 responses**
+and **token-mean loss**. Adopting that baseline requires fresh measurements. At batch
+512, unchanged producer and completed-buffer settings also represent a different
+number of optimizer batches; retune their budgets and inspect actual policy age.
+Do not copy Tiny's 12.5B inference preset, evaluator profile or cache geometry into
+Small: those are model-specific. Checkpoint/export/evaluation differences here are
+intentional for disposable timing runs, not a learning-run baseline.
 
 - Trainer: ~6.9K tok/s/GPU at EP8 on 4 nodes; ~6.0K tok/s/GPU with 2 × EP8; about 8.6-8.9M
   model tokens per update.
@@ -94,7 +162,7 @@ Updates 10-29 unless noted, 128 prompts × 8 samples, max response 32,768 tokens
 ## What did not work or was not tested
 
 - `fa4` attention: crashes on head_dim 256 (above).
-- R=64: slower (399 vs 309 s/update); engines gain throughput up to R=96. In single-engine
+- R=64: slower (396 vs 302 s/update); engines gain throughput up to R=96. In single-engine
   forced decodes, R=144 matched R=96 and R=192 gave +19% total tok/s with each request ~40%
   slower.
 - EP4 trainer: untested.
@@ -138,9 +206,12 @@ checks. The timing recipes deliberately disable saving and have no held-out spli
 
 ## Open items
 
-- R=160 test (`kf-hero-miles-timing4n-r160`): R=160, server concurrency 320, 192 KDA slots,
-  KV pool auto-sized (3,823,488 tokens). Still running at the time of writing; W&B
-  <https://wandb.ai/ai2-llm/open_instruct_internal/runs/dm2b8jj8>.
+- R160 finished 50 updates, then failed its 900-second final generation drain.
+  It used server concurrency 320, 192 KDA slots, CUDA graph batch 160, producer
+  budget 3,680 and an auto-sized KV pool. Repeat after the terminal-cleanup fix
+  and under the intended code-grading and batch/loss configuration.
 - Judge latency is not logged per call, so the judge's share of generation wait is unmeasured.
-- `train_rollout_logprob_abs_diff` reads 0.0 on every update. It is probably not computed in this
-  configuration; unverified.
+- The earlier claim that `train_rollout_logprob_abs_diff` is always zero was incorrect.
+  Raw actor metric events record about 0.008 over the measured timing windows;
+  `collection_score_mean_abs` is about 0.0065-0.0067. These combine numerical and
+  policy differences; they do not replace a controlled same-weight parity check.

@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Use 2,048-response optimizer batches at constant LR 6e-6 in Tiny MILES learning examples and token-mean loss in all maintained MILES examples, preserving omitted library defaults (https://github.com/allenai/open-instruct/pull/2271).
+- Retain terminal unused-work accounting after MILES refresh cancellation and audit Small timing recipes against the original Beaker artifacts, including the completed R160 trial and corrected score diagnostics (https://github.com/allenai/open-instruct/pull/2280).
 - Cancel unused MILES refresh generation during terminal cleanup so completed training runs do not wait for surplus responses; add Small B300 recipes with code-service credentials and mechanics qualification checks (https://github.com/allenai/open-instruct/pull/2280).
 - Enable native MILES score-centering TIS/MIS in Core refresh runs, validate candidate settings before launch, and pin the complete-support precision fixes (https://github.com/allenai/open-instruct/pull/2229).
 - Organize MILES examples by model family and explicitly configure candidate policy evaluation sampling, including shared and OPD in-loop defaults (https://github.com/allenai/open-instruct/pull/2255).
