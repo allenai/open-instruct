@@ -4,10 +4,14 @@ All notable changes to this project will be documented in this file.
 
 
 ### Removed
+- Remove the Small `dev.toml` placeholder that used a Tiny checkpoint; direct Small mechanics checks to the tested two-node recipe (https://github.com/allenai/open-instruct/pull/2280).
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed
 - Use 2,048-response optimizer batches at constant LR 6e-6 in Tiny MILES learning examples and token-mean loss in all maintained MILES examples, preserving omitted library defaults (https://github.com/allenai/open-instruct/pull/2271).
+- Align every Small MILES recipe with the Tiny baseline from #2271: 2,048-response batches at constant LR 6e-6 with no warmup and token-mean loss; retain historical timing provenance (https://github.com/allenai/open-instruct/pull/2280).
+- Retain terminal unused-work accounting after MILES refresh cancellation and audit Small timing recipes against the original Beaker artifacts, including the completed R160 trial and corrected score diagnostics (https://github.com/allenai/open-instruct/pull/2280).
+- Cancel unused MILES refresh generation during terminal cleanup so completed training runs do not wait for surplus responses; add Small B300 recipes with code-service credentials and mechanics qualification checks (https://github.com/allenai/open-instruct/pull/2280).
 - Enable native MILES score-centering TIS/MIS in Core refresh runs, validate candidate settings before launch, and pin the complete-support precision fixes (https://github.com/allenai/open-instruct/pull/2229).
 - Organize MILES examples by model family and explicitly configure candidate policy evaluation sampling, including shared and OPD in-loop defaults (https://github.com/allenai/open-instruct/pull/2255).
 - Add the native Nemotron abstention QA adapter and named three-tier judge profile, preserving NVIDIA's rubric and answer extraction while keeping judge failures ungraded (https://github.com/allenai/open-instruct/pull/2252).

@@ -70,3 +70,26 @@ def test_explicit_experiments_remain_possible():
     assert config.core.reward_zero_truncated is False
     assert config.miles["calculate_per_token_loss"] is False
     assert "--calculate-per-token-loss" not in config.arguments()
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted((Path(__file__).resolve().parents[1] / "configs/miles/examples/small").glob("*.toml")),
+    ids=lambda path: path.stem,
+)
+def test_small_recipes_use_tiny_learning_baseline(path):
+    # Match the final Tiny recipe in #2271, including the Small mechanics run.
+    # Hardware, serving pools, run length and qualification controls are separate.
+    config = RunSpec.load(path).compile()
+    options = config.resolved_miles()
+    assert options["rollout_batch_size"] == 256
+    assert options["n_samples_per_prompt"] == 8
+    assert options["global_batch_size"] == 2048
+    assert options["lr"] == 6e-6
+    assert options["lr_decay_style"] == "constant"
+    assert options["lr_warmup_iters"] == 0
+    assert options["calculate_per_token_loss"] is True
+    assert "--calculate-per-token-loss" in config.arguments()
+    assert options["grpo_std_normalization"] is False
+    assert options["async_data_buffer_capacity_factor"] == 4.0
+    assert config.plan()["scoring_pass"]["optimizer_steps_per_collection"] == 1

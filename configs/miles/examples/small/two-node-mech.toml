@@ -1,0 +1,208 @@
+# OLMo 3.5 Small ("Hero Small", A4B, olmo35-small-e256k8-sh2x) on B300: 2-node mechanics check.
+# 8 trainer GPUs (EP8), 7 TP1 engines at admission R=96, 1 Qwen3-32B judge; 4 updates.
+# Use it to check loading, publication, judging and drain before a 4- or 8-node run; not a timing layout.
+# Measured (kf-hero-miles-mech2) with the default attention backend and default MoE tiles;
+# four-node.toml adds trtllm_mha and the tuned tiles.
+# Baseline matches Tiny: 256 prompts x 8, batch 2,048, LR 6e-6, token-mean loss.
+# The historical mechanics run used batch 1,024, LR 1e-6 and response-mean loss.
+# Start checkpoint: H203 SFT export hf_step18410 (emo_* fields null; HF vocab 100278, Core pads to 100352).
+# Settings that matter: rounding mode, R=96 with 128 KDA slots, server concurrency 192, CUDA graph
+# bs 96, producer budget 96 x 7 = 672, judge timeout 600 + qwen3-no-thinking. Do not set
+# training.eval_interval: prompt_data has no held-out split. See docs/miles/olmo35-small.md.
+# Before setting up a run, review configuration options and defaults:
+# https://allenai.github.io/open-instruct/miles/configuration/
+# Setup and workload requirements: configs/miles/examples/README.md
+# Replace YOUR_USERNAME and input paths; inspect `plan` before launching.
+schema_version = 1
+name = "two-node-mech"
+
+[model]
+# H203 SFT export (read-only shared checkpoint).
+source = "/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-gpu/a4bgpu-s34521/hf_step18410"
+
+[output]
+root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/small-two-node-mech"
+export_hf = false
+
+[launch]
+# Measured in ai2/olmo-instruct (ai2/open-instruct-dev had no holmes allocation at the time).
+# Select a workspace with an allocation on the chosen cluster before submitting.
+workspace = "ai2/olmo-instruct"
+budget = "ai2/oe-other"
+cluster = "ai2/holmes"
+priority = "high"
+min_runtime = "3h"
+timeout = "3h"
+auto_resume = false
+gpus_per_replica = 8
+memory = "1500 GiB"
+shared_memory = "200 GiB"
+
+[launch.coordination]
+heartbeat_timeout = 120
+startup_timeout = 3600
+
+[[launch.weka_mounts]]
+weka = "oe-training-default"
+mount_path = "/weka/oe-training-default"
+
+[[launch.weka_mounts]]
+weka = "oe-adapt-default"
+mount_path = "/weka/oe-adapt-default"
+
+[[launch.weka_mounts]]
+weka = "olmo-3p5-post-checkpoints"
+mount_path = "/weka/olmo-3p5-post-checkpoints"
+
+[launch.env]
+# Ray logical capacity per node; the actor reservations below are not thread counts.
+OI_MILES_RAY_CPUS = "64"
+OI_MILES_CODE_FAILURE_POLICY = "zero"
+OI_MILES_JUDGE_FAILURE_POLICY = "zero"
+SGLANG_TIMEOUT_KEEP_ALIVE = "60"
+NCCL_SOCKET_IFNAME = "ib"
+NCCL_IB_HCA = "^=mlx5_bond_0"
+OLMO_SGLANG_CORE_COMPAT = "rounding"
+
+[launch.secrets]
+BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
+HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
+# Beaker secret name, not the token value; required by the H196 code verifier.
+CODE_EXECUTION_TOKEN = "YOUR_USERNAME_CODE_EXECUTION_TOKEN"
+
+[data]
+# Exclude over-budget training prompts and record per-source counts.
+over_length = "exclude"
+# robertb's H196 prepared Dolci inputs (read-only; 84,577 rendered rows, no held-out split).
+prompt_data = "/weka/olmo-3p5-post-checkpoints/robertb/miles/h196-dolci-control-20261113/inputs/dolci.jsonl.gz"
+reward_config = "/weka/olmo-3p5-post-checkpoints/robertb/miles/h196-dolci-control-20261113/inputs/verifiers.json"
+seed = 17
+shuffle = true
+
+[training]
+learning_rate = 6e-6
+# Zero-std group filtering stays on (default), as in the measured runs.
+# Mechanics check length; raise num_rollouts and enable checkpoints for a learning run.
+num_rollouts = 4
+save_checkpoints = false
+skip_eval_before_train = true
+
+[trainer]
+gpus = 8
+expert_parallel_size = 8
+sequence_packing = true
+packing_max_tokens = 34816
+
+[inference]
+placement_mode = "disaggregated"
+gpus = 7
+rollout_batch_size = 256
+samples_per_prompt = 8
+global_batch_size = 2048
+max_response_length = 32768
+max_context_length = 34816
+profile = "generic"
+sglang_disable_radix_cache = true
+# Admission R=96: engines gain throughput up to R=96 (R=64: 1.9K vs 2.5K tok/s/engine).
+sglang_max_running_requests = 96
+sglang_server_concurrency = 192
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 96
+sglang_cuda_graph_backend_prefill = "disabled"
+sglang_chunked_prefill_size = 8192
+# 96 x 34,816 KV tokens (63.8 GB) and 128 KDA state slots (17.9 GB) next to 135 GB of weights.
+sglang_max_total_tokens = 3342336
+sglang_max_mamba_cache_size = 128
+sglang_mem_fraction_static = 0.88
+
+[tracking]
+wandb_mode = "offline"
+wandb_team = "ai2-llm"
+wandb_project = "open-instruct-miles"
+wandb_group = "small-two-node-mech"
+
+[core]
+# Grade the presented response; process/format exceptions must be explicitly declared.
+reward_final_answer_only = true
+# Set to "none" only when using an explicitly non-thinking policy/template.
+reward_reasoning_mode = "required"
+max_policy_lag = 12
+# A response cut off at max_response_length scores 0 (capped = wrong).
+reward_zero_truncated = true
+checkpoint_keep_last = 2
+publication_mode = "refresh"
+engine_drain_timeout = 900.0
+engine_update_timeout = 1800.0
+pipeline_observation_interval = 2.0
+router_aux_loss_weight = 0.0
+router_z_loss_weight = 0.0
+# Repeat the standalone/training score check during this qualification run.
+scoring_check_interval = 1
+
+[miles]
+# Compare the initial publication against the engine's original HF weights.
+# This adds qualification overhead; timing recipes leave the audit disabled.
+check_weight_update_equal = true
+# Keep active-request KV/recurrent state across weight updates.
+pause_generation_mode = "in_place"
+# Weight contributing tokens equally across responses.
+calculate_per_token_loss = true
+# Trainer ranks only; do not change the serving allocator.
+train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }
+# Rust response transport; Core owns request retries and weight-ready membership.
+use_miles_router = false
+router_policy = "round_robin"
+router_disable_retries = true
+router_disable_health_check = true
+router_disable_circuit_breaker = true
+use_distributed_post = true
+http_post_actors_per_node = 16
+http_post_num_cpus = 1.0
+rollout_executor_num_cpus = 2.0
+# Four collections: 1,024 complete prompt groups / 8,192 samples.
+async_data_buffer_capacity_factor = 4.0
+sglang_enable_metrics = true
+use_rollout_routing_replay = true
+
+[async]
+fully_async = true
+# 96 unfinished samples per engine (= admission R) x 7 engines.
+async_max_concurrent_samples = 672
+
+[compiler_cache]
+shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+
+[judges.general]
+mode = "managed"
+backend = "sglang"
+model = "Qwen/Qwen3-32B"
+revision = "9216db5781bf21249d130ec9da846c4624c16137"
+chat_template = "qwen3-no-thinking"
+max_context_length = 131072
+context_extension = "qwen3-yarn-128k"
+cuda_graphs = true
+gpus = 1
+tensor_parallel_size = 1
+timeout = 600
+max_concurrent_calls = 32
+# robertb's prepared judge (read-only; the judge server only reads prepared.json).
+prepared_dir = "/weka/oe-adapt-default/robertb/olmo-miles/trial-data/dolci-think-20260908/judge"
+
+[rubrics.quality]
+profile = "open-instruct/general-quality"
+max_response_tokens = 2048
+temperature = 1.0
+
+[rubrics.reference_quality]
+profile = "open-instruct/general-quality_ref"
+max_response_tokens = 2048
+temperature = 1.0
+
+# Binding names are the hashed verifier ids in the H196 verifiers.json above.
+[judging.bindings.wb_ea066c35a7a5568b4cb168aff3382d4dd2694f5ce6ad5574c7ce649ac6b61224]
+judge = "general"
+rubric = "quality"
+
+[judging.bindings.wb_6f03833c91e17e0568b3d089ad5c2b0100a91fe6e9402e63119bc8e6d804b68d]
+judge = "general"
+rubric = "reference_quality"
