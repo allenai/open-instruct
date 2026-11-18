@@ -15,8 +15,12 @@ The maintained examples enable final-answer grading with
 Use `"none"` explicitly for a non-thinking policy/template. The library default
 remains false for compatibility with existing runs; see [grading contracts](grading.md).
 
+- **Tiny learning batch and LR** (`node` and `three-node`): 256 prompts × 8 responses,
+  batch 2,048 and constant learning rate 6e-6 with no warmup. The Tiny LR/batch
+  exploration used response-mean loss; retaining the separately selected token-mean
+  example objective is an engineering choice, not a measured combined optimum.
 - **Policy lag** (12 in both `node` and `three-node`): a higher limit discards fewer slow groups but trains on older samples; reconsider it when learning rate, group size or response length changes.
-- **Loss weighting** (per response, `miles.calculate_per_token_loss = false`): keep the demo objective in throughput trials; token-weighted loss is an explicit learning-policy experiment.
+- **Loss weighting** (token mean, `miles.calculate_per_token_loss = true`): keep the demo objective in throughput trials; response-mean loss is an explicit learning-policy override. Omitted library settings retain response-mean weighting for compatibility.
 - **Off-policy correction** (TIS on, `use_rollout_logprobs = false`): TIS reweights samples toward the current policy; turning it off assumes inference and training probabilities agree closely.
 - **Group filtering** (`training.filter_zero_std_groups = true`): groups where every response gets the same reward carry no policy gradient, so dropping them saves training work at the cost of extra generation; disable it for tiny checks that cannot produce mixed rewards.
 - **Router auxiliary losses** (coefficients zero in the examples): the balancing and z-losses keep expert load even during pretraining; whether RL needs them is open, so watch the `train/moe/` load metrics if you leave them off.
