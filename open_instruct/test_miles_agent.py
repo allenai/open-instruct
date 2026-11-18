@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from open_instruct.miles.configuration import constraints
+from open_instruct.miles.configuration.config import RunConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.rollout import agent
@@ -37,6 +38,31 @@ def test_agent_refresh_compiles_native_generator_arguments():
     assert argv[argv.index("--custom-agent-function-path") + 1] == "tmax_agent_function.run"
     assert argv[argv.index("--tito-model") + 1] == "olmo35"
     assert "--max-seq-len" in argv
+
+
+def test_native_bridge_preserves_agent_validation_inputs():
+    config = agent_config()
+    fields = constraints.native_values(SimpleNamespace(**config.resolved_miles()), set())
+    assert fields["pause_generation_mode"] == "in_place"
+    assert fields["use_session_server"] == "v2"
+    assert fields["custom_agent_function_path"] == "tmax_agent_function.run"
+    assert fields["max_seq_len"] == config.core.max_sequence_length
+    RunConfig(config.core, fields).validate()
+
+
+@pytest.mark.parametrize("value,expected", [(False, None), (True, "v1"), ("v2", "v2")])
+def test_native_session_alias_normalizes_without_changing_disabled_defaults(value, expected):
+    fields = constraints.native_values(
+        SimpleNamespace(custom_generate_function_path=constraints.AGENT_GENERATOR, use_session_server=value), set()
+    )
+    assert fields.get("use_session_server") == expected
+
+
+def test_agent_forwarding_does_not_change_other_native_workflows():
+    args = SimpleNamespace(use_session_server=True, pause_generation_mode="in_place", sglang_disable_radix_cache=False)
+    fields = constraints.native_values(args, set())
+    assert not (constraints.AGENT_VALIDATION_OPTIONS & fields.keys())
+    assert "use_session_server" not in fields
 
 
 @pytest.mark.parametrize(

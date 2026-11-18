@@ -3,12 +3,16 @@
 import asyncio
 import copy
 import json
+import sys
 from types import SimpleNamespace
 
+from miles.utils import arguments as native_arguments
 from miles.utils.data import Dataset
 from scripts.miles import agent_smoke
 
+from open_instruct.miles.configuration import arguments as core_arguments
 from open_instruct.miles.configuration import constraints
+from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 
 
@@ -115,3 +119,34 @@ def test_compiled_agent_data_loads_without_a_label_column(tmp_path):
     )
     assert data[0].prompt == messages
     assert data[0].label is None
+
+
+def test_real_native_parser_round_trip_preserves_core_agent_contract(monkeypatch):
+    config = RunConfig(
+        CoreConfig(publication_mode="refresh", max_policy_lag=2),
+        {
+            "hf_checkpoint": "/fixture/hf",
+            "global_batch_size": 4,
+            "rollout_batch_size": 2,
+            "n_samples_per_prompt": 2,
+            "fully_async": True,
+            "use_tis": True,
+            "sglang_cuda_graph_backend_decode": "disabled",
+            "sglang_cuda_graph_backend_prefill": "disabled",
+            "pause_generation_mode": "in_place",
+            "sglang_disable_radix_cache": True,
+            "custom_generate_function_path": constraints.AGENT_GENERATOR,
+            "custom_agent_function_path": "scripts.miles.agent_smoke.run",
+            "use_session_server": "v2",
+            "tito_model": "olmo35",
+            "max_seq_len": 4096,
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["train", *config.arguments()])
+    args = core_arguments.load_core_args(native_arguments.get_miles_extra_args_provider())
+    assert args.pause_generation_mode == "in_place"
+    assert args.use_session_server == "v2"
+    assert args.tito_model == "olmo35"
+    assert args.max_seq_len == 4096
+    assert args.custom_agent_function_path == "scripts.miles.agent_smoke.run"
+    assert args.custom_async_data_buffer_path.endswith("RefreshPolicyDataBuffer")

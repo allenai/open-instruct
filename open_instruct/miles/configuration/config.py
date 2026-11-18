@@ -830,9 +830,11 @@ class RunConfig:
             raise constraints.error("Core agent refresh requires custom_agent_function_path")
         if options.get("apply_chat_template", False):
             raise constraints.error("Core agent refresh requires unrendered messages; disable apply_chat_template")
-        for name in ("session_sample_picker_path", "session_sample_postprocessor_path", "group_rm"):
-            if options.get(name):
+        for name, supported in constraints.AGENT_SESSION_HOOKS.items():
+            if options.get(name) not in (None, supported):
                 raise constraints.error(f"Core agent refresh does not support miles.{name}")
+        if options.get("group_rm"):
+            raise constraints.error("Core agent refresh does not support miles.group_rm")
         length = options.get("max_seq_len")
         if type(length) is not int or not 0 < length <= self.core.max_sequence_length:
             raise constraints.error("Core agent refresh requires max_seq_len within core.max_sequence_length")
