@@ -7,6 +7,14 @@ response scores into its loss layout. Vocabulary logits are never gathered.
 This is an initial mechanics implementation; qualify the intended topology and
 sequence lengths before using it for a learning run.
 
+Small's Scalable-Softmax requires the Ulysses support in
+[OLMo-core #958](https://github.com/allenai/Olmo-core/pull/958), included in this
+integration's Core pin. That change computes scaling from original document
+positions before the attention exchange. The adapter is tracked in
+[MILES #45](https://github.com/allenai/miles-olmo-core/pull/45), and configuration
+and smoke tests in
+[Open Instruct #2284](https://github.com/allenai/open-instruct/pull/2284).
+
 ```toml
 [trainer]
 gpus = 8
@@ -52,7 +60,8 @@ requires its own GPU qualification.
 `tests/miles/cp_contract.py` compares EP2/CP1 and EP2/CP2 Adam states for the same
 hybrid MoE fixture, with response/token means and recomputation off/on. The first
 moments catch uniform gradient-scaling errors that an Adam parameter update can
-hide. `scripts/miles/cp_contract.sh` runs this bounded two-GPU check in the
+hide. The fixture includes Scalable-Softmax, nonunit per-head Q/K gains and
+grouped-query attention. `scripts/miles/cp_contract.sh` runs this bounded two-GPU check in the
 committed MILES image. `tests/miles/configs/cp2-smoke.toml` exercises a Tiny
 EP2/CP2 trainer and a TP1 engine with synthetic rewards, four updates and no
 checkpoint/export. It is not a Small throughput or learning-quality recipe.
