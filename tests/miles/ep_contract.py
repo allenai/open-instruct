@@ -36,7 +36,9 @@ def bootstrap(root, *, small_features=False):
     hf = Olmo3MoeConfig(
         vocab_size=256,
         hidden_size=128,
-        attention_hidden_size=256 if small_features else 128,
+        # Eight BF16 scale values preserve grouped-MM's 16-byte alignment in
+        # Core's flattened parameter buffer; four values would shift later weights.
+        attention_hidden_size=512 if small_features else 128,
         head_dim=64,
         dense_mlp_intermediate_size=256,
         dense_mlp_uses_shared_experts=True,
@@ -45,7 +47,7 @@ def bootstrap(root, *, small_features=False):
         n_routed_experts=4,
         num_experts_per_tok=2,
         num_hidden_layers=2,
-        num_attention_heads=4 if small_features else 2,
+        num_attention_heads=8 if small_features else 2,
         num_key_value_heads=2,
         use_head_qk_norm=True,
         qk_norm_per_head_gains=small_features,
