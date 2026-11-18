@@ -18,7 +18,7 @@ testing = importlib.import_module("click.testing")
 ROOT = Path(__file__).resolve().parents[2]
 runner = runpy.run_path(str(ROOT / "open_instruct/miles/evaluation/evaluation_runner.py"))
 CONFIGS = {
-    name: tomllib.loads((ROOT / f"configs/miles/examples/{name}.toml").read_text())["evaluation"]
+    name: tomllib.loads((ROOT / f"configs/miles/examples/tiny/{name}.toml").read_text())["evaluation"]
     for name in ("node", "three-node")
 }
 CASES = [

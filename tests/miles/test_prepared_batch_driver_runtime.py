@@ -13,7 +13,7 @@ TIME_STOPS = {"time", "time_final", "time_nosave"}
 
 
 @pytest.mark.parametrize(
-    "stop", [None, "training", "publication", "time", "time_final", "time_nosave", "evaluation", "debug"]
+    "stop", [None, "training", "publication", "time", "time_final", "time_nosave", "evaluation", "debug", "final_only"]
 )
 def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch, stop):
     events = []
@@ -23,6 +23,7 @@ def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch
         olmo_core=SimpleNamespace(
             publication_mode="refresh",
             max_run_seconds=0 if stop in TIME_STOPS else None,
+            save_final_checkpoint=stop == "final_only",
             max_run_final=stop == "time_final",
             diagnostic_interval=0,
             engine_update_timeout=1,
@@ -35,7 +36,7 @@ def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch
         num_rollout=3,
         eval_interval=1 if stop == "evaluation" else None,
         skip_eval_before_train=True,
-        save_interval=1,
+        save_interval=None if stop == "final_only" else 1,
         save=None if stop == "time_nosave" else "checkpoint",
         save_trigger_sentinel=None,
         update_weights_interval=1,
@@ -153,3 +154,7 @@ def test_prefetch_overlaps_training_and_is_joined_before_final_drain(monkeypatch
         # A resumable stop leaves the end-of-run export path free for the resumed process;
         # max_run_final, or no save path to resume from, makes the stop final.
         assert learner.export_hf.await_count == (stop != "time")
+
+    if stop == "final_only":
+        assert [e[1] for e in events if e[0] == "save"] == [2]
+        assert result["num_rollout"] == 3

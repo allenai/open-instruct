@@ -11,7 +11,7 @@ import pytest
 
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
-from open_instruct.miles.rewards import task_verifiers
+from open_instruct.miles.rewards import grading, task_verifiers
 
 
 class Tokenizer:
@@ -236,6 +236,88 @@ def test_prepared_mode_never_applies_template(environment, tmp_path):
     assert not environment[2].rendered
 
 
+@pytest.mark.parametrize("factory", ["MaxLenVerifier", "UpToMaxLenVerifier"])
+def test_prepared_grading_syntax_does_not_override_factory_defaults(environment, tmp_path, factory):
+    prompt = tmp_path / "input.jsonl"
+    prompt.write_text(
+        json.dumps(
+            {"input": "already rendered", "label": "3", "metadata": {"verifiers": [{"name": "length", "target": "3"}]}}
+        )
+        + "\n"
+    )
+    spec = {"factory": "open_instruct.ground_truth_utils." + factory, "grading": {"scope": "full"}}
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({"length": spec}))
+    prepared = prepare(environment, {"prompt_data": str(prompt), "reward_config": str(registry)})
+    assert json.loads(Path(prepared["reward_config"]).read_text())["length"] == spec
+    # Runtime resolves the factory's process/full defaults; lightweight data
+    # preparation must not assume every factory declares an answer objective.
+    declared = SimpleNamespace(grading_objective="process", grading_scope="full")
+    assert grading.verifier_policy(declared, spec) == grading.GradingPolicy("full", objective="process")
+
+
+@pytest.mark.parametrize("value", [{"scope": "bad"}, {"objective": "bad"}, {"require_response": 1}, {"extra": True}])
+def test_preparation_still_rejects_bad_grading_syntax(value):
+    with pytest.raises(ValueError, match="grading"):
+        grading.validate_spec({"grading": value})
+
+
+@pytest.mark.parametrize("objective,scope", [("process", "thinking"), ("process", "full"), ("format", "full")])
+def test_judge_binding_retains_grading_policy_and_refuses_old_dropped_policy_cache(
+    environment, tmp_path, objective, scope
+):
+    prompt = tmp_path / "input.jsonl"
+    prompt.write_text(
+        json.dumps(
+            {
+                "input": "already rendered",
+                "label": "3",
+                "metadata": {"verifiers": [{"name": "trusted", "target": "3"}]},
+            }
+        )
+        + "\n"
+    )
+    policy = {"objective": objective, "scope": scope, "require_response": False}
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps({"trusted": {"factory": "legacy.module.Factory", "config": {"old": True}, "grading": policy}})
+    )
+    overrides = {
+        "trusted": {
+            "factory": "open_instruct.miles.rewards.judge_registry.NamedJudgeVerifier",
+            "config": {"name": "trusted"},
+        }
+    }
+    data = {"prompt_data": str(prompt), "reward_config": str(registry)}
+    hf, output, _ = environment
+
+    def run():
+        return run_data.prepare_data(data, hf, output, max_prompt_length=2000, seed=17, registry_overrides=overrides)
+
+    result = run()
+    assert json.loads(Path(result["reward_config"]).read_text())["trusted"] == {
+        **overrides["trusted"],
+        "grading": policy,
+    }
+    assert "grading" not in overrides["trusted"]  # Do not mutate caller-owned declarations.
+    assert run() == result
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["contract"]["registry_overrides"]["trusted"]["grading"] == policy
+    # Simulate the old contract: an implementation override with no inherited
+    # policy. Refuse this cache rather than silently reusing its wrong objective.
+    manifest["contract"]["registry_overrides"] = overrides
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(InputError, match="Preparation contract changed"):
+        run()
+
+
+def test_explicit_override_policy_wins_over_inherited_policy():
+    original = {"test": {"grading": {"objective": "process", "scope": "full"}}}
+    override = {"test": {"factory": "new.Factory", "grading": {"objective": "answer", "scope": "response"}}}
+    assert run_data._inherit_grading_policies(original, override) == override
+
+
 def test_prepared_mode_rejects_holdout_overlap(environment, tmp_path):
     prompt = tmp_path / "input.jsonl"
     prompt.write_text(
@@ -328,8 +410,8 @@ def test_changed_source_during_preparation_never_commits(environment, tmp_path, 
     path = source_manifest(tmp_path)
     original = run_data._verify_row
 
-    def verify(*args):
-        original(*args)
+    def verify(*args, **kwargs):
+        original(*args, **kwargs)
         path.write_text(path.read_text() + " ")
 
     monkeypatch.setattr(run_data, "_verify_row", verify)
@@ -672,3 +754,73 @@ def test_prepared_jsonl_streams_and_preserves_validation_metadata(environment, t
     source.write_text(source.read_text().replace('"42"', '"43"', 1))
     with pytest.raises(InputError, match="source changed"):
         prepare(environment, data)
+
+
+@pytest.mark.parametrize("mode", ["tasks", "adopt", "mixture"])
+def test_resume_warns_only_for_original_prepared_inputs(environment, tmp_path, monkeypatch, mode):
+    warnings = []
+    monkeypatch.setattr(run_data.logger, "warning", lambda *args: warnings.append(args))
+    tasks = {"tasks": [{"task": "multiplication", "train_count": 2, "eval_count": 1}]}
+    if mode == "tasks":
+        data = tasks
+    elif mode == "adopt":
+        data = {"rl_manifest": str(source_manifest(tmp_path))}
+    else:
+        path = tmp_path / "original.jsonl"
+        path.write_text(
+            json.dumps({"input": "legacy", "metadata": {"verifiers": [{"name": "multiplication", "target": "2"}]}})
+            + "\n"
+        )
+        registry = tmp_path / "registry.json"
+        registry.write_text(json.dumps({"multiplication": {"factory": run_data.FACTORIES["multiplication"]}}))
+        data = {
+            "sources": [
+                {"name": "raw", "fraction": 0.5, **tasks},
+                {"name": "legacy", "fraction": 0.5, "prompt_data": str(path), "reward_config": str(registry)},
+            ]
+        }
+    result = prepare(environment, data)
+    fresh_warnings = list(warnings)
+    assert len(fresh_warnings) == (1 if mode == "mixture" else 0)
+    warnings.clear()
+    monkeypatch.setattr(
+        run_data, "_tokenizer", lambda path: pytest.fail("Resume must not load tokenizer without a hash")
+    )
+    assert prepare(environment, data) == result
+    assert warnings == fresh_warnings
+
+
+def test_resume_parses_each_row_once_and_screens_only_training(tmp_path, monkeypatch):
+    training = tmp_path / "train.jsonl"
+    evaluation = tmp_path / "eval.jsonl"
+    row = {"input": "prompt", "metadata": {"rendering_template_sha256": hashlib.sha256(b"native").hexdigest()}}
+    training.write_text((json.dumps(row) + "\n") * 2)
+    evaluation.write_text(json.dumps(row) + "\n")
+    before = {path: path.read_bytes() for path in (training, evaluation)}
+    monkeypatch.setattr(run_data, "_read_json_object", lambda *args: {})
+    monkeypatch.setattr(run_data, "_if_verifier_names", lambda registry: {"if"})
+    screened = []
+    monkeypatch.setattr(run_data, "_verify_if_training_row", lambda row, names: screened.append(row))
+    monkeypatch.setattr(run_data, "_tokenizer", lambda path: SimpleNamespace(chat_template="native"))
+    parsed = []
+    original = json.loads
+
+    def loads(line):
+        parsed.append(line)
+        return original(line)
+
+    monkeypatch.setattr(run_data.json, "loads", loads)
+    result = {
+        "prompt_data": str(training),
+        "eval_prompt_data": ["eval", str(evaluation)],
+        "reward_config": "unused",
+        "manifest": str(tmp_path / "manifest.json"),
+    }
+    run_data._verify_resumed_data(result, tmp_path, {"tasks": []})
+    assert len(parsed) == 3
+    assert len(screened) == 2
+    assert all(path.read_bytes() == contents for path, contents in before.items())
+    row["metadata"]["rendering_template_sha256"] = "0" * 64
+    evaluation.write_text(json.dumps(row) + "\n")
+    with pytest.raises(InputError, match="eval.jsonl: row 1:.*template hash"):
+        run_data._verify_resumed_data(result, tmp_path, {"tasks": []})

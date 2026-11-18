@@ -65,7 +65,7 @@ def test_advice_does_not_reject_intentional_small_pools_or_diagnostics():
     [("dev", 1, 1, 1, 0, 0), ("node", 8, 1, 2, 6, 0), ("three-node", 24, 3, 8, 15, 1)],
 )
 def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rollout_gpus, judge_gpus):
-    spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/{profile}.toml")
+    spec = RunSpec.load(Path(__file__).resolve().parents[1] / f"configs/miles/examples/tiny/{profile}.toml")
     assert spec.data.get("prompt_data") or spec.data["tasks"][0]["task"] == "gsm8k-less-noise"
     layout = spec.plan()["allocation"]
     assert layout["allocated_gpus"] == gpus
@@ -80,7 +80,7 @@ def test_self_contained_example_plans(profile, gpus, replicas, trainer_gpus, rol
 
 @pytest.mark.parametrize("profile,producer_budget", [("node", 1024), ("three-node", 3840)])
 def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path, profile, producer_budget):
-    spec = RunSpec.load(f"configs/miles/examples/{profile}.toml")
+    spec = RunSpec.load(f"configs/miles/examples/tiny/{profile}.toml")
     pending = spec.compile()
     assert pending.inference_profile["model_metadata_available"] is False
     assert pending.miles["pause_generation_mode"] == "in_place"
@@ -97,7 +97,7 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     assert producer_budget < capacity["global_http_slots"]
     assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
     assert config.miles["n_samples_per_prompt"] == 8
-    assert config.miles["global_batch_size"] == 1024
+    assert config.miles["global_batch_size"] == 2048
     assert config.core.max_policy_lag == 12
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
     assert config.miles["sglang_max_total_tokens"] == 512 * 34816
@@ -111,19 +111,19 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
 
 
 def test_dev_retains_weight_qualification():
-    config = RunSpec.load("configs/miles/examples/dev.toml").compile()
+    config = RunSpec.load("configs/miles/examples/tiny/dev.toml").compile()
     assert config.miles["check_weight_update_equal"] is True
 
 
 def test_learning_template_still_requires_scores_for_multiple_optimizer_steps():
     with pytest.raises(ValueError, match="refresh currently requires one optimizer step"):
-        RunSpec.load("configs/miles/examples/node.toml", ["inference.global_batch_size=128"])
+        RunSpec.load("configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=512"])
     config = RunSpec.load(
-        "configs/miles/examples/node.toml", ["inference.global_batch_size=128", 'core.publication_mode="barrier"']
+        "configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=512", 'core.publication_mode="barrier"']
     ).compile()
     decision = config.plan()["scoring_pass"]
     assert decision["standalone"] is True
-    assert decision["optimizer_steps_per_collection"] == 8
+    assert decision["optimizer_steps_per_collection"] == 4
     assert decision["check_interval"] == 0
 
 
@@ -342,10 +342,11 @@ def test_hardware_roles_follow_observed_ips_not_replica_order(tmp_path):
     assert throughput_occupancy.node_roles(tmp_path) == {"0": nodes[1], "1": nodes[0]}
 
 
-def test_terminal_unused_work_requires_final_boundary_and_uses_entire_run():
+@pytest.mark.parametrize("terminal_event", ["shutdown_complete", "shutdown_aborted"])
+def test_terminal_unused_work_requires_final_boundary_and_uses_entire_run(terminal_event):
     assert analyze_throughput.terminal_unused_work(None, delivered_tokens=80, stale_dropped_tokens=10) is None
     record = {
-        "event": "shutdown_complete",
+        "event": terminal_event,
         "completed_queue": dict(groups=2, samples=8, response_tokens=20),
         "producer_ready": dict(groups=0, samples=0, response_tokens=0),
         "shutdown_unqueued": dict(groups=1, samples=4, response_tokens=10),

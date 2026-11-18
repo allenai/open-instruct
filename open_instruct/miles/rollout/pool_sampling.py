@@ -7,8 +7,8 @@ from open_instruct.miles.errors import InputError
 
 
 def validate(sampling, pools):
-    if not isinstance(sampling, dict) or set(sampling) - {"policy", "weights"}:
-        raise InputError("data.sampling accepts policy and optional weights")
+    if not isinstance(sampling, dict) or set(sampling) - {"policy", "weights", "priority"}:
+        raise InputError("data.sampling accepts policy, optional weights and optional priority")
     policy = sampling.get("policy", "shuffle")
     if policy not in ("shuffle", "uniform", "weighted", "exposure"):
         raise InputError("data.sampling.policy must be shuffle, uniform, weighted, or exposure")
@@ -20,7 +20,28 @@ def validate(sampling, pools):
             raise InputError("Pool weights must be finite positive numbers")
     elif "weights" in sampling:
         raise InputError("Pool weights require data.sampling.policy=weighted")
-    return {"policy": policy, **({"weights": dict(weights)} if policy == "weighted" else {})}
+    result = {"policy": policy, **({"weights": dict(weights)} if policy == "weighted" else {})}
+    if "priority" in sampling:
+        priority = sampling["priority"]
+        if policy not in ("uniform", "exposure"):
+            raise InputError("Priority ordering requires data.sampling.policy=uniform or exposure")
+        if (
+            not isinstance(priority, dict)
+            or set(priority) != {"field"}
+            or not isinstance(priority["field"], str)
+            or not priority["field"].strip()
+        ):
+            raise InputError("data.sampling.priority requires a nonempty metadata field")
+        result["priority"] = {"field": priority["field"]}
+    return result
+
+
+def priority_value(metadata, field):
+    """Use the same four historical strata as standalone priority sampling."""
+    value = (metadata or {}).get(field)
+    if type(value) is not int or not 1 <= value <= 4:
+        raise InputError(f"Priority metadata.{field} must be an integer in 1..4; got {value!r}")
+    return value
 
 
 def draw_weights(sampling, active, *, trained, targets, terminal, pending):

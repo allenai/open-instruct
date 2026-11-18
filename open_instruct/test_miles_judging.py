@@ -330,7 +330,11 @@ def test_named_reward_uses_full_query_and_keeps_diagnostics(
     assert score == 0.8
     request = state["requests"][-1][1]["messages"][0]["content"]
     expected, _ = general_judge.build_judge_prompt(
-        "general-quality", query="entire conversation", prediction=extracted if final_only else response, target=""
+        "general-quality",
+        query="entire conversation",
+        prediction=extracted if final_only else response,
+        target="",
+        extract_answer=not final_only,
     )
     assert request == expected
     if final_only:

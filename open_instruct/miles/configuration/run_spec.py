@@ -17,6 +17,7 @@ from open_instruct.miles.configuration import (
     constraints,
     inference_profiles,
     options,
+    score_centering,
     topology,
     validation,
 )
@@ -318,6 +319,7 @@ class RunSpec:
             raise InputError(
                 f"data must select exactly one of tasks, sources, recipe, rl_manifest or prompt_data; found {selectors or 'none'}. Remove competing selectors or add data.tasks."
             )
+        validation.choice(data.get("over_length", "fail"), "data.over_length", ("fail", "exclude"))
         data.setdefault("seed", 17)
         if type(data["seed"]) is not int or data["seed"] < 0:
             raise InputError("data.seed must be a nonnegative integer")
@@ -683,7 +685,6 @@ class RunSpec:
             "micro_batch_size": 1,
             "rollout_batch_size": 8,
             "n_samples_per_prompt": 8,
-            "num_rollout": 100,
             "rollout_temperature": 1.0,
             "rollout_seed": self.data["seed"],
             "seed": self.data["seed"],
@@ -723,6 +724,7 @@ class RunSpec:
             "sglang_attention_backend": "triton",
             "use_wandb": False,
             "wandb_run_name": self.name,
+            "wandb_group": miles.get("wandb_run_name", self.name),
             "save": str(root / "checkpoints"),
             "save_debug_rollout_data": str(root / "rollouts" / "{rollout_id}.pt"),
             "rollout_sample_rate": 0.0,
@@ -731,6 +733,11 @@ class RunSpec:
         }
         for key, value in defaults.items():
             miles.setdefault(key, value)
+        if miles.get("num_epoch") is not None:
+            if miles.get("num_rollout") is not None:
+                raise InputError("Choose num_epoch or num_rollouts; MILES would otherwise ignore num_epoch")
+        else:
+            miles.setdefault("num_rollout", 100)
         # HTTP permits cover the entire request, including response delivery and
         # decoding. Leave transport headroom without increasing GPU batch/cache
         # limits. Preserve explicit limits, including deliberately small checks.
@@ -746,18 +753,25 @@ class RunSpec:
             raise InputError(
                 "off_policy_correction supports tis; other corrections require an explicitly qualified custom_tis_function_path"
             )
-        if "off_policy_correction" in controls:
+        centering = score_centering.is_enabled(miles)
+        if "off_policy_correction" in controls and centering:
+            put("miles.score_centering_is", "tis", controls["off_policy_correction"][1])
+        elif "off_policy_correction" in controls:
             # An explicit algorithm choice must take effect in either schedule,
             # and must agree with any native switch supplied alongside it.
             put("miles.use_tis", True, controls["off_policy_correction"][1])
-        miles.setdefault("use_tis", asynchronous and not miles["use_rollout_logprobs"])
+        miles.setdefault("use_tis", asynchronous and not centering and not miles["use_rollout_logprobs"])
         if miles["use_tis"] and miles["use_rollout_logprobs"]:
             raise InputError(
                 "use_tis and use_rollout_logprobs cannot both be enabled; use use_tis=true with use_rollout_logprobs=false for trainer-scored correction."
             )
         if asynchronous:
-            if not (miles["use_tis"] or miles["use_rollout_logprobs"]):
-                raise InputError("Async training requires TIS or an explicit rollout-logprob policy anchor")
+            if not (
+                miles["use_tis"] or miles["use_rollout_logprobs"] or score_centering.uses_importance_sampling(miles)
+            ):
+                raise InputError(
+                    "Async training requires TIS, score_centering_is=tis/mis, or an explicit rollout-logprob policy anchor"
+                )
             miles.setdefault("async_max_concurrent_samples", async_capacity.producer_default(miles))
             miles.setdefault("async_data_buffer_capacity_factor", 1.0)
             # Finite pools retire stale draws; retry would resubmit a selection
@@ -773,12 +787,19 @@ class RunSpec:
             miles.setdefault("ref_load", prepared.get("hf_checkpoint", self.conversion["hf_output"]))
         save_enabled = _boolean(controls.get("save_checkpoints", (True, ""))[0], "training.save_checkpoints")
         if save_enabled:
-            miles.setdefault("save_interval", miles["num_rollout"])
+            if miles.get("num_rollout") is not None:
+                miles.setdefault("save_interval", miles["num_rollout"])
+            else:
+                # Native MILES resolves the epoch budget after loading the dataset.
+                # Save the final update without inventing a periodic cadence here.
+                core.setdefault("save_final_checkpoint", True)
         elif "miles.save_interval" in origins:
             raise InputError("save_checkpoints=false conflicts with an explicit save_interval")
         elif core.get("max_run_seconds") is not None:
             # Nothing to resume from, so a wall-clock stop is final; launch_warnings says so.
             core["max_run_final"] = True
+        if self.data.get("sampling", {}).get("priority") and core.get("prompt_replay_enabled", False):
+            raise InputError("Pool priority ordering does not support replay")
         if "sources" in self.data:
             put("core.prompt_provider", "pools" if pools.resolve(self.data) else "mixture", "data.sources")
             put(
@@ -844,9 +865,10 @@ class RunSpec:
                 put("miles.eval_prompt_data", eval_data, "data.eval_prompt_data")
                 miles.setdefault("eval_interval", 20)
                 miles.setdefault("skip_eval_before_train", False)
-                miles.setdefault("eval_temperature", 0.0)
+                miles.setdefault("eval_temperature", 1.0)
+                miles.setdefault("eval_top_p", 0.95)
                 miles.setdefault("n_samples_per_eval_prompt", 1)
-                miles.setdefault("eval_max_response_len", response)
+                miles.setdefault("eval_max_response_len", min(response, 32768))
             elif miles.get("eval_interval") is not None:
                 raise InputError(
                     "eval_interval requires prepared held-out data; set data.tasks[].eval_count or data.eval_prompt_data, or remove eval_interval."
@@ -881,6 +903,10 @@ class RunSpec:
 
     def launch_warnings(self, miles, core=None) -> list[str]:
         warnings = []
+        try:
+            evaluation.validate_scicode_reference_path(self.evaluation)
+        except InputError as error:
+            warnings.append(str(error))
         if core is not None and core.max_run_seconds is not None and "save_interval" not in miles:
             warnings.append(
                 "training.save_checkpoints=false: the core.max_run_seconds stop cannot be resumed, so it is "
@@ -893,7 +919,8 @@ class RunSpec:
                 f"launch.min_runtime={self.launch['min_runtime']} exceeds Beaker's usual 8h limit; "
                 "submission fails unless the workspace has been granted a longer minimum runtime."
             )
-        periodic = miles.get("save_interval", miles["num_rollout"]) < miles["num_rollout"]
+        interval, total = miles.get("save_interval"), miles.get("num_rollout")
+        periodic = interval is not None and (total is None or interval < total)
         if (timeout == 0 or timeout > min_runtime) and not (periodic and self.launch["auto_resume"]):
             execution_limit = (
                 f"may run until launch.timeout={self.launch['timeout']}"

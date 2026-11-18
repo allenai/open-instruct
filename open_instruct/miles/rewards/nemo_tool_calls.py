@@ -5,11 +5,15 @@ import json
 import re
 from functools import lru_cache
 
+from jsonschema import validators
+from jsonschema.exceptions import SchemaError
 from pydantic import TypeAdapter
+from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 from open_instruct.miles.rewards import deterministic_verifiers as common
 from open_instruct.miles.rewards import nemo_tool_comparison as native
-from open_instruct.miles.rewards import nvidia_constraints, tool_call_parsing
+from open_instruct.miles.rewards import nvidia_constraints, response_text, tool_call_parsing
 
 UPSTREAM_REVISION = "966145fc02ae58b887fd49379675604cc38fdd43"
 ROUTES = {
@@ -79,11 +83,37 @@ def target_for_row(raw, options):
         "tools": declared_tools(raw),
     }
     contract(json.dumps(target, allow_nan=False))
+    if target["tool_format"] == "olmo_xml_v1":
+        validate_xml_reference(target)
     return target
 
 
+def action_text(prediction, prompt_opens_reasoning=False, *, selected_input=False):
+    """Return the response's action region, or None while its reasoning is still open.
+
+    NeMo Gym receives reasoning as a separate output item (vLLM's Nemotron V3 and
+    DeepSeek-R1 reasoning parsers treat output without a closing tag as all reasoning)
+    and grades only the assistant message or calls that follow it. Reasoning that never
+    closes therefore contains no action, and prose or calls written inside it never
+    count. When the prompt ends with the opening tag, the response does not repeat it.
+    """
+    if selected_input:
+        return common.answer_text(prediction, selected_input=True)
+    if "</think>" in prediction:
+        final = prediction.rsplit("</think>", 1)[1]
+    elif prompt_opens_reasoning or "<think>" in prediction:
+        return None
+    else:
+        final = prediction
+    # Conservatively treat any literal opener in the final region, including
+    # quoted tags or tool-argument text, as reopened and unfinished reasoning.
+    if "<think>" in final:
+        return None
+    return common.answer_text(final)
+
+
 def parse_action(text, target):
-    text = re.sub(r"(?:<\|im_end\|>|<\|endoftext\|>)\s*$", "", text, count=1).strip()
+    text = response_text.strip_terminal_special_tokens(text).strip()
     calls = []
     if target["tool_format"] == "olmo_pythonic_v1" and "<function_calls>" in text:
         blocks = re.findall(r"<function_calls>(.*?)</function_calls>", text, re.S)
@@ -121,13 +151,64 @@ def parse_action(text, target):
     return native.MessageAction(type="message", content=text) if text else None
 
 
-class SingleStepToolVerifier(nvidia_constraints._IsolatedAdapter):
-    kind = "nemo_single_step_tool_v1"
+@lru_cache(maxsize=256)
+def _reference_validator(serialized_schema):
+    schema = json.loads(serialized_schema)
+    cls = validators.validator_for(schema)
+    try:
+        cls.check_schema(schema)
+    except SchemaError as error:
+        raise ValueError("Invalid declared tool schema") from error
+    return cls(schema, registry=Registry())
 
-    def __call__(self, tokenized_prediction, prediction, label, **kwargs):
-        target, expected, config = contract(json.dumps(label, allow_nan=False))
+
+def validate_xml_reference(target):
+    """Admit only references representable by the declared schemas and XML grammar."""
+    _, expected, config = contract(json.dumps(target, allow_nan=False))
+    tools = {tool["function"]["name"]: tool["function"] for tool in target["tools"]}
+    # Even tools unused by the reference may be called by a model response.
+    for tool in tools.values():
+        _reference_validator(json.dumps(tool["parameters"], sort_keys=True, allow_nan=False))
+    blocks = []
+    for call in native.get_tool_calls(expected):
+        arguments = json_object(call.arguments)
+        schema = tools[call.name]["parameters"]
+        validator = _reference_validator(json.dumps(schema, sort_keys=True, allow_nan=False))
         try:
-            actual = parse_action(common.answer_text(prediction), target)
+            if not validator.is_valid(arguments):
+                raise ValueError("Reference arguments violate the declared tool schema")
+        except Unresolvable as error:
+            raise ValueError("Reference schema contains an unavailable resource") from error
+        parameters = "".join(
+            f"<parameter={name}>\n{value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, allow_nan=False)}\n</parameter>\n"
+            for name, value in arguments.items()
+        )
+        blocks.append(f"<tool_call>\n<function={call.name}>\n{parameters}</function>\n</tool_call>")
+    if blocks:
+        actual = parse_action("\n".join(blocks), target)
+        if native.ActionComparator(config=config).compare_action(expected, actual).reward != 1:
+            raise ValueError("Reference call does not round-trip through the XML parser")
+
+
+class SingleStepToolVerifier(nvidia_constraints._IsolatedAdapter):
+    grading_accepts_selected_input = True
+    kind = "nemo_single_step_tool_v1"
+    # The reward step tells this verifier whether the rendered prompt opened reasoning.
+    reads_prompt_reasoning = True
+
+    def __call__(self, tokenized_prediction, prediction, label, prompt_opens_reasoning=False, **kwargs):
+        """Grade an action; direct callers must supply the prompt's reasoning state.
+
+        Set prompt_opens_reasoning=True when the rendered prompt ends in <think>.
+        Without that state, tag-less text is treated as a non-thinking response.
+        registered_reward supplies the state automatically for string prompts.
+        """
+        target, expected, config = contract(json.dumps(label, allow_nan=False))
+        text = action_text(prediction, prompt_opens_reasoning, selected_input=kwargs.get("selected_input", False))
+        if text is None:
+            return self.result(0.0, category="unclosed_thinking")
+        try:
+            actual = parse_action(text, target)
             if actual is None:
                 return self.result(0.0, category="no_action")
             result = native.ActionComparator(config=config).compare_action(expected, actual)

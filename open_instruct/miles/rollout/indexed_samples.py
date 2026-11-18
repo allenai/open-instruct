@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 
 from open_instruct.miles.datasets import indexed_rows
+from open_instruct.miles.rollout import pool_sampling
 
 
 class Catalog:
@@ -28,7 +29,8 @@ class Catalog:
         self.bytes = 0
         self.lock = threading.Lock()
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="prompt-prefetch")
-        self.reads, self.hits = 0, 0
+        self.reads, self.hits, self.priority_reads = 0, 0, 0
+        self.priorities = {}
         try:
             for source in sources:
                 path = directory / source["path"]
@@ -46,7 +48,7 @@ class Catalog:
     def __len__(self):
         return self.ends[-1] if self.ends else 0
 
-    def _read(self, row):
+    def _read(self, row, *, priority_scan=False):
         source = bisect.bisect_right(self.ends, row)
         local = row - (self.ends[source - 1] if source else 0)
         entry = self.indexes[source][local]
@@ -54,7 +56,10 @@ class Catalog:
         if len(raw) != int(entry["length"]):
             raise OSError("Prepared prompt read was incomplete")
         with self.lock:
-            self.reads += 1
+            if priority_scan:
+                self.priority_reads += 1
+            else:
+                self.reads += 1
         return raw
 
     def _finished(self, row, future):
@@ -102,6 +107,17 @@ class Catalog:
         metadata = data["metadata"] | {"mixture_source": self.sources[source]["name"]}
         return self.sample_type(prompt=data["input"], label=data.get("label"), metadata=metadata)
 
+    def priority_codes(self, field):
+        # One bounded streaming metadata scan per field; retain one byte per row,
+        # not the prompts or verifier payloads. All pools share this label array.
+        if field not in self.priorities:
+            codes = np.empty(len(self), dtype=np.uint8)
+            for row in range(len(self)):
+                data = json.loads(self._read(row, priority_scan=True))
+                codes[row] = pool_sampling.priority_value(data.get("metadata"), field)
+            self.priorities[field] = codes
+        return self.priorities[field]
+
     def split(self, policy, shuffle, seed):
         order = np.arange(len(self), dtype=np.uint64)
         if policy == "shuffle" and shuffle:
@@ -118,6 +134,7 @@ class Catalog:
                 "cache_rows": len(self.cache),
                 "prefetch_pending": len(self.pending),
                 "disk_reads": self.reads,
+                "priority_scan_reads": self.priority_reads,
                 "cache_hits": self.hits,
             }
 
@@ -130,6 +147,7 @@ class Catalog:
         self.cache.clear()
         self.pending.clear()
         self.bytes = 0
+        self.priorities.clear()
 
 
 class PoolOrder(Sequence):
@@ -155,10 +173,13 @@ class View(Sequence):
             return [self.catalog.sample(row) for row in self.rows[index]]
         return self.catalog.sample(self.rows[index])
 
-    def ordered(self, seed, shuffle):
+    def ordered(self, seed, shuffle, *, priority_field=None):
         rows = self.rows.copy()
         if shuffle:
             random.Random(seed).shuffle(rows)
+        if priority_field:
+            priorities = self.catalog.priority_codes(priority_field)
+            rows = rows[np.argsort(priorities[rows], kind="stable")]
         return View(self.catalog, rows)
 
     def prefetch(self, offset):

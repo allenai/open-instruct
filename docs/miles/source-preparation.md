@@ -61,7 +61,7 @@ and are recorded as omissions rather than moved across conversation turns.
 | `mcqa_v1` | Displayed options and expected answer, final-choice parser with the row's own answer regex when present; no science-only filtering |
 | `math_v1` | Explicit symbolic-math source contract; proof requests are reported as requiring judged support |
 | `deterministic_v1` | Existing numeric, exact-text/JSON, countdown and knights contracts in `target` |
-| `toolrl_v1` | Canonical ToolRL messages, tools and reference calls; original partial-credit reward and format-only answer rows |
+| `toolrl_v1` | Canonical ToolRL messages, tools and reference calls; original partial-credit reward (mapped onto 0 to 1 for training) and format-only answer rows |
 | `single_step_tool_v1` | NeMo offline next-action routes with native conversational, function-calling or SWE-pivot comparison rules |
 
 New registries use
@@ -112,15 +112,28 @@ digits or parentheses: they remain unchanged and are parsed without executing
 Python. Keep `core.reward_final_answer_only: false`, since ToolRL grades the
 reasoning/answer boundary as well as the calls.
 
-| Target | Preserved reward |
-|---|---|
-| One or more reference calls | Format credit 0 or 1, plus native multiset-name overlap and greedy argument matching from −3 to 3; total −3 to 4 |
-| No reference calls | Plain response format only, from 0 to 1; no factual correctness check |
+| Target | Published reward | Training reward (default) |
+|---|---|---|
+| One or more reference calls | Format credit 0 or 1, plus native multiset-name overlap and greedy argument matching from −3 to 3; total −3 to 4 | The published total mapped linearly onto 0 to 1 |
+| No reference calls | Plain response format only, from 0 to 1; no factual correctness check | Unchanged |
 
-The reward factory is `open_instruct.miles.rewards.toolrl.ToolRLVerifier`.
-Qualification recognizes this native scale; it does not rescale training rewards
-to fit a generic binary control. Training's configured truncated-response gate
-still returns zero. Account for the reward scale when designing mixtures.
+The reward factory is `open_instruct.miles.rewards.toolrl.ToolRLVerifier`. It
+returns the training reward on 0 to 1 by default. Without
+`grpo_std_normalization`, a prompt group's advantages scale with its reward range;
+every other MILES verifier is on 0 to 1. Structured run files default this
+normalization to off; the raw MILES parser defaults it to on. With normalization
+on, the affine rescaling leaves advantages unchanged apart from numerical
+stabilization; the floor gate still fixes the truncation incentive on the
+published scale. Diagnostics keep the published values (`partial_score`,
+`binary_score`). The mapping is one positive rescaling per row, so the ordering
+and relative spacing of responses within a group are those of the published
+reward. Set the verifier
+config `unit_scale: false` to train on the published scale. When resuming a run
+started on the published scale, set this explicitly to avoid changing reward
+scales mid-run. The truncated-response gate gives a response the verifier's lowest score for that row (0 by default, −3
+for a call row on the published scale), so a truncated response never outranks a
+completed wrong answer. Any verifier score outside 0 to 1 is logged once per
+verifier as a warning.
 
 The 2026-11-06 local first-pass check reproduced the prior 3,506 training rows
 and 80 held-out rows exactly; the converter reports 414 malformed or unsupported
@@ -156,10 +169,23 @@ and 0 for SWE-pivot; numeric tolerance is 1e-6. Zero word-count tolerance still
 ignores word order. Calls take precedence over accompanying prose; with native
 parallel-call rewarding disabled, surplus calls are not penalized when the expected
 calls match. A message target rewards any nonempty assistant prose, not semantic
-equivalence to the reference message. Preserve these upstream limitations for
-initial mixing; investigate stricter behavior separately rather than silently
-changing reward semantics. Response parsing/resource failures score zero with
-diagnostics, while malformed targets remain fatal verifier errors.
+equivalence to the reference message. Preserve these upstream comparison
+limitations for initial mixing; investigate stricter behavior separately rather
+than silently changing reward semantics. Response parsing/resource failures score
+zero with diagnostics, while malformed targets remain fatal verifier errors.
+
+Only the text after the reasoning is an action, as in NeMo Gym, which receives
+reasoning as a separate output item. A response whose reasoning never closes scores
+zero (category `unclosed_thinking`), and prose or calls written inside the reasoning
+never count. Thinking chat templates end the prompt with `<think>`, so the response
+contains only the closing tag; the reward step reads each sample's rendered prompt to
+tell the verifier whether the response starts inside reasoning. Prepared labels are
+unchanged. Direct callers of `SingleStepToolVerifier` must pass
+`prompt_opens_reasoning=True` when their rendered prompt ends with `<think>`;
+otherwise tag-less text is treated as a non-thinking reply or action. Message-list
+prompts are not inspected for an opening tag. A literal `<think>` anywhere in the
+selected action region, even inside a quoted string, is conservatively treated as
+reopened, unfinished reasoning.
 
 These routes do not implement SWE patch execution, Workplace Assistant state
 changes, browser interaction or Lean compilation. Those environment-dependent
@@ -346,8 +372,10 @@ number of rows.
 `test_cases` assertion. `livecodebench_v1` reads
 `verifier_metadata.unit_tests` (`inputs`, `outputs`, optional `fn_name`). It retains
 all aligned pairs and distinguishes stdio from module/Solution function calls.
-The readiness requirements pin the maintained execution client to commit
-`103ca279b35e8e81d118947f82b72c22676c6540`.
+The maintained execution client is shipped in
+`open_instruct.code_utils.execution_client`; no private service package is needed.
+It was ported from client revision `103ca279b35e8e81d118947f82b72c22676c6540`.
+The executor implementation is not part of this client.
 
 Each source plan must supply trusted service configuration, outside raw rows:
 
@@ -360,8 +388,15 @@ Each source plan must supply trusted service configuration, outside raw rows:
 }
 ```
 
-Inject `CODE_EXECUTION_TOKEN` at runtime from the authorized Beaker secret;
-credentials never belong in plans, rows or qualification reports. Reward is one
+Configure only the Beaker secret **name** in the launch configuration:
+
+```toml
+[launch.secrets]
+CODE_EXECUTION_TOKEN = "your-code-execution-beaker-secret"
+```
+
+Beaker injects `CODE_EXECUTION_TOKEN` at runtime. Its value never belongs in
+plans, rows, qualification reports, `launch.env` or the image. Reward is one
 only when **every** test passes. All tests execute, including after a failure;
 suites above 2,000 tests are partitioned without truncation. Each partition uses
 the configured total client deadline, and each test uses a fresh interpreter.
@@ -493,3 +528,51 @@ Keep these follow-ups separate from the released maintained-verifier pools:
 | Alternative valid code constructions, arithmetic grammar and language detection | Preserve the documented upstream behavior for the first pass; investigate deliberate changes separately. |
 | Runtime verifier outages | Omitted-group W&B metric is implemented; the systemic-failure stopping threshold remains an explicit open decision. |
 | Semantic data quality | Qualification covers loader/reward integration and reviewed controls, not every source reference's scientific or mathematical correctness. Investigate observed training failures without retroactively selecting rows by policy success. |
+
+## Tool formats and pre-rendered template provenance
+
+Offline rendering remains supported. Render with the selected starting checkpoint's
+own tokenizer and chat template; do not replace its template to satisfy a dataset
+format label. Olmo 3.5 tool plans use `tool_format = "olmo_xml_v1"`. Structured
+function answers additionally select `tool_call_format = "olmo_xml_v1"`; the
+legacy `olmo3_pythonic_v1` answer contract remains available for older checkpoints.
+Changing these options requires rebuilding targets and rendered inputs, not only
+editing a label in an existing artifact.
+
+Source preparation records the SHA256 of the effective template string in
+`metadata.rendering_template_sha256`. The prepared-data loader checks a supplied
+hash against the starting checkpoint's effective template before accepting the
+row. Legacy prepared inputs without this field remain readable and warn once per
+source on fresh preparation and resume; they do not gain a claim of verified
+rendering provenance. Task-mode and adopted-manifest inputs rendered during the
+run do not emit that legacy warning. Resume parses each prepared row once:
+training rows get IF-target and template checks, evaluation rows get template
+checks only, without retokenizing or rewriting either partition. Source
+preparation uses the shared checkpoint tokenizer loader, preserving the serialized tokenization backend.
+
+New XML next-action references must satisfy their declared argument schemas and
+retain full comparator reward after serialization and parsing. Incompatible
+references are reported through the existing omitted-row dispositions. This
+includes contradictory reference types and values that the native XML grammar
+cannot represent unambiguously. No tool is executed during this check. Structured
+XML answers retain the selected function, payload key and JSON-schema reward;
+malformed, duplicate and wrong-function calls still fail.
+
+XML function answers also resolve property schemas behind root `$ref` and
+composition keywords, retaining nested resource scopes. Decoding applies all
+matching `patternProperties` schemas and uses typed `additionalProperties` only
+when neither an explicit property nor a pattern matches. Instance numeric overflow
+or recursion limits during decoding use the same zero-reward diagnostics as final
+schema validation; invalid target configurations remain fatal.
+
+XML parameter schemas guide decoding, including references and composition. A
+parseable value that has the declared JSON type but violates a constraint such as
+`minimum`, `enum` or a nested `required` field remains available to the task's
+comparator, preserving ToolRL partial credit. Empty-schema parameters keep the
+native string spelling. Structured-output grading still validates the entire
+final instance against its full schema; invalid source references still fail
+preparation admission independently of response parsing.
+
+## Abstention-aware factoid QA
+
+Use `nemo_abstention_v1` for Nemotron-RL-QA-Abstention-v1. It preserves system/user inputs and factual references and requires the named `nvidia/qa-abstention-v1` rubric. See [abstention QA](abstention.md) for reward semantics, service configuration and qualification limits.

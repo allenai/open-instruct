@@ -16,12 +16,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def document():
-    return RunSpec.load(ROOT / "configs/miles/examples/three-node.toml").to_dict()
+    return RunSpec.load(ROOT / "configs/miles/examples/tiny/three-node.toml").to_dict()
 
 
 @pytest.mark.parametrize("example", ["node", "three-node"])
 def test_examples_require_qualified_profile_and_capacity_batches(example):
-    config = RunSpec.load(ROOT / f"configs/miles/examples/{example}.toml").evaluation
+    config = RunSpec.load(ROOT / f"configs/miles/examples/tiny/{example}.toml").evaluation
     assert config["provider_kwargs"] == {"profile": "olmo3.5-12.5b", "context_length": 34816}
     assert config["external_server_args"] == []
     for task in config["tasks"]:

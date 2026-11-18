@@ -178,12 +178,15 @@ class _IsolatedAdapter:
 
 
 class CalendarVerifier(_IsolatedAdapter):
+    grading_accepts_selected_input = True
     kind = "calendar_v1"
 
     def __call__(self, tokenized_prediction, prediction, label, **kwargs):
         contract = calendar_contract(label)
         try:
-            events = common.strict_json(common.answer_text(prediction))
+            events = common.strict_json(
+                common.answer_text(prediction, selected_input=kwargs.get("selected_input", False))
+            )
         except (ValueError, RecursionError) as error:
             return self.result(
                 0.0, status="parse_error", error_type=type(error).__name__, error=str(error), failure_policy="zero"
@@ -272,11 +275,12 @@ def instruction_contract(serialized):
 
 
 class InstructionVerifier(_IsolatedAdapter):
+    grading_accepts_selected_input = True
     kind = "nemo_if_v1"
 
     def __call__(self, tokenized_prediction, prediction, label, **kwargs):
         grading_mode, compiled = instruction_contract(json.dumps(label, sort_keys=True, allow_nan=False))
-        final = common.answer_text(prediction)
+        final = common.answer_text(prediction, selected_input=kwargs.get("selected_input", False))
         if not final:
             return self.result(0.0)
         passed = []

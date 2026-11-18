@@ -126,3 +126,18 @@ def test_parallel_driver_startup_join_publication_and_cleanup(monkeypatch, tmp_p
         inference.dispose.assert_awaited_once()
     if failure in {None, "connection", "judges", "serving-after-ready"}:
         learner.dispose.assert_awaited_once()
+
+
+def test_invalid_grading_contract_fails_before_launching_workers(monkeypatch, tmp_path):
+    registry = tmp_path / "registry.json"
+    registry.write_text('{"toolrl":{"factory":"open_instruct.miles.rewards.toolrl.ToolRLVerifier"}}')
+    args = SimpleNamespace(
+        olmo_core=CoreConfig(reward_config=str(registry), reward_final_answer_only=True, reward_reasoning_mode="none"),
+        custom_rm_path="open_instruct.miles.rewards.rewards.rollout_reward",
+        save=str(tmp_path),
+    )
+    launch = Mock(side_effect=AssertionError("must not allocate workers for invalid grading"))
+    monkeypatch.setattr(driver.wiring, "launch_worker_manager", launch)
+    with pytest.raises(ValueError, match="requires reward_reasoning_mode=required"):
+        asyncio.run(driver.train(args))
+    launch.assert_not_called()

@@ -9,9 +9,14 @@ import ast
 import json
 import re
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import Any
 
-from open_instruct.miles.rewards import structured_tool_calls
+from jsonschema import validators
+from jsonschema.exceptions import SchemaError
+from referencing import Registry, Resource
+from referencing.exceptions import Unresolvable
+from referencing.jsonschema import DRAFT202012
 
 
 def _unique_keys(pairs):
@@ -27,36 +32,210 @@ def _invalid_constant(value):
     raise ValueError(f"Nonfinite JSON constant: {value}")
 
 
-def parameter_value(value, schema):
+def _literal(node):
+    # The template emits JSON literals inside Pythonic keyword arguments. Accept
+    # both JSON and Python spellings, without evaluating expressions or calls.
+    if isinstance(node, ast.Constant) and type(node.value) in (str, int, float, bool, type(None)):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in {"true", "false", "null"}:
+        return {"true": True, "false": False, "null": None}[node.id]
+    if isinstance(node, ast.List):
+        return [_literal(value) for value in node.elts]
+    if isinstance(node, ast.Dict):
+        result = {}
+        for key, value in zip(node.keys, node.values, strict=True):
+            key = _literal(key)
+            if not isinstance(key, str) or key in result:
+                raise ValueError("Tool arguments require distinct string keys")
+            result[key] = _literal(value)
+        return result
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _literal(node.operand)
+        if type(value) in (int, float):
+            return value if isinstance(node.op, ast.UAdd) else -value
+    raise ValueError("Tool arguments must contain JSON values only")
+
+
+@lru_cache(maxsize=256)
+def _schema_validator(serialized):
+    schema = json.loads(serialized)
+    cls = validators.validator_for(schema)
+    try:
+        cls.check_schema(schema)
+    except SchemaError as error:
+        raise ValueError("Invalid tool parameter schema") from error
+    return cls(schema, registry=Registry())
+
+
+def _parameter_type_matches(value, schema, resolver, checker, seen):
+    """Check wire types only; constraints belong to the task's reward policy."""
+    if isinstance(schema, bool):
+        return schema
+    if id(schema) in seen:
+        return True
+    seen = seen | {id(schema)}
+    kinds = schema.get("type")
+    if kinds is not None:
+        kinds = kinds if isinstance(kinds, list) else [kinds]
+        if not any(checker.is_type(value, kind) for kind in kinds):
+            return False
+    for key in ("$ref", "$dynamicRef"):
+        if key in schema:
+            resolved = resolver.lookup(schema[key])
+            if not _parameter_type_matches(value, resolved.contents, resolved.resolver, checker, seen):
+                return False
+    for key in ("allOf", "anyOf", "oneOf"):
+        if key in schema:
+            matches = [
+                _parameter_type_matches(
+                    value,
+                    child,
+                    resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012)),
+                    checker,
+                    seen,
+                )
+                for child in schema[key]
+            ]
+            # Branch exclusivity depends on full constraints, not just wire types.
+            if not (all(matches) if key == "allOf" else any(matches)):
+                return False
+    return True
+
+
+def parameter_value(value, schema, root_schema=None):
     """Decode native unquoted strings and JSON scalars/containers using the tool schema."""
     value = value.strip()
-    kind = schema.get("type", "string")
-    if kind == "string":
+    root_schema = root_schema if root_schema is not None else schema
+    validator = _schema_validator(json.dumps(root_schema, sort_keys=True, allow_nan=False))
+    if schema is False:
+        raise ValueError("Parameter forbidden by its schema")
+    schema = schema if isinstance(schema, dict) else {}
+    # Unconstrained and plain string parameters retain the native unquoted spelling.
+    if not schema or schema.get("type") == "string":
         return value
-    kinds = kind if isinstance(kind, list) else [kind]
+    resource = Resource.from_contents(root_schema, default_specification=DRAFT202012)
+    uri = resource.id() or ""
+    registry = Registry().with_resource(uri, resource).crawl()
+    scope = registry.resolver(uri)
+    if schema is not root_schema:
+        scope = scope.in_subresource(Resource.from_contents(schema, default_specification=DRAFT202012))
+
+    def is_valid(candidate):
+        # evolve(schema=...) alone retains the parent's resolver. Enter the
+        # property's resource first so its local references use its own $id.
+        return not any(validator.descend(candidate, schema, resolver=scope))
+
+    def matches_type(candidate):
+        return _parameter_type_matches(candidate, schema, scope, validator.TYPE_CHECKER, set())
+
+    return _decode_parameter(value, is_valid, matches_type)
+
+
+def _decode_parameter(value, is_valid, matches_type):
     try:
         decoded = json.loads(value, object_pairs_hook=_unique_keys, parse_constant=_invalid_constant)
     except json.JSONDecodeError:
-        # Native tool calls leave string arguments unquoted, including strings
-        # admitted by a union. Keep duplicate-key/nonfinite checks strict.
-        if "string" in kinds:
+        decoded = value
+    json.dumps(decoded, allow_nan=False)
+    try:
+        if is_valid(decoded):
+            return decoded
+        if is_valid(value):
             return value
-        raise
-    json.dumps(decoded, allow_nan=False)  # Reject overflow such as 1e999, including nested values.
-    matches = {
-        "null": decoded is None,
-        "boolean": type(decoded) is bool,
-        "integer": type(decoded) is int,
-        "number": type(decoded) in (int, float),
-        "array": isinstance(decoded, list),
-        "object": isinstance(decoded, dict),
-        "string": isinstance(decoded, str),
-    }
-    if not any(matches.get(item, False) for item in kinds):
-        if "string" in kinds:
+        # Preserve parseable model mistakes for comparator partial credit. The
+        # structured-output verifier still validates the complete final schema.
+        if matches_type(decoded):
+            return decoded
+        if matches_type(value):
             return value
-        raise ValueError("Parameter value does not match its declared type")
-    return decoded
+    except Unresolvable as error:
+        raise ValueError("Parameter schema references an unavailable resource") from error
+    raise ValueError("Parameter value does not match its declared type/schema")
+
+
+def property_value(value, name, schema):
+    """Decode an object property through root references/composition in its own scope.
+
+    Projection considers only this property's constraints. Required sibling fields
+    and oneOf branch exclusivity are checked against the complete final instance.
+    """
+    _schema_validator(json.dumps(schema, sort_keys=True, allow_nan=False))
+    if not any(
+        key in schema for key in ("$ref", "$dynamicRef", "allOf", "anyOf", "oneOf", "patternProperties")
+    ) and not isinstance(schema.get("additionalProperties"), dict):
+        return parameter_value(value, schema.get("properties", {}).get(name, {}), schema)
+    resource = Resource.from_contents(schema, default_specification=DRAFT202012)
+    uri = resource.id() or ""
+    registry = Registry().with_resource(uri, resource).crawl()
+    validator = validators.validator_for(schema)(schema, registry=registry)
+
+    def project(node, resolver, seen, types_only=False):
+        if isinstance(node, bool):
+            return (lambda candidate: False) if not node else None
+        if id(node) in seen:
+            return None
+        seen = seen | {id(node)}
+        checks = []
+        properties = node.get("properties", {})
+        children = [properties[name]] if name in properties else []
+        patterns = [child for pattern, child in node.get("patternProperties", {}).items() if re.search(pattern, name)]
+        children.extend(patterns)
+        if name not in properties and not patterns and isinstance(node.get("additionalProperties"), dict):
+            children.append(node["additionalProperties"])
+        for child in children:
+            if child is True or child == {}:
+                continue
+            scope = resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012))
+            if types_only:
+                checks.append(
+                    lambda candidate, child=child, scope=scope: _parameter_type_matches(
+                        candidate, child, scope, validator.TYPE_CHECKER, set()
+                    )
+                )
+            else:
+                checks.append(
+                    lambda candidate, child=child, scope=scope: not any(
+                        validator.descend(candidate, child, resolver=scope)
+                    )
+                )
+        for keyword in ("$ref", "$dynamicRef"):
+            if keyword in node:
+                resolved = resolver.lookup(node[keyword])
+                checks.append(project(resolved.contents, resolved.resolver, seen, types_only))
+        for child in node.get("allOf", []):
+            scope = resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012))
+            checks.append(project(child, scope, seen, types_only))
+        for keyword in ("anyOf", "oneOf"):
+            if keyword in node:
+                alternatives = [
+                    project(
+                        child,
+                        resolver.in_subresource(Resource.from_contents(child, default_specification=DRAFT202012)),
+                        seen,
+                        types_only,
+                    )
+                    for child in node[keyword]
+                ]
+                checks.append(
+                    lambda candidate, alternatives=alternatives: any(
+                        check is None or check(candidate) for check in alternatives
+                    )
+                )
+        checks = [check for check in checks if check is not None]
+        return (lambda candidate: all(check(candidate) for check in checks)) if checks else None
+
+    try:
+        check = project(schema, registry.resolver(uri), set())
+        if check is None:
+            return value.strip()
+
+        def matches_type(candidate):
+            type_check = project(schema, registry.resolver(uri), set(), types_only=True)
+            return type_check is None or type_check(candidate)
+
+        return _decode_parameter(value.strip(), check, matches_type)
+    except Unresolvable as error:
+        raise ValueError("Parameter schema references an unavailable resource") from error
 
 
 def parse_native_calls(body, tools):
@@ -66,7 +245,7 @@ def parse_native_calls(body, tools):
     All non-whitespace action text must belong to a call. Parallel calls have
     separate wrappers, and duplicate parameters or malformed tails fail closed.
     """
-    schemas = {tool["function"]["name"]: tool["function"]["parameters"].get("properties", {}) for tool in tools}
+    schemas = {tool["function"]["name"]: tool["function"]["parameters"] for tool in tools}
     calls = []
     remaining = body.strip()
     while remaining:
@@ -82,7 +261,8 @@ def parse_native_calls(body, tools):
             key, value = parameter[1], parameter[2]
             if re.search(r"</?(?:tool_call|function|parameter)(?:[=>])", value):
                 raise ValueError("Ambiguous structural tag in parameter")
-            parameters[key] = parameter_value(value, schemas.get(name, {}).get(key, {}))
+            schema = schemas.get(name, {})
+            parameters[key] = property_value(value, key, schema)
             content = content[parameter.end() :].strip()
         calls.append({"name": name, "parameters": parameters})
         remaining = remaining[match.end() :].strip()
@@ -145,13 +325,13 @@ def parse_pythonic_calls(body: str, tools: Sequence[dict[str, Any]] = ()):
             end = _boundary(args, ",")
             argument = args[:end].strip()
             if argument.startswith("**"):
-                values = structured_tool_calls._literal(ast.parse(argument[2:], mode="eval").body)
+                values = _literal(ast.parse(argument[2:], mode="eval").body)
             else:
                 key, separator, value = argument.partition("=")
                 key = key.strip()
                 if not separator or not key or any(c in key for c in "()[]{}<>\n"):
                     raise ValueError("Expected named literal arguments")
-                values = {key: structured_tool_calls._literal(ast.parse(value.strip(), mode="eval").body)}
+                values = {key: _literal(ast.parse(value.strip(), mode="eval").body)}
             if not isinstance(values, dict) or any(k in arguments for k in values):
                 raise ValueError("Duplicate or malformed arguments")
             arguments.update(values)

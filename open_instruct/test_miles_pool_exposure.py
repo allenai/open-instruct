@@ -148,21 +148,19 @@ def test_pool_mode_validation_and_no_fraction_ambiguity(tmp_path):
     }
     run_data.validate_data(data)
     spec = test_miles_run_spec.spec(
-        tmp_path,
-        data=data,
-        records={"enabled": True, "root": "/records"},
-        core={"prepared_batch_overlap": False},
-        **{"async": {"fully_async": True}},
+        tmp_path, data=data, records={"enabled": True, "root": "/records"}, **{"async": {"fully_async": True}}
     )
     # Use a single optimizer batch per collection; the default fixture may differ.
-    spec.compile()
+    # Pools accept the default prepared-batch overlap.
+    assert spec.compile().core.prepared_batch_overlap is True
     bad = copy.deepcopy(data)
     bad["sources"][0]["fraction"] = 1
     with pytest.raises(ValueError, match="omit source fraction"):
         run_data.validate_data(bad)
 
 
-def test_prepare_labeled_sources_preserves_payload_and_emits_pool_manifest(environment, tmp_path):
+@pytest.mark.parametrize("priority", [False, True])
+def test_prepare_labeled_sources_preserves_payload_and_emits_pool_manifest(environment, tmp_path, priority):
     row = {
         "input": "What is 6 times 7?",
         "label": "42",
@@ -178,15 +176,22 @@ def test_prepare_labeled_sources_preserves_payload_and_emits_pool_manifest(envir
         "sources": [{"name": "original", "prompt_data": str(data_path), "reward_config": str(rewards)}],
         "pools": {"math": {"label": "mathematics"}, "empty": {"label": "empty"}},
     }
+    if priority:
+        row["metadata"]["priority"] = 1
+        with gzip.open(data_path, "wt") as stream:
+            stream.write(json.dumps(row) + "\n")
+        data["sampling"] = {"policy": "exposure", "priority": {"field": "priority"}}
     result = test_miles_run_data.prepare(environment, data)
     manifest = json.loads(Path(result["prompt_mixture"]).read_text())
     assert manifest["pools"] == data["pools"]
-    assert manifest["sampling"] == {"policy": "shuffle"}
+    assert manifest["sampling"] == data.get("sampling", {"policy": "shuffle"})
     assert "fraction" not in manifest["sources"][0]
     actual = json.loads(Path(result["prompt_data"]).read_text())
     assert actual["pool_id"] == row["pool_id"]
     assert actual["metadata"]["sampling_pool"] == "math"
     assert actual["metadata"]["verifiers"] == row["metadata"]["verifiers"]
+    if priority:
+        assert actual["metadata"]["priority"] == 1
     assert actual["label"] == row["label"] and actual["input"] == row["input"]
     assert test_miles_run_data.prepare(environment, data) == result
 

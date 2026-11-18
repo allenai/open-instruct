@@ -17,7 +17,6 @@ CONFIG = complete_code.Config(api_url="https://service.example", expected_source
 
 def mock_client(monkeypatch, scores):
     calls = []
-    native_import = importlib.import_module
 
     class Client:
         def __init__(self, config):
@@ -35,13 +34,7 @@ def mock_client(monkeypatch, scores):
             return SimpleNamespace(score=score, diagnostics={"status": "ok", "tests": len(tests)})
 
     monkeypatch.setattr(
-        complete_code.importlib,
-        "import_module",
-        lambda name: (
-            SimpleNamespace(CodeVerifier=Client, ServiceConfig=SimpleNamespace)
-            if name == "code_execution_client.verifier"
-            else native_import(name)
-        ),
+        complete_code, "execution_verifier", SimpleNamespace(CodeVerifier=Client, ServiceConfig=SimpleNamespace)
     )
     return calls
 
@@ -157,7 +150,6 @@ def test_acecode_preserves_context_and_all_assertions():
 
 
 def test_livecodebench_adaptation_preserves_test_order():
-    pytest.importorskip("code_execution_client.livecodebench")
     raw = {"question": "Add", "verifier_metadata": {"unit_tests": {"inputs": ["2 3", "4 5"], "outputs": ["5", "9"]}}}
     _, label, name, stratum = sources.adapt(raw, "livecodebench_v1")
     assert label == {

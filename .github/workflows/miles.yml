@@ -43,7 +43,7 @@ jobs:
           uv run --frozen python -m scripts.miles.generate_docs --check
       - name: Check application integration types
         run: uv run --frozen ty check open_instruct/miles --config 'src.exclude = []'
-      - name: Check optional structured-output verifiers
+      - name: Check structured-output verifiers
         run: >-
-          uv run --frozen --with openapi-schema-validator==0.6.3 --with xmltodict==0.14.2
+          uv run --frozen
           pytest open_instruct/test_structured_outputs.py open_instruct/test_miles_source_preparation.py

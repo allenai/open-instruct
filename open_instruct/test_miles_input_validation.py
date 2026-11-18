@@ -44,6 +44,7 @@ def test_core_numbers_reject_invalid_values_without_type_errors(field, value):
         ("sglang_mem_fraction_static", 0),
         ("sglang_mem_fraction_static", 1.1),
         ("rollout_top_p", 0),
+        ("rollout_top_logprobs_num", -1),
         ("eval_temperature", -1),
         ("rollout_max_context_len", 0),
         ("eval_interval", 0),
@@ -80,6 +81,39 @@ def test_valid_boundaries_and_native_sentinels_remain_supported():
     for field, value in values.items():
         assert config.miles[field] == value
     assert "--eval-temperature" in config.arguments()
+
+
+@pytest.mark.parametrize("loss_type", ["policy_loss", "score_centering"])
+def test_candidate_collection_rejects_incomplete_top_k_during_preflight(tmp_path, loss_type):
+    values = {"loss_type": loss_type, "rollout_top_k": 50, "rollout_top_logprobs_num": 20}
+    with pytest.raises(InputError, match=r"rollout_top_logprobs_num must be >= miles\.rollout_top_k"):
+        RunConfig.from_dict(raw_config(**values) | {"core": {"fp32_lm_head": True}})
+    payload = {
+        "schema_version": 1,
+        "name": "candidate-limit",
+        "model": {"source": "model"},
+        "output": {"root": str(tmp_path / "run")},
+        "data": {"tasks": [{"task": "gsm8k", "train_count": 8}]},
+        "trainer": {"fp32_lm_head": True},
+        "miles": values,
+    }
+    with pytest.raises(InputError, match=r"rollout_top_logprobs_num must be >= miles\.rollout_top_k"):
+        RunSpec.from_dict(payload, config_path=tmp_path / "run.toml").compile()
+
+
+@pytest.mark.parametrize("loss_type", ["policy_loss", "score_centering"])
+@pytest.mark.parametrize("top_k,candidates", [(20, 20), (20, 50), (-1, 20)])
+def test_candidate_collection_accepts_complete_support_or_unfiltered_heads(loss_type, top_k, candidates):
+    values = {"loss_type": loss_type, "rollout_top_k": top_k, "rollout_top_logprobs_num": candidates}
+    RunConfig.from_dict(raw_config(**values) | {"core": {"fp32_lm_head": True}}).arguments()
+
+
+@pytest.mark.parametrize("candidates", [None, 0])
+def test_top_k_sampling_without_candidate_collection_remains_valid(candidates):
+    values = {"rollout_top_k": 50}
+    if candidates is not None:
+        values["rollout_top_logprobs_num"] = candidates
+    RunConfig.from_dict(raw_config(**values)).arguments()
 
 
 @pytest.mark.parametrize(

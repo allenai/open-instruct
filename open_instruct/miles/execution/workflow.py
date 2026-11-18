@@ -347,6 +347,7 @@ def run_directory(spec):
 
 
 def execute(spec):
+    evaluation.validate_scicode_reference_path(spec.evaluation)
     with run_directory(spec) as (root, state):
         timing_args = SimpleNamespace(save=root)
         with stage(timing_args, "model_preparation"):
@@ -416,7 +417,10 @@ def execute(spec):
             completed is None
             or bool(result.get("pools_exhausted"))
             or (bool(result.get("stopped_for_time")) and not result.get("time_stop_resumable"))
-            or ((completed[-1] + 1 if completed else result["start_rollout_id"]) == config.miles.get("num_rollout"))
+            or (
+                (completed[-1] + 1 if completed else result["start_rollout_id"])
+                == result.get("num_rollout", config.miles.get("num_rollout"))
+            )
         )
         state.update(status="complete" if complete else "stopped", finished_unix=time.time(), result=result)
         write_json(root / "workflow.json", state)

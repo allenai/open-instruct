@@ -354,7 +354,8 @@ def test_default_native_arguments_match_the_exercised_prototype():
     assert values["--save-interval"] == "1"
     assert values["--eval-interval"] == "2"
     assert values["--n-samples-per-eval-prompt"] == "1"
-    assert values["--eval-temperature"] == "0.0"
+    assert values["--eval-temperature"] == "1.0"
+    assert values["--eval-top-p"] == "0.95"
     assert values["--wandb-project"] == "open-instruct-opd"
     assert values["--wandb-mode"] == "offline"
     assert values["--actor-num-gpus-per-node"] == "2"
@@ -747,3 +748,25 @@ def test_prune_checkpoints_keeps_the_newest_completed_iterations(tmp_path, monke
     opd_retention.post_save(None, 79, str(save_root / "iter_0000079"), None)
     assert sorted(path.name for path in save_root.glob("iter_*")) == ["iter_0000079", "iter_0000099"]
     assert (save_root / "rollout").is_dir()
+
+
+def test_opd_in_loop_eval_response_budget_and_override():
+    inherited = specs.load(CONFIG, ["inference.max_response_length=65536", "inference.max_context_length=67584"])
+    values, _ = native(inherited)
+    assert values["--eval-temperature"] == "1.0"
+    assert values["--eval-top-p"] == "0.95"
+    assert values["--eval-max-response-len"] == "32768"
+    explicit = specs.load(
+        CONFIG,
+        [
+            "inference.max_response_length=65536",
+            "inference.max_context_length=67584",
+            "inference.eval_max_response_length=65536",
+            "inference.eval_temperature=0.0",
+            "inference.eval_top_p=1.0",
+        ],
+    )
+    values, _ = native(explicit)
+    assert values["--eval-max-response-len"] == "65536"
+    assert values["--eval-temperature"] == "0.0"
+    assert values["--eval-top-p"] == "1.0"

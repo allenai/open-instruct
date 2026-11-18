@@ -1,8 +1,11 @@
 """Native format coercion, explicit schema policy, and bounded response validation."""
 
 import asyncio
+import hashlib
+import json
 import signal
 import time
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -11,6 +14,7 @@ from referencing import exceptions
 pytest.importorskip("xmltodict")
 pytest.importorskip("openapi_schema_validator")
 
+from open_instruct.miles.datasets import source_preparation
 from open_instruct.miles.rewards import structured_outputs as structured
 
 
@@ -189,7 +193,9 @@ def test_alarm_during_cleanup_scores_zero_and_restores_signal(monkeypatch):
     def alarm_on_disarm(which, seconds, interval=0):
         if seconds == 0 and not cleanup_alarm.called:
             cleanup_alarm()
-            signal.getsignal(signal.SIGALRM)(signal.SIGALRM, None)
+            handler = signal.getsignal(signal.SIGALRM)
+            assert callable(handler)
+            handler(signal.SIGALRM, None)
         return real_setitimer(which, seconds, interval)
 
     monkeypatch.setattr(signal, "setitimer", alarm_on_disarm)
@@ -237,22 +243,33 @@ def test_real_worker_timeout_logs_in_parent(monkeypatch):
     ],
     ids=["recursive-arrays", "huge-integer-multiple"],
 )
-def test_async_instance_validation_limits_score_zero(schema, prediction, error_type):
+@pytest.mark.parametrize("response_mode", ["text", "xml_tool"])
+def test_async_instance_validation_limits_score_zero(schema, prediction, error_type, response_mode):
     label = target(schema=schema)
+    if response_mode == "xml_tool":
+        label.update(
+            response_mode="tool_call", tool_name="submit", tool_payload_key="result", tool_call_format="olmo_xml_v1"
+        )
+
+    def response(body):
+        if response_mode == "xml_tool":
+            return f"<tool_call><function=submit><parameter=result>{body}</parameter></function></tool_call>"
+        return body
+
     # Both inputs pass parsing/serialization and target validation. The failure
     # happens only when the schema validator traverses/calculates on the instance.
     structured.parse(prediction, "json", structured.validate_target(label), False)
 
     async def score_and_recover():
         verifier = structured.StructuredOutputVerifier()
-        result = await verifier.async_call([], prediction, label)
+        result = await verifier.async_call([], response(prediction), label)
         assert result.score == 0
         assert result.diagnostics["status"] == "validation_error"
         assert result.diagnostics["error_type"] == error_type
         assert result.diagnostics["failure_policy"] == "zero"
         assert result.diagnostics["elapsed_seconds"] >= 0
         assert result.diagnostics["error"]
-        assert (await verifier.async_call([], "1", label)).score == 1
+        assert (await verifier.async_call([], response("1"), label)).score == 1
 
     asyncio.run(score_and_recover())
 
@@ -415,3 +432,282 @@ def test_native_strictification_does_not_close_allof_branches():
     assert asyncio.run(verifier.async_call([], '{"a":1,"b":2}', label)).score == 1
     assert asyncio.run(verifier.async_call([], '{"a":1}', label)).score == 0
     assert asyncio.run(verifier.async_call([], '{"a":1,"b":"wrong"}', label)).score == 0
+
+
+def test_xml_structured_payload_retains_schema_reward_and_rejects_wrong_calls():
+    target = {
+        "format": "json",
+        "schema_policy": "as_declared",
+        "schema": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]},
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "tool_payload_key": "result",
+        "tool_call_format": "olmo_xml_v1",
+    }
+    response = '<tool_call><function=submit><parameter=result>{"n":3}</parameter></function></tool_call>'
+    verifier = structured.StructuredOutputVerifier()
+    assert verifier([], response, target).score == 1
+    for invalid in [
+        response.replace("submit", "other"),
+        response + response,
+        response.replace("3}", '"bad"}'),
+        response.replace("<tool_call>", ""),
+        response.replace('{"n":3}', '{"n":1,"n":3}'),
+    ]:
+        assert verifier([], invalid, target).score == 0
+
+
+@pytest.mark.parametrize("root_ref", [False, True])
+def test_source_preparation_records_xml_target_and_template_identity(tmp_path, root_ref):
+    schema = {"type": "object", "properties": {"n": {"type": "integer"}}}
+    if root_ref:
+        schema = {"$defs": {"payload": schema}, "$ref": "#/$defs/payload"}
+    raw = {
+        "schema_type": "json",
+        "schema_str": json.dumps(schema),
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "responses_create_params": {
+            "input": "Extract n.",
+            "tools": [{"type": "function", "name": "submit", "parameters": schema}],
+        },
+    }
+    data = tmp_path / "rows.jsonl"
+    data.write_text(json.dumps(raw) + "\n")
+    receipt = tmp_path / "hygiene.json"
+    receipt.write_text("{}")
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "sources": {
+                    "structured": {
+                        "adapter": "structured_v1",
+                        "options": {"tool_call_format": "olmo_xml_v1"},
+                        "inputs": [
+                            {
+                                "path": str(data),
+                                "sha256": source_preparation.file_hash(data),
+                                "revision": "pinned",
+                                "split": "train",
+                            }
+                        ],
+                        "hygiene_receipt": {"path": str(receipt), "sha256": source_preparation.file_hash(receipt)},
+                    }
+                },
+            }
+        )
+    )
+    tokenizer = SimpleNamespace(
+        chat_template="native <tool_call>",
+        apply_chat_template=lambda *a, **k: "prompt<think>",
+        encode=lambda *a, **k: [1],
+    )
+    source_preparation.prepare(plan, tmp_path / "output", tokenizer)
+    row = json.loads((tmp_path / "output/structured/prompts.jsonl").read_text())
+    assert row["label"]["tool_call_format"] == "olmo_xml_v1"
+    assert row["label"]["schema_policy"] == "nemo_strict_v1"
+    response = "<tool_call><function=submit><parameter=n>3</parameter></function></tool_call>"
+    assert asyncio.run(structured.StructuredOutputVerifier().async_call([], response, row["label"])).score == 1
+    assert row["metadata"]["rendering_template_sha256"] == hashlib.sha256(tokenizer.chat_template.encode()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {
+            "$defs": {"payload": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}},
+            "$ref": "#/$defs/payload",
+        },
+        {
+            "$defs": {"payload": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}},
+            "$dynamicRef": "#/$defs/payload",
+        },
+        {"allOf": [{"type": "object", "properties": {"n": {"type": "integer"}}}, {"required": ["n"]}]},
+        {
+            "$id": "https://example.invalid/root",
+            "$defs": {
+                "payload": {
+                    "$id": "child",
+                    "$defs": {"value": {"type": "integer"}},
+                    "type": "object",
+                    "properties": {"n": {"$ref": "#/$defs/value"}},
+                    "required": ["n"],
+                }
+            },
+            "$ref": "#/$defs/payload",
+        },
+    ],
+    ids=["root-ref", "root-dynamic-ref", "root-allof", "nested-resource-scope"],
+)
+@pytest.mark.parametrize("payload_key", [None, "result"])
+@pytest.mark.parametrize("schema_policy", ["as_declared", "nemo_strict_v1"])
+def test_xml_answers_resolve_root_property_schemas(schema, payload_key, schema_policy):
+    target = {
+        "format": "json",
+        "schema_policy": schema_policy,
+        "schema": schema,
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "tool_payload_key": payload_key,
+        "tool_call_format": "olmo_xml_v1",
+    }
+    parameter = "<parameter=n>3</parameter>" if payload_key is None else '<parameter=result>{"n":3}</parameter>'
+    response = f"<tool_call><function=submit>{parameter}</function></tool_call>"
+    verifier = structured.StructuredOutputVerifier()
+    assert verifier([], response, target).score == 1
+    assert verifier([], response.replace("3", "3.5"), target).score == 0
+
+
+def test_xml_allof_properties_decode_independently_of_required_siblings():
+    schema = {
+        "allOf": [
+            {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]},
+            {"properties": {"active": {"type": "boolean"}}, "required": ["active"]},
+        ]
+    }
+    target = {
+        "format": "json",
+        "schema_policy": "as_declared",
+        "schema": schema,
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "tool_call_format": "olmo_xml_v1",
+    }
+    response = "<tool_call><function=submit><parameter=n>3</parameter><parameter=active>true</parameter></function></tool_call>"
+    assert structured.StructuredOutputVerifier()([], response, target).score == 1
+
+
+@pytest.mark.parametrize("keyword", ["anyOf", "oneOf"])
+def test_xml_property_projection_leaves_branch_selection_to_final_validation(keyword):
+    branches = [
+        {
+            "type": "object",
+            "properties": {"n": {"type": "integer"}, "side": {"enum": [side]}},
+            "required": ["n", "side"],
+        }
+        for side in ["left", "right"]
+    ]
+    target = {
+        "format": "json",
+        "schema_policy": "as_declared",
+        "schema": {keyword: branches},
+        "response_mode": "tool_call",
+        "tool_name": "submit",
+        "tool_call_format": "olmo_xml_v1",
+    }
+    response = (
+        "<tool_call><function=submit><parameter=n>3</parameter><parameter=side>left</parameter></function></tool_call>"
+    )
+    verifier = structured.StructuredOutputVerifier()
+    assert verifier([], response, target).score == 1
+    assert verifier([], response.replace("left", "neither"), target).score == 0
+
+
+@pytest.mark.parametrize("arguments", ["result=", 'result={"n":3} x', "**"])
+def test_malformed_pythonic_answers_score_zero_and_worker_recovers(arguments):
+    verifier = structured.StructuredOutputVerifier()
+    response = f"<function_calls>submit({arguments})</function_calls>"
+    assert verifier([], response, tool_target()).score == 0
+
+    async def run():
+        result = await verifier.async_call([], response, tool_target())
+        assert result.score == 0
+        assert result.diagnostics["status"] == "parse_error"
+        assert (
+            await verifier.async_call([], '<function_calls>submit(result={"n":3})</function_calls>', tool_target())
+        ).score == 1
+
+    asyncio.run(run())
+
+
+def test_xml_constraint_failure_is_still_rejected_by_final_schema_validation():
+    label = tool_target(
+        schema={"type": "object", "properties": {"n": {"type": "integer", "minimum": 1}}, "required": ["n"]}
+    )
+    label["tool_call_format"] = "olmo_xml_v1"
+    result = structured.StructuredOutputVerifier()(
+        [], '<tool_call><function=submit><parameter=result>{"n":0}</parameter></function></tool_call>', label
+    )
+    assert result.score == 0
+    assert result.diagnostics["status"] == "completed"
+
+
+@pytest.mark.parametrize("constraint", [{"enum": [1, 2]}, {"const": 1}])
+def test_xml_typeless_numeric_constraints_remain_answerable(constraint):
+    label = tool_target(schema={"type": "object", "properties": {"n": constraint}, "required": ["n"]})
+    label["tool_call_format"] = "olmo_xml_v1"
+    label["tool_payload_key"] = None
+    response = "<tool_call><function=submit><parameter=n>1</parameter></function></tool_call>"
+    assert structured.StructuredOutputVerifier()([], response, label).score == 1
+
+
+@pytest.mark.parametrize("root_id", [None, "https://example.invalid/root"])
+@pytest.mark.parametrize("schema_policy", ["as_declared", "nemo_strict_v1"])
+def test_xml_direct_property_local_reference_uses_child_resource(root_id, schema_policy):
+    schema = {
+        "type": "object",
+        "properties": {
+            "n": {"$id": "child", "$defs": {"num": {"type": "integer", "minimum": 1}}, "$ref": "#/$defs/num"}
+        },
+        "required": ["n"],
+    }
+    if root_id:
+        schema["$id"] = root_id
+        schema["$defs"] = {"num": {"type": "string"}}
+    label = tool_target(schema=schema, schema_policy=schema_policy)
+    label["tool_call_format"] = "olmo_xml_v1"
+    label["tool_payload_key"] = None
+    response = "<tool_call><function=submit><parameter=n>3</parameter></function></tool_call>"
+    verifier = structured.StructuredOutputVerifier()
+    assert verifier([], response, label).score == 1
+    assert asyncio.run(verifier.async_call([], response, label)).score == 1
+    assert verifier([], response.replace(">3<", ">0<"), label).score == 0
+    assert verifier([], response.replace(">3<", ">3.5<"), label).score == 0
+
+
+@pytest.mark.parametrize("wrapper", ["direct", "$ref", "allOf"])
+@pytest.mark.parametrize("schema_policy", ["as_declared", "nemo_strict_v1"])
+@pytest.mark.parametrize(
+    "fields,value,wrong",
+    [
+        ({"additionalProperties": {"type": "integer"}}, "3", "3.5"),
+        ({"patternProperties": {"^n$": {"type": "integer"}}, "additionalProperties": False}, "3", "3.5"),
+        ({"patternProperties": {"^x$": {"type": "string"}}, "additionalProperties": {"type": "integer"}}, "3", "3.5"),
+        ({"properties": {"n": {"type": "integer"}}, "patternProperties": {"^n$": {"minimum": 1}}}, "3", "0"),
+        ({"patternProperties": {"^n": {"type": "integer"}, "n$": {"minimum": 1}}}, "3", "0"),
+        (
+            {"additionalProperties": {"$id": "child", "$defs": {"v": {"type": "integer"}}, "$ref": "#/$defs/v"}},
+            "3",
+            "3.5",
+        ),
+    ],
+)
+def test_xml_decodes_applicable_pattern_and_additional_properties(fields, value, wrong, wrapper, schema_policy):
+    schema = {"type": "object", "required": ["n"], **fields}
+    if wrapper == "$ref":
+        schema = {"$defs": {"arguments": schema}, "$ref": "#/$defs/arguments"}
+    elif wrapper == "allOf":
+        schema = {"allOf": [schema]}
+    label = tool_target(schema=schema, schema_policy=schema_policy)
+    label["tool_call_format"] = "olmo_xml_v1"
+    label["tool_payload_key"] = None
+    response = f"<tool_call><function=submit><parameter=n>{value}</parameter></function></tool_call>"
+    verifier = structured.StructuredOutputVerifier()
+    # NeMo strictification closes schemas that explicitly declare properties.
+    assert verifier([], response, label).score == 1
+    assert verifier([], response.replace(f">{value}<", f">{wrong}<"), label).score == 0
+
+
+def test_additional_properties_do_not_apply_to_declared_or_pattern_matched_fields():
+    for fields in [
+        {"properties": {"n": {"type": "string"}}, "additionalProperties": {"type": "integer"}},
+        {"patternProperties": {"^n$": {"type": "string"}}, "additionalProperties": {"type": "integer"}},
+        {"patternProperties": {"^n$": {}}, "additionalProperties": {"type": "integer"}},
+    ]:
+        label = tool_target(schema={"type": "object", "required": ["n"], **fields})
+        label["tool_call_format"] = "olmo_xml_v1"
+        label["tool_payload_key"] = None
+        response = "<tool_call><function=submit><parameter=n>text</parameter></function></tool_call>"
+        assert structured.StructuredOutputVerifier()([], response, label).score == 1

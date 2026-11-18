@@ -9,7 +9,7 @@ from open_instruct.miles.configuration import options, validation
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.errors import InputError
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "configs/miles/examples/node.toml"
+EXAMPLE = Path(__file__).resolve().parents[1] / "configs/miles/examples/tiny/node.toml"
 OVERRIDES = [
     'inference.profile="generic"',
     "inference.radix_cache=true",

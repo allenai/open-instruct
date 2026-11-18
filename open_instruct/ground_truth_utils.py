@@ -160,6 +160,8 @@ class VerifierFunction(ABC):
         label: Any,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         """
         Asynchronous version of __call__. By default, it runs the synchronous __call__ in a thread pool.
@@ -177,8 +179,9 @@ class VerifierFunction(ABC):
         """
         # Run the synchronous __call__ in a thread pool to avoid blocking
         loop = asyncio.get_event_loop()
+        selected = {"selected_input": True} if selected_input else {}
         return await loop.run_in_executor(
-            None, lambda: self.__call__(tokenized_prediction, prediction, label, query, rollout_state)
+            None, lambda: self.__call__(tokenized_prediction, prediction, label, query, rollout_state, **selected)
         )
 
     def __repr__(self) -> str:
@@ -189,10 +192,13 @@ class VerifierFunction(ABC):
 # assumes a certain format, so might not always be useful.
 # we don't always need this -- for example, math evaluations just extract a final
 # number, so we don't need to remove the thinking section.
-def remove_thinking_section(prediction: str) -> str:
+def remove_thinking_section(prediction: str, *, selected_input: bool = False) -> str:
+    # MILES selected views bypass reasoning discovery while retaining this
+    # consumer's historical answer-wrapper and whitespace normalization.
     prediction = prediction.replace("<|assistant|>", "").strip()
     # remove thinking section from the prediction
-    prediction = prediction.split("</think>")[-1]
+    if not selected_input:
+        prediction = prediction.split("</think>")[-1]
     # remove answer tags from the prediction
     prediction = prediction.replace("<answer>", "").replace("</answer>", "")
     return prediction.strip()
@@ -334,6 +340,8 @@ class IFEvalVerifier(VerifierFunction):
 
     """
 
+    grading_accepts_selected_input = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("ifeval", weight=1.0)
 
@@ -344,13 +352,15 @@ class IFEvalVerifier(VerifierFunction):
         label: str | dict,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         constraint_dict = ast.literal_eval(label)
         constraint_dict = constraint_dict[0]
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
-        answer = remove_thinking_section(prediction)
+        answer = remove_thinking_section(prediction, selected_input=selected_input)
         instruction_keys = constraint_dict["instruction_id"]
         args_list = constraint_dict["kwargs"]
         rewards = []
@@ -380,6 +390,8 @@ class IFEvalVerifierOld(VerifierFunction):
     'func_name' used to lookup the evaluation function.
     """
 
+    grading_accepts_selected_input = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("ifeval_old", verifier_config=verifier_config, weight=1.0)
 
@@ -390,9 +402,11 @@ class IFEvalVerifierOld(VerifierFunction):
         label: str | dict,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         constraint = label
-        answer = remove_thinking_section(prediction)
+        answer = remove_thinking_section(prediction, selected_input=selected_input)
         if isinstance(constraint, str):
             constraint = json.loads(constraint)
         if "func_name" not in constraint:
@@ -497,6 +511,8 @@ class F1Verifier(VerifierFunction):
     the maximum F1 score across all labels is returned.
     """
 
+    grading_accepts_selected_input = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
@@ -507,8 +523,10 @@ class F1Verifier(VerifierFunction):
         label: str | list[str],
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
-        prediction = remove_thinking_section(prediction)
+        prediction = remove_thinking_section(prediction, selected_input=selected_input)
         labels: list[str] = label if isinstance(label, list) else [label]
         score = max(f1_score(prediction, str(lab))["f1"] for lab in labels)
         return VerificationResult(score=score)
@@ -521,6 +539,8 @@ class PuzzleMatcherVerifier(VerifierFunction):
     It checks if the model output matches the ground truth answer.
     """
 
+    grading_accepts_selected_input = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("puzzle", verifier_config=verifier_config, weight=1.0)
 
@@ -531,9 +551,11 @@ class PuzzleMatcherVerifier(VerifierFunction):
         label: str,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         # remove answer tags from the prediction
-        prediction = remove_thinking_section(prediction)
+        prediction = remove_thinking_section(prediction, selected_input=selected_input)
         score = float(normalize_answer(prediction) == normalize_answer(label))
         return VerificationResult(score=score)
 
@@ -645,6 +667,10 @@ class MaxLenVerifier(VerifierFunction):
     The ground truth (label) is interpreted as the maximum length.
     """
 
+    grading_objective = "process"
+    grading_scope = "full"
+    grading_uses_tokens = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("max_length", verifier_config=verifier_config, weight=1.0)
 
@@ -679,6 +705,10 @@ class UpToMaxLenVerifier(VerifierFunction):
 
     The ground truth (label) is interpreted as the maximum length.
     """
+
+    grading_objective = "process"
+    grading_scope = "full"
+    grading_uses_tokens = True
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("up_to_max_length", verifier_config=verifier_config, weight=1.0)
@@ -715,6 +745,8 @@ class LMJudgeVerifier(VerifierFunction):
     """
     Verifier that uses a language model's judgement to score a response.
     """
+
+    grading_accepts_selected_input = True
 
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
@@ -771,11 +803,13 @@ class LMJudgeVerifier(VerifierFunction):
         label: str,
         query: str,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         """
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
-        final_answer = extract_final_answer(prediction)
+        final_answer = extract_final_answer(prediction, selected_input=selected_input)
         prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
 
         max_retries = 3  # for rate limits

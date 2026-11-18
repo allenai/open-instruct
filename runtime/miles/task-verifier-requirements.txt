@@ -1,0 +1,19 @@
+# Application-only task graders, matching the qualified readiness image.
+# Installed with --no-deps to preserve the pinned Torch/CUDA stack. The binary
+# base supplies numpy, Pillow, requests, rich, matplotlib, sympy, mpmath and six.
+reasoning-gym==0.1.25
+rdkit==2025.9.3
+arckit==0.1.0
+bfi==1.0.4
+cellpylib==2.4.0
+magiccube==0.3.0
+pycosat==0.6.6
+pyfiglet==1.0.2
+pytz==2026.6
+pyyaml==6.0.3
+tabulate==0.9.0
+zss==1.2.0
+drawsvg==2.4.2
+
+# The HTTP client is shipped in open_instruct.code_utils.execution_client;
+# its requests dependency is already supplied by the binary base.

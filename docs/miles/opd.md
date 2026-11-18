@@ -66,3 +66,7 @@ campaign-specific configurations and rendered specifications there. Launch via
 the committed-image wrapper described in [launching](launching.md). CPU asset
 preparation is unallocated on Saturn, with Jupiter as the scheduling fallback;
 GPU experiment placement and limits come from the reviewed run specification.
+
+Held-out in-loop evaluation defaults to temperature 1.0 and top-p 0.95. When
+`inference.eval_max_response_length=0`, its response budget follows the rollout
+budget up to 32,768 tokens; a positive value is an explicit override.

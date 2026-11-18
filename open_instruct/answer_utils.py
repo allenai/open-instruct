@@ -7,12 +7,14 @@ importing their training dependencies.
 import re
 
 
-def extract_final_answer(prediction: str) -> str:
+def extract_final_answer(prediction: str, *, selected_input: bool = False) -> str:
     """
     Extract the substring between <answer> and </answer>.
     If no match is found, extract the substring after </think>.
     If neither condition matches, clean the prediction by removing the <|assistant|> tag.
     If none of the above applies, return the original string.
+    With selected_input=True, never interpret thinking boundaries again; answer
+    wrappers and the historical assistant-tag normalization remain task parsing.
 
     Args:
         prediction (str): The input string.
@@ -24,7 +26,7 @@ def extract_final_answer(prediction: str) -> str:
     if answer_match:
         return answer_match.group(1).strip()
 
-    think_match = re.search(r"</think>(.*)", prediction, re.DOTALL)
+    think_match = None if selected_input else re.search(r"</think>(.*)", prediction, re.DOTALL)
     if think_match:
         return think_match.group(1).strip()
 

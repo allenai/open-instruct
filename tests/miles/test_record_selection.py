@@ -219,3 +219,95 @@ def test_selection_section_pins_path_and_digest(tmp_path):
         RunSpec.from_dict(document(tmp_path, selection={"table": "t.json"}), config_path=tmp_path / "run.toml")
     with pytest.raises(InputError, match="64-character"):
         CoreConfig(selection_table="/t.json", selection_sha256="ABC")
+
+
+def grading_store(tmp_path, *, final=True, reasoning="required", zero_truncated=True, run_prefix="contract"):
+    for run in ("first", "second"):
+        args = make_args(tmp_path, run=run_prefix + run)
+        args.sglang_enable_deterministic_inference = False
+        args.olmo_core = CoreConfig(
+            records_root=str(tmp_path / "records"),
+            reward_final_answer_only=final,
+            reward_reasoning_mode=reasoning,
+            reward_zero_truncated=zero_truncated,
+        )
+        recorder = recording.create_recorder(args)
+        for _ in range(4):
+            recorder.record_group(
+                [sample(i, 0.0, prompt=prompt("hard"), versions=("0",)) for i in range(2)], decision="passed"
+            )
+        recorder.close()
+    return tmp_path / "records"
+
+
+@pytest.mark.parametrize("final", [False, True])
+def test_selection_round_trip_uses_the_recorders_grading_key(tmp_path, final):
+    store = grading_store(tmp_path, final=final)
+    table = record_selection.build(store, skip=["all_zero"], readmit_fraction=0.0)
+    path = tmp_path / "table.json"
+    digest = record_selection.write_table(table, path)
+    args = selection_args(tmp_path, path, digest)
+    args.olmo_core = CoreConfig(selection_table=str(path), selection_sha256=digest, reward_final_answer_only=final)
+    selector = record_selection.Selection(args)
+    group = [sample(0, 0.0, prompt=prompt("hard"))]
+    assert selector.input_key(group[0]) == table["excluded"][0]["input_key"]
+    assert not selector.keep(group)
+    assert selector.keep([sample(0, 0.0, prompt=prompt("different"))])
+
+
+@pytest.mark.parametrize("table_final,run_final", [(True, False), (False, True)])
+def test_selection_refuses_cross_grading_tables(tmp_path, table_final, run_final):
+    table = record_selection.build(grading_store(tmp_path, final=table_final), skip=["all_zero"], readmit_fraction=0.0)
+    if not table_final:
+        table.pop("grading_policy")  # Historical unversioned table.
+    path = tmp_path / "table.json"
+    digest = record_selection.write_table(table, path)
+    args = selection_args(tmp_path, path, digest)
+    args.olmo_core = CoreConfig(selection_table=str(path), selection_sha256=digest, reward_final_answer_only=run_final)
+    with pytest.raises(RuntimeError, match="different grading contract"):
+        record_selection.Selection(args)
+
+
+@pytest.mark.parametrize("reasoning,zero_truncated", [("none", True), ("required", False)])
+def test_selection_refuses_a_different_final_grading_convention(tmp_path, reasoning, zero_truncated):
+    table = record_selection.build(grading_store(tmp_path), skip=["all_zero"], readmit_fraction=0.0)
+    path = tmp_path / "table.json"
+    digest = record_selection.write_table(table, path)
+    args = selection_args(tmp_path, path, digest)
+    args.olmo_core = CoreConfig(
+        selection_table=str(path),
+        selection_sha256=digest,
+        reward_final_answer_only=True,
+        reward_reasoning_mode=reasoning,
+        reward_zero_truncated=zero_truncated,
+    )
+    with pytest.raises(RuntimeError, match="different grading contract"):
+        record_selection.Selection(args)
+
+
+def test_selection_builder_requires_a_choice_for_mixed_grading_evidence(tmp_path):
+    store = grading_store(tmp_path, final=False, run_prefix="legacy")
+    grading_store(tmp_path, final=True, run_prefix="final")
+    with pytest.raises(InputError, match="choose one with --grading-policy"):
+        record_selection.build(store, skip=["all_zero"], readmit_fraction=0.0)
+    args = make_args(tmp_path)
+    args.olmo_core = CoreConfig(reward_final_answer_only=True)
+    policy = recording.grading_policy(args)
+    final = record_selection.build(
+        store, skip=["all_zero"], grading_policy=inference_records.sha256(policy), readmit_fraction=0.0
+    )
+    legacy = record_selection.build(store, skip=["all_zero"], grading_policy="legacy", readmit_fraction=0.0)
+    assert final["grading_policy"] == policy and legacy["grading_policy"] is None
+    assert final["excluded"][0]["input_key"] != legacy["excluded"][0]["input_key"]
+    assert final["excluded"][0]["observations"] == legacy["excluded"][0]["observations"] == 16
+
+
+def test_legacy_schema_one_tables_still_work_in_legacy_mode(tmp_path):
+    table = record_selection.build(grading_store(tmp_path, final=False), skip=["all_zero"], readmit_fraction=0.0)
+    table["schema_version"] = 1
+    table.pop("grading_policy")
+    table.pop("grading_policy_id")
+    path = tmp_path / "legacy-table.json"
+    digest = record_selection.write_table(table, path)
+    selector = record_selection.Selection(selection_args(tmp_path, path, digest))
+    assert not selector.keep([sample(0, 0.0, prompt=prompt("hard"))])

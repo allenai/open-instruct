@@ -31,6 +31,16 @@ GATED_JUDGE_MODELS = {"allenai/wildguard", "google/gemma-2b"}
 # olmo-eval task families whose datasets are gated, keyed by the task name before "_" or ":".
 GATED_TASK_DATASETS = {"gpqa": "Idavidrein/gpqa"}
 
+SCICODE_REFERENCE_SECRET = "SCICODE_H5PY_HOST_PATH"
+SCICODE_REFERENCE_HELP = (
+    "SciCode arguments.h5py_host_path must be an explicit absolute reference-data file path when set. "
+    "Remove arguments.h5py_host_path to use the default SCICODE_H5PY_HOST_PATH Beaker secret, "
+    "or replace the placeholder with your actual test_data.h5 path on an evaluator-mounted filesystem. "
+    "Override evaluation.secrets.SCICODE_H5PY_HOST_PATH to select a different Beaker secret. "
+    "If you do not want SciCode, remove its [[evaluation.tasks]] entry. "
+    "Then rerun python -m open_instruct.miles plan <your-run-config> before launching."
+)
+
 
 def parse(value, launch):
     value = dict(value)
@@ -191,8 +201,11 @@ def parse(value, launch):
             arguments = task.get("arguments", {})
             if not isinstance(arguments, dict) or arguments.get("split") != "validation":
                 raise InputError("SciCode development evaluation requires arguments.split=validation")
-            if not isinstance(arguments.get("h5py_host_path"), str) or not arguments["h5py_host_path"]:
-                raise InputError("SciCode requires arguments.h5py_host_path for its reference data")
+            # Templates stay loadable; validate_scicode_reference_path rejects unresolved paths at launch.
+            if "h5py_host_path" in arguments and (
+                not isinstance(arguments["h5py_host_path"], str) or not arguments["h5py_host_path"]
+            ):
+                raise InputError(SCICODE_REFERENCE_HELP)
         elif "arguments" in task:
             raise InputError("evaluation task arguments require kind=external")
         preset = task.get("harness_preset", "default")
@@ -216,8 +229,35 @@ def parse(value, launch):
         encoded = json.dumps(task).lower()
         if any(word in encoded for word in ("api_key", "password", "access_token", "api-key")):
             raise InputError("Use evaluation.secrets for credentials, not task overrides")
+    if any(
+        task.get("kind") == "external" and task["task"] == "scicode" and "h5py_host_path" not in task["arguments"]
+        for task in tasks
+    ):
+        value["secrets"].setdefault(SCICODE_REFERENCE_SECRET, SCICODE_REFERENCE_SECRET)
     validate_judge_credentials(value)
     return value
+
+
+def validate_scicode_reference_path(config):
+    """Reject unresolved SciCode assets before allocating a training/evaluation job.
+
+    Examples remain loadable for planning. The path belongs to the remote worker,
+    so existence is checked there rather than on the submitting workstation.
+    """
+    for task in config.get("tasks", []):
+        if task.get("kind") != "external" or task.get("task") != "scicode":
+            continue
+        if "h5py_host_path" not in task.get("arguments", {}):
+            continue  # The evaluator resolves the default Beaker secret.
+        path = task["arguments"]["h5py_host_path"]
+        if (
+            not isinstance(path, str)
+            or not path.strip()
+            or path != path.strip()
+            or not Path(path).is_absolute()
+            or re.search(r"YOUR_[A-Z_]+|[$<>]", path)
+        ):
+            raise InputError(SCICODE_REFERENCE_HELP)
 
 
 def validate_judge_credentials(config):
@@ -326,6 +366,7 @@ def runtime(spec, options):
 
 def specification(receipt):
     config = receipt["evaluation"]
+    validate_scicode_reference_path({"tasks": receipt.get("tasks", [])})
     # Carry the committed runner to the independent evaluator image. No source
     # checkout, dependency resolution or moving branch is used at job startup.
     runner = Path(__file__).with_name("evaluation_runner.py").read_bytes()
@@ -406,6 +447,10 @@ def submit(receipt, path):
             error=type(error).__name__,
             diagnostic="Submission failed or timed out; inspect Beaker before manual resubmission. No automatic retry.",
         )
+        if isinstance(error, InputError):
+            # Our specification InputErrors contain controlled diagnostics, not
+            # child output or credential values. Keep the actionable message.
+            receipt["diagnostic"] = str(error)
         if isinstance(error, subprocess.CalledProcessError):
             receipt["exit_code"] = error.returncode
             try:
@@ -418,7 +463,7 @@ def submit(receipt, path):
         logger.warning(
             "BACKGROUND EVALUATION GAP at update %s: %s; receipt %s",
             receipt["update"],
-            receipt.get("submission_error", type(error).__name__),
+            receipt.get("submission_error", f"{receipt['error']}: {receipt['diagnostic']}"),
             path,
         )
     state.atomic_json(path, receipt)

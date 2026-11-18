@@ -428,15 +428,17 @@ def test_refresh_checkpoint_saves_while_generation_is_unfinished(monkeypatch, tm
         if name == fail_at:
             raise OSError(f"injected {name}")
 
-    async def boundary(paused, *, refresh=False):
+    async def boundary(paused, *, refresh=False, abort=False):
         if refresh:
             await event(f"refresh-{paused}")
         elif paused:
-            # Only final cleanup may wait for/stop outstanding inference.
+            # Only terminal cleanup may cancel outstanding inference. The
+            # checkpoint must commit without waiting for generated responses.
+            assert abort
             assert any(name in events for name in ["cursor-saved", "model-saved", "committed"])
-            live["release"].set()
-            await live["request"]
-            await event("shutdown-drain")
+            live["request"].cancel()
+            await asyncio.gather(live["request"], return_exceptions=True)
+            await event("shutdown-cancel")
         else:
             pytest.fail("Checkpoint must not close/reopen inference admission")
 
@@ -511,7 +513,9 @@ def test_refresh_checkpoint_saves_while_generation_is_unfinished(monkeypatch, tm
         asyncio.run(exercise())
         assert events.index("trained") < events.index("cursor-saved")
         assert events.index("cursor-saved") < events.index("inference-progress") < events.index("model-saved")
-        assert events.index("model-saved") < events.index("committed") < events.index("shutdown-drain")
+        assert events.index("model-saved") < events.index("committed") < events.index("shutdown-cancel")
+    assert live["request"].cancelled()
+    assert events.index("shutdown-cancel") < events.index("close_weight_transport") < events.index("engines-disposed")
     timings = [json.loads(line) for line in (tmp_path / "driver_timing.jsonl").read_text().splitlines()]
     assert not any(row["stage"] == "checkpoint_drain" for row in timings)
     assert [row["passed"] for row in timings if row["stage"] == "checkpoint"] == [fail_at is None]
