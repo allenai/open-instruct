@@ -7,6 +7,8 @@ from miles.utils.chat_template_utils import get_tito_tokenizer, resolve_reasonin
 from tokenizers import Tokenizer, models
 from transformers import PreTrainedTokenizerFast
 
+from open_instruct.miles.datasets import agent_data
+
 
 @pytest.fixture
 def tokenizer():
@@ -58,3 +60,13 @@ def test_tool_continuation_matches_native_template_and_preserves_sampled_tokens(
     assert merged[: len(sampled)] == sampled
     assert tokenizer.chat_template.endswith("{%- endfor -%}\n")
     assert resolve_reasoning_and_tool_call_parser("olmo35") == ("qwen3", "qwen3_coder")
+
+
+def test_agent_preparation_hashes_token_ids_with_real_transformers_tokenizer(tokenizer):
+    row = {"input": [{"role": "user", "content": "Read the value"}], "metadata": {}}
+    agent_data.verify_row(row, tokenizer, 4096)
+    expected = tokenizer.apply_chat_template(
+        row["input"], tokenize=True, add_generation_prompt=True, return_dict=False
+    )
+    assert row["metadata"]["run_prompt_tokens"] == len(expected)
+    assert len(row["metadata"]["run_prompt_token_ids_sha256"]) == 64

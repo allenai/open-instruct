@@ -22,7 +22,7 @@ def verify_row(row, tokenizer, limit, *, exclude_over_length=False):
     metadata = row.get("metadata")
     if not isinstance(metadata, dict):
         raise InputError("Agent metadata must be an object")
-    ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+    ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=False)
     if not ids or (len(ids) > limit and not exclude_over_length):
         raise InputError(f"Agent prompt has {len(ids)} tokens, outside 1..{limit}")
     metadata["run_prompt_tokens"] = len(ids)

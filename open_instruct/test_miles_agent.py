@@ -93,8 +93,8 @@ def test_structured_agent_run_selects_native_sessions_and_episode_rewards(tmp_pa
 class AgentTokenizer:
     chat_template = "native Olmo template"
 
-    def apply_chat_template(self, messages, *, tokenize, add_generation_prompt):
-        assert tokenize and add_generation_prompt
+    def apply_chat_template(self, messages, *, tokenize, add_generation_prompt, return_dict):
+        assert tokenize and add_generation_prompt and return_dict is False
         return list(range(len(messages[-1]["content"])))
 
 

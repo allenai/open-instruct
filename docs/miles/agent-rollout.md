@@ -30,6 +30,7 @@ publication_mode = "refresh"
 custom_generate_function_path = "miles.rollout.generate_hub.agentic_tool_call.generate"
 custom_agent_function_path = "tmax_agent_function.run"
 pause_generation_mode = "in_place"
+rollout_stop = ["<|im_end|>", "<|endoftext|>"]
 ```
 
 Merge these settings into the existing sections rather than declaring duplicate
