@@ -26,7 +26,6 @@
     "engine_drain_timeout": "Seconds to wait for already-reserved engine requests to finish; expiry fails the run without reopening the engine.",
     "engine_update_timeout": "Seconds allowed for an independent engine update and acknowledgement; expiry quarantines the engine and fails the run.",
     "expert_parallel_size": "Expert-parallel group size; must divide trainer world size.",
-    "quantized_export": "Opt-in sender-side FP8/NVFP4 routed-expert export matching the serialized rollout checkpoint; requires streaming per_expert publication and flattened transport. GPU qualification pending.",
     "expert_publication": "per_expert exports separate HF expert slices; fused publishes stacked serving tensors. Disk HF export remains per-expert.",
     "max_policy_lag": "Maximum optimizer-step age at consumption; multiple updates per collection also consume this allowance. Structured async runs default to six (provisional); synchronous and low-level defaults remain zero. Explicit limits take precedence.",
     "max_sequence_length": "Trainer context limit in tokens; structured max_context_length sets trainer and serving limits together.",
