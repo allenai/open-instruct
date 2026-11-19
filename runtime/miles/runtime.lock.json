@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "H253 startup qualification candidate. Each cell prepares its weights asynchronously with a 300-second deadline. All 670 rollout CPU tests passed. GPU qualification pending.",
+  "status": "H253 qualification image: background weight preparation with a 300s tick budget and a per-engine 600s snapshot reply deadline. Both budgets scale with the infrastructure timeout multiplier. CPU rollout suite passed; GPU startup checks enabled.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "3179e7b9bde9e2fa2f7b1086f7e1c7c93b857881"
+      "revision": "c6b98de20e4e43f74c5e15ca189f6e2079753ad5"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
