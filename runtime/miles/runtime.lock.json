@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "H253 startup retry candidate: preserve acknowledged references, reuse pending snapshot RPCs, skip unused debug snapshots, and allow 300-second initialization ticks. Backend PR allenai/miles-olmo-core#46; 226 targeted/neighboring CPU tests plus final nine snapshot regressions passed. Patched-image GPU qualification pending; binary base and other source pins unchanged.",
+  "status": "H253 startup qualification candidate. Each cell prepares its weights asynchronously with a 300-second deadline. All 670 rollout CPU tests passed. GPU qualification pending.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "32ba74da40ff2ec0440f340539a984867893d2f5"
+      "revision": "3179e7b9bde9e2fa2f7b1086f7e1c7c93b857881"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
