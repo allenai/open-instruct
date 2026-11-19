@@ -9,7 +9,11 @@ The original rubric is unchanged on its branch; this is a separate draft for dis
 ## Prompt review (the priority)
 
 Prompt verdicts are judged on the prompt alone, never on how the current response handles it, so the prompt
-filter stays valid if responses are regenerated. The prompt codes are Abhishek's, unchanged. Added:
+filter stays valid if responses are regenerated. Abhishek's prompt codes are unchanged. Added:
+- two prompt codes from the Clean v4 draft: `training_target_leakage` (prompt accidentally exposes the target
+  answer) and `contaminated_context` (irrelevant or misattached context changes the task);
+- unusual formatting and stylistic variation are not defects, and prompts are not rejected for being repetitive,
+  simple, generic or artificial without a concrete defect (also from the v4 draft);
 - a rule that naturally occurring false premises in user questions are useful prompts (keep), with
   `inconsistent_premise` reserved for accidentally impossible or non-unique tasks (from the hive abstention judge);
 - a "Prompt thresholds" list giving a keep/drop call for the borderline cases reviewers hit in the pilots:

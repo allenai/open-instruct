@@ -31,6 +31,13 @@ Drop a prompt for a concrete defect:
   instructions make the desired response unknowable from the visible context.
 - `context_defect`: prior conversation or tool results contain a material error
   that contaminates the requested continuation.
+- `training_target_leakage`: the prompt unintentionally exposes the expected
+  answer or target output in a way that defeats the task being supervised. Do
+  not apply when the user intentionally supplies an answer for critique,
+  verification, transformation or discussion.
+- `contaminated_context`: irrelevant or incorrectly associated context materially
+  changes the meaning of the task or makes the intended supervision unreliable.
+  Ordinary additional context is not contamination.
 - `prompt_other`: another specific defect; state it precisely.
 
 Do not drop an intentional impossibility proof, counterexample, fictional
@@ -39,7 +46,8 @@ prompt-injection defense example merely because its surface statement is false,
 underspecified, unsafe or adversarial. Distinguish that intent from a broken
 ordinary task. For underspecified prompts, the burden is whether the visible
 example reasonably supports a useful answer, rather than whether every detail
-was specified. Mere typos, non-native English and terse wording are not defects.
+was specified. Mere typos, non-native English, terse wording, unusual formatting
+and stylistic variation are not defects.
 
 Judge the prompt alone. A prompt verdict must not depend on how the current
 response handles it: a broken prompt stays broken when a response happens to
@@ -85,6 +93,9 @@ or non-unique, typically synthetic math, code or puzzle problems.
   wrong or unanswerable.
 - A prompt in one language with no other language requested expects an answer
   in that language; this is not ambiguity.
+- Do not reject a prompt simply because it is repetitive, simple, generic,
+  artificial or stylistically unusual. Reject only when a concrete defect makes
+  the example invalid.
 
 ## Response review
 
