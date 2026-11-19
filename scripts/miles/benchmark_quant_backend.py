@@ -141,7 +141,9 @@ def single(manifest, case, output):
     )
     importlib.import_module("olmo_sglang").register()
     engine_type = importlib.import_module("sglang.srt.entrypoints.engine").Engine
-    engine_type.run_scheduler_process_func = staticmethod(audit_scheduler)
+    engine_type.run_scheduler_process_func = staticmethod(
+        importlib.import_module("scripts.miles.benchmark_quant_backend").audit_scheduler
+    )
     started = time.monotonic()
     engine = engine_type(**case["options"])
     save(output / "startup.json", {"seconds": time.monotonic() - started, "case": case})
