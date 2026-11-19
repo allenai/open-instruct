@@ -1,5 +1,14 @@
 import pytest
 from scripts.miles.benchmark_quant_backend import measure, validate_outputs
+from scripts.miles.prepare_quant_backend_runtime import patch_top_k
+
+
+def test_adapter_topk_is_forwarded_without_changing_routing():
+    source = "self.experts = expert_class(\n            num_experts=self.num_experts,\n            hidden_size=expert_hidden_size,\n)"
+    patched = patch_top_k(source)
+    assert patched.replace("            top_k=config.num_experts_per_tok,\n", "") == source
+    with pytest.raises(ValueError, match="Unexpected"):
+        patch_top_k(patched)
 
 
 def test_truncated_or_missing_work_is_not_a_speed_result():

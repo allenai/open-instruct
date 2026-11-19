@@ -180,6 +180,19 @@ def single(manifest, case, output):
                 save(output / f"{workload['name']}-{repeat}.json", row)
                 print(json.dumps(row), flush=True)
         save(output / "complete.json", {"rows": rows, "case": case, "accuracy_evaluated": False})
+        if manifest.get("profile"):
+            # Separate untimed workload: profiling must never affect the speed rows.
+            engine.flush_cache()
+            engine.start_profile(
+                output_dir=str(output / "profile"),
+                num_steps=10,
+                activities=["CPU", "GPU"],
+                profile_by_stage=True,
+                profile_stages=["decode"],
+                record_shapes=True,
+            )
+            measure(engine, inputs[:1024], 64)
+            save(output / "profile-complete.json", {"timed": False})
     finally:
         engine.shutdown()
 
