@@ -129,6 +129,7 @@ def measure(engine, inputs, output_tokens):
 
 def single(manifest, case, output):
     output.mkdir(parents=True, exist_ok=False)
+    os.environ.update(case.get("env", {}))
     os.environ["QUANT_BENCH_OUTPUT"] = str(output)
     os.environ["OLMO_SGLANG_CORE_COMPAT"] = case.get("core_compat", "auto")
     if case.get("moe_config_dir"):
