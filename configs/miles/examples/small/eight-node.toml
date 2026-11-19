@@ -10,8 +10,9 @@
 # Timing results above used batch 1,024, LR 1e-6 and response-mean loss; see the docs audit.
 # Start checkpoint: H203 SFT export hf_step18410 (emo_* fields null; HF vocab 100278, Core pads to 100352).
 # Same serving/judge settings as four-node.toml (trtllm_mha, tuned MoE tiles, rounding mode,
-# R=96 with 128 KDA slots, server concurrency 192, CUDA graph bs 96, judge timeout 600 +
-# qwen3-no-thinking); producer budget 96 x 47 engines = 4,512. Do not set training.eval_interval.
+# judge timeout 600 + qwen3-no-thinking) except admission: R=96 with 128 KDA slots, server
+# concurrency 192, CUDA graph bs 96; producer budget 96 x 47 engines = 4,512.
+# four-node.toml uses R=160; R=160 is untested on 8 nodes. Do not set training.eval_interval.
 # See docs/miles/olmo35-small.md.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
@@ -116,6 +117,7 @@ max_context_length = 34816
 profile = "generic"
 sglang_disable_radix_cache = true
 # Admission R=96: engines gain throughput up to R=96 (R=64: 1.9K vs 2.5K tok/s/engine).
+# R=160 was faster on 4 nodes (see four-node.toml) but is untested on 8 nodes.
 sglang_max_running_requests = 96
 sglang_server_concurrency = 192
 sglang_cuda_graph_backend_decode = "full"
