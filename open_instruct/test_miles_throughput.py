@@ -107,7 +107,10 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     assert plan["scoring_pass"]["standalone"] is False
     assert plan["scoring_pass"]["check_interval"] == 0
     assert not config.core.replay_diagnostics and config.core.diagnostic_interval == 0
-    assert config.miles["save_interval"] == 25
+    assert config.miles["save_interval"] == 10
+    assert config.core.checkpoint_keep_last == 2
+    assert config.core.checkpoint_keep_every == (50 if profile == "node" else 100)
+    assert config.core.save_final_checkpoint is True
 
 
 def test_dev_retains_weight_qualification():

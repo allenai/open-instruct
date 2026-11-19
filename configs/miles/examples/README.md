@@ -297,10 +297,9 @@ These templates inherit the disabled optional startup weight snapshot/reset audi
 audits (`scoring_check_interval = 0`). The first score check at startup/resume, required
 scoring passes, TIS, and publication acknowledgments remain. `dev`
 retains weight qualification. Re-enable audits when changing the publication or
-scoring implementation. Learning templates save every 25 updates; choose the
-cadence from measured save cost and acceptable recovery loss.
+scoring implementation. See the checkpoint policy below before launching a learning run.
 
-All three examples explicitly retain two native checkpoints and disable router
+The examples explicitly retain two native checkpoints and disable router
 auxiliary losses; these differ from the defaults. The learning recipes also keep
 their model-specific context, packing, cache and memory settings. Review these
 choices when changing models. `three-node` keeps its background evaluator configuration
@@ -325,3 +324,41 @@ evaluator does not expose top-p for that external task. Full nucleus-sampling
 alignment requires an evaluator update. Keep benchmark-specific protocols such
 as greedy RULER and BFCL explicit when adding them; do not override every task
 in a suite globally.
+
+## Recovery checkpoints and preserved milestones
+
+The Tiny learning and Small four-/eight-node templates enable native recovery
+saves every **10 updates**, retain the latest **two** saves, and preserve the
+following milestones plus the final checkpoint. Automatic resume is enabled.
+The short mechanics examples keep their separate checkpoint settings.
+
+| Template | Recovery interval | Preserved interval | Reason |
+|---|---:|---:|---|
+| Tiny `node` |10 updates|50 updates|Align native milestones with the existing 50-update development panel.|
+| Tiny `three-node` |10 updates|100 updates|Retain longer learning milestones; its evaluation remains initial/final.|
+| Small `four-node`, `eight-node` |10 updates|50 updates|Retain milestones for expensive runs when extending the 30-update budget.|
+
+Choose the recovery interval from measured **wall-clock update time**, aiming for
+roughly **1–2 hours** between saves. Ten updates is a starting point, not a timer:
+Tiny seed17 data runs at batch 2,048 recently took about 5–7 minutes/update
+(roughly 50–70 minutes per10 updates). This is workload-specific evidence, not a
+throughput claim for every template. The Small timing measurements above used an
+older batch/objective; remeasure the current recipe rather than treating those
+numbers as its checkpoint forecast. Native saves also add I/O time, which the
+historical checkpoint-disabled Small timing runs did not include.
+
+Before launch, budget startup/compilation, generation wait, training, evaluation
+and save time separately. Ensure the **first complete recovery save** should
+finish comfortably inside the protected minimum runtime; if it will not, shorten
+the interval or revise the run budget before submission. Review output storage
+for the latest saves, preserved milestones and evaluator snapshots. For a
+checkpoint-free timing experiment, explicitly disable saving and automatic
+resume and remove `save_interval`; do not carry that override into a learning run.
+
+Verify the first real save's completion manifest, latest pointer and data-cursor
+hash. On interruption, restore the latest complete save and check the first
+post-resume optimizer counter and cursor identity. Check that ordinary saves
+actually roll off while preserved milestones and pending evaluation inputs remain.
+Automatic job restart alone does not establish model/optimizer recovery. See
+[checkpoint retention](../../../docs/miles/models-and-checkpoints.md#save-resume-and-export)
+for native retention semantics.

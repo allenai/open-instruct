@@ -33,11 +33,17 @@ def test_learning_baseline_and_worker_controls(name, batch, lag, buffer):
 
 @pytest.mark.parametrize(
     "section,topology_fields",
-    [("training", set()), ("core", set()), ("inference", {"gpus"}), ("trainer", {"gpus", "expert_parallel_size"})],
+    [
+        ("training", set()),
+        ("core", {"checkpoint_keep_every"}),
+        ("inference", {"gpus"}),
+        ("trainer", {"gpus", "expert_parallel_size"}),
+    ],
 )
 def test_learning_demos_share_training_parameters(section, topology_fields):
     # Dataset, judge and evaluation workloads intentionally differ. Changing GPU
-    # topology must not silently change the learning recipe.
+    # topology must not silently change the learning recipe. Artifact milestone
+    # cadence follows each template's evaluation/retention needs.
     runs = [
         tomllib.loads(Path(f"configs/miles/examples/tiny/{name}.toml").read_text()) for name in ("node", "three-node")
     ]

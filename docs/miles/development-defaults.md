@@ -40,7 +40,7 @@ remains false for compatibility with existing runs; see [grading contracts](grad
 - **Compiler cache** (on): shortens repeat startup and does not change training.
 - **Weight equality audit** (off in learning templates, on in mechanics templates): startup snapshot/reset qualification is separate from the required publication protocol.
 - **Trainer scoring** (`scoring_pass_required = false`): reuse the training forward only when the recipe permits it. Learning templates set `scoring_check_interval = 0` to retain startup/resume validation without periodic extra scoring forwards; TIS and required scoring remain active.
-- **Native checkpoints** (every 25 updates in learning templates): synchronous saves interrupt training. Adjust using measured save time and acceptable lost work after preemption; keep recovery enabled.
+- **Native checkpoints** (every10 updates in the learning starters): aim for roughly 1–2 hours between ephemeral recovery saves, using measured wall-clock update and save times. Retain the latest two saves, permanent 50-/100-update milestones as specified by the template, and the final checkpoint. Include startup/compilation and evaluation overhead when checking that the first complete save fits comfortably inside protected runtime. Verify actual saving, bounded retention and restored optimizer/cursor identity; automatic restart alone is not recovery. See [the template checkpoint policy](../../configs/miles/examples/README.md#recovery-checkpoints-and-preserved-milestones).
 
 ## Opt-in features
 
