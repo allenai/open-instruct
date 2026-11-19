@@ -39,6 +39,7 @@ def audit_scheduler(*args, **kwargs):
                 modules.append(
                     {
                         "name": name,
+                        "layer_class": type(layer).__name__,
                         "method": type(method).__name__,
                         "runner": str(getattr(getattr(method, "runner", None), "runner_backend", None)),
                         "parameters": {
@@ -79,6 +80,8 @@ def audit_scheduler(*args, **kwargs):
                 "gpu": torch.cuda.get_device_name(),
                 "free_total_bytes": torch.cuda.mem_get_info(),
                 "triton_moe_configs": triton_configs,
+                "moe_config_dir": os.environ.get("SGLANG_MOE_CONFIG_DIR"),
+                "core_compat_mode": getattr(runner.model, "core_compat_mode", None),
             },
         )
 
@@ -134,6 +137,8 @@ def single(manifest, case, output):
     if torch.cuda.device_count() != 1 or "B300" not in torch.cuda.get_device_name():
         raise ValueError("Requires exactly one B300")
     model = Path(case["options"]["model_path"])
+    if case["options"].get("moe_runner_backend") == "flashinfer_trtllm":
+        raise ValueError("Use flashinfer_trtllm_routed to preserve Olmo custom routing and restored weight scale")
     if case["precision"] == "nvfp4" and not model.exists():
         subprocess.run(
             [
