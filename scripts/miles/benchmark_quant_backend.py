@@ -48,6 +48,28 @@ def audit_scheduler(*args, **kwargs):
                     }
                 )
         torch = importlib.import_module("torch")
+        triton_configs = {}
+        for name, layer in runner.model.named_modules():
+            method = getattr(layer, "quant_method", None)
+            backend = str(getattr(getattr(method, "runner", None), "runner_backend", None))
+            if name.endswith(".experts") and backend.endswith(".TRITON"):
+                config_module = importlib.import_module(
+                    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe_triton_config"
+                )
+                quant_config = getattr(method, "quant_config", None)
+                fp8 = "fp8" in type(method).__name__.lower()
+                triton_configs = {
+                    str(batch): config_module.try_get_optimal_moe_config(
+                        tuple(layer.w13_weight.shape),
+                        tuple(layer.w2_weight.shape),
+                        runner.model.config.num_experts_per_tok,
+                        "fp8_w8a8" if fp8 else None,
+                        batch,
+                        block_shape=getattr(quant_config, "weight_block_size", None) if fp8 else None,
+                    )
+                    for batch in [128, 256, 512, 1024]
+                }
+                break
         save(
             Path(os.environ["QUANT_BENCH_OUTPUT"]) / "loaded-audit.json",
             {
@@ -56,6 +78,7 @@ def audit_scheduler(*args, **kwargs):
                 "attention_backend": type(runner.attn_backend).__name__,
                 "gpu": torch.cuda.get_device_name(),
                 "free_total_bytes": torch.cuda.mem_get_info(),
+                "triton_moe_configs": triton_configs,
             },
         )
 
@@ -105,6 +128,8 @@ def single(manifest, case, output):
     output.mkdir(parents=True, exist_ok=False)
     os.environ["QUANT_BENCH_OUTPUT"] = str(output)
     os.environ["OLMO_SGLANG_CORE_COMPAT"] = "auto"
+    if case.get("moe_config_dir"):
+        os.environ["SGLANG_MOE_CONFIG_DIR"] = case["moe_config_dir"]
     torch = importlib.import_module("torch")
     if torch.cuda.device_count() != 1 or "B300" not in torch.cuda.get_device_name():
         raise ValueError("Requires exactly one B300")
