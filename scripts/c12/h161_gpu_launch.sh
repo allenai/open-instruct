@@ -17,7 +17,8 @@
 #          head_dim 256 on SM100) at --expert_parallel_degree 8, with --loss_implementation fused_linear (the default CE
 #          materialised 24.5 GiB of logits and OOMed at 235 GiB allocated per B300 in smoke 01M6XRDCCY49SEAJ5NPNCDEHFW). The smoke
 #          runs 100 steps and seeds the promoted rows of the unseeded HF export in memory for the reference CE, under
-#          transformers 5.15.1 (the export's remote code).
+#          transformers 5.15.1 (the export's remote code). The json keeps whole-block recompute but turns off the nested
+#          checkpoint_attn/_permute_moe_unpermute/_second_unpermute (a third forward): -16% s/step, same CE; with compile it OOMs.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
