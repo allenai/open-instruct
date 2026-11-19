@@ -5,9 +5,11 @@ This module provides DPO (Direct Preference Optimization) training using
 OLMo-core's native training infrastructure.
 """
 
+import dataclasses
 import os
 import pathlib
 import shutil
+import time
 from typing import Any
 
 import torch
@@ -30,6 +32,7 @@ from open_instruct import (
     model_utils,
     olmo_core_train_modules,
     olmo_core_utils,
+    template_tokens,
     utils,
 )
 from open_instruct.olmo_core_callbacks import PerfCallback
@@ -59,7 +62,59 @@ def export_to_hf(
         olmo_core_utils.save_state_dict_as_hf(state_dict, save_dir, original_model_name_or_path, tokenizer)
 
 
-def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
+@dataclasses.dataclass
+class HFStepExportCallback(callbacks.Callback):
+    """Write a HuggingFace export of the model at fixed training steps (``--hf_export_steps``; off by default).
+
+    Runs after the optimizer step of each listed step (same point as OLMo-core's checkpointer). Every rank takes part
+    in gathering the full state dict; rank 0 converts it with ``olmo_core_utils.save_state_dict_as_hf`` (the same
+    converter as the final ``hf_model`` export), writes it to ``<output_dir>/hf_step<N>.partial-<time>`` and renames
+    that to ``<output_dir>/hf_step<N>`` when complete. A step whose ``hf_step<N>`` already exists (a resumed run that
+    re-reaches it) is skipped. Nothing is ever deleted: a partial dir left by a killed job stays for the operator.
+    """
+
+    steps: tuple[int, ...] = ()
+    output_dir: str = ""
+    model_name_or_path: str = ""
+    tokenizer: Any = None
+    dtype: str = "float32"
+
+    def post_train_batch(self):
+        if self.step not in self.steps:
+            return
+        final_dir = os.path.join(self.output_dir, f"hf_step{self.step}")
+        exists = [os.path.isfile(os.path.join(final_dir, "config.json"))]
+        if distributed_utils.is_distributed():
+            dist.broadcast_object_list(exists, src=0)
+        if exists[0]:
+            logger.info(f"hf_export_steps: {final_dir} already exists, skipping the step-{self.step} export")
+            return
+        is_main = distributed_utils.get_rank() == 0
+        t0 = time.time()
+        model = self.trainer.train_module.model
+        state_dict = {}
+        for k, v in model.state_dict().items():
+            full = v.full_tensor() if hasattr(v, "full_tensor") else v
+            if is_main:
+                state_dict[k] = full.cpu()
+            del full
+        if is_main:
+            tmp_dir = f"{final_dir}.partial-{int(time.time())}"
+            olmo_core_utils.save_state_dict_as_hf(
+                state_dict, tmp_dir, self.model_name_or_path, self.tokenizer, dtype=getattr(torch, self.dtype)
+            )
+            os.rename(tmp_dir, final_dir)
+            logger.info(f"hf_export_steps: wrote {final_dir} ({self.dtype}) in {time.time() - t0:.0f}s")
+        del state_dict
+        if distributed_utils.is_distributed():
+            dist.barrier()
+
+
+def _setup_callbacks(
+    args: dpo_utils.DPOExperimentConfig,
+    dp_world_size: int,
+    tokenizer: transformers.PreTrainedTokenizerBase | None = None,
+):
     """Return callbacks dict."""
     json_config = dpo_utils.config_to_json_serializable(vars(args))
     run_name = args.run_name or args.exp_name
@@ -73,7 +128,18 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
         wandb_entity=args.wandb_entity,
         save_async=False,
         max_checkpoints=args.keep_last_n_checkpoints,
+        pre_train_checkpoint=args.pre_train_checkpoint,
     )
+    if args.hf_export_steps:
+        if args.hf_export_dtype not in ("float32", "bfloat16"):
+            raise ValueError(f"hf_export_dtype must be float32 or bfloat16, got {args.hf_export_dtype!r}")
+        trainer_callbacks["hf_step_export"] = HFStepExportCallback(
+            steps=tuple(sorted({int(x) for x in args.hf_export_steps})),
+            output_dir=args.output_dir,
+            model_name_or_path=args.model_name_or_path,
+            tokenizer=tokenizer,
+            dtype=args.hf_export_dtype,
+        )
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if args.send_slack_alerts and slack_webhook_url:
         trainer_callbacks["slack"] = callbacks.SlackNotifierCallback(name=run_name, webhook_url=slack_webhook_url)
@@ -282,6 +348,19 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         args.activation_checkpointing_modules,
     )
 
+    # SafeComp ablations (2026-11-03): chosen-side template tokens, tokenized with this run's tokenizer.
+    template_patterns = None
+    if args.log_template_probs or args.template_nll_coef != 0.0:
+        template_patterns = template_tokens.build_template_patterns(tokenizer)
+        logger.info(
+            f"Template tokens (template_nll_coef={args.template_nll_coef}, tau={args.template_nll_tau}, "
+            f"log_template_probs={args.log_template_probs}): spans={template_patterns.spans} "
+            f"content_sep={template_patterns.content_sep} "
+            f"types={list(zip(template_patterns.type_names, template_patterns.type_tokens))}"
+        )
+    if args.dpo_loss_coef != 1.0:
+        logger.info(f"dpo_loss_coef={args.dpo_loss_coef} (chosen_nll_coef={args.chosen_nll_coef})")
+
     train_module = olmo_core_train_modules.DPOTrainModule(
         model=model,
         optim=optim_config,
@@ -302,6 +381,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
         max_grad_norm=args.max_grad_norm,
         scheduler=scheduler,
         device=device,
+        template_patterns=template_patterns,
     )
 
     olmo_core_utils.reload_hf_checkpoint_after_parallelization(train_module, args.model_name_or_path, args.output_dir)
@@ -316,15 +396,21 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: dataset_transformation.Tokeniz
             dist.destroy_process_group()
         return
 
-    trainer_callbacks = _setup_callbacks(args, dp_world_size)
+    trainer_callbacks = _setup_callbacks(args, dp_world_size, tokenizer)
 
     if args.max_train_steps is not None:
         max_duration = train.Duration.steps(args.max_train_steps)
     else:
         max_duration = train.Duration.steps(num_training_steps)
 
+    # --checkpoint_save_folder (default None = output_dir): raw OLMo-core checkpoints elsewhere, same layout.
+    save_folder = (
+        os.path.join(args.checkpoint_save_folder, args.exp_name) if args.checkpoint_save_folder else args.output_dir
+    )
+    if save_folder != args.output_dir:
+        logger.info(f"Raw OLMo-core checkpoints -> {save_folder} (HF exports -> {args.output_dir})")
     trainer = train.TrainerConfig(
-        save_folder=args.output_dir,
+        save_folder=save_folder,
         max_duration=max_duration,
         metrics_collect_interval=args.logging_steps,
         callbacks=trainer_callbacks,

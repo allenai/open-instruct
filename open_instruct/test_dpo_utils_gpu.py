@@ -135,6 +135,30 @@ class TestForwardFunctionsOlmo(unittest.TestCase):
         self.assertTrue(torch.isfinite(chosen_logps).all())
         self.assertTrue(torch.isfinite(rejected_logps).all())
 
+    def test_token_logps_out_frame_matches_sequence_logps(self):
+        # SafeComp ablations (2026-11-03): the chosen per-token log-probs exported for template logging / gated NLL are
+        # in _get_batch_logps' frame (index i = log p(labels[:, i + 1])), stay in the autograd graph, and the default
+        # call (no token_logps_out) is unchanged.
+        batch = self._make_batch()
+        batch["chosen_labels"][:, :3] = -100  # an unlabeled prompt
+        for fn in (dpo_utils.separate_forward_olmo, dpo_utils.concatenated_forward_olmo):
+            out = {}
+            chosen, rejected, _ = fn(self.olmo_model, batch, average_log_prob=True, token_logps_out=out)
+            ref_chosen, ref_rejected, _ = fn(self.olmo_model, batch, average_log_prob=True)
+            torch.testing.assert_close(chosen, ref_chosen)
+            torch.testing.assert_close(rejected, ref_rejected)
+            tok, lab = out["chosen_token_logps"], out["chosen_labels"]
+            self.assertEqual(tuple(tok.shape), (2, 9))
+            torch.testing.assert_close(lab, batch["chosen_labels"])
+            mask = lab[:, 1:] != -100
+            torch.testing.assert_close((tok * mask).sum(-1) / mask.sum(-1), chosen)
+            self.assertTrue(tok.requires_grad)
+            self.olmo_model.zero_grad(set_to_none=True)
+            dpo_utils.template_gated_nll(tok, mask, tau=1.01).backward()  # tau > 1: every masked position gated in
+            grads = [p.grad for p in self.olmo_model.parameters() if p.grad is not None]
+            self.assertTrue(grads and all(torch.isfinite(g).all() for g in grads))
+            self.olmo_model.zero_grad(set_to_none=True)
+
     def test_olmo_and_hf_produce_different_results(self):
         batch = self._make_batch()
         olmo_chosen, olmo_rejected, _ = dpo_utils.concatenated_forward_olmo(self.olmo_model, batch)

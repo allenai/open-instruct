@@ -244,17 +244,20 @@ def build_checkpointer_callback(
     ephemeral_save_interval: int | None,
     save_async: bool = True,
     max_checkpoints: int | None = 3,
+    pre_train_checkpoint: bool | None = None,
 ) -> CheckpointerCallback:
     """Construct a CheckpointerCallback with shared Open Instruct defaults.
 
     ``max_checkpoints`` accepts the open-instruct convention where ``-1`` means
     unlimited.  Negative values are mapped to ``None`` (keep all).
+    ``pre_train_checkpoint`` None (default) keeps OLMo-core's default (step-0 checkpoint unless resuming).
     """
     return CheckpointerCallback(
         save_interval=checkpointing_steps,
         ephemeral_save_interval=ephemeral_save_interval,
         save_async=save_async,
         max_checkpoints=max_checkpoints if max_checkpoints is not None and max_checkpoints >= 0 else None,
+        pre_train_checkpoint=pre_train_checkpoint,
     )
 
 
@@ -305,13 +308,18 @@ def build_base_callbacks(
     wandb_entity: str | None = None,
     save_async: bool = True,
     max_checkpoints: int | None = 3,
+    pre_train_checkpoint: bool | None = None,
 ) -> dict[str, Any]:
     """Build the callbacks shared across SFT and DPO: beaker, gpu monitor, checkpointer, and optional wandb."""
     result: dict[str, Any] = {
         "beaker": olmo_core_callbacks.BeakerCallbackV2(config=config_dict),
         "gpu_monitor": train_callbacks.GPUMemoryMonitorCallback(),
         "checkpointer": build_checkpointer_callback(
-            checkpointing_steps, ephemeral_save_interval, save_async=save_async, max_checkpoints=max_checkpoints
+            checkpointing_steps,
+            ephemeral_save_interval,
+            save_async=save_async,
+            max_checkpoints=max_checkpoints,
+            pre_train_checkpoint=pre_train_checkpoint,
         ),
     }
     if with_tracking and wandb_project:
@@ -567,17 +575,22 @@ def save_state_dict_as_hf(
     save_dir: str,
     original_model_name_or_path: str,
     tokenizer: transformers.PreTrainedTokenizerBase,
+    dtype: torch.dtype | None = None,
 ) -> None:
     """Convert an olmo-core state dict to HuggingFace format and save it to disk.
 
     Loads the target HF config from ``original_model_name_or_path``, converts the
     olmo-core ``state_dict`` keys/shapes to the matching HF layout, materializes
     an HF model with those weights, and writes the model + tokenizer to
-    ``save_dir``.
+    ``save_dir``. ``dtype`` (default None = keep the state dict's dtype) casts every
+    converted tensor AFTER the conversion.
     """
     hf_config = transformers.AutoConfig.from_pretrained(original_model_name_or_path, trust_remote_code=True)
     hf_config, converted = _convert_olmo_core_state_to_hf(hf_config, state_dict)
-    converted = {k: v.contiguous() for k, v in converted.items()}
+    if dtype is None:
+        converted = {k: v.contiguous() for k, v in converted.items()}
+    else:
+        converted = {k: v.to(dtype).contiguous() for k, v in converted.items()}
 
     with accelerate.init_empty_weights():
         hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)

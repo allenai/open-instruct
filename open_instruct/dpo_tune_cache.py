@@ -115,6 +115,21 @@ def build_deepspeed_config(
 
 
 def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
+    if (
+        args.chosen_nll_coef != 0.0
+        or args.hf_export_steps
+        or args.checkpoint_save_folder
+        or args.pre_train_checkpoint is not None
+        or args.dpo_loss_coef != 1.0
+        or args.template_nll_coef != 0.0
+        or args.log_template_probs
+        or args.pair_avg_loss
+    ):
+        raise ValueError(
+            "chosen_nll_coef / hf_export_steps / checkpoint_save_folder / pre_train_checkpoint / dpo_loss_coef / "
+            "template_nll_coef / log_template_probs / pair_avg_loss are implemented only in the OLMo-core trainer "
+            "(open_instruct/dpo.py), not in dpo_tune_cache.py"
+        )
     # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers

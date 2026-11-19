@@ -27,7 +27,7 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from transformers import PreTrainedTokenizer
 
 from open_instruct import data_loader as data_loader_lib
-from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator
+from open_instruct import dpo_utils, grpo_utils, logger_utils, model_utils, padding_free_collator, template_tokens
 from open_instruct.rl_utils import masked_mean
 
 logger = logger_utils.setup_logger(__name__)
@@ -163,7 +163,20 @@ class DPOTrainModule(TransformerTrainModule):
         device: torch.device | None = None,
         state_dict_save_opts: dist_cp_sd.StateDictOptions | None = None,
         state_dict_load_opts: dist_cp_sd.StateDictOptions | None = None,
+        template_patterns: template_tokens.TemplatePatterns | None = None,
     ) -> None:
+        # SafeComp ablations (2026-11-03): chosen-side template-token logging / gated NLL need the template patterns
+        # (built from the run's tokenizer in dpo.py) and the per-token chosen log-probs of the non-packing forwards.
+        template_on = dpo_config.log_template_probs or dpo_config.template_nll_coef != 0.0
+        if template_on:
+            if template_patterns is None:
+                raise ValueError("log_template_probs / template_nll_coef need template_patterns (built in dpo.py)")
+            if dpo_config.packing:
+                raise NotImplementedError("log_template_probs / template_nll_coef are not implemented for packing")
+        # --pair_avg_loss (2026-11-07) weights micro-batches by pairs; the gated template NLL is normalized by the
+        # template positions of the whole micro-batch, so it is per pair only with one pair per micro-batch.
+        if dpo_config.pair_avg_loss and dpo_config.template_nll_coef != 0.0 and sample_microbatch_size != 1:
+            raise NotImplementedError("pair_avg_loss with template_nll_coef needs per_device_train_batch_size 1")
         if dpo_config.packing:
             assert attn_implementation in _DOC_LENS_ATTN_BACKENDS, (
                 f"DPOTrainModule with packing requires a flash attention backend for intra-document "
@@ -199,6 +212,17 @@ class DPOTrainModule(TransformerTrainModule):
         }
         if dpo_config.load_balancing_loss:
             self._metrics["aux_loss"] = torch.tensor(0.0, device=device)
+        if dpo_config.chosen_nll_coef != 0.0:
+            self._metrics["chosen_nll"] = torch.tensor(0.0, device=device)
+        if dpo_config.template_nll_coef != 0.0:
+            self._metrics["template_nll"] = torch.tensor(0.0, device=device)
+        self._template_on = template_on
+        self.template_patterns = template_patterns if template_on else None
+        self._template_sums: torch.Tensor | None = None
+        self._template_mins: torch.Tensor | None = None
+        self._template_det_types = (
+            template_patterns.deterministic_type_mask(device) if self.template_patterns is not None else None
+        )
 
         if dpo_config.concatenated_forward or dpo_config.packing:
             self._forward_fn = dpo_utils.concatenated_forward_olmo
@@ -220,12 +244,15 @@ class DPOTrainModule(TransformerTrainModule):
         return flops_per_token * global_num_tokens if flops_per_token is not None else None
 
     def _compute_microbatch_loss(self, micro_batch: dict[str, Any]) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        token_out: dict[str, torch.Tensor] | None = {} if self._template_on else None
+        extra_kwargs = {"token_logps_out": token_out} if token_out is not None else {}
         policy_chosen_logps, policy_rejected_logps, aux_loss = self._forward_fn(
             self.model,
             micro_batch,
             average_log_prob=self.dpo_config.loss_type.is_average_loss,
             output_router_logits=self.dpo_config.load_balancing_loss,
             **self._forward_kwargs,
+            **extra_kwargs,
         )
 
         losses, chosen_rewards, rejected_rewards = dpo_utils.compute_loss(
@@ -236,9 +263,39 @@ class DPOTrainModule(TransformerTrainModule):
             self.reference_cache if self.dpo_config.loss_type.needs_reference_model else None,
         )
 
-        loss = losses.mean()
+        # dpo_loss_coef == 1.0 (default) returns the same tensor; 0.0 = SFT-on-chosen control (sftc, 2026-11-03).
+        loss = dpo_utils.apply_dpo_loss_coef(losses.mean(), self.dpo_config.dpo_loss_coef)
         if self.dpo_config.load_balancing_loss and aux_loss is not None:
             loss = loss + self.dpo_config.load_balancing_weight * aux_loss
+        # RPO-style NLL on the chosen response; chosen_nll_coef == 0 (default) returns `loss` untouched.
+        loss, chosen_nll = dpo_utils.add_chosen_nll(
+            loss,
+            policy_chosen_logps,
+            micro_batch,
+            self.dpo_config.chosen_nll_coef,
+            self.dpo_config.loss_type.is_average_loss,
+            packing=self.dpo_config.packing,
+        )
+        template_nll = None
+        if token_out is not None:
+            assert self.template_patterns is not None and self._template_det_types is not None
+            token_logps = token_out["chosen_token_logps"]
+            types = template_tokens.template_types(token_out["chosen_labels"], self.template_patterns)
+            sums, mins = dpo_utils.template_prob_sums(
+                token_logps,
+                types,
+                self.template_patterns.num_types,
+                self.dpo_config.template_nll_tau,
+                self._template_det_types,
+            )
+            if self._template_sums is None or self._template_mins is None:
+                self._template_sums, self._template_mins = sums, mins
+            else:
+                self._template_sums = self._template_sums + sums
+                self._template_mins = torch.minimum(self._template_mins, mins)
+            if self.dpo_config.template_nll_coef != 0.0:
+                template_nll = dpo_utils.template_gated_nll(token_logps, types >= 0, self.dpo_config.template_nll_tau)
+                loss = loss + self.dpo_config.template_nll_coef * template_nll
 
         step_metrics: dict[str, torch.Tensor] = {
             "loss": loss,
@@ -250,6 +307,10 @@ class DPOTrainModule(TransformerTrainModule):
         }
         if aux_loss is not None and "aux_loss" in self._metrics:
             step_metrics["aux_loss"] = aux_loss
+        if chosen_nll is not None:
+            step_metrics["chosen_nll"] = chosen_nll
+        if template_nll is not None:
+            step_metrics["template_nll"] = template_nll
 
         return loss, step_metrics
 
@@ -269,18 +330,32 @@ class DPOTrainModule(TransformerTrainModule):
         device = batch["chosen_input_ids"].device
         micro_token_counts = [padding_free_collator.get_num_tokens(mb) for mb in micro_batches]
         total_tokens = sum(micro_token_counts)
+        # Default: micro-batch weight = its share of this rank's tokens (unchanged). --pair_avg_loss (2026-11-07):
+        # n_pairs(mb) * dp_world / global n_pairs, i.e. every pair in the global batch weighs 1 / global n_pairs.
+        global_pairs = None
+        dp_world_size = 1
+        micro_pair_counts: list[int] = []
+        if self.dpo_config.pair_avg_loss:
+            micro_pair_counts = [dpo_utils.num_pairs(mb) for mb in micro_batches]
+            global_pairs, dp_world_size = dpo_utils.global_pair_count(
+                sum(micro_pair_counts), device, self.dp_process_group
+            )
+        loss_weights, metric_weights = dpo_utils.microbatch_weights(
+            micro_token_counts, micro_pair_counts, self.dpo_config.pair_avg_loss, global_pairs, dp_world_size
+        )
 
         for v in self._metrics.values():
             v.zero_()
+        self._template_sums = None
+        self._template_mins = None
 
         for micro_batch_idx, micro_batch in enumerate(micro_batches):
             with self._train_microbatch_context(micro_batch_idx, num_micro_batches):
                 try:
                     loss, step_metrics = self._compute_microbatch_loss(micro_batch)
-                    micro_tokens = micro_token_counts[micro_batch_idx]
-                    weight = micro_tokens / total_tokens
+                    weight = loss_weights[micro_batch_idx]
                     for k, v in step_metrics.items():
-                        self._metrics[k] += v.detach() * micro_tokens
+                        self._metrics[k] += v.detach() * metric_weights[micro_batch_idx]
                     (loss * weight).backward()
                 except torch.OutOfMemoryError:
                     if snapshot_dir:
@@ -314,6 +389,10 @@ class DPOTrainModule(TransformerTrainModule):
                 weighted_sums["rewards/margin"] = chosen_rewards - rejected_rewards
             if "aux_loss" in self._metrics:
                 weighted_sums["aux_loss"] = self._metrics["aux_loss"]
+            if "chosen_nll" in self._metrics:
+                weighted_sums["train/chosen_nll"] = self._metrics["chosen_nll"]
+            if "template_nll" in self._metrics:
+                weighted_sums["train/template_nll"] = self._metrics["template_nll"]
 
             # DPO token-weighted metrics are ratios sum_ranks(sum_mb(metric*tokens)) / sum_ranks(tokens).
             # Stack the shared denominators (real and padded token counts) with the numerators and
@@ -329,11 +408,17 @@ class DPOTrainModule(TransformerTrainModule):
             )
             dist.all_reduce(local_sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
             global_tokens, global_padded = local_sums[0], local_sums[1]
+            # --pair_avg_loss: the numerators are pair-weighted, so divide by the global pair count instead.
+            metric_denominator = global_tokens if global_pairs is None else global_pairs
             for i, name in enumerate(metric_names):
-                self.record_metric(name, (local_sums[i + 2] / global_tokens).item(), reduce_type=None)
+                self.record_metric(name, (local_sums[i + 2] / metric_denominator).item(), reduce_type=None)
+            if global_pairs is not None:
+                self.record_metric("train/global_pairs_per_step", global_pairs, reduce_type=None)
             self.record_metric(
                 "train/padding_fraction", (1.0 - global_tokens / global_padded).item(), reduce_type=None
             )
+            if self._template_on:
+                self._record_template_metrics(device)
 
             local_num_sequences_f = local_num_sequences.to(device=device, dtype=torch.float32)
             # Use mean rather than sum: the reduction runs over the whole world, but all non-DP
@@ -362,6 +447,46 @@ class DPOTrainModule(TransformerTrainModule):
                     self.trainer.max_steps,
                 )
                 self.record_metric("learning_rate", float(lr), reduce_type=None)
+
+    def _record_template_metrics(self, device: torch.device) -> None:
+        """Per-step chosen-side template-token probabilities (2026-11-03 SafeComp ablations; collapse early warning).
+
+        Reduced over all micro-batches and DP ranks: template/p_mean (mean p over all template positions),
+        template/p_min (min p), template/det_p_min (min p over deterministic positions, i.e. without the decision
+        types of template_tokens.DECISION_TYPES), template/type_p_min and template/type_p_min_det (min over position
+        types of the per-type mean p, the collapse probe's "worst template position"), template/frac_below_tau,
+        template/n_positions, and template_type/<type> per-type mean p."""
+        assert self.template_patterns is not None and self._template_det_types is not None
+        nt = self.template_patterns.num_types
+        sums = self._template_sums
+        mins = self._template_mins
+        if sums is None or mins is None:  # no micro-batch on this rank (should not happen): reduce neutral values
+            sums = torch.zeros(3 + 2 * nt, device=device)
+            mins = torch.full((2,), float("inf"), device=device)
+        sums, mins = sums.clone(), mins.clone()
+        dist.all_reduce(sums, op=dist.ReduceOp.SUM, group=self.trainer.dp_process_group)
+        dist.all_reduce(mins, op=dist.ReduceOp.MIN, group=self.trainer.dp_process_group)
+        s = sums.tolist()
+        mn = mins.tolist()
+        n = s[1]
+        type_sum, type_cnt = s[3 : 3 + nt], s[3 + nt :]
+        type_mean = [ts / tc if tc > 0 else float("nan") for ts, tc in zip(type_sum, type_cnt)]
+        det = self._template_det_types.tolist()
+        seen = [m for m, c in zip(type_mean, type_cnt) if c > 0]
+        seen_det = [m for m, c, d in zip(type_mean, type_cnt, det) if c > 0 and d]
+        nan = float("nan")
+        self.record_metric("template/n_positions", n, reduce_type=None)
+        self.record_metric("template/p_mean", s[0] / n if n > 0 else nan, reduce_type=None)
+        self.record_metric("template/frac_below_tau", s[2] / n if n > 0 else nan, reduce_type=None)
+        self.record_metric("template/p_min", mn[0] if math.isfinite(mn[0]) else nan, reduce_type=None)
+        self.record_metric("template/det_p_min", mn[1] if math.isfinite(mn[1]) else nan, reduce_type=None)
+        self.record_metric("template/type_p_min", min(seen) if seen else nan, reduce_type=None)
+        self.record_metric("template/type_p_min_det", min(seen_det) if seen_det else nan, reduce_type=None)
+        for name, m in zip(self.template_patterns.type_names, type_mean):
+            self.record_metric(f"template_type/{name}", m, reduce_type=None)
+        if n == 0 and not getattr(self, "_warned_no_template", False):
+            self._warned_no_template = True
+            logger.warning("log_template_probs: no chosen-side template positions found in this step's batch")
 
 
 class GRPOTrainModule(TransformerTrainModule):

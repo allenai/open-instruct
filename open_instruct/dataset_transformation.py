@@ -1319,6 +1319,17 @@ def _tokenize_tulu_sft_with_assistant_labels(
             ) from exc
         assert isinstance(header, str)
         assert isinstance(through, str)
+        if header and not rendered.startswith(header):
+            # Templates whose generation prompt OPENS a reasoning block (Qwen3.5: "<|im_start|>assistant\n<think>\n")
+            # render an assistant turn WITHOUT reasoning_content as "<|im_start|>assistant\n" + content, so the
+            # generation-prompt header is not a prefix of the full render even though the conversation is
+            # perfectly prefix-stable. Drop the opened block from the header; the label span then starts at the
+            # content (and covers a think block when the message does carry one). 2026-09-20, SafeComp task-level
+            # rows (teacher rollouts without reasoning_content).
+            for opener in ("<think>\n\n</think>\n\n", "<think>\n"):
+                if header.endswith(opener) and rendered.startswith(header[: -len(opener)]):
+                    header = header[: -len(opener)]
+                    break
         if not (len(header) <= len(through) and rendered.startswith(header) and rendered.startswith(through)):
             raise ValueError(
                 "Cannot compute assistant label spans for this chat template/conversation: the "

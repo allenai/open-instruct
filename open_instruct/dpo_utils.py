@@ -27,7 +27,7 @@ import pathlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -112,6 +112,180 @@ class DPOConfig:
     """Whether to concatenate chosen and rejected for DPO training."""
     packing: bool = False
     """Whether to use packing/padding-free collation."""
+    chosen_nll_coef: float = 0.0
+    """Weight of an NLL (SFT) term on the chosen response, RPO-style (Pang et al. 2024, "Iterative Reasoning
+    Preference Optimization"; TRL's ``rpo_alpha``): loss = DPO loss + chosen_nll_coef * NLL(chosen), where NLL is the
+    per-example negative log-likelihood of the chosen response's labeled tokens divided by their count (length
+    normalized). 0.0 (default) = off: the loss and the logged metrics are exactly the plain DPO ones. OLMo-core
+    trainer (``dpo.py``) only; ``dpo_tune_cache.py`` refuses a non-zero value."""
+    dpo_loss_coef: float = 1.0
+    """Weight of the DPO (preference) term: loss = dpo_loss_coef * DPO + chosen_nll_coef * NLL + template_nll_coef *
+    gated template NLL. 1.0 (default) = unchanged (the DPO loss tensor is used as is). 0.0 with chosen_nll_coef 1.0 =
+    SFT on the chosen side only (SafeComp ``sftc`` control, 2026-11-03): the rejected forward, reference cache and
+    reward/accuracy metrics are still computed and logged, but the DPO term contributes zero gradient. OLMo-core
+    trainer only; ``dpo_tune_cache.py`` refuses a value other than 1.0."""
+    template_nll_coef: float = 0.0
+    """Weight of a confidence-gated NLL on chosen-side tool-call TEMPLATE tokens (TAB-PO-style barrier; SafeComp
+    ``gtn`` arm, 2026-11-03): -sum log p over template positions whose policy probability (detached) is below
+    ``template_nll_tau``, divided by max(1, number of template positions in the micro-batch). Template positions =
+    ``open_instruct/template_tokens.py`` (Qwen3.5 '\\n</think>\\n\\n', the prose->call '\\n\\n', the tool-call markup,
+    '<|im_end|>\\n'), labeled positions only. 0.0 (default) = off. Turns on ``log_template_probs``. OLMo-core trainer,
+    non-packing path only."""
+    template_nll_tau: float = 0.99
+    """Gate of ``template_nll_coef``: a template position contributes only while its policy probability is < tau."""
+    log_template_probs: bool = False
+    """Log, every step, the policy probability of chosen-side template tokens (template/p_min, template/p_mean,
+    template/det_p_min, per-type means, ...) from the training forward pass (no extra forward). Collapse early warning
+    (2026-10-28 collapse diagnosis). Detached: does not change the loss. OLMo-core trainer, non-packing path only."""
+    pair_avg_loss: bool = False
+    """Average the loss over preference PAIRS (SafeComp, 2026-11-07). False (default) = unchanged: each micro-batch's
+    loss (a mean over its pairs) is weighted by its share of this rank's attention-mask tokens (chosen + rejected,
+    prefix and tool outputs included), so a long pair outweighs a short one when they sit in different micro-batches
+    of a rank. True = every pair in the global batch gets weight 1 / (global number of pairs), whatever its length,
+    the micro-batch split (gradient accumulation) or the rank it lands on (data parallelism): micro-batch weight =
+    n_pairs(micro-batch) * dp_world_size / global n_pairs, with the global count all-reduced over the DP group each
+    step (the gradient reduction averages over DP ranks). The same pair weights apply to the NLL term and to the
+    logged train_loss / logps / rewards metrics (rewards/accuracy = fraction of pairs). OLMo-core trainer only;
+    ``dpo_tune_cache.py`` refuses it."""
+
+
+def num_pairs(batch: dict[str, Any]) -> int:
+    """Number of preference pairs in a (micro-)batch: one ``index`` entry per pair in both DPO collators."""
+    return int(batch["index"].numel())
+
+
+def global_pair_count(
+    local_pairs: int, device: torch.device, group: dist.ProcessGroup | None = None
+) -> tuple[float, int]:
+    """(Number of pairs summed over the data-parallel group, DP world size); (local_pairs, 1) when not distributed."""
+    if not (dist.is_available() and dist.is_initialized()):
+        return float(local_pairs), 1
+    count = torch.tensor(float(local_pairs), device=device)
+    dist.all_reduce(count, op=dist.ReduceOp.SUM, group=group)
+    return count.item(), dist.get_world_size(group)
+
+
+def microbatch_weights(
+    micro_token_counts: list[int],
+    micro_pair_counts: list[int],
+    pair_avg: bool,
+    global_pairs: float | None = None,
+    dp_world_size: int = 1,
+) -> tuple[list[float], list[int]]:
+    """Per micro-batch (loss weight, metric weight) on this rank.
+
+    Each micro-batch's loss is a mean over its own pairs; the rank backpropagates sum_mb loss_mb * loss_weight_mb and
+    the DP gradient reduction then AVERAGES over ranks.
+    - ``pair_avg=False`` (default, unchanged): loss weight = micro_tokens / rank_tokens, metric weight = micro_tokens.
+    - ``pair_avg=True``: loss weight = n_pairs_mb * dp_world_size / global_pairs, so the averaged gradient is that of
+      (1 / global_pairs) * sum over all pairs of the per-pair loss; metric weight = n_pairs_mb (metrics are divided by
+      the global pair count).
+    """
+    if not pair_avg:
+        total_tokens = sum(micro_token_counts)
+        return [t / total_tokens for t in micro_token_counts], list(micro_token_counts)
+    if global_pairs is None or global_pairs <= 0:
+        raise ValueError(f"pair_avg needs a positive global pair count, got {global_pairs}")
+    return [n * dp_world_size / global_pairs for n in micro_pair_counts], list(micro_pair_counts)
+
+
+def apply_dpo_loss_coef(loss: torch.Tensor, coef: float) -> torch.Tensor:
+    """``coef`` * DPO loss; with ``coef == 1.0`` the SAME tensor object is returned (the default path is unchanged)."""
+    if coef == 1.0:
+        return loss
+    return coef * loss
+
+
+def template_gated_nll(token_logps: torch.Tensor, template_mask: torch.Tensor, tau: float) -> torch.Tensor:
+    """Confidence-gated NLL on chosen-side template positions (TAB-PO-style barrier).
+
+    Args:
+        token_logps: (B, T) policy log-probs of each target token, shifted frame (``per_token_logps[:, :-1]``, i.e.
+            index i = log p(labels[:, i + 1])).
+        template_mask: (B, T) bool, template positions in the same frame (``template_tokens.template_mask``).
+        tau: gate; a position contributes only while exp(logp) (detached) < tau.
+
+    Returns:
+        Scalar: -sum(logp over gated template positions) / max(1, number of template positions).
+    """
+    gate = template_mask & (token_logps.detach().exp() < tau)
+    n = template_mask.sum().clamp(min=1).to(token_logps.dtype)
+    return -torch.where(gate, token_logps, torch.zeros_like(token_logps)).sum() / n
+
+
+def template_prob_sums(
+    token_logps: torch.Tensor, types: torch.Tensor, num_types: int, tau: float, det_type_mask: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Detached template-probability statistics of one micro-batch, for cross-micro-batch / cross-rank reduction.
+
+    Args:
+        token_logps: (B, T) policy log-probs, shifted frame.
+        types: (B, T) template type ids (``template_tokens.template_types``), -1 = not template.
+        num_types: number of template position types.
+        tau: probability threshold counted in ``n_below_tau``.
+        det_type_mask: (num_types,) bool, True for the deterministic (non-decision) types.
+
+    Returns:
+        sums: (3 + 2 * num_types,) = [sum p, n positions, n with p < tau, per-type sum p..., per-type count...]
+            (reduce with SUM);
+        mins: (2,) = [min p over all template positions, min p over deterministic positions], +inf if none (reduce
+            with MIN).
+    """
+    p = token_logps.detach().float().exp()
+    m = types >= 0
+    pt, tt = p[m], types[m]
+    type_sum = torch.zeros(num_types, dtype=torch.float32, device=p.device).index_add_(0, tt, pt)
+    type_cnt = torch.zeros(num_types, dtype=torch.float32, device=p.device).index_add_(0, tt, torch.ones_like(pt))
+    head = torch.stack([pt.sum(), pt.new_tensor(float(pt.numel())), (pt < tau).float().sum()])
+    inf = p.new_tensor(float("inf"))
+    if pt.numel():
+        det = det_type_mask.to(p.device)[tt]
+        mins = torch.stack([pt.min(), torch.where(det, pt, inf).min()])
+    else:
+        mins = torch.stack([inf, inf])
+    return torch.cat([head, type_sum, type_cnt]), mins
+
+
+def chosen_nll_loss(
+    policy_chosen_logps: torch.Tensor, chosen_labels: torch.Tensor | None, average_log_prob: bool
+) -> torch.Tensor:
+    """Per-example length-normalized NLL of the chosen response (RPO's L_NLL).
+
+    Args:
+        policy_chosen_logps: per-example chosen log-probs as returned by the forward fns, shape (batch_size,):
+            the MEAN log-prob over labeled tokens when ``average_log_prob`` (dpo_norm / simpo), else the SUM.
+        chosen_labels: the chosen labels (-100 = not labeled), shape (batch_size, seq_len); only used (and then
+            required) when ``average_log_prob`` is False, to divide the summed log-prob by the labeled-token count
+            with the same one-token shift as ``_get_batch_logps``.
+        average_log_prob: whether ``policy_chosen_logps`` is already a per-token mean.
+
+    Returns:
+        (batch_size,) tensor: -mean log p(chosen labeled tokens).
+    """
+    if average_log_prob:
+        return -policy_chosen_logps
+    if chosen_labels is None:
+        raise ValueError("chosen_nll_loss needs chosen_labels when the log-probs are summed (average_log_prob=False)")
+    n_tokens = (chosen_labels[:, 1:] != -100).sum(-1).clamp(min=1).to(policy_chosen_logps.dtype)
+    return -policy_chosen_logps / n_tokens
+
+
+def add_chosen_nll(
+    loss: torch.Tensor,
+    policy_chosen_logps: torch.Tensor,
+    batch: dict[str, Any],
+    coef: float,
+    average_log_prob: bool,
+    packing: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Add ``coef`` * mean-over-batch chosen NLL to ``loss`` (RPO). With ``coef == 0`` the SAME ``loss`` object is
+    returned untouched together with ``None``, so the default path does no extra computation."""
+    if coef == 0.0:
+        return loss, None
+    if packing and not average_log_prob:
+        raise NotImplementedError("chosen_nll_coef with packing needs an average-log-prob loss (e.g. dpo_norm)")
+    nll = chosen_nll_loss(policy_chosen_logps, batch.get("chosen_labels"), average_log_prob).mean()
+    return loss + coef * nll, nll
 
 
 @dataclass
@@ -136,6 +310,22 @@ class DPOTrainingConfig(TrainingConfig):
     """FSDP shard degree. None means auto-detect."""
     fsdp_num_replicas: int | None = None
     """Number of FSDP replicas. None means auto-detect."""
+    hf_export_steps: list[int] | None = None
+    """OLMo-core trainer only: training steps at which to ALSO write a HuggingFace export of the model to
+    ``<output_dir>/hf_step<N>`` (all ranks gather the full state dict, rank 0 converts and writes into a temporary
+    dir that is renamed when complete). A step whose ``hf_step<N>`` already exists (e.g. after a resume) is skipped.
+    None (default) = off. The final ``hf_model`` export is unchanged."""
+    hf_export_dtype: str = "float32"
+    """dtype of the ``hf_export_steps`` exports: "float32" (as the final ``hf_model``) or "bfloat16" (half the disk;
+    weights are cast AFTER the OLMo-core -> HF conversion, i.e. the same values a bfloat16 vLLM server loads from a
+    float32 export)."""
+    checkpoint_save_folder: str | None = None
+    """OLMo-core trainer only: parent folder for the raw OLMo-core checkpoints (``step<N>/``: model + optimizer
+    state). None (default) = ``output_dir``. When set, checkpoints are saved to and resumed from
+    ``<checkpoint_save_folder>/<exp_name>__<seed>``; HF exports still go to ``output_dir``."""
+    pre_train_checkpoint: bool | None = None
+    """OLMo-core ``CheckpointerCallback.pre_train_checkpoint``: None (default) = OLMo-core's default (save a step-0
+    checkpoint unless resuming); False = never save the step-0 checkpoint."""
 
 
 @dataclass
@@ -962,6 +1152,7 @@ def concatenated_forward_olmo(
     average_log_prob: bool = False,
     packing: bool = False,
     output_router_logits: bool = False,
+    token_logps_out: dict[str, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
@@ -976,11 +1167,16 @@ def concatenated_forward_olmo(
         average_log_prob: Whether to average the log probabilities.
         packing: Whether to use padding-free packing.
         output_router_logits: Unused for OLMo-core models (MoE aux loss handled separately).
+        token_logps_out: if a dict is given (non-packing only), it receives the chosen side's per-token policy
+            log-probs in the shifted frame, ``chosen_token_logps`` (B, S - 1) = per_token_logps[:bs, :-1] (still in
+            the autograd graph), and the matching ``chosen_labels`` (B, S) (template logging / gated NLL).
 
     Returns:
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
     """
     del output_router_logits
+    if token_logps_out is not None and packing:
+        raise NotImplementedError("token_logps_out (template logging / gated NLL) is not implemented for packing")
     if not packing:
         concatenated_batch = concatenated_inputs(batch)
     else:
@@ -1006,6 +1202,9 @@ def concatenated_forward_olmo(
     if not packing:
         all_logps = _get_batch_logps(per_token_logps, concatenated_labels, average_log_prob=average_log_prob)
         bs = batch["chosen_input_ids"].shape[0]
+        if token_logps_out is not None:
+            token_logps_out["chosen_token_logps"] = per_token_logps[:bs, :-1]
+            token_logps_out["chosen_labels"] = concatenated_labels[:bs]
     else:
         all_logps = pf_get_batch_logps(
             per_token_logps,
@@ -1024,6 +1223,7 @@ def separate_forward_olmo(
     batch: dict[str, list | torch.Tensor],
     average_log_prob: bool = False,
     output_router_logits: bool = False,
+    token_logps_out: dict[str, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Run the model on chosen and rejected inputs separately.
 
@@ -1037,6 +1237,9 @@ def separate_forward_olmo(
         batch: Dictionary containing chosen and rejected inputs.
         average_log_prob: Whether to average the log probabilities.
         output_router_logits: Unused for OLMo-core models (MoE aux loss handled separately).
+        token_logps_out: if a dict is given, it receives the chosen side's per-token policy log-probs in the shifted
+            frame, ``chosen_token_logps`` (B, S - 1) = per_token_logps[:, :-1] (still in the autograd graph), and the
+            matching ``chosen_labels`` (B, S) (template logging / gated NLL).
 
     Returns:
         Tuple of (chosen_logps, rejected_logps, aux_loss). aux_loss is always None for OLMo-core.
@@ -1047,6 +1250,9 @@ def separate_forward_olmo(
         branch_batch = process_batch(batch, branch)
         output = model(branch_batch["input_ids"], labels=branch_batch["labels"])
         logps = _get_batch_logps(output.loss, branch_batch["labels"], average_log_prob=average_log_prob)
+        if token_logps_out is not None and branch == "chosen":
+            token_logps_out["chosen_token_logps"] = output.loss[:, :-1]
+            token_logps_out["chosen_labels"] = branch_batch["labels"]
         del branch_batch
         torch.cuda.empty_cache()
         return logps
