@@ -36,12 +36,18 @@ def audit_scheduler(*args, **kwargs):
         for name, layer in runner.model.named_modules():
             method = getattr(layer, "quant_method", None)
             if method is not None:
+                quant_config = getattr(method, "quant_config", None)
                 modules.append(
                     {
                         "name": name,
                         "layer_class": type(layer).__name__,
                         "method": type(method).__name__,
                         "runner": str(getattr(getattr(method, "runner", None), "runner_backend", None)),
+                        "per_token_activation": getattr(quant_config, "use_per_token_activation", None),
+                        "activation_scheme": getattr(quant_config, "activation_scheme", None),
+                        "native_quant_mode": str(
+                            getattr(getattr(layer, "_cutedsl_wrapper", None), "quant_mode", None)
+                        ),
                         "parameters": {
                             k: {"dtype": str(v.dtype), "shape": list(v.shape)}
                             for k, v in layer.named_parameters(recurse=False)
@@ -68,7 +74,7 @@ def audit_scheduler(*args, **kwargs):
                         batch,
                         block_shape=getattr(quant_config, "weight_block_size", None) if fp8 else None,
                     )
-                    for batch in [128, 256, 512, 1024]
+                    for batch in [128, 256, 512, 1024, 2048]
                 }
                 break
         save(
@@ -77,6 +83,14 @@ def audit_scheduler(*args, **kwargs):
                 "modules": modules,
                 "server_args": vars(instance.server_args),
                 "attention_backend": type(runner.attn_backend).__name__,
+                "attention_components": {
+                    name: type(value).__name__
+                    for name, value in getattr(runner.attn_backend, "__dict__", {}).items()
+                    if "backend" in name
+                },
+                "kv_pool_class": type(getattr(runner, "token_to_kv_pool", None)).__name__,
+                "kv_cache_dtype": str(getattr(runner, "kv_cache_dtype", None)),
+                "page_size": getattr(runner, "page_size", None),
                 "gpu": torch.cuda.get_device_name(),
                 "free_total_bytes": torch.cuda.mem_get_info(),
                 "triton_moe_configs": triton_configs,
