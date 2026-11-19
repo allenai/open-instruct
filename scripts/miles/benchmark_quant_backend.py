@@ -292,12 +292,28 @@ def main():
     attempt = root / ("attempt-" + os.environ["BEAKER_JOB_ID"])
     attempt.mkdir(parents=True, exist_ok=False)
     save(attempt / "manifest.json", manifest)
-    for case in manifest["cases"]:
-        status = run_case(args.manifest, case, attempt, manifest["case_timeout_seconds"])
-        print(json.dumps(status), flush=True)
-        report(attempt, manifest)
-        if case["name"] == "bf16" and not status["completed"]:
-            raise RuntimeError("Baseline failed; do not spend compute on unmatched cases")
+    with (attempt / "gpu-telemetry.csv").open("w") as telemetry:
+        sampler = subprocess.Popen(
+            [
+                "nvidia-smi",
+                "--query-gpu=timestamp,uuid,name,utilization.gpu,utilization.memory,memory.used,temperature.gpu,power.draw,clocks.sm,clocks.mem,pstate",
+                "--format=csv",
+                "-l",
+                "1",
+            ],
+            stdout=telemetry,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            for case in manifest["cases"]:
+                status = run_case(args.manifest, case, attempt, manifest["case_timeout_seconds"])
+                print(json.dumps(status), flush=True)
+                report(attempt, manifest)
+                if case["name"] == "bf16" and not status["completed"]:
+                    raise RuntimeError("Baseline failed; do not spend compute on unmatched cases")
+        finally:
+            sampler.terminate()
+            sampler.wait(timeout=10)
     save(
         attempt / "screen-complete.json",
         {"finished_at": time.time(), "scope": "Backend screening; inspect failed case logs"},
