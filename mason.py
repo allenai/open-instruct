@@ -152,6 +152,23 @@ def get_args():
     parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
     parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
     parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
+    # 2026-10-11 (f08 alloc relaunch): ALLOCATED job. Sets context.minRuntime (e.g. "4h") and leaves preemptible
+    # unset; after submit the spec is read back and the experiment is cancelled unless minRuntime > 0 and the
+    # workspace is --workspace. Needs beaker-py >= 2.8 (BeakerTaskContext.min_runtime); unset = unchanged behavior.
+    parser.add_argument(
+        "--min_runtime",
+        type=str,
+        default=None,
+        help="Allocated job: context.minRuntime as a duration string (e.g. '4h'); read back after submit.",
+    )
+    # 2026-10-25 (Phase 0, allocation scheduling): build the full experiment spec exactly as a real launch would,
+    # print a SPEC_DRYRUN read-back (workspace, clusters, minRuntime, priority, preemptible, timeout, gpus) and exit 0
+    # WITHOUT creating anything. Only read-only Beaker calls (secret list, user, workspace lookup). Unset = unchanged.
+    parser.add_argument(
+        "--spec_dry_run",
+        action="store_true",
+        help="Build the experiment spec, print a read-back of every task, and exit without submitting.",
+    )
     parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
     parser.add_argument(
         "--mount_docker_socket", action="store_true", help="Mount the host Docker socket for Docker-in-Docker"
@@ -346,6 +363,11 @@ def get_env_vars(
             ]
         )
 
+    # User --env values win over the weka/default cache locations too (2026-09-18): e.g. HF_HOME /
+    # HF_HUB_CACHE on node-local disk when reading model.safetensors from the shared weka cache stalls.
+    _user_vals = {v["name"]: v["value"] for v in additional_env_vars}
+    env_vars = [v for v in env_vars
+                if v.name not in _user_vals or getattr(v, "value", None) == _user_vals[v.name]]
     return env_vars
 
 
@@ -581,8 +603,12 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: list[str], w
         arguments=[full_command],
         result=beaker.BeakerResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster, args.mount_docker_socket),
-        context=beaker.BeakerTaskContext(
-            priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+        context=(
+            beaker.BeakerTaskContext(priority=beaker.BeakerJobPriority[args.priority], min_runtime=args.min_runtime)
+            if args.min_runtime
+            else beaker.BeakerTaskContext(
+                priority=beaker.BeakerJobPriority[args.priority], preemptible=args.preemptible
+            )
         ),
         constraints=constraints,
         env_vars=get_env_vars(
@@ -689,8 +715,71 @@ def maybe_override_checkpoint_dir(
     return command
 
 
+def verify_allocated(beaker_client, workload, args) -> None:
+    """--min_runtime read-back (2026-10-11): cancel the experiment and exit non-zero unless every task's
+    context.minRuntime > 0 and the experiment landed in --workspace. Prints one READBACK_OK line on success."""
+    exp_id = workload.experiment.id
+    problems, mrs, clusters, prio = [], [], [], None
+    got_ws = want_ws = None
+    try:
+        spec = beaker_client.experiment.get_spec(workload)
+        mrs = [int(t.context.min_runtime or 0) for t in spec.tasks]
+        clusters = [list((t.constraints.cluster if t.constraints else None) or []) for t in spec.tasks]
+        prio = spec.tasks[0].context.priority if spec.tasks else None
+        got_ws = workload.experiment.workspace_id
+        want_ws = beaker_client.workspace.get(args.workspace).id if args.workspace else got_ws
+    except Exception as e:  # any read-back failure counts as "not verified"
+        problems.append(f"read-back failed: {e!r}")
+    if not mrs or any(m <= 0 for m in mrs):
+        problems.append(f"minRuntime not > 0 in submitted spec: {mrs}")
+    if got_ws is None or got_ws != want_ws:
+        problems.append(f"workspace mismatch: experiment in {got_ws}, wanted {args.workspace} ({want_ws})")
+    if problems:
+        try:
+            beaker_client.workload.cancel(workload)
+            how = "cancelled"
+        except Exception as e:
+            how = f"CANCEL FAILED ({e!r}) -- stop it by hand"
+        print(f"READBACK_FAIL exp={exp_id} {how}: " + "; ".join(problems), flush=True)
+        sys.exit(4)
+    print(
+        f"READBACK_OK exp={exp_id} workspace={args.workspace} ({got_ws}) "
+        f"min_runtime={','.join(f'{m / 3.6e12:g}h' for m in mrs)} clusters={clusters} priority={prio}",
+        flush=True,
+    )
+
+
+def spec_dry_run_readback(beaker_client, experiment_spec, args) -> None:
+    """--spec_dry_run (2026-10-25): print one SPEC_DRYRUN line per task of the BUILT (never submitted) spec."""
+    try:
+        ws = beaker_client.workspace.get(args.workspace) if args.workspace else None
+        ws_desc = f"{args.workspace} ({ws.id})" if ws is not None else "(client default)"
+    except Exception as e:  # an unknown workspace must be visible in the read-back, not a crash
+        ws_desc = f"{args.workspace} (LOOKUP FAILED: {e!r})"
+    for i, t in enumerate(experiment_spec.tasks):
+        ctx = t.context
+        mr = int(getattr(ctx, "min_runtime", 0) or 0)
+        clusters = list((t.constraints.cluster if t.constraints else None) or [])
+        timeout = getattr(t, "timeout", None)
+        timeout_h = f"{int(timeout) / 3.6e12:g}h" if isinstance(timeout, (int, float)) and timeout else repr(timeout)
+        print(
+            f"SPEC_DRYRUN task={i} workspace={ws_desc} clusters={clusters} "
+            f"min_runtime={mr / 3.6e12:g}h allocated={mr > 0} "
+            f"priority={beaker.BeakerJobPriority(ctx.priority).name if ctx.priority else ctx.priority} "
+            f"preemptible={getattr(ctx, 'preemptible', None)} timeout={timeout_h} "
+            f"gpus={t.resources.gpu_count if t.resources else None} replicas={t.replicas}",
+            flush=True,
+        )
+    print("SPEC_DRYRUN nothing submitted", flush=True)
+
+
 def main():
     args, commands = get_args()
+    if args.min_runtime and "min_runtime" not in getattr(beaker.BeakerTaskContext, "__dataclass_fields__", {}):
+        sys.exit(
+            f"--min_runtime needs beaker-py >= 2.8 (BeakerTaskContext.min_runtime); this interpreter "
+            f"({sys.executable}) has beaker {getattr(beaker, '__version__', '?')}. Refusing to submit unallocated."
+        )
     # If the user is not in Ai2, we run the command as is
     config_path = os.path.expanduser("~/.beaker/config.yml")
     is_external_user = not os.path.exists(config_path) and "BEAKER_TOKEN" not in os.environ
@@ -734,6 +823,9 @@ def main():
         budget=args.budget,
         retry=beaker.BeakerRetrySpec(allowed_task_retries=args.max_retries),
     )
+    if args.spec_dry_run:
+        spec_dry_run_readback(beaker_client, experiment_spec, args)
+        return
 
     @backoff.on_exception(
         backoff.expo,
@@ -747,7 +839,9 @@ def main():
         console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.experiment.id}")
         return exp
 
-    launch_experiment()
+    workload = launch_experiment()
+    if args.min_runtime:
+        verify_allocated(beaker_client, workload, args)
 
 
 if __name__ == "__main__":
