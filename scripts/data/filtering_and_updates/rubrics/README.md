@@ -6,11 +6,22 @@
 rubrics (`rubrics/olmo-rubric`, `olmo-verdicts`, `abstention-judge`, `eval-awareness-judge` in allenai/hive).
 The original rubric is unchanged on its branch; this is a separate draft for discussion.
 
-## Changes to existing codes
+## Prompt review (the priority)
 
-- `inconsistent_premise`: narrowed. Drop only when the response does not recognize the conflict; if it says
-  there is no unique answer, corrects the premise or asks for what is missing, keep (useful abstention). If it
-  answers as if the task were well posed, the drop code is `overconfident_answer`.
+Prompt verdicts are judged on the prompt alone, never on how the current response handles it, so the prompt
+filter stays valid if responses are regenerated. The prompt codes are Abhishek's, unchanged. Added:
+- a rule that naturally occurring false premises in user questions are useful prompts (keep), with
+  `inconsistent_premise` reserved for accidentally impossible or non-unique tasks (from the hive abstention judge);
+- a "Prompt thresholds" list giving a keep/drop call for the borderline cases reviewers hit in the pilots:
+  choice questions with no options, references to absent turns/tests, template residue, broken diagrams,
+  ambiguous format examples, contradictory instructions, strict-inequality optimization, "your favorite ..."
+  prompts, multi-turn prompts with an earlier assistant error, and implied response language.
+
+An earlier draft made `inconsistent_premise`, `missing_context` and `instruction_conflict` depend on whether the
+response noticed the problem; that is reverted.
+
+## Changes to existing response codes
+
 - `identity_leak`: widened to the assistant (outside requested roleplay) claiming to be human, to have a body or
   personal experiences, or to have genuine feelings or preferences. Figures of speech do not count.
 - `safety_failure`: widened to refusing all of a mixed request instead of its safe part; disclosing private
@@ -34,18 +45,19 @@ The original rubric is unchanged on its branch; this is a separate draft for dis
 - `tone`: stock openers/closers, cliches, unnecessary moralizing, boilerplate disclaimers, humor on serious topics.
 - `unasked_assumption`: a materially ambiguous request where the response silently picked one reading.
 
-## Pilot (60 Dolci-Think-SFT-32B rows, single pass, Claude reviewers)
+## Response pilots (60 Dolci-Think-SFT-32B rows, single pass, Claude reviewers)
 
 Sample: 24 random rows, 12 from safety sources and 24 keyword-targeted. Keep/drop matched the original rubric on 59/60 (one drop became
 uncertain); 13 rows changed code, 11 of them to `overconfident_answer`. `test_gaming` and `sycophancy` fired
 once each; `unsafe_action` and the widened `safety_failure` never fired. `tone` tagged 15/60,
 `unasked_assumption` 5/60. Drop rates are not comparable to Clean v1/v2 (different reviewer model, small sample).
 
-Wording fixed after the pilot (not yet re-piloted):
-- "recognizes the problem" now refers to the final answer, not only the reasoning;
+Response-code wording fixed after the first pilot:
 - precedence: `incorrect_answer` when an answerable request is answered wrongly, `overconfident_answer` only
   when no correct answer could be given as asked or sources are fabricated;
-- the noticed-problem carve-out now also covers `missing_context` and `instruction_conflict`;
 - `test_gaming` excludes users probing limits and remarks about a problem's provenance that don't change the answer;
 - `sycophancy` vs `tone`: sycophancy changes the substance; praise that leaves content intact is `tone`;
 - `safety_failure` now covers reproducing substantial copyrighted text and passive suicidal ideation.
+
+A blind rerun of the 60 rows on the fixed wording agreed with the first pass on 56/60 keep/drop labels. Every
+drop in it was a response code, so the pilots say little about prompt review; a prompt-only pilot is next.

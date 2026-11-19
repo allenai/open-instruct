@@ -24,12 +24,7 @@ Drop a prompt for a concrete defect:
   code, earlier turns or tool results are absent; the task cannot reasonably be
   answered, clarified or refused as a complete example.
 - `inconsistent_premise`: mathematical constraints or factual assumptions
-  conflict in an unintended way, or the requested unique answer is underdetermined,
-  AND the final answer does not recognize it. When the final answer notices the
-  conflict (says no unique answer exists, corrects the premise, or asks for what
-  is missing), keep the prompt: that is a useful abstention example. Noticing it
-  only in the reasoning and then answering anyway does not count. When the final
-  answer treats the task as well posed, use `overconfident_answer` instead.
+  conflict in an unintended way, or the requested unique answer is underdetermined.
 - `corrupt_prompt`: broken extraction, truncation, fragment, placeholder,
   malformed role boundary or nonsensical synthetic text destroys the task.
 - `instruction_conflict`: accidental incompatible requirements or hidden/missing
@@ -46,10 +41,50 @@ ordinary task. For underspecified prompts, the burden is whether the visible
 example reasonably supports a useful answer, rather than whether every detail
 was specified. Mere typos, non-native English and terse wording are not defects.
 
-The same carve-out applies to `missing_context` and `instruction_conflict`: when
-the final answer notices the gap or conflict and asks for what is missing, states
-the assumption it makes, or declines appropriately, keep the prompt. When it
-answers as if nothing were missing or conflicting, use `overconfident_answer`.
+Judge the prompt alone. A prompt verdict must not depend on how the current
+response handles it: a broken prompt stays broken when a response happens to
+notice the problem, and a sound prompt stays sound under a bad response.
+
+A naturally occurring false or loaded premise in a user question (a wrong date,
+attribution or assumption a user could plausibly hold) is a useful prompt: keep
+it, since the right response corrects the premise. Reserve `inconsistent_premise`
+for tasks whose own constraints accidentally make the requested answer impossible
+or non-unique, typically synthetic math, code or puzzle problems.
+
+### Prompt thresholds
+
+- A choice question ("choose", "which of the following") with no options shown:
+  keep if the question has a unique answer without options; otherwise
+  `missing_context`.
+- A reference to an absent earlier turn, document, image, table or test set ("as
+  above", "the previous answer", "check the assertion tests"): `missing_context`
+  when the task needs it to be answered or to define correctness; keep when the
+  reference is incidental and the visible text fully specifies the task.
+- Template or extraction residue (formatting rules pasted inside quoted content,
+  empty citations, stray placeholders): `corrupt_prompt` when it makes the
+  intended task unclear; keep when the task stays clear and the residue is cosmetic.
+- Broken or inconsistent supporting material (diagram code, figure description,
+  sample explanation) that the text makes unnecessary: keep. When the task depends
+  on it, use `inconsistent_premise` (conflicting facts) or `missing_context`.
+- A format rule whose example contradicts it, or that supports several readings
+  ("wrap every bigram" with an example that skips pairs): `instruction_conflict`
+  only when the readings give materially different outputs and the visible text
+  cannot settle which is wanted; otherwise keep.
+- Explicitly contradictory instructions ("choose one of the following ... answer
+  both"): `instruction_conflict`.
+- Optimization with strict inequalities or an unattained bound ("as large as
+  possible"): keep when a conventional reading (supremum, largest integer value)
+  gives a unique answer; `inconsistent_premise` only when no conventional reading
+  does.
+- A request that presupposes the assistant has experiences or preferences
+  ("what is your favorite ..."): keep. It is a useful identity example; the
+  response is judged under `identity_leak`.
+- A multi-turn prompt whose earlier assistant turn contains an error: keep with
+  `needs_response_review` when the user's latest request is still coherent;
+  `context_defect` only when the error makes the requested continuation itself
+  wrong or unanswerable.
+- A prompt in one language with no other language requested expects an answer
+  in that language; this is not ambiguity.
 
 ## Response review
 
