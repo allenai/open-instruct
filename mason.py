@@ -334,6 +334,11 @@ def get_env_vars(
             ]
         )
 
+    # User --env values win over the weka/default cache locations too (2026-09-18): e.g. HF_HOME /
+    # HF_HUB_CACHE on node-local disk when reading model.safetensors from the shared weka cache stalls.
+    _user_vals = {v["name"]: v["value"] for v in additional_env_vars}
+    env_vars = [v for v in env_vars
+                if v.name not in _user_vals or getattr(v, "value", None) == _user_vals[v.name]]
     return env_vars
 
 
