@@ -3,6 +3,7 @@ OLMo-core utility functions, shared training configurations, and model configura
 """
 
 import datetime
+import hashlib
 import json
 import os
 import shlex
@@ -355,6 +356,22 @@ def promoted_token_matrices(model) -> list[torch.Tensor]:
 def _rows(weight: torch.Tensor, ids: list[int]) -> torch.Tensor:
     data = weight.data.full_tensor() if isinstance(weight.data, DTensor) else weight.data
     return data[ids].detach().float().cpu().clone()
+
+
+def log_promoted_row_hashes(train_module, tokenizer) -> list[tuple[int, int, str]]:
+    """Log a sha256 of each promoted row (as fp32 bytes) of each seeded matrix, without writing any.
+
+    For a start whose promoted rows are already trained and must be kept: the hashes are compared
+    offline with the same rows of the start checkpoint. Returns (matrix index, token id, hash).
+    """
+    ids = [target for target, _ in model_utils.promoted_token_rows(tokenizer)]
+    out = []
+    for m, weight in enumerate(promoted_token_matrices(train_module.model)):
+        rows = _rows(weight, ids) if ids else []
+        for token_id, row in zip(ids, rows):
+            out.append((m, token_id, hashlib.sha256(row.numpy().tobytes()).hexdigest()))
+    logger.info(f"Kept {len(ids)} promoted token row(s) unseeded (matrix, id, sha256 of fp32 row): {out}")
+    return out
 
 
 class PromotedRowStepCheck(train_callbacks.Callback):

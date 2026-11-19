@@ -417,6 +417,13 @@ class SFTConfig:
     follow the cache's and are packed the same way, one source file at a time, so an instance never
     mixes extra docs with chat rows; docs longer than max_seq_length are truncated. Checked at
     startup, which logs token and loss-token totals for the cache and the extras."""
+    keep_promoted_rows: bool = False
+    """Do not seed the rows of reserved-slot-promoted tokens when the start is loaded.
+
+    For a start that has already trained those rows (continued SFT from an SFT checkpoint through
+    `--model_name_or_path`): seeding would overwrite them with their pre-SFT piece averages. The
+    tokenizer still promotes the tokens, so the cache and template are unchanged. Logs a hash of
+    each promoted row instead, to check against the start (ledger H259, gate G2a)."""
 
 
 @dataclasses.dataclass
@@ -735,7 +742,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     # trainer was built, the olmo-core path just above, and the trainer is configured with
     # LoadStrategy.never so fit() loads nothing of its own. Skipped when resuming, since those
     # rows have been trained since they were seeded.
-    if not resumed:
+    if not resumed and args.sft.keep_promoted_rows:
+        olmo_core_utils.log_promoted_row_hashes(train_module, tc.tokenizer)
+    elif not resumed:
         row_check = olmo_core_utils.PromotedRowStepCheck.before_seeding(train_module, tc.tokenizer)
         olmo_core_utils.initialize_promoted_token_embeddings(train_module, tc.tokenizer)
         if row_check is not None:
