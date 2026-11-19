@@ -8,7 +8,7 @@
 # assistant-label masking; the Qwen3-0.6B template is NOT prefix-stable).
 #
 # NOTE: OAS = held-out eval; this is a pipeline test, NOT real training.
-BEAKER_IMAGE="${1:-${BEAKER_USER}/open_instruct_auto}"
+BEAKER_IMAGE="${1:-mingqianz/open-instruct-integration-test-agent-safety}"
 echo "Using Beaker image: $BEAKER_IMAGE"
 
 DATA=/weka/oe-adapt-default/mingqianz/agent-safety/data/sft/sft_oas_sanity.jsonl
