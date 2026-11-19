@@ -25,4 +25,4 @@ def test_queued_batch_has_exact_token_work_and_flushes_before_timing():
     result = measure(Engine(), [[1, 2]] * 2048, 512)
     assert result["output_tokens"] == 1048576
     assert result["requests"] == 2048
-    assert result["output_tokens_per_second"] * result["seconds"] == 1048576
+    assert result["output_tokens_per_second"] * result["seconds"] == pytest.approx(1048576)

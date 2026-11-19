@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--miles-benchmark" ]]; then
+  shift
+  exec bash scripts/miles/submit_quant_benchmark.sh "$@"
+fi
+
 if [[ "${1:-}" == "--miles" ]]; then
   shift
   if [[ "${1:-}" == "--cuda-version" || "${1:-}" == --cuda-version=* ]]; then
