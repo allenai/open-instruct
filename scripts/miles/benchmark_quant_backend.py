@@ -77,6 +77,8 @@ def audit_scheduler(*args, **kwargs):
                     for batch in [128, 256, 512, 1024, 2048]
                 }
                 break
+        kv_pool = getattr(runner, "token_to_kv_pool", None)
+        kv_method = kv_pool.get_kv_cache_quant_method() if kv_pool is not None else None
         save(
             Path(os.environ["QUANT_BENCH_OUTPUT"]) / "loaded-audit.json",
             {
@@ -89,6 +91,10 @@ def audit_scheduler(*args, **kwargs):
                     if "backend" in name
                 },
                 "kv_pool_class": type(getattr(runner, "token_to_kv_pool", None)).__name__,
+                "kv_quant_method": type(kv_method).__name__,
+                "kv_quant_recipe": getattr(kv_method, "name", None),
+                "kv_global_k_scales": getattr(kv_method, "k_scales_float", None),
+                "kv_global_v_scales": getattr(kv_method, "v_scales_float", None),
                 "kv_cache_dtype": str(getattr(runner, "kv_cache_dtype", None)),
                 "page_size": getattr(runner, "page_size", None),
                 "gpu": torch.cuda.get_device_name(),
