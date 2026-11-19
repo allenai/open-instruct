@@ -41,10 +41,10 @@ workspace = "ai2/olmo-instruct"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "high"
-# About 3.3h including measured startup and 30 updates; retain scheduling headroom.
+# Historical budget used the older batch without saves; remeasure current wall time and save cost.
 min_runtime = "4h"
 timeout = "8h"
-auto_resume = false
+auto_resume = true
 gpus_per_replica = 8
 memory = "1500 GiB"
 shared_memory = "200 GiB"
@@ -96,9 +96,10 @@ shuffle = true
 [training]
 learning_rate = 6e-6
 # Zero-std group filtering stays on (default), as in the measured runs.
-# Timing run length; raise num_rollouts and enable checkpoints for a learning run.
+# Short starting budget; extend only after measuring runtime, save cost and recovery.
 num_rollouts = 30
-save_checkpoints = false
+# Recovery target: roughly 1–2h; current-batch wall time still needs qualification.
+save_interval = 10
 skip_eval_before_train = true
 
 [trainer]
@@ -145,7 +146,10 @@ reward_reasoning_mode = "required"
 max_policy_lag = 12
 # A response cut off at max_response_length scores 0 (capped = wrong).
 reward_zero_truncated = true
+# Keep the latest two native saves plus permanent milestones and the final save.
 checkpoint_keep_last = 2
+checkpoint_keep_every = 50
+save_final_checkpoint = true
 publication_mode = "refresh"
 engine_drain_timeout = 900.0
 engine_update_timeout = 1800.0

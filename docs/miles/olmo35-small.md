@@ -215,7 +215,8 @@ weights as a qualification requirement. HF-versus-SGLang greedy agreement and an
 always-zero training metric do not establish that comparison.
 
 Longer learning runs additionally need native checkpoint/save-resume and evaluation
-checks. The timing recipes deliberately disable saving and have no held-out split.
+checks. The historical timing runs disabled saving; the current four-/eight-node starters
+enable bounded recovery saves. Their inputs still have no held-out split.
 
 ## Open items
 
@@ -228,3 +229,16 @@ checks. The timing recipes deliberately disable saving and have no held-out spli
   Raw actor metric events record about 0.008 over the measured timing windows;
   `collection_score_mean_abs` is about 0.0065-0.0067. These combine numerical and
   policy differences; they do not replace a controlled same-weight parity check.
+
+## Checkpoint settings in the current starters
+
+The four- and eight-node templates now enable 10-update native recovery saves,
+automatic resume, retention of the latest two saves and 50-update permanent
+milestones, plus a final native save. Their 30-update starting budgets therefore
+save at 10/20/30; 50-update retention becomes relevant when the run is extended.
+The four-update two-node mechanics check still disables checkpoints/resume.
+The reported historical timings used checkpoint-disabled runs and do not include
+this new save overhead or qualify restore correctness. Measure current batch 2,048
+wall time and checkpoint cost, aim for recovery saves roughly every 1–2 hours, and
+verify the first save and resume before relying on these settings for long runs.
+See [the shared checkpoint policy](../../configs/miles/examples/README.md#recovery-checkpoints-and-preserved-milestones).
