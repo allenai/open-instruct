@@ -64,4 +64,34 @@ Response-code wording fixed after the first pilot:
 - `safety_failure` now covers reproducing substantial copyrighted text and passive suicidal ideation.
 
 A blind rerun of the 60 rows on the fixed wording agreed with the first pass on 56/60 keep/drop labels. Every
-drop in it was a response code, so the pilots say little about prompt review; a prompt-only pilot is next.
+drop in it was a response code, so the response pilots say little about prompt review.
+
+## Prompt pilot (60 new prompts, responses hidden, two independent runs per rubric and model)
+
+Sample: OT3 math 12, Persona IF 6, Precise IF 6, Aya 6, multi-turn 6, code 6, safety 6, OT3 STEM 4,
+SYNTHETIC-2 3, TableGPT 3, random 2.
+
+| | Claude, original | Claude, this draft | gpt-6.2-sol, original | gpt-6.2-sol, this draft |
+|---|---|---|---|---|
+| dropped by both runs | 13 | 13 (same set) | 12 | 13 |
+| runs agree on keep/drop | 59/60 | 60/60 | 60/60 | 60/60 |
+| needs_response_review votes | 10 | 11 | 7 | 6 |
+
+- Drops are almost all `inconsistent_premise` on OT3 math (10 of 12 sampled), plus one answer fragment
+  (`corrupt_prompt`) and one multiple-choice question with no correct option. Nothing else was dropped.
+- Claude and GPT share 12 of 13 drops on this draft; each drops one borderline OT3 geometry/counting prompt the
+  other keeps.
+- The rubric changes do not change prompt keep/drop on this sample; the new prompt codes never fired. Testing them
+  needs a sample targeted at leaked answers, template residue, etc.
+
+Open wording questions from the pilots: underdetermined vs contradictory problems (both use
+`inconsistent_premise`), intentional impossibility exercises vs broken synthetic problems, unique but clearly
+unintended answers (e.g. a count of 0), how much reinterpretation may rescue a problem, constraints bolted onto a
+task, and the scope of `needs_response_review`.
+
+## Pipeline notes
+
+- In `review_batches.py` only keep/drop/uncertain filters; codes are stored labels (format-checked only), except
+  `needs_response_review`, `unresolved_quality` and `confirmed_contamination`.
+- `review_batches.py` requires exactly `id`, `decision`, `code`, `rationale`, so the behavior tags need a schema
+  change or should be dropped.
