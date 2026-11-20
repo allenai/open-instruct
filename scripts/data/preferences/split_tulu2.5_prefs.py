@@ -2,9 +2,11 @@ import argparse
 
 import datasets
 
+import open_instruct.utils as open_instruct_utils
+
 
 def main(push_to_hub: bool, hf_entity: str | None):
-    ds = datasets.load_dataset("allenai/tulu-2.5-preference-data", num_proc=max_num_processes())
+    ds = datasets.load_dataset("allenai/tulu-2.5-preference-data", num_proc=open_instruct_utils.max_num_processes())
 
     # for each config in the above dict, upload a new private dataset
     # with the corresponding subsets, for easy mixing

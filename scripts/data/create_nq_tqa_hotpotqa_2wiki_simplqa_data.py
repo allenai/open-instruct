@@ -2,6 +2,8 @@ import json
 
 import datasets
 
+import open_instruct.utils as open_instruct_utils
+
 PROMPT = "Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <query> query </query>, and it will return the top searched results between <output> and </output>. You can search up to 3 times. If you search more, you will receive an error message. If you find no further external knowledge needed or have reached the maximum number of searches, you can directly provide the answer inside <finish> and </finish> without detailed illustrations. For example, <finish> xxx </finish>. Question: "
 
 example_data = [
@@ -17,7 +19,7 @@ example_data = [
 
 def convert_hotpotqa_to_rlvr_format(no_prompt: bool):
     # Load the HotpotQA dataset
-    hotpotqa_dataset = datasets.load_dataset("hotpot_qa", "fullwiki", num_proc=max_num_processes())
+    hotpotqa_dataset = datasets.load_dataset("hotpot_qa", "fullwiki", num_proc=open_instruct_utils.max_num_processes())
     hotpotqa_data = hotpotqa_dataset["train"]
 
     if no_prompt:
@@ -62,7 +64,7 @@ def convert_hotpotqa_to_rlvr_format(no_prompt: bool):
 
 def convert_nq_to_rlvr_format_with_context(no_prompt: bool):
     # Load the NQ dataset
-    nq_dataset = datasets.load_dataset("google-research-datasets/nq_open", num_proc=max_num_processes())
+    nq_dataset = datasets.load_dataset("google-research-datasets/nq_open", num_proc=open_instruct_utils.max_num_processes())
     nq_data = nq_dataset["train"]
 
     if no_prompt:
@@ -94,13 +96,13 @@ def convert_nq_to_rlvr_format_with_context(no_prompt: bool):
 
 
 def check_nq_rlvr_dataset():
-    nq_dataset = datasets.load_dataset("hamishivi/nq_rlvr", num_proc=max_num_processes())
+    nq_dataset = datasets.load_dataset("hamishivi/nq_rlvr", num_proc=open_instruct_utils.max_num_processes())
     nq_data = nq_dataset["train"]  # noqa: F841
 
 
 def convert_tqa_to_rlvr_format(no_prompt: bool):
     # Load the TQA dataset
-    tqa_dataset = datasets.load_dataset("mandarjoshi/trivia_qa", "rc.nocontext", num_proc=max_num_processes())
+    tqa_dataset = datasets.load_dataset("mandarjoshi/trivia_qa", "rc.nocontext", num_proc=open_instruct_utils.max_num_processes())
     tqa_data = tqa_dataset["train"]
 
     if no_prompt:
@@ -137,7 +139,7 @@ def convert_tqa_to_rlvr_format(no_prompt: bool):
 
 def convert_2wiki_to_rlvr_format(no_prompt: bool):
     # Load the 2Wiki dataset
-    two_wiki_dataset = datasets.load_dataset("hzy/kr1_2wiki", num_proc=max_num_processes())
+    two_wiki_dataset = datasets.load_dataset("hzy/kr1_2wiki", num_proc=open_instruct_utils.max_num_processes())
     two_wiki_data = two_wiki_dataset["train"]
 
     if no_prompt:
@@ -170,7 +172,7 @@ def convert_2wiki_to_rlvr_format(no_prompt: bool):
 
 def convert_simple_qa_to_rlvr_format(no_prompt: bool):
     # Load the SimpleQA dataset
-    simple_qa_dataset = datasets.load_dataset("basicv8vc/SimpleQA", split="test", num_proc=max_num_processes())
+    simple_qa_dataset = datasets.load_dataset("basicv8vc/SimpleQA", split="test", num_proc=open_instruct_utils.max_num_processes())
     simple_qa_dataset = simple_qa_dataset.train_test_split(test_size=0.1, seed=42)
     simple_qa_data = simple_qa_dataset["train"]
     simple_qa_test_data = simple_qa_dataset["test"]

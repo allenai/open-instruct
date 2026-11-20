@@ -23,6 +23,8 @@ import datasets
 import openai
 import tiktoken
 
+import open_instruct.utils as open_instruct_utils
+
 # Model costs are in USD per million tokens.
 MODEL_COSTS_PER_1M_TOKENS = {
     "o3-batch": {"input": 10 * 0.5, "output": 40 * 0.5},
@@ -182,7 +184,7 @@ def main(
     os.makedirs(f"{current_dir}/batch_files", exist_ok=True)
 
     print(f"Loading dataset {input_dataset_name} with split {split}")
-    input_dataset = datasets.load_dataset(input_dataset_name, split=split, num_proc=max_num_processes())
+    input_dataset = datasets.load_dataset(input_dataset_name, split=split, num_proc=open_instruct_utils.max_num_processes())
 
     # First get all unique IDs
     print(f"Processing dataset with {len(input_dataset)} rows")

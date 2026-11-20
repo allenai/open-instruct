@@ -88,6 +88,7 @@ from huggingface_hub import HfApi, HfFolder, create_repo  # For Hub upload
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
+import open_instruct.utils as open_instruct_utils
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
@@ -136,7 +137,7 @@ def main(args):
     logger.info(f"Loading dataset: {args.dataset_name}, split: {args.split}, streaming={args.streaming}")
     try:
         dataset = datasets.load_dataset(
-            args.dataset_name, split=args.split, streaming=args.streaming, num_proc=max_num_processes()
+            args.dataset_name, split=args.split, streaming=args.streaming, num_proc=open_instruct_utils.max_num_processes()
         )
     except FileNotFoundError:
         logger.error(f"Dataset '{args.dataset_name}' not found.")
