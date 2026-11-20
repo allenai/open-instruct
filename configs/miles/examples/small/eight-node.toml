@@ -25,7 +25,9 @@ name = "eight-node"
 source = "/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-gpu/a4bgpu-s34521/hf_step18410"
 
 [output]
-root = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/runs/small-eight-node"
+# GPU run outputs go on olmo-3p5-post-checkpoints, not oe-training-default (which filled during
+# timing4). Each native save is ~0.85 TB; check free space before launch (docs/miles/olmo35-small.md).
+root = "/weka/olmo-3p5-post-checkpoints/YOUR_USERNAME/miles/small-eight-node"
 # Sample 10% of rollouts to disk for per-verifier analysis.
 rollout_sample_rate = 0.1
 export_hf = false
@@ -39,7 +41,9 @@ cluster = "ai2/holmes"
 priority = "high"
 # Historical budget used the older batch without saves; remeasure current wall time and save cost.
 min_runtime = "3h"
-timeout = "8h"
+# Beaker cancels a job at its timeout; autoResume does not requeue a timed-out job. core.max_run_seconds
+# (22 h) stops and saves first, leaving 2 h for the last collection, the forced save and teardown.
+timeout = "24h"
 auto_resume = true
 gpus_per_replica = 8
 memory = "1500 GiB"
@@ -61,6 +65,12 @@ mount_path = "/weka/oe-adapt-default"
 weka = "olmo-3p5-post-checkpoints"
 mount_path = "/weka/olmo-3p5-post-checkpoints"
 
+# SFT exports under olmo-3p5-post-checkpoints can be symlinks into this bucket (e.g. the H258
+# export's weights, config and tokenizer). Without the mount, model load fails at runtime.
+[[launch.weka_mounts]]
+weka = "olmo-3p5-checkpoints"
+mount_path = "/weka/olmo-3p5-checkpoints"
+
 [launch.env]
 # Ray logical capacity per node; the actor reservations below are not thread counts.
 OI_MILES_RAY_CPUS = "64"
@@ -77,8 +87,9 @@ SGLANG_MOE_CONFIG_DIR = "/opt/core-rl/configs/miles/moe_configs"
 [launch.secrets]
 BEAKER_TOKEN = "YOUR_USERNAME_BEAKER_TOKEN"
 HF_TOKEN = "YOUR_USERNAME_HF_TOKEN"
-# Beaker secret name, not the token value; required by the H196 code verifier.
-CODE_EXECUTION_TOKEN = "YOUR_USERNAME_CODE_EXECUTION_TOKEN"
+# Beaker secret name, not the token value; required by the H196 code verifier. This is the shared
+# code-service token in ai2/olmo-instruct; in another workspace, substitute that workspace's secret.
+CODE_EXECUTION_TOKEN = "robertb_MILES_PR2178_CODE_EXECUTION_TOKEN"
 
 [data]
 # Exclude over-budget training prompts and record per-source counts.
@@ -143,10 +154,14 @@ reward_reasoning_mode = "required"
 max_policy_lag = 12
 # A response cut off at max_response_length scores 0 (capped = wrong).
 reward_zero_truncated = true
-# Keep the latest two native saves plus permanent milestones and the final save.
+# Keep the latest two native saves plus a permanent milestone every 100 updates and the final save
+# (~0.85 TB each): a 660-update run peaks near (2 + 6 + 1) x 0.85 = ~7.7 TB.
 checkpoint_keep_last = 2
-checkpoint_keep_every = 50
+checkpoint_keep_every = 100
 save_final_checkpoint = true
+# Resumable wall-clock stop (22 h of driver time): saves at the next completed collection and exits
+# with workflow "stopped". Resubmit the unchanged TOML with the same image to continue.
+max_run_seconds = 79200.0
 publication_mode = "refresh"
 engine_drain_timeout = 900.0
 engine_update_timeout = 1800.0
@@ -184,6 +199,31 @@ async_max_concurrent_samples = 4512
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"
+
+# Optional HF snapshots for offline evals (<root>/eval-snapshots/update-NNNNNNNN/hf, ~145 GB each)
+# at updates 50, 100, ... and the final update. Snapshot export is a synchronous trainer collective;
+# a failed export fails training. It needs an image built from main at or after #2293 (writer-only
+# HF export, miles 9eff46a4); older images can run out of memory during the export. Not yet
+# qualified on Small. The in-run evaluator below is best effort and unqualified for Small; run the
+# standard panel offline on the snapshots. See docs/miles/background-evaluation.md.
+# To enable, uncomment the block and delete training.skip_eval_before_train (it selects shared-engine
+# evaluation, which conflicts with background mode).
+# [evaluation]
+# mode = "background"
+# interval = 50
+# initial = false
+# final = true
+# image = "01M6J0KMAD3CXVGT07V1BHR1VH"
+# revision = "ba0ff700e8f9b301cfd8ed5fd462df9d83dddfe1"
+# gpus = 1
+# cluster = "ai2/holmes"
+# submit_timeout = 30
+# timeout = "6h"
+# provider_kwargs = { profile = "generic", context_length = 34816 }
+#
+# [[evaluation.tasks]]
+# task = "ifeval"
+# generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
 
 [judges.general]
 mode = "managed"

@@ -336,7 +336,7 @@ The short mechanics examples keep their separate checkpoint settings.
 |---|---:|---:|---|
 | Tiny `node` |10 updates|50 updates|Align native milestones with the existing 50-update development panel.|
 | Tiny `three-node` |10 updates|100 updates|Retain longer learning milestones; its evaluation remains initial/final.|
-| Small `four-node`, `eight-node` |10 updates|50 updates|Retain milestones for expensive runs when extending the 30-update budget.|
+| Small `four-node`, `eight-node` |10 updates|100 updates|Bound storage for long runs (~0.85 TB per save); see [Small long runs](../../../docs/miles/olmo35-small.md#long-runs).|
 
 Choose the recovery interval from measured **wall-clock update time**, aiming for
 roughly **1–2 hours** between saves. Ten updates is a starting point, not a timer:
