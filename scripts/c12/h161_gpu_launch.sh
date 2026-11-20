@@ -113,6 +113,7 @@ $F/identity/identity.jsonl 1.0"
          CACHE="${C16_CACHE:?C16_CACHE=<numpy cache name from the C16 tokenize job>}"; TOKREV=03c29652a9d74902fe9d39bc0ad211748c7e7ae6; KEEP_LAST=-1
          LR="${A4B_LR:?A4B_LR=<peak LR from the H228 LR rule>}"; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8 --loss_implementation fused_linear"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/chrisg/a4b-gpu; DESC="ledger H260 a4b8t-c16"; SECRETS=chrisg; SYNC_START=30m
+         IMAGE=01M6XV36F2WWV7GZ9B7X7K3PB2   # H203/H228 A4B image (expert parallelism); the launcher default predates it
          STEPS="${S_R:?S_R=<two-pass steps from the R4 prime replay>}"; EPOCHS=2; CKPT=$(((STEPS + 3) / 4)); HOURS=192 ;;
     a4b8) # ledger H228 (a4b8t-c12rf-2pass): the a4b arm on the 8T decay base, with H210's C12rf data (cache and
          # tokenizer revision as the rfn arm), two passes, every permanent save kept (--keep_last_n_checkpoints -1:
