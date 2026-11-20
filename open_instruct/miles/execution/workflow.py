@@ -301,7 +301,7 @@ def train_config(config, *, export_hf=None, background_evaluation=None):
         args = parse_runtime(config)
     args.background_evaluation = background_evaluation
     args.core_evaluation_snapshot = (
-        "open_instruct.miles.evaluation.evaluation.training_snapshot" if background_evaluation else None
+        "open_instruct.miles.evaluation.evaluation.mid_rollout_snapshot" if background_evaluation else None
     )
     os.environ.setdefault("SGLANG_EXTERNAL_MODEL_PACKAGE", "olmo_sglang.models")
     with stage(args, "driver_module_import"):
