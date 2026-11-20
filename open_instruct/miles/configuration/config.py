@@ -74,6 +74,9 @@ class CoreConfig:
     # and the rest failed with a transport error or refresh_request_timeout;
     # each failed member becomes a fully masked dummy. None keeps whole groups.
     refresh_min_group_size: int | None = None
+    # Isolated retries of one prompt group after recoverable serving failures; the next
+    # failure stops the run. Retries count only while other generation succeeds.
+    max_group_retries: int = 3
     snapshot_capacity: int = 2
     row_specialization: str = "static"
     compiler_cache: bool = True
@@ -191,6 +194,7 @@ class CoreConfig:
         validation.boolean(self.prepared_batch_overlap, "core.prepared_batch_overlap")
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
+        validation.integer(self.max_group_retries, "core.max_group_retries", minimum=0)
         for name in ("engine_drain_timeout", "engine_update_timeout", "refresh_request_timeout"):
             validation.number(getattr(self, name), f"core.{name}")
             if getattr(self, name) <= 0:

@@ -245,3 +245,15 @@ def test_recovery_allows_heartbeat_patience_only(tmp_path, invalid_change):
     elif invalid_change == "saved_spec":
         workflow.write_json(tmp_path / "run-spec.json", document)
     assert workflow.recovery_configuration_matches(tmp_path, previous, document) is (invalid_change is None)
+
+
+@pytest.mark.parametrize("invalid_change", [None, "recipe"])
+def test_recovery_allows_group_retry_limit_changes(tmp_path, invalid_change):
+    document, previous = saved_run(tmp_path)
+    document.setdefault("core", {})["max_group_retries"] = 3
+    previous["spec_sha256"] = workflow.fingerprint(document)
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    document["core"]["max_group_retries"] = 5
+    if invalid_change == "recipe":
+        document["optimizer"]["learning_rate"] = 6e-6
+    assert workflow.recovery_configuration_matches(tmp_path, previous, document) is (invalid_change is None)
