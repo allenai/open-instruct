@@ -144,3 +144,168 @@ def test_language_verdicts_do_not_depend_on_the_random_state():
     verdicts = {instructions._detect_language(text) for _ in range(20)}
     assert len(verdicts) == 1
     assert instructions.langdetect.DetectorFactory.seed == 0
+
+
+def _bullet_checker(num_bullets):
+    checker = instructions.BulletListChecker("detectable_format:number_bullet_lists")
+    checker.build_description(num_bullets=num_bullets)
+    return checker
+
+
+@pytest.mark.parametrize(
+    "answer,num_bullets,expected",
+    [
+        ("* one\n* two\n* three", 3, True),
+        ("- one\n- two\n- three", 3, True),
+        ("Intro\n  * one\n  - two", 2, True),
+        ("* one\n* two\n* three\n---\n*italic note*", 3, True),
+        ("* one\n* two\n* three\n---\n*italic note*", 5, False),
+        ("* one\n* two\n\n---\n\n* three\n*Note:* done", 3, True),
+        ("* one\n* two\n* three\n*", 3, True),
+        ("* one\n* two\n- ", 2, True),
+        ("* one\n* two", 3, False),
+        ("* one\n* two\n* three\n* four", 3, False),
+        ("---\n***\n* * *\n*italic*\n**bold**", 0, True),
+        ("*item without space\n* real", 1, True),
+    ],
+)
+def test_bullet_count_ignores_rules_italics_and_empty_markers(answer, num_bullets, expected):
+    assert _bullet_checker(num_bullets).check_following(answer) is expected
+
+
+def _palindrome(answer):
+    checker = instructions.PalindromeBasicChecker("keywords:palindrome")
+    checker.build_description()
+    return checker.check_following(answer)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "The level is high.",
+        "Racecar, anyone?",
+        'She said "Wow!" loudly',
+        "Madam",
+        "Step on no pets.",
+        "Was it a car or a cat I saw?",
+        "We saw 202",
+        "121",
+        'Here is one: "A man, a plan, a canal: Panama!" enjoy',
+        "Here is one: A man, a plan, a canal: Panama! enjoy",
+        "(Cue the palindrome: 'A man, a plan, a canal: Panama!')",
+        "a palindrome\u2014racecar\u2014appears",
+        "palindrome \u2014*racecar*\u2014 appears",
+        "Here's one you'll remember: \u201cStep on no pets\u201d, enjoy it",
+        "Try this (Was it a car or a cat I saw) today",
+        "see:level;radar,done",
+        "The phrase A man a plan a canal Panama embodies this idea",
+        "the palindrome *A man, a plan, a canal: Panama* is a classic",
+        "[*A man, a plan, a canal: Panama*] phrase, a classic",
+        "so step on no pets as a call to move forward",
+        "Anna\u2019s Exit",
+        "at noon\u2019s closing",
+    ],
+)
+def test_palindrome_accepts_real_palindromes(answer):
+    assert _palindrome(answer)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "I saw a cat.",
+        "a",
+        "---",
+        "### Title",
+        "+ = ~",
+        "aa bb",
+        "No palindrome here",
+        "",
+        "ab, ba",
+        "II",
+        "11.",
+        "1, 2; 1",
+        "so a b a b a is cool",
+        "now 1 2 1 2 1 is odd",
+        "go on now",
+        "a non-profit group",
+        "a level-headed person",
+        "a woman\u2019s eyes",
+        "see a, b, a, b, a here",
+        "Ayumi\u2019s eyes narrowed",
+        "see [a] [b] [a] [c] [a] [b] [a] here",
+        "so a t a c a t a is it",
+        "He saw it was a good day",
+    ],
+)
+def test_palindrome_rejects_single_characters_symbols_and_non_palindromes(answer):
+    assert not _palindrome(answer)
+
+
+def _first_word(cls_name, key, word, answer, **kwargs):
+    checker = getattr(instructions, cls_name)(key)
+    checker.build_description(first_word=word, **kwargs)
+    return checker.check_following(answer)
+
+
+@pytest.mark.parametrize(
+    "answer,expected",
+    [
+        ("Building a house", True),
+        ('"Building a house"', True),
+        ("Building, a house", True),
+        ("**Building** a house", True),
+        ("[building] a house", True),
+        ("<<Building a house", True),
+        ("Buildings are tall", False),
+        ("Rebuilding", False),
+        ("", False),
+        ("# Building a house", False),
+    ],
+)
+def test_first_word_answer_ignores_edge_punctuation_and_markup(answer, expected):
+    assert _first_word("FirstWordAnswerChecker", "first_word:first_word_answer", "building", answer) is expected
+
+
+@pytest.mark.parametrize(
+    "answer,expected",
+    [('**Yes** it is. Yes, again! "Yes" too?', True), ("Yes it is. Maybe not.", False), ("Yesterday it is.", False)],
+)
+def test_first_word_of_each_sentence_ignores_edge_punctuation_and_markup(answer, expected):
+    assert _first_word("FirstWordSentChecker", "first_word:first_word_sent", "yes", answer) is expected
+
+
+@pytest.mark.parametrize(
+    "answer,expected",
+    [
+        ("Intro text.\n\n**Hello,** world\n\nlast", True),
+        ("Intro text.\n\nHello, world\n\nlast", True),
+        ('Intro text.\n\n"Hello world"\n\nlast', True),
+        ("Intro text.\n\nHelloes world\n\nlast", False),
+        ("Intro text.\n\nWorld hello\n\nlast", False),
+    ],
+)
+def test_nth_paragraph_first_word_ignores_edge_markup(answer, expected):
+    assert (
+        _first_word(
+            "ParagraphFirstWordCheck",
+            "length_constraints:nth_paragraph_first_word",
+            "hello",
+            answer,
+            num_paragraphs=3,
+            nth_paragraph=2,
+        )
+        is expected
+    )
+
+
+def test_nth_paragraph_first_word_keeps_apostrophe_cut():
+    answer = "Intro.\n\nyesterday's news\n\nlast"
+    assert _first_word(
+        "ParagraphFirstWordCheck",
+        "length_constraints:nth_paragraph_first_word",
+        "yesterday",
+        answer,
+        num_paragraphs=3,
+        nth_paragraph=2,
+    )

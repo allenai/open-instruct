@@ -26,6 +26,23 @@ from absl import logging
 
 from open_instruct.IFEvalG import instructions_util
 
+
+def _edge_stripped(word):
+    """Lower-cased word without leading/trailing punctuation or markup (e.g. '**Hello,**' -> 'hello')."""
+    return re.sub(r"^[\W_]+|[\W_]+$", "", word).casefold()
+
+
+def _first_word_matches(text, expected, *, keep_exact_match=True):
+    """Whether the first word of `text` is `expected` (case-insensitive), ignoring punctuation or markup on the
+    edges of the response's word (e.g. '**Hello,**' counts as 'hello'). `keep_exact_match` also accepts the raw
+    token, so a target that itself ends in punctuation still matches as before."""
+    tokens = text.split()
+    if not tokens:
+        return False
+    want = expected.casefold()
+    return _edge_stripped(tokens[0]) == want or (keep_exact_match and tokens[0].casefold() == want)
+
+
 _InstructionArgsDtype = dict[str, int | str | Sequence[str]] | None
 
 
@@ -348,9 +365,11 @@ class BulletListChecker(Instruction):
           True if the actual number of bullet lists in the response meets the
           requirement.
         """
-        bullet_lists = re.findall(r"^\s*\*[^\*].*$", value, flags=re.MULTILINE)
-        bullet_lists_2 = re.findall(r"^\s*-.*$", value, flags=re.MULTILINE)
-        num_bullet_lists = len(bullet_lists) + len(bullet_lists_2)
+        # A bullet is a line that starts with '*' or '-', a space, and item text; '---' rules, empty markers and
+        # '*italic*' lines are not bullets.
+        num_bullet_lists = sum(
+            1 for line in value.split("\n") if re.match(r"^\s*[*-]\s+\S", line) and not re.fullmatch(r"[\s*_-]+", line)
+        )
         return num_bullet_lists == self._num_bullets
 
 
@@ -992,6 +1011,8 @@ class ParagraphFirstWordCheck(Instruction):
         else:
             return False
 
+        # Keep the historical rule (cut the first word at the first of . , ? ! ' ") and also accept the word
+        # when only punctuation or markup surrounds it.
         first_word = ""
         punctuation = {".", ",", "?", "!", "'", '"'}
 
@@ -1006,7 +1027,10 @@ class ParagraphFirstWordCheck(Instruction):
                 break
             first_word += letter.lower()
 
-        return num_paragraphs == self._num_paragraphs and first_word == self._first_word
+        first_word_ok = first_word == self._first_word or _first_word_matches(
+            paragraph, self._first_word, keep_exact_match=False
+        )
+        return num_paragraphs == self._num_paragraphs and first_word_ok
 
 
 # TODO(jeffrey) add relation - at least/at most?
@@ -2005,8 +2029,7 @@ class FirstWordSentChecker(Instruction):
         for sentence in sentences:
             if not sentence.strip():
                 return False
-            first_word = sentence.split()[0].strip()
-            if first_word.lower() != self._first_word.lower():
+            if not _first_word_matches(sentence, self._first_word):
                 return False
         return True
 
@@ -2052,8 +2075,7 @@ class FirstWordAnswerChecker(Instruction):
         """
         if not value.strip() or len(value.split()) == 0:
             return False
-        first_word = value.split()[0].strip()
-        return first_word.lower() == self._first_word.lower()
+        return _first_word_matches(value, self._first_word)
 
 
 class LastWordSentChecker(Instruction):
@@ -2519,6 +2541,20 @@ class CountIncrementWordChecker(Instruction):
         return bool(actual_occurrences1 == 1 and actual_occurrences2 == 2)
 
 
+# an ASCII hyphen between letters or digits ("non-profit") keeps its word together; any other dash cuts
+_CLAUSE_SEPARATORS = r"[.!?\n:;,()\"\u201c\u201d\u2014\u2013\u2015]|(?<![^\W_])-|-(?![^\W_])"
+_QUOTED_SPAN = re.compile(
+    r'"([^"]*)"|\u201c([^\u201d]*)\u201d|\u2018([^\u2019]*)\u2019|(?<!\w)\'([^\']*)\'(?!\w)|\(([^()]*)\)', re.DOTALL
+)
+
+
+def _is_palindrome_core(text, min_len, need_letter=False):
+    core = re.sub(r"[\W_]", "", text).casefold()
+    if len(core) < min_len or core != core[::-1]:
+        return False
+    return not need_letter or any(c.isalpha() for c in core)
+
+
 class PalindromeBasicChecker(Instruction):
     "Include a palindrome in your response."
 
@@ -2543,8 +2579,56 @@ class PalindromeBasicChecker(Instruction):
         Returns:
           True if the response contains a palindrome; otherwise, False.
         """
-        palindromes = [word for word in value.split() if word == word[::-1]]
-        return len(palindromes) > 0
+        # A palindrome needs at least 3 letters or digits (ignoring case and punctuation). Whole words (as written, or cut
+        # at every non-alphanumeric character) and phrases (a sentence, line, clause, quoted span or run of words, 5+ letters/digits
+        # with at least one letter) count.
+        for word in value.split():
+            if _is_palindrome_core(word, 3):
+                return True
+        for piece in re.findall(r"[^\W_]+(?:-[^\W_]+)*", value):
+            if _is_palindrome_core(piece, 3, need_letter=True):
+                return True
+        cores = [re.sub(r"[\W_]", "", c).casefold() for c in re.split(_CLAUSE_SEPARATORS, value)]
+        cores = [c for c in cores if c]
+        for start in range(len(cores)):
+            # a phrase can run over several clauses ("A man, a plan, a canal: Panama"): try up to 8 in a row, with at least
+            # 3 different characters and one clause of 3+ characters (an apostrophe does not end a clause)
+            window = ""
+            longest = 0
+            for clause in cores[start : start + 8]:
+                window += clause
+                longest = max(longest, len(clause))
+                if (
+                    len(window) >= 5
+                    and longest >= 3
+                    and window == window[::-1]
+                    and len(set(window)) >= 3
+                    and any(c.isalpha() for c in window)
+                ):
+                    return True
+        # a phrase inside a longer sentence ("... A man a plan a canal Panama embodies ..."): up to 10 words in a row (an
+        # apostrophe stays inside its word), with at least 3 different characters and one word of 3+ letters, so strings of
+        # single letters ("a b a b a") and "'s eyes" do not count
+        words = [w.casefold() for w in re.findall(r"[^\W_]+(?:['\u2019-][^\W_]+)*", value)]
+        words = [re.sub(r"[\W_]", "", w) for w in words]
+        for start in range(len(words)):
+            window = ""
+            longest = 0
+            for word in words[start : start + 10]:
+                window += word
+                longest = max(longest, len(word))
+                if (
+                    len(window) >= 5
+                    and longest >= 3
+                    and window == window[::-1]
+                    and len(set(window)) >= 3
+                    and any(c.isalpha() for c in window)
+                ):
+                    return True
+        for part in re.split(r"[.!?\n]", value):
+            if _is_palindrome_core(part, 5):
+                return True
+        return any(_is_palindrome_core("".join(span), 5, need_letter=True) for span in _QUOTED_SPAN.findall(value))
 
 
 class KeywordSpecificPositionChecker(Instruction):
