@@ -69,11 +69,11 @@ OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h161-gpu
 LR=5e-5
 EXTRA_ARGS=""
 DESC="ledger H161 GPU companion (draft)"
-# HF cache and Beaker secrets; an arm owned by someone else sets its own (b1r-toolA).
+# HF cache and Beaker secrets; an arm owned by someone else sets its own (b1r-toolA, b1r-nemov4).
 HF_ROOT=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache
 SECRET_HF=abhishekr_HF_TOKEN; SECRET_WANDB=abhishekr_WANDB_API_KEY; SECRET_BEAKER=abhishekr_BEAKER_TOKEN
 case "$ARM" in
-    b1r|b1r-superior|b1r-ifchatv2|b1r-sciv1|b1r-scimcq|b1r-toolA)
+    b1r|b1r-superior|b1r-ifchatv2|b1r-sciv1|b1r-scimcq|b1r-toolA|b1r-nemov4)
          MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/step20000-lm-olmocore/model_and_optim
          HF_REF=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt1-64k/h161-b1-step20000-c12seed
          LR=2e-4; REPLAY=/weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r
@@ -96,6 +96,18 @@ case "$ARM" in
              CACHE="${H221_CACHE:?H221_CACHE=<the arm cache name from experiments/h221/cache_job.sh>}"
              OUT_ROOT=/weka/olmo-3p5-post-checkpoints/baileyk/h221-gpu; DESC="ledger h221 toolA-b1-gpu"; HOURS=16
              HF_ROOT=$ROOT221/hf_cache; SECRET_HF=BAILEYK_HF_TOKEN; SECRET_WANDB=BAILEYK_WANDB_API_KEY
+             SECRET_BEAKER=BAILEYK_BEAKER_TOKEN
+         elif [[ "$SRC" == nemov4 ]]; then
+             # ledger H264 (baileyk): nemo replaced by Nemotron-SFT-Agentic-v4 tool_calling + knowledge_agent, each converted
+             # and through C12's nemo filters, at 1.0 (ledger experiments/h264/cache_job.sh); H182's replay dir unchanged.
+             HYP=h264; ROOT264=/weka/olmo-3p5-post-checkpoints/baileyk/h264
+             TC="${H264_TC:?H264_TC=<filtered tool_calling parquet name, v4tc-*.parquet>}"
+             KA="${H264_KA:?H264_KA=<filtered knowledge_agent parquet name, v4ka-*.parquet>}"
+             MIXER="${MIXER/$P\/nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426/$ROOT264/data/filtered/$TC 1.0 $ROOT264/data/filtered/$KA 1.0}"
+             [[ "$MIXER" == *"$TC 1.0"*"$KA 1.0"* ]] || { echo "nemo swap failed" >&2; exit 1; }
+             CACHE="${H264_CACHE:?H264_CACHE=<the arm cache name from experiments/h264/cache_job.sh>}"
+             OUT_ROOT=/weka/olmo-3p5-post-checkpoints/baileyk/h264-gpu; DESC="ledger h264 nemov4-b1-gpu"; HOURS=18
+             HF_ROOT=$ROOT264/hf_cache; SECRET_HF=BAILEYK_HF_TOKEN; SECRET_WANDB=BAILEYK_WANDB_API_KEY
              SECRET_BEAKER=BAILEYK_BEAKER_TOKEN
          elif [[ -n "$SRC" ]]; then
              MIXER="$MIXER $ADD 1.0"; REPLAY=/weka/olmo-3p5-post-checkpoints/abhishekr/$HYP/replay-$SRC
