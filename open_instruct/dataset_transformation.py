@@ -1108,8 +1108,8 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 # template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
 # v8: preserve the serialized GPT-2 pre-tokenizer, including Dolma 2's Split regex, when
 # loading tokenizer-only repositories. v9: SFT and DPO derive assistant labels from
-# explicit generation ranges. v10: SFT decodes JSON-string tool-call arguments before
-# rendering, which changes what templates that print a string argument verbatim render.
+# explicit generation ranges. v10: SFT and DPO decode JSON-string tool-call arguments
+# before rendering, which changes what templates that print a string argument verbatim render.
 DATASET_CACHE_VERSION = "v10"
 
 
@@ -1125,6 +1125,12 @@ def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[
     a template that needs a mapping still rejects it, and one that prints the string or ignores
     tool calls renders the row as before. Messages are shallow-copied where they change so the
     dataset row itself is not mutated.
+
+    A template that prints a string argument verbatim and serializes only mappings (Qwen's
+    `is string` branch) now renders its own `tojson` of the decoded mapping, so spacing and
+    escapes can differ from the dataset's string. Callers: `_tokenize_row_or_mask_out` (the SFT
+    and DPO tulu tokenizers) and the added-token filter. The older `sft_tokenize_v1`,
+    `preference_tokenize_v1` and `rlvr_tokenize_*` paths render arguments as stored.
     """
     out: list[dict[str, Any]] = []
     for message in messages:
@@ -1140,7 +1146,8 @@ def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[
             if isinstance(arguments, str):
                 try:
                     decoded = json.loads(arguments)
-                except json.JSONDecodeError:
+                except (ValueError, RecursionError):
+                    # Malformed JSON, an integer past Python's digit limit, or nesting too deep.
                     decoded = arguments
                 if decoded is None:
                     decoded = {}
@@ -2064,7 +2071,7 @@ def _non_content_texts(row: Mapping[str, Any], sft_messages_key: str) -> list[st
             # added token holds a character JSON escapes, so a literal survives `json.dumps`.
             if message.get("tool_calls"):
                 texts.append(json.dumps(message["tool_calls"], ensure_ascii=False))
-    # Decoded as the SFT tokenizers decode it, so a JSON-escaped spelling reads as the token.
+    # Tool schemas, decoded the same way.
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
     if tools:
         texts.append(json.dumps(tools, ensure_ascii=False))

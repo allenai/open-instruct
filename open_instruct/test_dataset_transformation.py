@@ -426,7 +426,10 @@ class TestNormalizeToolCallArguments(unittest.TestCase):
         out = open_instruct.dataset_transformation._normalize_tool_call_arguments(ok)
         self.assertEqual(out[0]["tool_calls"][0]["function"]["arguments"], {})
         # Not a JSON object: left for the template, which renders or rejects it as it did before.
-        for arguments in ("{not json", "[1, 2]", ""):
+        # Python's own limits (integer digits, nesting depth) count as undecodable too.
+        too_long = '{"n": ' + "9" * 5000 + "}"
+        too_deep = '{"a": ' + "[" * 100_000 + "]" * 100_000 + "}"
+        for arguments in ("{not json", "[1, 2]", "", too_long, too_deep):
             row = [
                 {
                     "role": "assistant",
