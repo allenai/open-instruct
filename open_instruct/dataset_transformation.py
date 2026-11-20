@@ -1121,8 +1121,10 @@ def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[
     store each call's `arguments` as a JSON string. Chat templates that iterate the arguments
     as a mapping (the Olmo 3.5 template's `| items`) reject the string, so decode it here.
     Rows without tool calls, and calls whose arguments are already a mapping, pass through
-    unchanged; a string that does not decode to a JSON object is an error, not a silent drop.
-    Messages are shallow-copied where they change so the dataset row itself is not mutated.
+    unchanged. So does a string that does not decode to a JSON object (or `null`, read as `{}`):
+    a template that needs a mapping still rejects it, and one that prints the string or ignores
+    tool calls renders the row as before. Messages are shallow-copied where they change so the
+    dataset row itself is not mutated.
     """
     out: list[dict[str, Any]] = []
     for message in messages:
@@ -1138,16 +1140,15 @@ def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[
             if isinstance(arguments, str):
                 try:
                     decoded = json.loads(arguments)
-                except json.JSONDecodeError as exc:
-                    raise ValueError(f"tool_calls[].function.arguments is not valid JSON: {arguments!r}") from exc
+                except json.JSONDecodeError:
+                    decoded = arguments
                 if decoded is None:
                     decoded = {}
-                if not isinstance(decoded, dict):
-                    raise ValueError(f"tool_calls[].function.arguments must decode to an object, got: {arguments!r}")
-                new_calls.append({**call, "function": {**function, "arguments": decoded}})
-                changed = True
-            else:
-                new_calls.append(call)
+                if isinstance(decoded, dict):
+                    new_calls.append({**call, "function": {**function, "arguments": decoded}})
+                    changed = True
+                    continue
+            new_calls.append(call)
         out.append({**message, "tool_calls": new_calls} if changed else message)
     return out
 
@@ -2054,7 +2055,8 @@ def sft_added_token_strings_filter_v2(
 def _non_content_texts(row: Mapping[str, Any], sft_messages_key: str) -> list[str]:
     """The other raw fields the olmo35 template renders: reasoning, tool calls and tool schemas."""
     texts = []
-    for message in row[sft_messages_key] or []:
+    # Tool-call arguments as the SFT tokenizers render them: a JSON-escaped spelling reads as the token.
+    for message in _normalize_tool_call_arguments(row[sft_messages_key] or []):
         if isinstance(message, Mapping):
             if isinstance(message.get("reasoning_content"), str):
                 texts.append(message["reasoning_content"])

@@ -421,20 +421,21 @@ class TestNormalizeToolCallArguments(unittest.TestCase):
         # the row's own messages are untouched
         self.assertEqual(messages[1]["tool_calls"][0]["function"]["arguments"], '{"q": "Paris", "days": 5}')
 
-    def test_null_json_becomes_empty_mapping_and_bad_json_raises(self):
+    def test_null_json_becomes_empty_mapping_and_other_strings_pass_through(self):
         ok = [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "null"}}]}]
         out = open_instruct.dataset_transformation._normalize_tool_call_arguments(ok)
         self.assertEqual(out[0]["tool_calls"][0]["function"]["arguments"], {})
-        bad = [
-            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "{not json"}}]}
-        ]
-        with self.assertRaises(ValueError):
-            open_instruct.dataset_transformation._normalize_tool_call_arguments(bad)
-        scalar = [
-            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "[1, 2]"}}]}
-        ]
-        with self.assertRaises(ValueError):
-            open_instruct.dataset_transformation._normalize_tool_call_arguments(scalar)
+        # Not a JSON object: left for the template, which renders or rejects it as it did before.
+        for arguments in ("{not json", "[1, 2]", ""):
+            row = [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "f", "arguments": arguments}}],
+                }
+            ]
+            out = open_instruct.dataset_transformation._normalize_tool_call_arguments(row)
+            self.assertIs(out[0], row[0], arguments)
 
 
 class TestMaskLabels(unittest.TestCase):
@@ -1983,6 +1984,16 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
         # The Olmo templates join text parts without a separator, so this renders as `<|im_end|>`.
         self.assertFalse(self.keeps([{"role": "user", "content": split_im_end}]))
         self.assertTrue(self.keeps(None))
+
+    def test_drops_json_escaped_added_token_in_tool_call_arguments(self):
+        # The row path decodes JSON-string arguments before rendering, so an escaped spelling
+        # renders as the token itself.
+        call = {"function": {"name": "f", "arguments": '{"q": "\\u003c|im_start|\\u003e"}'}}
+        messages = [{"role": "user", "content": "Call f."}, {"role": "assistant", "content": "", "tool_calls": [call]}]
+        self.assertNotIn("<|im_start|>", json.dumps(messages, ensure_ascii=False))
+        self.assertFalse(self.keeps(messages))
+        call["function"]["arguments"] = '{"q": "plain"}'
+        self.assertTrue(self.keeps(messages))
 
     def test_allowlist_is_configurable(self):
         eos_row = [{"role": "assistant", "content": "Explaining the <|endoftext|> token."}]
