@@ -19,8 +19,6 @@
 #   - R=224 running requests with 256 mamba/KDA slots, server concurrency 448, CUDA graph decode bs 224,
 #     producer budget 224 x 23 engines = 5,152, KV pool auto-sized at mem fraction 0.92,
 #     core.refresh_request_timeout = 3600 s.
-#   - Score centering with native TIS ([miles] loss_type = "score_centering"); requires
-#     trainer.fp32_lm_head = true. The timings above used policy_loss + use_tis with a BF16 head.
 #   - Judge: timeout 600 s and chat_template "qwen3-no-thinking".
 #   - Do not set training.eval_interval: prompt_data has no held-out split.
 # Measured on open-instruct 5c6645da (= main 28c18166 + an SGLang SWA-KV pin that Small does not use)
@@ -110,8 +108,6 @@ save_interval = 10
 skip_eval_before_train = true
 
 [trainer]
-# Required by score centering (validation rejects a BF16 trainer head).
-fp32_lm_head = true
 gpus = 8
 expert_parallel_size = 8
 sequence_packing = true
@@ -170,12 +166,6 @@ router_z_loss_weight = 0.0
 scoring_check_interval = 0
 
 [miles]
-# Score centering with native truncated importance sampling for refresh (async) training
-# (docs/miles/core.md#score-centering); replaces the default policy_loss + use_tis.
-loss_type = "score_centering"
-rollout_top_logprobs_num = 20
-score_centering_is = "tis"
-score_centering_tis_clip = 2.0
 # Keep active-request KV/recurrent state across weight updates.
 pause_generation_mode = "in_place"
 # Weight contributing tokens equally across responses.

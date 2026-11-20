@@ -69,7 +69,6 @@ checkpoints and do not establish learning quality.
   `core.refresh_request_timeout = 3600.0` (see [the timeout fix](#request-timeout-at-high-admission)).
   The eight-node example stays at R=96 (128 slots, concurrency 192, graph bs 96,
   3,342,336 KV tokens) with the same 3600 s timeout; R>96 is untested on 8 nodes.
-- Score centering is on in all three Small examples (see [below](#score-centering)).
 - Judge: `timeout = 600` and `chat_template = "qwen3-no-thinking"`. The judge bindings use the
   hashed verifier ids in the H196 `verifiers.json`.
 - `two-node-mech` enables the initial serving-weight comparison and repeats the
@@ -212,18 +211,6 @@ end to end. Risk: the longest (>=30K-token) samples finish at policy lag 8-10 (m
 `max_policy_lag` = 12; if responses grow later in a long run, stale drops are the next limit.
 One run per arm; no seed repeat. The eight-node example keeps R=96 but also sets 3600 s,
 which only removes a failure mode.
-
-### Score centering
-
-The Small examples select MILES' native score-centering objective with truncated importance
-sampling for refresh training (`[miles] loss_type = "score_centering"`,
-`score_centering_is = "tis"`, `score_centering_tis_clip = 2.0`,
-`rollout_top_logprobs_num = 20`, `[trainer] fp32_lm_head = true`; see
-[Core: score centering](core.md#score-centering)). It is not a default: without
-`loss_type`, MILES uses `policy_loss` with `use_tis` for async runs, which is what every
-timing run above used (BF16 LM head). The FP32 trainer/serving head and top-20
-candidate recording are untested for throughput and memory on Small; remeasure s/update,
-trainer peak memory and engine KV headroom on the first run.
 
 ## What did not work or was not tested
 

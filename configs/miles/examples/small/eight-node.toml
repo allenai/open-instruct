@@ -12,7 +12,7 @@
 # Same serving/judge settings as four-node.toml (trtllm_mha, tuned MoE tiles, rounding mode,
 # judge timeout 600 + qwen3-no-thinking) except admission: R=96 with 128 KDA slots, server
 # concurrency 192, CUDA graph bs 96; producer budget 96 x 47 engines = 4,512.
-# four-node.toml uses R=160; R=160 is untested on 8 nodes. Do not set training.eval_interval.
+# four-node.toml uses R=224; R>96 is untested on 8 nodes. Do not set training.eval_interval.
 # See docs/miles/olmo35-small.md.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
@@ -100,8 +100,6 @@ save_interval = 10
 skip_eval_before_train = true
 
 [trainer]
-# Required by score centering (validation rejects a BF16 trainer head).
-fp32_lm_head = true
 gpus = 8
 expert_parallel_size = 8
 sequence_packing = true
@@ -119,7 +117,7 @@ max_context_length = 34816
 profile = "generic"
 sglang_disable_radix_cache = true
 # Admission R=96: engines gain throughput up to R=96 (R=64: 1.9K vs 2.5K tok/s/engine).
-# R=160 was faster on 4 nodes (see four-node.toml) but is untested on 8 nodes.
+# R=224 was faster on 4 nodes (see four-node.toml) but R>96 is untested on 8 nodes.
 sglang_max_running_requests = 96
 sglang_server_concurrency = 192
 sglang_cuda_graph_backend_decode = "full"
@@ -162,12 +160,6 @@ router_z_loss_weight = 0.0
 scoring_check_interval = 0
 
 [miles]
-# Score centering with native truncated importance sampling for refresh (async) training
-# (docs/miles/core.md#score-centering); replaces the default policy_loss + use_tis.
-loss_type = "score_centering"
-rollout_top_logprobs_num = 20
-score_centering_is = "tis"
-score_centering_tis_clip = 2.0
 # Keep active-request KV/recurrent state across weight updates.
 pause_generation_mode = "in_place"
 # Weight contributing tokens equally across responses.
