@@ -65,7 +65,9 @@ class CoreConfig:
     prepared_batch_overlap: bool = True
     engine_drain_timeout: float = 180.0
     engine_update_timeout: float = 180.0
-    refresh_request_timeout: float = 1800.0
+    # A 32,768-token response at R=224 needs ~1,770-2,000 s with queueing and refresh
+    # pauses; 1,800 s timed out ~95 groups per update. The router allows 14,400 s.
+    refresh_request_timeout: float = 3600.0
     snapshot_capacity: int = 2
     row_specialization: str = "static"
     compiler_cache: bool = True
