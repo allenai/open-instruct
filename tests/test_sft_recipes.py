@@ -44,7 +44,7 @@ def test_recipe_plans_a_launch(monkeypatch, capsys, name):
     assert value(cmd, "--run_name") == f"{name}-s{recipe['seed']}"
     assert f"EXPECTED_NUMPY_CACHE={recipe['cache']}" in cmd
     for env in recipe.get("env", []):
-        assert env in cmd
+        assert cmd[cmd.index(env) - 1] == "--env"
     # The training command follows mason's "--" and starts torchrun on the recipe's node count.
     train = cmd[cmd.index("--") + 1 :]
     assert train[:2] == ["torchrun", f"--nnodes={recipe['nodes']}"]

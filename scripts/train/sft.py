@@ -120,7 +120,8 @@ RECIPES = {
         # -16% s/step at the same CE; turning off block recompute instead OOMs).
         "image": "01M7VCQM65SD251KYS4Z1AD8FG",
         "checkpoint": "/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-4t-decay159k-causal/step162974/model_and_optim",
-        # c12r's half epoch: same cache, replay and loader seed, so the same step.
+        # c12r's half epoch: same cache, replay and loader seed, so the same step. EP shards experts over
+        # the same 16 ranks, so the data-parallel batch stays 16 sequences per step.
         "steps": 18410,
         "seed": 34521,
         "cache": "bf82a8fab8-6068a350-rowaligned",
@@ -180,8 +181,10 @@ RECIPES = {
             "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/if/"
             "nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet",
             "4.937456",
+            # As in c12r: the job's cache dir holds a symlink to the frozen cache.
             "--local_cache_dir",
             "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache",
+            # As in c12r: --seed names the cache; the data order is --data_loader_seed.
             "--seed",
             "33333",
             "--extra_numpy_dirs",
