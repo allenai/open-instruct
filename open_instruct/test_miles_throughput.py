@@ -299,6 +299,21 @@ def test_refresh_request_deadline_is_finite_and_positive(value):
         CoreConfig(refresh_request_timeout=value)
 
 
+def test_group_retry_limit_defaults_to_three_and_reaches_core_arguments():
+    assert CoreConfig().max_group_retries == 3
+    path = Path(__file__).resolve().parents[1] / "configs/miles/examples/small/four-node.toml"
+    assert '"max_group_retries": 3' in RunSpec.load(path).compile().arguments()[-1]
+    raised = RunSpec.load(path, ["core.max_group_retries=5"]).compile()
+    assert raised.core.max_group_retries == 5
+    assert '"max_group_retries": 5' in raised.arguments()[-1]
+
+
+@pytest.mark.parametrize("value", [-1, True, 2.0, "3", None])
+def test_group_retry_limit_is_a_nonnegative_integer(value):
+    with pytest.raises(ValueError, match="max_group_retries"):
+        CoreConfig(max_group_retries=value)
+
+
 @pytest.mark.parametrize("value", [-1, True, float("inf"), float("nan")])
 def test_pipeline_observation_interval_is_nonnegative_and_finite(value):
     with pytest.raises(ValueError):
