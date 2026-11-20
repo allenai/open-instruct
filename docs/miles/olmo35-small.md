@@ -214,6 +214,8 @@ end to end. Risk: the longest (>=30K-token) samples finish at policy lag 8-10 (m
 This was measured at batch 1,024; at the shipped 2,048 each update takes longer, so a sample
 should span fewer versions, but remeasure. The run completed 40/40 updates and then, like
 R=160 and timing8, exited 1 when the final generation drain hit `engine_drain_timeout` (900 s).
+The four- and eight-node examples now set `engine_drain_timeout = 3600.0` to match
+`refresh_request_timeout`; this is expected to remove the exit 1 at shutdown but has not been run.
 One run per arm; no seed repeat. The eight-node example keeps R=96 but also sets 3600 s,
 which only removes a failure mode.
 
