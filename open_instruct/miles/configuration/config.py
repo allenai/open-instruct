@@ -65,8 +65,10 @@ class CoreConfig:
     prepared_batch_overlap: bool = True
     engine_drain_timeout: float = 180.0
     engine_update_timeout: float = 180.0
-    # A 32,768-token response at R=224 needs ~1,770-2,000 s with queueing and refresh
-    # pauses; 1,800 s timed out ~95 groups per update. The router allows 14,400 s.
+    # Deadline for a whole refresh request: SGLang queueing, decode and refresh pauses.
+    # 32K-token responses at high engine concurrency took up to ~2,000 s (see #2297).
+    # It is also what ends a request on a stalled engine, so a hang is noticed after
+    # this long. The default router timeout (14,400 s) is above it.
     refresh_request_timeout: float = 3600.0
     snapshot_capacity: int = 2
     row_specialization: str = "static"

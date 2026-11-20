@@ -289,7 +289,7 @@ def test_analyzer_does_not_infer_missing_collection_time_from_driver_wait(tmp_pa
     assert result["warm_cycle_seconds"] == 9
 
 
-def test_refresh_request_deadline_default_covers_long_responses_at_high_concurrency():
+def test_refresh_request_deadline_default():
     assert CoreConfig().refresh_request_timeout == 3600.0
 
 
