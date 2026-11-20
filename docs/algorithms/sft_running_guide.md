@@ -24,6 +24,21 @@ experiment (H-numbers here are its internal tracking IDs).
 - **Nothing to build:** each recipe pins the Beaker image that trained it, so the
   training code comes from that image, not from your checkout.
 
+### Olmo 3.5 Small (A4B)
+
+```bash
+uv run python scripts/train/sft.py --recipe a4b
+```
+
+`a4b` is `c12r` (same data, replay, seeds and 18,410 steps) on the Olmo 3.5 Small
+hero (the A4B MoE) at its 4T decay endpoint (`olmo35-4b-active-4t-decay159k-causal`
+step 162974), peak LR 7.3e-5, with experts sharded 8 ways inside each node and the
+fused linear+CE loss. It runs on 2×8 B300 on `ai2/holmes` at about 7.4 s/step, about
+38 h. It pins its own image because main's image has no transformer-engine, which
+the A4B MoE needs; that image also holds the model config
+(`scripts/c12/a4b_sft_config.json`), with whole-block recompute and the nested
+attention/MoE checkpoints off. The same flags as `c12r` apply.
+
 Exporting these checkpoints to HF for evaluation is not yet one command; it follows
 ledger hypothesis H167's G4 step.
 
