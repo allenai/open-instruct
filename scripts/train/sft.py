@@ -3,7 +3,7 @@
     uv run python scripts/train/sft.py --recipe c12r
     uv run python scripts/train/sft.py --recipe c12r --checkpoint <olmo-core DCP dir> --name my-run
 
-Each recipe pins the Beaker image that trained it, so its training code comes from that image, not from this
+Each recipe pins the Beaker image it runs with, so its training code comes from that image, not from this
 checkout: nothing needs building or committing first. Running the same command again resumes from the latest
 checkpoint in the run's output directory, which has no timestamp.
 """
@@ -109,8 +109,8 @@ RECIPES = {
     # Olmo 3.5 Small hero (A4B MoE). c12r's data, cache, seeds and length (half an epoch of C12 plus the 10%
     # long-context replay) on the hero's 4T decay endpoint, peak LR 7.3e-5 (c12r's 2e-4 scaled by the bases'
     # pretraining LRs, 2e-4 x 4.04e-4 / 1.1e-3): the a4b arm of scripts/c12/h161_gpu_launch.sh on branch
-    # a4b-bigbatch (ledger H203). 2 x 8 B300 on holmes with experts sharded 8 ways inside each node, about 38 h
-    # of training (7.36 s/step).
+    # a4b-bigbatch (ledger H203). 2 x 8 B300 on holmes with experts sharded 8 ways inside each node; estimated ~38 h
+    # of training (~7.4 s/step from the #2291 300-step benchmark with nested checkpoints off).
     "a4b": {
         # Built from the a4b-bigbatch line with #2291 (open-instruct e436f7647). main's image cannot run A4B: its
         # MoE needs transformer-engine, which only that line's CUDA 13 Dockerfile installs. The image also holds
@@ -201,7 +201,7 @@ RECIPES = {
         "cluster": "ai2/holmes",
         "nodes": 2,
         "timeout": "72h",
-        # The first ephemeral checkpoint (step 1000) lands after about 2 h.
+        # The first ephemeral checkpoint (step 1000) is estimated to land after about 2 h.
         "min_runtime": "2h15m",
     },
 }
