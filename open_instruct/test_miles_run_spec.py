@@ -423,7 +423,13 @@ def test_all_researcher_examples_compile_to_native_arguments():
         else:
             assert config.core.attention_backend == "torch"
         if config.miles["fully_async"]:
-            assert config.miles["use_tis"] is True
+            if config.miles.get("loss_type") == "score_centering":
+                # Score centering replaces legacy TIS with its own importance weighting.
+                assert config.miles["use_tis"] is False
+                assert config.miles["score_centering_is"] == "tis"
+                assert config.core.fp32_lm_head is True
+            else:
+                assert config.miles["use_tis"] is True
             assert config.miles["use_rollout_logprobs"] is False
             assert config.core.publication_mode == "refresh"
             assert config.core.max_policy_lag == 12

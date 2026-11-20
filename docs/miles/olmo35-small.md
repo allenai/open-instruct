@@ -45,9 +45,11 @@ checkpoints and do not establish learning quality.
 - Engine at R=96: weights 135 GB; KDA state for 128 slots 17.9 GB (SSM 17.64 + conv 0.21);
   KV for 3,342,336 tokens 63.8 GB (K 31.88 + V 31.88); about 50 GB free after pools at
   `mem_fraction_static` 0.88.
-- Engine at R=160 (four-node example): KDA state for 192 slots 26.7 GB (SSM 26.39 + conv
+- Engine at R=160 (previous four-node example): KDA state for 192 slots 26.7 GB (SSM 26.39 + conv
   0.31); KV pool auto-sized to 3,823,488 tokens, 72.9 GB (K 36.46 + V 36.46); 32.0 GB free
   after pools and 30.5 GB after CUDA graphs at `mem_fraction_static` 0.88.
+- Engine at R=224 (four-node example): 256 KDA slots; KV pool auto-sized to 3,919,232 tokens
+  at `mem_fraction_static` 0.92; 19.7 GB free after CUDA graphs; full-attention KV peak 71%.
 
 ## Settings that matter
 
@@ -60,11 +62,14 @@ checkpoints and do not establish learning quality.
   `configs/miles`; an older image has no file at that path.
 - `OLMO_SGLANG_CORE_COMPAT = "rounding"`. The attention trial's HF vs SGLang
   samples have mean |Δlogprob| 0.0155-0.0223 and argmax agreement 98.2-99.4%.
-- Admission R=160 on four nodes: `sglang_max_running_requests` 160,
-  `sglang_max_mamba_cache_size` 192, `sglang_server_concurrency` 320,
-  `sglang_cuda_graph_max_bs_decode` 160, producer budget `async_max_concurrent_samples` =
-  160 × engines, no `sglang_max_total_tokens`. The eight-node example stays at R=96
-  (128 slots, concurrency 192, graph bs 96, 3,342,336 KV tokens); R=160 is untested on 8 nodes.
+- Admission R=224 on four nodes: `sglang_max_running_requests` 224,
+  `sglang_max_mamba_cache_size` 256, `sglang_server_concurrency` 448,
+  `sglang_cuda_graph_max_bs_decode` 224, producer budget `async_max_concurrent_samples` =
+  224 × engines, `sglang_mem_fraction_static` 0.92, no `sglang_max_total_tokens`, and
+  `core.refresh_request_timeout = 3600.0` (see [the timeout fix](#request-timeout-at-high-admission)).
+  The eight-node example stays at R=96 (128 slots, concurrency 192, graph bs 96,
+  3,342,336 KV tokens) with the same 3600 s timeout; R>96 is untested on 8 nodes.
+- Score centering is on in all three Small examples (see [below](#score-centering)).
 - Judge: `timeout = 600` and `chat_template = "qwen3-no-thinking"`. The judge bindings use the
   hashed verifier ids in the H196 `verifiers.json`.
 - `two-node-mech` enables the initial serving-weight comparison and repeats the
@@ -94,9 +99,10 @@ figures (299/309/399/139 seconds) were not reproduced by this definition.
 | timing8, u24-29 | 8-node, R=96 | 185.5 | 73.8 | 96.0 | 18.3 | — | Only six late updates; shutdown subsequently failed |
 | [timing4n-r160](https://beaker.org/ex/01M7NHRMV28ZX4S3HXD4BWAQVJ), u10-29 | 4-node, R=160 | 182.7 | 0.3 | 163.8 | 10.0 | — | Early buffered work; 50 updates total |
 | timing4n-r160, u30-49 | 4-node, R=160 | 248.9 | 64.8 | 173.3 | 9.8 | — | Later window; shutdown subsequently failed |
-| timing4n-r160, u40-49 | 4-node, R=160 | 246.8 | 69.5 | 172.3 | 10.3 | 3,414 | 0 retractions, full KV peak 55%; basis of `four-node.toml` |
+| timing4n-r160, u40-49 | 4-node, R=160 | 246.8 | 69.5 | 172.3 | 10.3 | 3,414 | 0 retractions, full KV peak 55% |
 | [timing4n-r224](https://beaker.org/ex/01M7R62YRQ4PH9T5YF78MQJB8T), u30-39 | 4-node, R=224 | 350.9 | 171.3 | 165.3 | 11.7 | 4,094 | 883 timed-out group attempts; 40/40, then failed final drain |
 | [timing4n-r256](https://beaker.org/ex/01M7R8JNKYN72WEHXY5JGGF9MT), u30-36 | 4-node, R=256 | 313.0 | 160.7 | 152.6 | 9.8 | 4,395 | 622 timed-out group attempts; KV 100%, 51 retractions; aborted at 37/40 |
+| [timing4n-r224-t3600](https://beaker.org/ex/01M7V230Y5TM2K6J2X400XGG02), u30-39 | 4-node, R=224, request timeout 3600 s | 215.8 (mean 212.3) | 32.7 | 170.1 | 10.8 | 4,100 | 0 timeouts, 0 stale drops, KV peak 71%, 0 retractions; basis of `four-node.toml` ([W&B](https://wandb.ai/ai2-llm/open_instruct_internal/runs/6bo8weoa)) |
 
 The engine token rates above retain the original serving summaries; cycle and stage
 durations were audited directly. `driver_timing.jsonl`, `rollout_flow.jsonl`,
@@ -153,14 +159,14 @@ from [PR #2271](https://github.com/allenai/open-instruct/pull/2271):
 | Group-standard-deviation normalization | Off | Off |
 
 This is the starting baseline for Small; the historical throughput results do not
-measure this combination. The serving geometry is the submitted timing4n-r160 (four-node) and timing8
+measure this combination. The serving geometry is the submitted timing4n-r224-t3600 (four-node) and timing8
 geometry. Paths, credentials, runtime budgets and mechanics qualification controls
 also have the documented changes above.
 
 The completed-buffer factor stays four: 1,024 prompt groups / 8,192 responses.
-Unfinished producer budgets are 672, 3,680 and 4,512 for the two/four/eight-node
-layouts, respectively (0.328, 1.797 and 2.203 optimizer batches). The nominal sum
-of unfinished budget plus completed-buffer capacity is therefore 4.328, 5.797 and
+Unfinished producer budgets are 672, 5,152 and 4,512 for the two/four/eight-node
+layouts, respectively (0.328, 2.516 and 2.203 optimizer batches). The nominal sum
+of unfinished budget plus completed-buffer capacity is therefore 4.328, 6.516 and
 6.203 batches. Finished siblings can live outside that accounting; these figures
 are not policy-age guarantees. Inspect measured age and useful throughput when
 tuning the new baseline.
@@ -180,10 +186,10 @@ intentional for disposable timing runs, not a learning-run baseline.
   is still required. Evaluation and final HF export retain their generation-drain
   boundaries because they may reuse live serving resources.
 
-The u40-49, r224 and r256 rows come from the same artifacts via a separate analysis
+The u40-49, r224, r256 and r224-t3600 rows come from the same artifacts via a separate analysis
 (engine rates are sampled engine means; r160 sampled 19 of 23 engines), not from the audit above.
 
-### Why not higher than R=160
+### Request timeout at high admission
 
 At batch 1,024 (128 × 8), R=224 and R=256 raise engine throughput by 20% and 29% over
 R=160, but each request decodes more slowly: about 21.9 tok/s at R=160, 18.7 at R=224
@@ -194,12 +200,36 @@ produces long responses (from about update 30), whole groups time out and are re
 none at R=160). Updates became slower (351/313 vs 241-247 s), truncated responses
 disappeared from training (0.7%/0.0% vs 3.6-3.8%), R=256 filled the KV pool (100%,
 51 retractions) and aborted at update 37 of 40 when the rollout failure rate stayed
-above 50%. R=224 with a longer request timeout is untested.
+above 50%.
+
+The fix is `core.refresh_request_timeout = 3600.0` (the per-request deadline in refresh
+rollout; nothing else caps it). A timeout discards the whole group of eight, so a few
+slow 32K responses waste the other seven samples too. With 3600 s, R=224 (timing4n-r224-t3600,
+updates 31-40, 1-indexed) ran at 212 s/update mean vs 243 s at R=160 (-13%) and 401 s at
+R=224 with 1800 s: 0 timeouts, 0 stale drops, truncation 3.55% (r160 3.79%), and generation
+wait fell to 33 s, so the run is now train-bound. 4.7% of completed samples took 1,800-2,000 s
+end to end. Risk: the longest (>=30K-token) samples finish at policy lag 8-10 (median 9) against
+`max_policy_lag` = 12; if responses grow later in a long run, stale drops are the next limit.
+One run per arm; no seed repeat. The eight-node example keeps R=96 but also sets 3600 s,
+which only removes a failure mode.
+
+### Score centering
+
+The Small examples select MILES' native score-centering objective with truncated importance
+sampling for refresh training (`[miles] loss_type = "score_centering"`,
+`score_centering_is = "tis"`, `score_centering_tis_clip = 2.0`,
+`rollout_top_logprobs_num = 20`, `[trainer] fp32_lm_head = true`; see
+[Core: score centering](core.md#score-centering)). It is not a default: without
+`loss_type`, MILES uses `policy_loss` with `use_tis` for async runs, which is what every
+timing run above used (BF16 LM head). The FP32 trainer/serving head and top-20
+candidate recording are untested for throughput and memory on Small; remeasure s/update,
+trainer peak memory and engine KV headroom on the first run.
 
 ## What did not work or was not tested
 
 - `fa4` attention: crashes on head_dim 256 (above).
-- R=224/256: slower than R=160 and failing on request timeouts (above). R=160 on 8 nodes: untested.
+- R=224 at the default 1800 s request timeout and R=256: slower than R=160 and failing on request
+  timeouts (above); R=256 also fills the KV pool. R>96 on 8 nodes: untested.
 - R=64: slower (396 vs 302 s/update); engines gain throughput up to R=96. In single-engine
   forced decodes, R=144 matched R=96 and R=192 gave +19% total tok/s with each request ~40%
   slower.

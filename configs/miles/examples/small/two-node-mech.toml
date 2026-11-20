@@ -88,6 +88,8 @@ save_checkpoints = false
 skip_eval_before_train = true
 
 [trainer]
+# Required by score centering (validation rejects a BF16 trainer head).
+fp32_lm_head = true
 gpus = 8
 expert_parallel_size = 8
 sequence_packing = true
@@ -140,6 +142,12 @@ router_z_loss_weight = 0.0
 scoring_check_interval = 1
 
 [miles]
+# Score centering with native truncated importance sampling for refresh (async) training
+# (docs/miles/core.md#score-centering); replaces the default policy_loss + use_tis.
+loss_type = "score_centering"
+rollout_top_logprobs_num = 20
+score_centering_is = "tis"
+score_centering_tis_clip = 2.0
 # Compare the initial publication against the engine's original HF weights.
 # This adds qualification overhead; timing recipes leave the audit disabled.
 check_weight_update_equal = true
