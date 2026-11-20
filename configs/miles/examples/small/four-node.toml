@@ -1,9 +1,15 @@
 # OLMo 3.5 Small ("Hero Small", A4B, olmo35-small-e256k8-sh2x) on B300: 4 nodes / 32 GPUs.
-# 8 trainer GPUs (EP8, one full node), 23 TP1 engines at admission R=96, 1 Qwen3-32B judge.
-# Measured (kf-hero-miles-timing4 / -timing4n, 30 updates, 128 prompts x 8, 32K responses):
-#   audited cycle median 276 s over updates 10-24 / 302 s over 10-29 (gen wait ~110-126 s, train ~171-175 s,
-#   publication ~9 s); trainer ~6.9K tok/s/GPU, peak reserved 220.5 of 268.6 GiB;
-#   engines ~2.5K tok/s each, 92 of 96 slots busy. R=64 was 31% slower (396 s).
+# 8 trainer GPUs (EP8, one full node), 23 TP1 engines at admission R=224, 1 Qwen3-32B judge.
+# Measured at batch 1,024 (128 prompts x 8, 32K responses), updates 31-40: 212 s/update mean at
+# R=224 with core.refresh_request_timeout = 3600 s (kf-hero-miles-timing4n-r224-t3600,
+# Beaker 01M7V230Y5TM2K6J2X400XGG02) vs 243 s at R=160 (-13%); R=96 had no updates 31-40
+# (302 s median over updates 11-30). 0 request timeouts, 0 stale drops, full-attention KV peak
+# 71%, 0 retractions; like R=160, it exited 1 when the final drain hit engine_drain_timeout.
+# R=224 with the default 1800 s timeout took 401 s/update mean (351 s median): per-request decode is slower at high R,
+# so 32K responses timed out, and each timeout discards the whole group of 8 samples.
+# R=256 filled the KV pool (100%, 51 retractions) and aborted; R=64 was slower than R=96.
+# Risk: the longest samples finish at policy lag 8-10 against core.max_policy_lag = 12 (measured at
+# batch 1,024; batch 2,048 should mean fewer versions per sample, but remeasure).
 # Baseline matches Tiny: 256 prompts x 8, batch 2,048, LR 6e-6, token-mean loss.
 # Timing results above used batch 1,024, LR 1e-6 and response-mean loss; see the docs audit.
 # Start checkpoint: H203 SFT export hf_step18410 (emo_* fields null; HF vocab 100278, Core pads to 100352).
@@ -12,12 +18,14 @@
 #   - Tuned fused-MoE tiles for E=256,N=3072 on B300 via SGLANG_MOE_CONFIG_DIR
 #     (configs/miles/moe_configs/, from SGLang's MoE tuner).
 #   - OLMO_SGLANG_CORE_COMPAT = "rounding" (serving matches Core's bf16 rounding).
-#   - R=96 running requests with 128 mamba/KDA slots, server concurrency 192, CUDA graph decode bs 96,
-#     producer budget 96 x 23 engines = 2,208.
+#   - R=224 running requests with 256 mamba/KDA slots, server concurrency 448, CUDA graph decode bs 224,
+#     producer budget 224 x 23 engines = 5,152, KV pool auto-sized at mem fraction 0.92,
+#     core.refresh_request_timeout = 3600 s.
 #   - Judge: timeout 600 s and chat_template "qwen3-no-thinking".
 #   - Do not set training.eval_interval: prompt_data has no held-out split.
-# Measured on open-instruct 5c6645da (= main 28c18166 + an SGLang SWA-KV pin that Small does not use)
-# and on a87a0feac; `plan` on main resolves identically. Code verifier needs CODE_EXECUTION_TOKEN;
+# R=224 runs (including r224-t3600) used image 01M7GA94Q6GKMP2MV2N36YE83Q from open-instruct 5c6645da
+# (= main 28c18166 + an SGLang SWA-KV pin that Small does not use); the oldest R=96 run used
+# a87a0feac. `plan` on main resolves identically; not yet run on an image built from main. Code verifier needs CODE_EXECUTION_TOKEN;
 # without it code samples are excluded as ungraded.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
@@ -118,17 +126,18 @@ max_response_length = 32768
 max_context_length = 34816
 profile = "generic"
 sglang_disable_radix_cache = true
-# Admission R=96: engines gain throughput up to R=96 (R=64: 1.9K vs 2.5K tok/s/engine).
-sglang_max_running_requests = 96
-sglang_server_concurrency = 192
+# Admission R=224 needs core.refresh_request_timeout = 3600 s; at 1800 s 32K responses time out.
+sglang_max_running_requests = 224
+sglang_server_concurrency = 448
 sglang_cuda_graph_backend_decode = "full"
-sglang_cuda_graph_max_bs_decode = 96
+sglang_cuda_graph_max_bs_decode = 224
 sglang_cuda_graph_backend_prefill = "disabled"
 sglang_chunked_prefill_size = 8192
-# 96 x 34,816 KV tokens (63.8 GB) and 128 KDA state slots (17.9 GB) next to 135 GB of weights.
-sglang_max_total_tokens = 3342336
-sglang_max_mamba_cache_size = 128
-sglang_mem_fraction_static = 0.88
+# No sglang_max_total_tokens key: RunSpec then caps the pool at R x max_context_length = 7,798,784
+# tokens, above the 3,919,232 tokens that fit at this memory fraction next to 256 KDA slots and
+# 135 GB of weights, so the pool is memory-sized (full-attention KV peak 71% at R=224).
+sglang_max_mamba_cache_size = 256
+sglang_mem_fraction_static = 0.92
 # Full-attention layers (5 of 40) on trtllm_mha; KDA layers are unchanged.
 sglang_attention_backend = "trtllm_mha"
 
@@ -151,8 +160,11 @@ checkpoint_keep_last = 2
 checkpoint_keep_every = 50
 save_final_checkpoint = true
 publication_mode = "refresh"
-engine_drain_timeout = 900.0
+# Matches refresh_request_timeout for evaluation and final HF export drains (terminal refresh cleanup cancels unused generation).
+engine_drain_timeout = 3600.0
 engine_update_timeout = 1800.0
+# Default 1800 s times out 32K responses at R=224; a timeout discards the whole group.
+refresh_request_timeout = 3600.0
 pipeline_observation_interval = 2.0
 router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0
@@ -182,8 +194,8 @@ use_rollout_routing_replay = true
 
 [async]
 fully_async = true
-# 96 unfinished samples per engine (= admission R) x 23 engines.
-async_max_concurrent_samples = 2208
+# 224 unfinished samples per engine (= admission R) x 23 engines.
+async_max_concurrent_samples = 5152
 
 [compiler_cache]
 shared_root = "/weka/oe-training-default/open-instruct-compiler-cache/tmp-7d"

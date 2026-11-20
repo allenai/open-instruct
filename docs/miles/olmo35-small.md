@@ -45,6 +45,11 @@ checkpoints and do not establish learning quality.
 - Engine at R=96: weights 135 GB; KDA state for 128 slots 17.9 GB (SSM 17.64 + conv 0.21);
   KV for 3,342,336 tokens 63.8 GB (K 31.88 + V 31.88); about 50 GB free after pools at
   `mem_fraction_static` 0.88.
+- Engine at R=160 (previous four-node example): KDA state for 192 slots 26.7 GB (SSM 26.39 + conv
+  0.31); KV pool auto-sized to 3,823,488 tokens, 72.9 GB (K 36.46 + V 36.46); 32.0 GB free
+  after pools and 30.5 GB after CUDA graphs at `mem_fraction_static` 0.88.
+- Engine at R=224 (four-node example): 256 KDA slots; KV pool auto-sized to 3,919,232 tokens
+  at `mem_fraction_static` 0.92; 19.7 GB free after CUDA graphs; full-attention KV peak 71%.
 
 ## Settings that matter
 
@@ -57,9 +62,14 @@ checkpoints and do not establish learning quality.
   `configs/miles`; an older image has no file at that path.
 - `OLMO_SGLANG_CORE_COMPAT = "rounding"`. The attention trial's HF vs SGLang
   samples have mean |Δlogprob| 0.0155-0.0223 and argmax agreement 98.2-99.4%.
-- Admission R=96: `sglang_max_running_requests` 96, `sglang_max_mamba_cache_size` 128,
-  `sglang_server_concurrency` 192, `sglang_cuda_graph_max_bs_decode` 96, producer budget
-  `async_max_concurrent_samples` = 96 × engines.
+- Admission R=224 on four nodes: `sglang_max_running_requests` 224,
+  `sglang_max_mamba_cache_size` 256, `sglang_server_concurrency` 448,
+  `sglang_cuda_graph_max_bs_decode` 224, producer budget `async_max_concurrent_samples` =
+  224 × engines, `sglang_mem_fraction_static` 0.92, no `sglang_max_total_tokens` key (RunSpec's
+  default cap, R × context = 7,798,784 tokens, is above the 3,919,232-token memory-sized pool), and
+  `core.refresh_request_timeout = 3600.0` (see [the timeout fix](#request-timeout-at-high-admission)).
+  The eight-node example stays at R=96 (128 slots, concurrency 192, graph bs 96,
+  3,342,336 KV tokens) with the same 3600 s timeout; R>96 is untested on 8 nodes.
 - Judge: `timeout = 600` and `chat_template = "qwen3-no-thinking"`. The judge bindings use the
   hashed verifier ids in the H196 `verifiers.json`.
 - `two-node-mech` enables the initial serving-weight comparison and repeats the
@@ -89,6 +99,10 @@ figures (299/309/399/139 seconds) were not reproduced by this definition.
 | timing8, u24-29 | 8-node, R=96 | 185.5 | 73.8 | 96.0 | 18.3 | — | Only six late updates; shutdown subsequently failed |
 | [timing4n-r160](https://beaker.org/ex/01M7NHRMV28ZX4S3HXD4BWAQVJ), u10-29 | 4-node, R=160 | 182.7 | 0.3 | 163.8 | 10.0 | — | Early buffered work; 50 updates total |
 | timing4n-r160, u30-49 | 4-node, R=160 | 248.9 | 64.8 | 173.3 | 9.8 | — | Later window; shutdown subsequently failed |
+| timing4n-r160, u40-49 | 4-node, R=160 | 246.8 | 69.5 | 172.3 | 10.3 | 3,414 | 0 retractions, full KV peak 55% |
+| [timing4n-r224](https://beaker.org/ex/01M7R62YRQ4PH9T5YF78MQJB8T), u30-39 | 4-node, R=224 | 350.9 (mean 401) | 171.3 | 165.3 | 11.7 | 4,094 | 883 timed-out group attempts; 40/40, then failed final drain |
+| [timing4n-r256](https://beaker.org/ex/01M7R8JNKYN72WEHXY5JGGF9MT), u30-36 | 4-node, R=256 | 313.0 | 160.7 | 152.6 | 9.8 | 4,395 | 622 timed-out group attempts; KV 100%, 51 retractions; aborted at 37/40 |
+| [timing4n-r224-t3600](https://beaker.org/ex/01M7V230Y5TM2K6J2X400XGG02), u30-39 | 4-node, R=224, request timeout 3600 s | 215.8 (mean 212.3) | 32.7 | 170.1 | 10.8 | 4,100 | 0 timeouts, 0 stale drops, KV peak 71%, 0 retractions; 40/40, then failed final drain (900 s); basis of `four-node.toml` ([W&B](https://wandb.ai/ai2-llm/open_instruct_internal/runs/6bo8weoa)) |
 
 The engine token rates above retain the original serving summaries; cycle and stage
 durations were audited directly. `driver_timing.jsonl`, `rollout_flow.jsonl`,
@@ -114,9 +128,10 @@ respectively, without skipped updates; those experiments still failed at shutdow
   2.2 for four-node R96. These are different operating regimes.
 - Four-node R160: the later u30-49 window reduces wait to **24.9%**, with median
   sample age 3.3 versions and no stale-token discards in that window. Its early
-  near-zero wait is not a steady-state result. This is a promising next candidate,
-  not a qualified replacement: it failed the same final-drain boundary and has not
-  been repeated with code grading or newer batch/loss settings.
+  near-zero wait is not a steady-state result. It failed the same final-drain boundary
+  and was not repeated; the example moved on to R=224 with a 3600 s request timeout
+  (see [the timeout fix](#request-timeout-at-high-admission)), which is also a single,
+  unqualified run.
 - HTTP permit wait and generation-admission wait are zero at the median in these
   windows; unfinished work is near its configured budget. This does not isolate
   the judge's contribution. Rollout wait includes production, filtering and grading,
@@ -145,14 +160,14 @@ from [PR #2271](https://github.com/allenai/open-instruct/pull/2271):
 | Group-standard-deviation normalization | Off | Off |
 
 This is the starting baseline for Small; the historical throughput results do not
-measure this combination. The serving geometry remains the submitted timing4n/timing8
+measure this combination. The serving geometry is the submitted timing4n-r224-t3600 (four-node) and timing8
 geometry. Paths, credentials, runtime budgets and mechanics qualification controls
 also have the documented changes above.
 
 The completed-buffer factor stays four: 1,024 prompt groups / 8,192 responses.
-Unfinished producer budgets remain 672, 2,208 and 4,512 for the two/four/eight-node
-layouts, respectively (0.328, 1.078 and 2.203 optimizer batches). The nominal sum
-of unfinished budget plus completed-buffer capacity is therefore 4.328, 5.078 and
+Unfinished producer budgets are 672, 5,152 and 4,512 for the two/four/eight-node
+layouts, respectively (0.328, 2.516 and 2.203 optimizer batches). The nominal sum
+of unfinished budget plus completed-buffer capacity is therefore 4.328, 6.516 and
 6.203 batches. Finished siblings can live outside that accounting; these figures
 are not policy-age guarantees. Inspect measured age and useful throughput when
 tuning the new baseline.
@@ -172,9 +187,45 @@ intentional for disposable timing runs, not a learning-run baseline.
   is still required. Evaluation and final HF export retain their generation-drain
   boundaries because they may reuse live serving resources.
 
+The u40-49, r224, r256 and r224-t3600 rows come from the same artifacts via a separate analysis
+(engine rates are sampled engine means; r160 sampled 19 of 23 engines), not from the audit above.
+
+### Request timeout at high admission
+
+At batch 1,024 (128 × 8), R=224 and R=256 raise engine throughput by 20% and 29% over
+R=160, but each request decodes more slowly: about 21.9 tok/s at R=160, 18.7 at R=224
+and 17.5 at R=256. A 32,768-token response then needs about 1,750-1,870 s before queueing
+and refresh pauses, which exceeds `core.refresh_request_timeout` = 1800 s. Once the policy
+produces long responses (from about update 30), whole groups time out and are retried
+(883 timed-out group attempts for R=224 over updates 31-40, 622 for R=256 over 31-37;
+none at R=160). Updates became slower (medians 351/313 vs 241-247 s), truncated responses
+disappeared from training (0.7%/0.0% vs 3.6-3.8%), R=256 filled the KV pool (100%,
+51 retractions) and aborted at update 37 of 40 when the rollout failure rate stayed
+above 50%.
+
+The fix is `core.refresh_request_timeout = 3600.0` (the per-request deadline in refresh
+rollout; nothing else caps it). A timeout discards the whole group of eight, so a few
+slow 32K responses waste the other seven samples too. With 3600 s, R=224 (timing4n-r224-t3600,
+updates 31-40, 1-indexed; the table's u30-39) ran at 212 s/update mean vs 243 s at R=160 (-13%)
+and 401 s mean at R=224 with 1800 s: 0 timeouts, 0 stale drops, truncation 3.55% (r160 3.79%), and generation
+wait fell to 33 s, so the run is now train-bound. 4.7% of completed samples took 1,800-2,000 s
+end to end. Risk: the longest (>=30K-token) samples finish at policy lag 8-10 (median 9) against
+`max_policy_lag` = 12; if responses grow later in a long run, stale drops are the next limit.
+This was measured at batch 1,024; at the shipped 2,048 each update takes longer, so a sample
+should span fewer versions, but remeasure. The run completed 40/40 updates and then, on that pre-#2280 image (`5c6645da`), exited 1
+when the final generation drain hit `engine_drain_timeout` (900 s). On main, terminal refresh
+cleanup cancels unused generation instead of draining (above), while evaluation and final HF
+export retain generation-drain boundaries. The four- and eight-node examples set
+`engine_drain_timeout = 3600.0` to match `refresh_request_timeout` so those drain boundaries
+cover long responses when enabled (untested in a run).
+One run per arm; no seed repeat. The eight-node example keeps R=96 but also sets 3600 s,
+which only removes a failure mode.
+
 ## What did not work or was not tested
 
 - `fa4` attention: crashes on head_dim 256 (above).
+- R=224 at the default 1800 s request timeout and R=256: slower than R=160 and failing on request
+  timeouts (above); R=256 also fills the KV pool. R>96 on 8 nodes: untested.
 - R=64: slower (396 vs 302 s/update); engines gain throughput up to R=96. In single-engine
   forced decodes, R=144 matched R=96 and R=192 gave +19% total tok/s with each request ~40%
   slower.
@@ -211,8 +262,16 @@ snapshot/reset/republish checks after optimizer updates. This adds a second tran
 and extra gradient/update diagnostics. The check detects incomplete transfers over
 its selected tensors; it does not independently prove the export mapping. Keep a
 separate Core-versus-serving score comparison on identical tokens, prefixes and
-weights as a qualification requirement. HF-versus-SGLang greedy agreement and an
-always-zero training metric do not establish that comparison.
+weights as a qualification requirement. HF-versus-SGLang greedy agreement and the
+always-zero `train/ppo_kl` do not establish that comparison.
+
+`train/train_rollout_logprob_abs_diff` (masked mean |trainer − rollout logprob|) is
+nonzero on every update, about 0.008-0.010 in the measured runs;
+`collection_score_mean_abs` is about 0.0065-0.0067. These combine numerical and
+policy differences and do not replace a controlled same-weight parity check. The
+metric that reads exactly 0 is `train/ppo_kl`, which is expected with
+`use_rollout_logprobs = false` (the old logprobs are recomputed by the trainer on
+the same weights) and refresh mode's one optimizer step per collection.
 
 Longer learning runs additionally need native checkpoint/save-resume and evaluation
 checks. The historical timing runs disabled saving; the current four-/eight-node starters
@@ -225,10 +284,6 @@ enable bounded recovery saves. Their inputs still have no held-out split.
   budget 3,680 and an auto-sized KV pool. Repeat after the terminal-cleanup fix
   and under the intended code-grading and batch/loss configuration.
 - Judge latency is not logged per call, so the judge's share of generation wait is unmeasured.
-- The earlier claim that `train_rollout_logprob_abs_diff` is always zero was incorrect.
-  Raw actor metric events record about 0.008 over the measured timing windows;
-  `collection_score_mean_abs` is about 0.0065-0.0067. These combine numerical and
-  policy differences; they do not replace a controlled same-weight parity check.
 
 ## Checkpoint settings in the current starters
 
