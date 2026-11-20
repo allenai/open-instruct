@@ -24,9 +24,11 @@ checkpoints and do not establish learning quality.
   (`/weka/olmo-3p5-post-checkpoints/robertb/miles/h196-dolci-control-20261113/inputs/`,
   84,577 rendered rows). Its rendering was made for Tiny but uses the same tokenizer and chat
   template as this export. There is no held-out split, so do not set `training.eval_interval`.
-- Code verifier needs `CODE_EXECUTION_TOKEN`. Each recipe maps it to a placeholder
-  Beaker secret name under `[launch.secrets]`; replace that name with a secret in the
-  selected workspace. Never put the token value in the TOML. The historical timing
+- Code verifier needs `CODE_EXECUTION_TOKEN`. The four- and eight-node recipes map it to
+  `robertb_MILES_PR2178_CODE_EXECUTION_TOKEN`, the shared code-service token secret in
+  `ai2/olmo-instruct`. In another workspace, create or select that workspace's secret and
+  put its name there. Never put the token value in the TOML. Check the first updates' driver
+  log for `missing code-service bearer token` or 401/403 lines. The historical timing
   runs omitted this credential: code samples were ungraded and their groups dropped
   (3-36 groups per update). Runs with code grading enabled have a different effective
   workload; remeasure throughput rather than assuming the historical timings apply.
@@ -77,8 +79,8 @@ checkpoints and do not establish learning quality.
   overhead relative to the original mechanics run and remain off in timing recipes
   (which retain the default startup scoring check).
 - The four/eight-node recipes request 4h/3h of protected runtime, respectively,
-  based on historical startup and update times plus headroom, with an 8h timeout.
-  Revisit these budgets when enabling code grading or other additional work.
+  based on historical startup and update times plus headroom. They set a 24h job
+  timeout with a 22h `core.max_run_seconds` stop; see [Long runs](#long-runs).
 
 ## Results
 
@@ -288,12 +290,104 @@ enable bounded recovery saves. Their inputs still have no held-out split.
 ## Checkpoint settings in the current starters
 
 The four- and eight-node templates now enable 10-update native recovery saves,
-automatic resume, retention of the latest two saves and 50-update permanent
+automatic resume, retention of the latest two saves and 100-update permanent
 milestones, plus a final native save. Their 30-update starting budgets therefore
-save at 10/20/30; 50-update retention becomes relevant when the run is extended.
+save at 10/20/30; 100-update retention becomes relevant when the run is extended.
 The four-update two-node mechanics check still disables checkpoints/resume.
 The reported historical timings used checkpoint-disabled runs and do not include
 this new save overhead or qualify restore correctness. Measure current batch 2,048
 wall time and checkpoint cost, aim for recovery saves roughly every 1–2 hours, and
 verify the first save and resume before relying on these settings for long runs.
 See [the shared checkpoint policy](../../configs/miles/examples/README.md#recovery-checkpoints-and-preserved-milestones).
+
+## Long runs
+
+The four- and eight-node starters are set up so that raising `training.num_rollouts`
+is the only change a multi-day run needs. Check each item below before launch.
+
+### Mounts
+
+`model.source` paths under `/weka/olmo-3p5-post-checkpoints` can be symlinks into
+`/weka/olmo-3p5-checkpoints` (the H258 SFT export's weights, config and tokenizer
+are). The launcher only checks the paths written in the TOML, and it usually runs
+where WEKA is not mounted, so it cannot follow these symlinks. A job without the
+target bucket fails at model load, not at submission. The starters therefore mount
+both buckets. For another checkpoint, run `ls -l` on its files from a job or
+session with WEKA mounted and add a `[[launch.weka_mounts]]` entry for every
+bucket the links point into.
+
+### Output path and disk space
+
+Write run outputs to `/weka/olmo-3p5-post-checkpoints/YOUR_USERNAME/miles/...`, not
+`oe-training-default` (timing4 failed when that volume filled). One A4B native save
+is about 0.81-0.87 TB (model, optimizer and RNG state). With `checkpoint_keep_last
+= 2`, `checkpoint_keep_every = 100` and the final save, a 660-update run peaks at
+about 2 rolling + 6 milestones + 1 final = 9 saves, ~7.7 TB, plus ~145 GB per
+evaluation snapshot if enabled (14 snapshots at interval 50, ~2 TB). Rolling saves
+roll off only after the next save completes, so budget one extra save of headroom.
+On November 20, 2026 the volume had 81 TB free of 180 TB (56% used); measure it
+again before launch with a CPU job that mounts the bucket and runs
+`df -h /weka/olmo-3p5-post-checkpoints`. Do not write to `olmo-3p5-checkpoints`
+(95% used on the same date).
+
+### Job timeout, wall-clock stop and resubmission
+
+Beaker cancels a job when its `timeout` expires. A canceled job is not preempted:
+`autoResume` requeues only preempted jobs, and Beaker's task retries apply only to
+failed tasks (the launcher does not set them). A timeout therefore ends the run
+without a final save. `launch.auto_resume` covers preemption only.
+
+For a run longer than one job, the starters set `core.max_run_seconds = 79200`
+(22 h of driver wall clock, counted from driver start) under a 24h `launch.timeout`.
+At the first completed collection after 22 h, the run forces a native save and exits
+with `workflow.json` status `stopped`. The final HF export and final evaluation are
+skipped. The remaining 2 h cover the last collection (~6-8 min at batch 2,048), the
+forced save (~10-20 min) and teardown. To continue:
+
+1. Confirm the stop: the job exited 0, `OUTPUT/workflow.json` says `stopped`, and the
+   newest checkpoint has its completion marker.
+2. Resubmit the unchanged TOML with the same image:
+   `MILES_EXISTING_IMAGE=<image id from the launch receipt> python -m open_instruct.miles run <toml>`.
+   The run loads the newest complete checkpoint under the same `output.root`. The
+   updates since the last save are redone; with a forced save at the stop, that is none.
+   `beaker experiment resume` applies only to preempted experiments, so it does not
+   restart a stopped or timed-out run.
+3. Every start, including resubmissions, appends to `attempts.json`. If you set
+   `launch.max_retries`, count planned resubmissions in it (default -1, no cap).
+
+Each resubmission pays startup again (about 35-40 minutes to the end of the first
+update, plus checkpoint load). A 660-update run at ~370 s/update is about 3 days of
+training, so plan on three or four jobs. To keep one W&B run across jobs, set
+`tracking.wandb_run_name` and `wandb_random_suffix = false` (the real100 runs did
+this; continuity across separate jobs is not yet verified).
+
+If a job does hit its timeout, the run resumes from the last periodic save when you
+resubmit as above; the updates since that save are redone.
+
+### Evaluation snapshots
+
+Each starter carries a commented `[evaluation]` block in background mode (interval
+50, final). It writes trainer-side HF snapshots to
+`OUTPUT/eval-snapshots/update-NNNNNNNN/hf` for offline evaluation, without draining the
+rollout engines. To enable it, uncomment the block and delete
+`training.skip_eval_before_train`, which selects shared-engine evaluation. Snapshot
+export is a synchronous trainer collective, and a failed export fails training. It
+requires an image built from main at or after #2293, which brought the writer-only
+HF-export memory fix (miles 9eff46a4); with older images the snapshot export can run
+out of memory. Snapshot export is not yet qualified on Small. The in-run evaluator
+image is the Tiny one and is best effort: its job failures do not affect training.
+
+### Changing the start checkpoint
+
+The H196 prompt file records the SHA-256 of the chat template it was rendered with.
+If the new checkpoint's template differs, data preparation stops with "Prepared
+rendering template hash differs from the checkpoint chat template; re-render
+inputs". Re-render the prompts with the new checkpoint's tokenizer before launch.
+
+### Engine drain timeout
+
+These starters keep `core.engine_drain_timeout = 900`. With `export_hf = false` and
+background evaluation, no stage that drains generation runs before shutdown, and
+terminal refresh cleanup cancels unused generation. PR #2290 raises the four-node
+example to R=224 and both drain timeouts to 3600 s. Merge it before using
+`output.export_hf = true` or shared-engine evaluation.
