@@ -1,0 +1,155 @@
+"""Re-render prepared MILES prompts under a new start checkpoint's chat template.
+
+Prepared rows record the SHA-256 of the chat template they were rendered with
+(`metadata.rendering_template_sha256`). When the start checkpoint changes and its
+template differs, data preparation stops with "Prepared rendering template hash
+differs from the checkpoint chat template; re-render inputs". This tool renders
+each row's `metadata.messages` with the checkpoint tokenizer's chat template
+(`add_generation_prompt=True`, as source preparation does) and rewrites only:
+
+- `input` (the rendered prompt),
+- `metadata.rendering_template_sha256`,
+- `metadata.prompt_tokens` and `metadata.prompt_token_ids`, when present.
+
+Labels, verifiers and all other metadata are kept. Rows whose targets carry tool
+definitions are rejected: source preparation renders those with extra template
+arguments, so re-run source preparation for them instead. The output is written
+atomically to a new path, with a JSON report beside it.
+
+    python -m scripts.miles.rerender_prompts INPUT.jsonl[.gz] CHECKPOINT OUTPUT.jsonl[.gz]
+"""
+
+import argparse
+import collections
+import gzip
+import hashlib
+import json
+import os
+from pathlib import Path
+
+from open_instruct import tokenizer_utils
+
+
+class RerenderError(ValueError):
+    pass
+
+
+def _open(path, mode):
+    return (
+        gzip.open(path, mode + "t", encoding="utf-8")
+        if str(path).endswith(".gz")
+        else open(path, mode, encoding="utf-8")
+    )
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def template_sha256(tokenizer):
+    """The hash MILES compares against `metadata.rendering_template_sha256`."""
+    template = tokenizer.chat_template
+    if not isinstance(template, str) or not template:
+        raise RerenderError("The checkpoint tokenizer has no chat template")
+    return hashlib.sha256(template.encode()).hexdigest()
+
+
+def _uses_tools(row):
+    metadata = row.get("metadata", {})
+    targets = [row.get("label")] + [v.get("target") for v in metadata.get("verifiers", []) if isinstance(v, dict)]
+    return any(
+        isinstance(target, dict) and ("tools" in target or target.get("response_mode") == "tool_call")
+        for target in targets
+    )
+
+
+def rerender_row(row, tokenizer, new_hash):
+    """Return (row, changed); raises RerenderError for rows that cannot be re-rendered here."""
+    metadata = row.get("metadata")
+    if not isinstance(metadata, dict) or not metadata.get("messages"):
+        raise RerenderError("row has no metadata.messages to render")
+    if _uses_tools(row):
+        raise RerenderError("row has tool definitions; re-run source preparation for tool rows")
+    text = tokenizer.apply_chat_template(metadata["messages"], tokenize=False, add_generation_prompt=True)
+    changed = text != row.get("input")
+    row["input"] = text
+    metadata["rendering_template_sha256"] = new_hash
+    if "prompt_tokens" in metadata or metadata.get("prompt_token_ids") is not None:
+        ids = tokenizer.encode(text, add_special_tokens=False)
+        if "prompt_tokens" in metadata:
+            metadata["prompt_tokens"] = len(ids)
+        if metadata.get("prompt_token_ids") is not None:
+            metadata["prompt_token_ids"] = ids
+    return row, changed
+
+
+def rerender(source, output, tokenizer, *, examples=3):
+    source, output = Path(source), Path(output)
+    if source.resolve() == output.resolve():
+        raise RerenderError("Write to a new path; prepared inputs are never rewritten in place")
+    new_hash = template_sha256(tokenizer)
+    counts = collections.Counter()
+    old_hashes = collections.Counter()
+    changed_examples = []
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.name}.tmp{'.gz' if output.name.endswith('.gz') else ''}")
+    try:
+        with _open(source, "r") as reader, _open(temporary, "w") as writer:
+            for index, line in enumerate(reader, 1):
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                old_hashes[str(row.get("metadata", {}).get("rendering_template_sha256"))] += 1
+                old_input = row.get("input")
+                try:
+                    row, changed = rerender_row(row, tokenizer, new_hash)
+                except RerenderError as error:
+                    raise RerenderError(f"{source}: row {index}: {error}") from error
+                counts["changed" if changed else "identical"] += 1
+                if changed and len(changed_examples) < examples:
+                    changed_examples.append(
+                        {"row": index, "old_tail": str(old_input)[-300:], "new_tail": row["input"][-300:]}
+                    )
+                writer.write(json.dumps(row, ensure_ascii=False) + "\n")
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    report = {
+        "source": str(source),
+        "source_sha256": _sha256(source),
+        "output": str(output),
+        "output_sha256": _sha256(output),
+        "rendering_template_sha256": new_hash,
+        "rows": counts["changed"] + counts["identical"],
+        "inputs_changed": counts["changed"],
+        "inputs_identical": counts["identical"],
+        "previous_template_hashes": dict(old_hashes),
+        "changed_examples": changed_examples,
+    }
+    output.with_name(output.name + ".report.json").write_text(json.dumps(report, indent=2) + "\n")
+    return report
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("source", help="Prepared prompt JSONL (optionally .gz)")
+    parser.add_argument(
+        "checkpoint", help="New start checkpoint (HF directory or hub id) whose tokenizer renders the prompts"
+    )
+    parser.add_argument(
+        "output", help="New prepared JSONL path (.gz to compress); a .report.json is written beside it"
+    )
+    parser.add_argument("--revision", help="Hub revision of the checkpoint")
+    args = parser.parse_args(argv)
+    tokenizer = tokenizer_utils.load_tokenizer(args.checkpoint, revision=args.revision, trust_remote_code=True)
+    report = rerender(args.source, args.output, tokenizer)
+    print(json.dumps({k: v for k, v in report.items() if k != "changed_examples"}, indent=2))
+    return report
+
+
+if __name__ == "__main__":
+    main()
