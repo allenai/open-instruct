@@ -1108,8 +1108,9 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 # template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
 # v8: preserve the serialized GPT-2 pre-tokenizer, including Dolma 2's Split regex, when
 # loading tokenizer-only repositories. v9: SFT and DPO derive assistant labels from
-# explicit generation ranges.
-DATASET_CACHE_VERSION = "v9"
+# explicit generation ranges. v10: SFT decodes JSON-string tool-call arguments before
+# rendering, which changes what templates that print a string argument verbatim render.
+DATASET_CACHE_VERSION = "v10"
 
 
 def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

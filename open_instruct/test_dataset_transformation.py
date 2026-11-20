@@ -402,7 +402,11 @@ class TestNormalizeToolCallArguments(unittest.TestCase):
                 "content": "",
                 "reasoning_content": "call it",
                 "tool_calls": [
-                    {"id": "c0", "type": "function", "function": {"name": "f", "arguments": '{"q": "Paris", "days": 5}'}},
+                    {
+                        "id": "c0",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": '{"q": "Paris", "days": 5}'},
+                    },
                     {"id": "c1", "type": "function", "function": {"name": "g", "arguments": "{}"}},
                     {"id": "c2", "type": "function", "function": {"name": "h", "arguments": {"already": 1}}},
                 ],
@@ -421,10 +425,14 @@ class TestNormalizeToolCallArguments(unittest.TestCase):
         ok = [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "null"}}]}]
         out = open_instruct.dataset_transformation._normalize_tool_call_arguments(ok)
         self.assertEqual(out[0]["tool_calls"][0]["function"]["arguments"], {})
-        bad = [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "{not json"}}]}]
+        bad = [
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "{not json"}}]}
+        ]
         with self.assertRaises(ValueError):
             open_instruct.dataset_transformation._normalize_tool_call_arguments(bad)
-        scalar = [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "[1, 2]"}}]}]
+        scalar = [
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "[1, 2]"}}]}
+        ]
         with self.assertRaises(ValueError):
             open_instruct.dataset_transformation._normalize_tool_call_arguments(scalar)
 
@@ -610,6 +618,35 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
             dict(row), self.tokenizer, max_seq_length=4096
         )
         self.assertIn(open_instruct.dataset_transformation.LABELS_KEY, out)
+
+    def test_json_string_tool_call_arguments_render_through_mapping_template(self):
+        # Olmo 3.5's template iterates arguments with `| items`, which raises on the JSON string
+        # a dataset row stores; the SFT row path decodes it first.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}"
+            "{% if m['role'] == 'user' %}User: {{ m['content'] }}\n"
+            "{% elif m['role'] == 'assistant' %}Assistant: {{ m['content'] }}"
+            "{% for tc in m.get('tool_calls') or [] %}"
+            "<call {{ tc['function']['name'] }}>{% for k, v in tc['function']['arguments'] | items %}{{ k }}={{ v }};"
+            "{% endfor %}</call>{% endfor %}{{ eos_token }}{% endif %}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}Assistant: {% endif %}"
+        )
+        call = {"id": "c0", "type": "function", "function": {"name": "weather", "arguments": '{"city": "Paris"}'}}
+        row = {
+            "messages": [
+                {"role": "user", "content": "weather?"},
+                {"role": "assistant", "content": "", "tool_calls": [call]},
+            ]
+        }
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), tokenizer, max_seq_length=4096
+        )
+        text = tokenizer.decode(out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist())
+        self.assertIn("city=Paris;", text)
+        self.assertTrue(any(label != -100 for label in out[open_instruct.dataset_transformation.LABELS_KEY].tolist()))
+        self.assertEqual(row["messages"][1]["tool_calls"][0]["function"]["arguments"], '{"city": "Paris"}')
 
     def test_content_span_handles_header_without_newline_and_multiline_content(self):
         # A "simple_chat"-style template: the assistant header ("Assistant: ") has no
