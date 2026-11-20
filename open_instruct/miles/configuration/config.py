@@ -66,6 +66,10 @@ class CoreConfig:
     engine_drain_timeout: float = 180.0
     engine_update_timeout: float = 180.0
     refresh_request_timeout: float = 1800.0
+    # Refresh only: keep a prompt group when at least this many members succeed
+    # and the rest failed with a transport error or refresh_request_timeout;
+    # each failed member becomes a fully masked dummy. None keeps whole groups.
+    refresh_min_group_size: int | None = None
     snapshot_capacity: int = 2
     row_specialization: str = "static"
     compiler_cache: bool = True
@@ -279,6 +283,11 @@ class CoreConfig:
         validation.number(self.expert_balance_search_seconds, "core.expert_balance_search_seconds")
         if self.packing_max_tokens is not None:
             validation.integer(self.packing_max_tokens, "core.packing_max_tokens", minimum=1)
+        size = self.refresh_min_group_size
+        if size is not None and (type(size) is not int or size < 2):
+            raise constraints.error(
+                f"core.refresh_min_group_size must be an integer of at least 2 or null; got {size!r}"
+            )
         if type(self.max_policy_lag) is not int or self.max_policy_lag < 0:
             raise constraints.error("core.max_policy_lag must be a nonnegative integer")
         validation.choice(self.router_aux_loss_grouping, "core.router_aux_loss_grouping", ("pack", "sequence"))
@@ -649,6 +658,12 @@ class RunConfig:
         for name in ("rollout_batch_size", "n_samples_per_prompt", "num_rollout", "num_epoch"):
             if name in options and (type(options[name]) is not int or options[name] < 1):
                 raise constraints.error(f"miles.{name} must be a positive integer")
+        minimum = self.core.refresh_min_group_size
+        if minimum is not None:
+            if self.core.publication_mode != "refresh":
+                raise constraints.error("core.refresh_min_group_size requires core.publication_mode=refresh")
+            if minimum > options.get("n_samples_per_prompt", 1):
+                raise constraints.error("core.refresh_min_group_size cannot exceed miles.n_samples_per_prompt")
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
         if collection and collection % samples:
             raise constraints.error(

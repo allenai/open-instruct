@@ -34,6 +34,8 @@ from miles.rollout.filter_hub import base_types, common_filters
 from miles.utils.types import Sample
 
 UNGRADED_KEY = "reward_omission"
+# MILES marks placeholder rows (core.refresh_min_group_size dummies) this way.
+NO_BASELINE_KEY = "exclude_from_reward_baseline"
 
 
 def ungraded(sample) -> bool:
@@ -43,7 +45,9 @@ def ungraded(sample) -> bool:
 
 
 def _excluded(sample, *, truncated: bool) -> bool:
-    return ungraded(sample) or (truncated and sample.status == Sample.Status.TRUNCATED)
+    metadata = getattr(sample, "metadata", None)
+    placeholder = isinstance(metadata, dict) and bool(metadata.get(NO_BASELINE_KEY))
+    return placeholder or ungraded(sample) or (truncated and sample.status == Sample.Status.TRUNCATED)
 
 
 def _filter_responses(args, samples, *, truncated: bool, variance: bool, **kwargs):
