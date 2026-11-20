@@ -800,6 +800,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     local_pred_tokens_this_log_period = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     start_time = time.perf_counter()
+    start_step = completed_steps
     skipped_batches = False
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
@@ -985,6 +986,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                         wandb_url=wandb_tracker.run.url
                         if wandb_tracker is not None and accelerator.is_main_process
                         else None,
+                        start_step=start_step,
                     )
                     total_loss = 0
                     total_aux_loss = 0

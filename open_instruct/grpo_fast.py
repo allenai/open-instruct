@@ -1914,6 +1914,7 @@ def run_training(
         total_steps=args.num_training_steps,
         start_time=training_start_time,
         wandb_url=wandb_url,
+        start_step=resume_training_step - 1,
     )
     last_eval_collected = True
 
@@ -2040,6 +2041,7 @@ def run_training(
             total_steps=args.num_training_steps,
             start_time=training_start_time,
             wandb_url=wandb_url,
+            start_step=resume_training_step - 1,
         )
 
     if resume_training_step > args.num_training_steps:

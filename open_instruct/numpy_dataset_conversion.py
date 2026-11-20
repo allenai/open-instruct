@@ -368,7 +368,9 @@ def convert_hf_to_numpy_sft(
     )
 
     collect_start = time.perf_counter()
-    utils.maybe_update_beaker_description(current_step=start_idx, total_steps=total_samples, start_time=collect_start)
+    utils.maybe_update_beaker_description(
+        current_step=start_idx, total_steps=total_samples, start_time=collect_start, start_step=start_idx
+    )
     last_description_update = collect_start
     idx = start_idx - 1
     with (
@@ -411,13 +413,13 @@ def convert_hf_to_numpy_sft(
             now = time.perf_counter()
             if now - last_description_update >= 30.0:
                 utils.maybe_update_beaker_description(
-                    current_step=idx + 1, total_steps=total_samples, start_time=collect_start
+                    current_step=idx + 1, total_steps=total_samples, start_time=collect_start, start_step=start_idx
                 )
                 last_description_update = now
 
     progress.close()
     utils.maybe_update_beaker_description(
-        current_step=total_samples, total_steps=total_samples, start_time=collect_start
+        current_step=total_samples, total_steps=total_samples, start_time=collect_start, start_step=start_idx
     )
     collect_elapsed = time.perf_counter() - collect_start
     samples_processed = max(0, total_samples - start_idx)
