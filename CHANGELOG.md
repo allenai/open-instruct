@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed
+- Expose the MILES isolated group retry limit as `core.max_group_retries` (default 3, adjustable on resume) and recommend 5 for multi-day runs (https://github.com/allenai/open-instruct/pull/2303).
 - Raise the MILES `core.refresh_request_timeout` default from 1,800 s to 3,600 s so 32K-token responses at high SGLang concurrency are not timed out and their groups discarded (https://github.com/allenai/open-instruct/pull/2297).
 - Add a CUDA 13 MoE image (`build_image_and_launch.sh --cuda-version 13 --moe`) with transformer-engine 2.16.1, which MoE v2 (`OLMoDDPModel`) SFT needs. The default images are unchanged (https://github.com/allenai/open-instruct/pull/2298).
 - Pin the MILES runtime with writer-only HF export storage and the startup weight-check fix (https://github.com/allenai/open-instruct/pull/2293).
