@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "H253 qualification image: background weight preparation with a 300s tick budget and a per-engine 600s snapshot reply deadline. Both budgets scale with the infrastructure timeout multiplier. CPU rollout suite passed; GPU startup checks enabled.",
+  "status": "H253 recovery: writer-only CPU HF exports; existing startup acknowledgment fixes retained. CPU export regressions passed; GPU recovery qualification pending.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "c6b98de20e4e43f74c5e15ca189f6e2079753ad5"
+      "revision": "61c6a7689c73f19eef1fae95c2bb77e466e4b3b0"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
