@@ -77,3 +77,28 @@ def test_refresh_checks_effective_json_graph_overrides(encode):
             "sglang_cuda_graph_config": encode({"decode": {"backend": "full"}}),
         },
     ).validate()
+
+
+def test_refresh_min_group_size_defaults_off_and_compiles_into_core_config():
+    assert CoreConfig().refresh_min_group_size is None
+    assert '"refresh_min_group_size": null' in configured().arguments()[-1]
+    config = configured()
+    config = dataclasses.replace(
+        config, core=dataclasses.replace(config.core, refresh_min_group_size=2), miles=config.miles
+    )
+    config.validate()
+    assert '"refresh_min_group_size": 2' in config.arguments()[-1]
+
+
+@pytest.mark.parametrize("value", [1, 0, True, 2.0, "2"])
+def test_refresh_min_group_size_must_be_an_integer_of_at_least_two(value):
+    with pytest.raises(ValueError, match="refresh_min_group_size"):
+        CoreConfig(publication_mode="refresh", max_policy_lag=2, refresh_min_group_size=value)
+
+
+def test_refresh_min_group_size_requires_refresh_and_fits_the_group():
+    config = configured()
+    with pytest.raises(ValueError, match="cannot exceed"):
+        dataclasses.replace(config, core=dataclasses.replace(config.core, refresh_min_group_size=3)).validate()
+    with pytest.raises(ValueError, match="publication_mode=refresh"):
+        RunConfig(CoreConfig(refresh_min_group_size=2), dict(config.miles)).validate()
