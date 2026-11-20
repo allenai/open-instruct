@@ -326,7 +326,7 @@ async def train(args, *, export_hf=None):
             if stopped_for_time:
                 logger.info("Graceful wall-clock stop after completed rollout %s (budget=%ss)", rollout_id, budget)
             final_stop = stopped_for_time and not resumable
-            if coordinator is not None:
+            if coordinator is not None and background is not None:
                 per_rollout = background_eval.updates_per_rollout(args)
                 end_update = (rollout_id + 1) * per_rollout
                 # The optimizer hook handles mid-rollout snapshots. At the boundary
