@@ -4,6 +4,8 @@ ARG IMAGE_VARIANT=""
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS cuda12
 FROM nvidia/cuda:13.0.3-devel-ubuntu22.04 AS cuda13
 FROM nvidia/cuda:13.3.1-cudnn-devel-ubuntu22.04 AS cuda13-moe
+# torch is built with CUDA 13.0; without this DeepSpeed refuses to JIT-build its ops (CPU Adam) against 13.3.
+ENV DS_SKIP_CUDA_CHECK=1
 FROM cuda${CUDA_VERSION}${IMAGE_VARIANT}
 
 ARG CUDA_VERSION
