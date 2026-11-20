@@ -312,7 +312,8 @@ Review those warnings instead of inheriting settings from an old experiment.
 ## Candidate evaluation sampling
 
 Policy evaluation uses temperature 1.0 and top-p 0.95. Background tasks explicitly
-request 32,768 response tokens, independent of the serving context size; the math
+request a nominal 32,768 response-token cap with context fitting enabled; long
+rendered prompts reduce that allowance to the remaining context space. The math
 tasks retain 32 draws. Shared in-loop evaluation defaults to the same sampling
 and caps its inherited response budget at 32K; short smoke tests keep their
 smaller budgets. Explicit run overrides still win. Judge sampling and training

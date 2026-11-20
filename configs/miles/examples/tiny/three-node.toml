@@ -72,9 +72,9 @@ mode = "background"
 interval = 0
 initial = true
 final = true
-# Native SGLang plus code sandboxes/judges; full-panel resource qualification is pending.
-image = "01M6J0KMAD3CXVGT07V1BHR1VH"
-revision = "ba0ff700e8f9b301cfd8ed5fd462df9d83dddfe1"
+# Context-fitting native SGLang plus code sandboxes/judges; see background-evaluation.md.
+image = "01M7CK4QK3MJ7Q9MZYRQTMTPYW"
+revision = "56dc89212fc040a0b7fd957901c3b326b8a5cd11"
 gpus = 1
 cluster = "ai2/holmes"
 submit_timeout = 30
@@ -87,69 +87,69 @@ provider_kwargs = { profile = "olmo3.5-12.5b", context_length = 34816 }
 [[evaluation.tasks]]
 # Full datasets with explicit candidate policy sampling; judge settings are unchanged.
 # Periodic subsets are not enabled; see docs/miles/background-evaluation.md.
-# Seven AIME/HMMT variants retain 32 draws with a fixed 32K response budget.
+# Seven AIME/HMMT variants retain 32 draws and a nominal 32K response cap.
 task = "aime_2022:pass_at_32"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 32 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 32 }
 
 [[evaluation.tasks]]
 task = "aime_2023:pass_at_32"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 32 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 32 }
 
 [[evaluation.tasks]]
 task = "aime_2024:pass_at_32"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 32 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 32 }
 
 [[evaluation.tasks]]
 task = "aime_2025:pass_at_32"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 32 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 32 }
 
 [[evaluation.tasks]]
 task = "aime_2026:pass_at_32"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 32 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 32 }
 
 [[evaluation.tasks]]
 task = "hmmt_nov_2025:pass_at_32"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 32 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 32 }
 
 [[evaluation.tasks]]
 task = "hmmt_feb_2026:pass_at_32"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 32 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 32 }
 
 [[evaluation.tasks]]
 task = "gpqa_diamond:cot"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "gpqa_main:cot"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "omega_500:hillclimb"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "omega_500_out"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "ifeval"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "ifeval_mt_wildchat_unused_withRewrite"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "ifeval_mt_ood_wildchat_unused_withRewrite"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "ifeval_ood"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "livecodebench:lite"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 harness_preset = "codex_python"
 # Preinstall the sandbox server; the pinned runtime's on-demand fallback fails.
 harness = { "sandboxes.0.inject_swerex" = true }
@@ -159,13 +159,13 @@ task = "scicode"
 kind = "external"
 # SciCode has no top_p argument in the pinned evaluator; nucleus sampling is not pinned here.
 # Reference data defaults to the SCICODE_H5PY_HOST_PATH Beaker secret.
-arguments = { temperature = 1.0, max_tokens = 32768, split = "validation" }
+arguments = { temperature = 1.0, max_tokens = 32768, fit_max_tokens_to_context = true, split = "validation" }
 
 # Text safety for reasoning models. olmo-eval manages these evaluation judges
 # on the additional GPU reserved per group, separate from the policy server.
 [[evaluation.tasks]]
 task = "do_anything_now:wg_judge_thinking"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
@@ -174,7 +174,7 @@ auxiliary_gpus = 1
 
 [[evaluation.tasks]]
 task = "harmbench:wg_judge_thinking"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
@@ -183,7 +183,7 @@ auxiliary_gpus = 1
 
 [[evaluation.tasks]]
 task = "wildguardtest:wg_judge_thinking"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
@@ -192,7 +192,7 @@ auxiliary_gpus = 1
 
 [[evaluation.tasks]]
 task = "wildjailbreak:wg_judge_thinking"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
@@ -201,7 +201,7 @@ auxiliary_gpus = 1
 
 [[evaluation.tasks]]
 task = "xstest:wg_judge_thinking"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.wg_judge.kind" = "vllm_server"
@@ -210,15 +210,15 @@ auxiliary_gpus = 1
 
 [[evaluation.tasks]]
 task = "wmdp:mcq"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "bbq:mcq"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 
 [[evaluation.tasks]]
 task = "strongreject:sr_judge_thinking"
-generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, num_samples = 1 }
+generation = { temperature = 1.0, top_p = 0.95, max_tokens = 32768, fit_max_tokens_to_context = true, num_samples = 1 }
 auxiliary_gpus = 1
 [evaluation.tasks.harness]
 "auxiliary_providers.sr_judge.kind" = "vllm_server"

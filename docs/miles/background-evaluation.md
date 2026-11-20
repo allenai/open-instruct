@@ -379,15 +379,32 @@ background evaluations select `provider.kind=sglang` and
 explicit HTTP exception described above. The runner checks the installed
 olmo-eval revision against the receipt before evaluating.
 
-The node example pins olmo-eval revision `3536fe751e40162cc33d5e647085e986375aadce`
-and image `01M5ZGD5K01GNW3ASDPNXXPEJ3`. The three-node example pins
-`ba0ff700e8f9b301cfd8ed5fd462df9d83dddfe1` and image
-`01M6J0KMAD3CXVGT07V1BHR1VH`, retaining H169's qualified sandbox and isolated vLLM
-runtime. Its only evaluator code change from H169's `ede61eb9` image is the shared
-startup lifecycle fix ([olmo-eval PR 541](https://github.com/allenai/olmo-eval/pull/541));
-the earlier `3536fe75` to `ede61eb9` change fixes explicit CLI `null` overrides.
-Neither change alters benchmark prompts, sampling defaults, or scoring. The
-startup image recipe is `runtime/miles/Dockerfile.evaluator-startup`.
+The node and three-node examples pin olmo-eval revision
+`56dc89212fc040a0b7fd957901c3b326b8a5cd11` and image
+`01M7CK4QK3MJ7Q9MZYRQTMTPYW`. This runtime includes the opt-in
+[SciCode context fitting](https://github.com/allenai/olmo-eval/pull/566) and
+[SGLang context fitting](https://github.com/allenai/olmo-eval/pull/567) fixes.
+Both templates explicitly request `fit_max_tokens_to_context = true` for every
+native task, and the three-node SciCode entry passes it through `arguments`.
+The nominal 32,768-token output cap is preserved when it fits; otherwise the
+provider reduces it to the space left after the rendered input and its safety
+margin. Prompts are not shortened to manufacture room, and an input leaving no
+generation space still fails explicitly. Evaluation temperature 1.0/top-p 0.95,
+math draws and training sampling remain separate settings.
+
+The new evaluator revision is an intentional protocol promotion, not a claim
+that every old task hash or result is interchangeable. Native context checks
+covered 24 generated cases across eight task families; their enclosing job
+exited 1 because of a separately identified extra three-user-turn fixture
+requirement. The SciCode validation completed all 15 problems/50 substeps with
+no infrastructure errors. These are scoped runtime checks, not full-panel or
+GPU-pytest qualification claims.
+
+SciCode still cannot explicitly accept top-p in this pinned revision. Keep that
+argument absent until [the optional top-p API](https://github.com/allenai/olmo-eval/pull/568)
+and context fixes are included in a newly pinned image; then set it explicitly
+as a separate sampling-protocol change. Existing submitted receipts remain
+frozen and do not inherit changes to these templates.
 
 Replace the old `evaluation.server_args` with typed `evaluation.provider_kwargs`
 using Python option names, for example `context_length = 34816`. Let the selected
