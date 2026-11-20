@@ -50,7 +50,7 @@ memory = "1500 GiB"
 shared_memory = "200 GiB"
 
 [launch.coordination]
-heartbeat_timeout = 120
+heartbeat_timeout = 480
 startup_timeout = 3600
 
 [[launch.weka_mounts]]
