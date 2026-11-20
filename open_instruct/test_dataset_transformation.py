@@ -393,6 +393,56 @@ def _mask_all_but_last(idx, _msg, msgs):
     return idx < len(msgs) - 1
 
 
+class TestNormalizeToolCallArguments(unittest.TestCase):
+    def test_json_string_arguments_become_mappings(self):
+        messages = [
+            {"role": "user", "content": "hi", "tool_calls": None},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "call it",
+                "tool_calls": [
+                    {
+                        "id": "c0",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": '{"q": "Paris", "days": 5}'},
+                    },
+                    {"id": "c1", "type": "function", "function": {"name": "g", "arguments": "{}"}},
+                    {"id": "c2", "type": "function", "function": {"name": "h", "arguments": {"already": 1}}},
+                ],
+            },
+        ]
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(messages)
+        self.assertIs(out[0], messages[0])
+        calls = out[1]["tool_calls"]
+        self.assertEqual(calls[0]["function"]["arguments"], {"q": "Paris", "days": 5})
+        self.assertEqual(calls[1]["function"]["arguments"], {})
+        self.assertEqual(calls[2]["function"]["arguments"], {"already": 1})
+        # the row's own messages are untouched
+        self.assertEqual(messages[1]["tool_calls"][0]["function"]["arguments"], '{"q": "Paris", "days": 5}')
+
+    def test_null_json_becomes_empty_mapping_and_other_strings_pass_through(self):
+        ok = [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "f", "arguments": "null"}}]}]
+        out = open_instruct.dataset_transformation._normalize_tool_call_arguments(ok)
+        self.assertEqual(out[0]["tool_calls"][0]["function"]["arguments"], {})
+        # Not a JSON object: left for the template, which renders or rejects it as it did before.
+        # Python's own limits (integer digits, nesting depth) count as undecodable too, and so does
+        # an object that is not valid UTF-8 once decoded (a lone surrogate).
+        too_long = '{"n": ' + "9" * 5000 + "}"
+        too_deep = '{"a": ' + "[" * 100_000 + "]" * 100_000 + "}"
+        lone_surrogate = '{"q": "\\ud800"}'
+        for arguments in ("{not json", "[1, 2]", "", too_long, too_deep, lone_surrogate):
+            row = [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "f", "arguments": arguments}}],
+                }
+            ]
+            out = open_instruct.dataset_transformation._normalize_tool_call_arguments(row)
+            self.assertIs(out[0], row[0], arguments)
+
+
 class TestMaskLabels(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -574,6 +624,35 @@ class TestSFTTuluTokenizeLabels(unittest.TestCase):
             dict(row), self.tokenizer, max_seq_length=4096
         )
         self.assertIn(open_instruct.dataset_transformation.LABELS_KEY, out)
+
+    def test_json_string_tool_call_arguments_render_through_mapping_template(self):
+        # Olmo 3.5's template iterates arguments with `| items`, which raises on the JSON string
+        # a dataset row stores; the SFT row path decodes it first.
+        tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+        tokenizer.chat_template = (
+            "{% for m in messages %}"
+            "{% if m['role'] == 'user' %}User: {{ m['content'] }}\n"
+            "{% elif m['role'] == 'assistant' %}Assistant: {{ m['content'] }}"
+            "{% for tc in m.get('tool_calls') or [] %}"
+            "<call {{ tc['function']['name'] }}>{% for k, v in tc['function']['arguments'] | items %}{{ k }}={{ v }};"
+            "{% endfor %}</call>{% endfor %}{{ eos_token }}{% endif %}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}Assistant: {% endif %}"
+        )
+        call = {"id": "c0", "type": "function", "function": {"name": "weather", "arguments": '{"city": "Paris"}'}}
+        row = {
+            "messages": [
+                {"role": "user", "content": "weather?"},
+                {"role": "assistant", "content": "", "tool_calls": [call]},
+            ]
+        }
+        out = open_instruct.dataset_transformation.sft_tulu_tokenize_and_truncate_v1(
+            dict(row), tokenizer, max_seq_length=4096
+        )
+        text = tokenizer.decode(out[open_instruct.dataset_transformation.INPUT_IDS_KEY].tolist())
+        self.assertIn("city=Paris;", text)
+        self.assertTrue(any(label != -100 for label in out[open_instruct.dataset_transformation.LABELS_KEY].tolist()))
+        self.assertEqual(row["messages"][1]["tool_calls"][0]["function"]["arguments"], '{"city": "Paris"}')
 
     def test_content_span_handles_header_without_newline_and_multiline_content(self):
         # A "simple_chat"-style template: the assistant header ("Assistant: ") has no
@@ -1910,6 +1989,16 @@ class TestAddedTokenStringsFilter(unittest.TestCase):
         # The Olmo templates join text parts without a separator, so this renders as `<|im_end|>`.
         self.assertFalse(self.keeps([{"role": "user", "content": split_im_end}]))
         self.assertTrue(self.keeps(None))
+
+    def test_drops_json_escaped_added_token_in_tool_call_arguments(self):
+        # The row path decodes JSON-string arguments before rendering, so an escaped spelling
+        # renders as the token itself.
+        call = {"function": {"name": "f", "arguments": '{"q": "\\u003c|im_start|\\u003e"}'}}
+        messages = [{"role": "user", "content": "Call f."}, {"role": "assistant", "content": "", "tool_calls": [call]}]
+        self.assertNotIn("<|im_start|>", json.dumps(messages, ensure_ascii=False))
+        self.assertFalse(self.keeps(messages))
+        call["function"]["arguments"] = '{"q": "plain"}'
+        self.assertTrue(self.keeps(messages))
 
     def test_allowlist_is_configurable(self):
         eos_row = [{"role": "assistant", "content": "Explaining the <|endoftext|> token."}]
