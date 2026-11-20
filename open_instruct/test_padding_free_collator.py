@@ -204,7 +204,7 @@ def _make_dpo_features(
 
 class TestDPOPackingIndices(unittest.TestCase):
     def _collate(self, max_seq_length, num_samples, chosen_lengths, rejected_lengths, start_index=0):
-        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=max_seq_length)
+        collator = TensorDataCollatorWithFlatteningDPO()
         features = _make_dpo_features(num_samples, chosen_lengths, rejected_lengths, start_index)
         return collator(features)
 
@@ -288,9 +288,9 @@ class TestDPOPackingIndices(unittest.TestCase):
         self.assertEqual(len(chosen_logps), num_indices)
         self.assertEqual(len(rejected_logps), num_indices)
 
-    @parameterized.expand([("no_truncation", 1000, []), ("with_truncation", 300, [3, 7, 11, 15])])
+    @parameterized.expand([("no_truncation", 1000, []), ("with_truncation", 300, [])])
     def test_simulate_reference_cache(self, name, max_seq_length, expected_missing):
-        collator = TensorDataCollatorWithFlatteningDPO(max_seq_length=max_seq_length)
+        collator = TensorDataCollatorWithFlatteningDPO()
         num_total_samples = 16
         all_features = _make_dpo_features(
             num_samples=num_total_samples, chosen_lengths=[100], rejected_lengths=[100], start_index=0
@@ -324,13 +324,6 @@ class TestDPOPackingIndices(unittest.TestCase):
         self.assertEqual(missing_chosen, expected_missing)
         self.assertEqual(missing_rejected, expected_missing)
 
-    def test_prefilter_keeps_complete_sequences(self):
-        batch = self._collate(max_seq_length=150, num_samples=4, chosen_lengths=[100], rejected_lengths=[100])
-
-        self.assertEqual(len(batch["index"]), 1)
-        self.assertEqual(batch["chosen_cu_seq_lens_k"][-1].item(), 100)
-        self.assertEqual(batch["rejected_cu_seq_lens_k"][-1].item(), 100)
-
     def test_average_log_prob_all_masked_segment(self):
         vocab_size = 100
         seq_len = 20
@@ -351,16 +344,13 @@ class TestDPOPackingIndices(unittest.TestCase):
         )
 
         self.assertEqual(bs, 2)
-        self.assertEqual(batch["chosen_input_ids"].shape[-1], 500)
-        self.assertEqual(batch["rejected_input_ids"].shape[-1], 500)
-        self.assertEqual(concat_batch["concatenated_input_ids"].shape[-1], 1000)
+        self.assertEqual(batch["chosen_input_ids"].shape[-1], 100)
+        self.assertEqual(batch["rejected_input_ids"].shape[-1], 100)
+        self.assertEqual(concat_batch["concatenated_input_ids"].shape[-1], 200)
 
         cu_seq_lens = concat_batch["concatenated_cu_seq_lens_k"]
         self.assertEqual(len(cu_seq_lens), 5)
-        self.assertEqual(cu_seq_lens[0].item(), 0)
-        self.assertEqual(cu_seq_lens[2].item(), 100)
-        self.assertEqual(cu_seq_lens[3].item(), 550)
-        self.assertEqual(cu_seq_lens[4].item(), 600)
+        self.assertEqual(cu_seq_lens.tolist(), [0, 50, 100, 150, 200])
 
 
 class TestDPOLMHead(unittest.TestCase):
