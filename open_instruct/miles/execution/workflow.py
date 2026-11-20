@@ -93,6 +93,9 @@ def recovery_configuration_matches(root, previous, document):
     adopt_keys(recorded, document, ("compiler_cache",))
     if isinstance(recorded.get("core"), dict) and isinstance(document.get("core"), dict):
         adopt_keys(recorded["core"], document["core"], COMPILER_CACHE_CORE_KEYS)
+        # Serving-failure patience is operational, like heartbeat patience: a run
+        # stopped by the isolated group retry limit can resume with a higher one.
+        adopt_keys(recorded["core"], document["core"], ("max_group_retries",))
     # Checkpoint/evaluation cadence changes only future artifact production.
     # Keep training horizon, evaluation tasks/scorers, and all recipe fields strict.
     if isinstance(recorded.get("training"), dict) and isinstance(document.get("training"), dict):
