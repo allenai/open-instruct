@@ -277,6 +277,10 @@ def adapt(raw, kind, options=None):
                 tool_payload_key=raw.get("tool_payload_key"),
                 tool_call_format=options.get("tool_call_format", "olmo3_pythonic_v1"),
             )
+        if not tool_answer and target["format"] != "csv":
+            # The same wording rule the verifier applies to a prompt when this field is missing.
+            prompt = "\n".join(message["content"] for message in ms)
+            target["code_fence"] = "forbidden" if structured.prompt_forbids_code_fence(prompt) else "allowed"
         structured.validate_target(target)
         # These native parsers have fixed root shapes. A schema demanding the
         # opposite shape cannot be satisfied by any response in that format.
