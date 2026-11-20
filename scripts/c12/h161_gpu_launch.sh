@@ -102,7 +102,8 @@ case "$ARM" in
     a4b8c16) # ledger H260 (a4b8t-c16): a4b8 below with C16's Dolci parquet; see the header.
          MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-8t-decay318k-causal/step321974/model_and_optim
          HF_REF=/weka/oe-training-default/tanushy/checkpoints/olmo35-small-hero-decay318k-causal-321974/hf
-         CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=30; SMOKE_HOURS=1; REF_TRANSFORMERS=5.15.1
+         CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=30; SMOKE_HOURS=2;   # base load alone took 47 min in H260 smoke 01M7VJPHR0GE1WCPQ4FF5B966Z, whose 1h timeout cut its HF reference
+         REF_TRANSFORMERS=5.15.1
          SEED_ROWS='[[100256, [14023, 771, 29]], [100266, [524, 27963, 29]]]'
          F=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/rf
          MIXER="/weka/olmo-3p5-post-checkpoints/chrisg/h257/c16/c16-dolci-2cb5a8ad.parquet 1.0 \
