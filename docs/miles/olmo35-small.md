@@ -212,10 +212,12 @@ wait fell to 33 s, so the run is now train-bound. 4.7% of completed samples took
 end to end. Risk: the longest (>=30K-token) samples finish at policy lag 8-10 (median 9) against
 `max_policy_lag` = 12; if responses grow later in a long run, stale drops are the next limit.
 This was measured at batch 1,024; at the shipped 2,048 each update takes longer, so a sample
-should span fewer versions, but remeasure. The run completed 40/40 updates and then, like
-R=160 and timing8, exited 1 when the final generation drain hit `engine_drain_timeout` (900 s).
-The four- and eight-node examples now set `engine_drain_timeout = 3600.0` to match
-`refresh_request_timeout`; this is expected to remove the exit 1 at shutdown but has not been run.
+should span fewer versions, but remeasure. The run completed 40/40 updates and then, on that pre-#2280 image (`5c6645da`), exited 1
+when the final generation drain hit `engine_drain_timeout` (900 s). On main, terminal refresh
+cleanup cancels unused generation instead of draining (above), while evaluation and final HF
+export retain generation-drain boundaries. The four- and eight-node examples set
+`engine_drain_timeout = 3600.0` to match `refresh_request_timeout` so those drain boundaries
+cover long responses when enabled (untested in a run).
 One run per arm; no seed repeat. The eight-node example keeps R=96 but also sets 3600 s,
 which only removes a failure mode.
 

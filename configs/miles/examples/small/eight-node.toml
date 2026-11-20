@@ -150,7 +150,7 @@ checkpoint_keep_last = 2
 checkpoint_keep_every = 50
 save_final_checkpoint = true
 publication_mode = "refresh"
-# Matches refresh_request_timeout so the final generation drain does not exit 1 after the last update.
+# Matches refresh_request_timeout for evaluation and final HF export drains (terminal refresh cleanup cancels unused generation).
 engine_drain_timeout = 3600.0
 engine_update_timeout = 1800.0
 # Headroom for 32K responses; R=96 has not hit 1800 s (R>=224 did). A timeout discards the whole group.
