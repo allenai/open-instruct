@@ -48,9 +48,27 @@ or verifier configuration. See [launching](launching.md#task-grader-dependencies
 Registry factory
 `open_instruct.miles.rewards.structured_outputs.StructuredOutputVerifier` accepts
 a target with `format` (`json`, `yaml`, `toml`, `xml`, `csv`), `schema`, an explicit
-`schema_policy` (`as_declared` or `nemo_strict_v1`), and optional `coerce_types`.
+`schema_policy` (`as_declared` or `nemo_strict_v1`), optional `coerce_types`, and
+optional `code_fence` (`allowed` or `forbidden`).
 These rewards measure structural compliance, not factual correctness. Preserve
 original messages; no JSON-only suffix is needed for non-JSON sources.
+
+An answer is parsed as written first. Only when that fails and the answer holds
+exactly one closed Markdown code fence whose tag is empty or names the format
+(`json`, `yaml`/`yml`, `toml`, `xml`) is the fence content parsed instead; text
+around the fence is ignored. Two or more fences, an unclosed fence and a fence
+tagged for another language are not unwrapped, and CSV answers and tool calls
+are never unwrapped. Source preparation writes `code_fence` from all rendered
+messages: `forbidden` when the wording bans Markdown, backticks or code fences
+(`prompt_forbids_code_fence()`), otherwise `allowed`. A target without the field
+(prepared earlier) falls back to the same check on the `query` the verifier
+receives, which in production is the last user message; with no `query` the
+fence is allowed. "Return only the JSON/YAML/XML/TOML" alone does not forbid a
+fence (`ONLY_OUTPUT_FORBIDS_FENCE = False`). A correct document that needed its
+fence removed scores `StructuredConfig.fenced_document_reward` (default 1.0, a
+number in [0, 1]), and the result diagnostics carry `unwrapped_fence: true`.
+Because `code_fence` is part of the target, re-preparing a source changes target
+and artifact hashes; previously prepared data stays valid and uses the prompt check.
 
 `nemo_strict_v1` and XML/CSV type coercion use the pure helpers extracted from
 NVIDIA NeMo Gym's Apache-2.0 `resources_servers/structured_outputs/app.py`

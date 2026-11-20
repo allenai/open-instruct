@@ -30,8 +30,7 @@ FORMATS = {"json", "yaml", "toml", "xml", "csv"}
 PARSE_ERRORS = (ValueError, TypeError, yaml.YAMLError, csv.Error, xmltodict.expat.ExpatError)
 CODE_FENCE_VALUES = {"allowed", "forbidden"}
 # Whether "Return only the JSON/YAML/XML/TOML output" (with no explicit ban on markdown or
-# backticks) forbids wrapping the document in a Markdown code fence. Open question (V16): False
-# means such prompts allow the fence.
+# backticks) forbids wrapping the document in a Markdown code fence. False: such prompts allow it.
 ONLY_OUTPUT_FORBIDS_FENCE = False
 _FENCE_BAN = re.compile(
     r"not be in markdown|no markdown|without (?:markdown|code fence)|not .{0,20}```"
@@ -58,10 +57,8 @@ def validate_target(target):
         "code_fence",
     }:
         raise ValueError("Unknown structured target fields")
-    if (
-        not isinstance(target.get("code_fence", "allowed"), str)
-        or target.get("code_fence", "allowed") not in CODE_FENCE_VALUES
-    ):
+    code_fence = target.get("code_fence", "allowed")
+    if not isinstance(code_fence, str) or code_fence not in CODE_FENCE_VALUES:
         raise ValueError("code_fence must be 'allowed' or 'forbidden'")
     if target.get("schema_policy") not in {"as_declared", "nemo_strict_v1"}:
         raise ValueError("Specify schema_policy explicitly: as_declared or nemo_strict_v1")
@@ -170,7 +167,7 @@ def parse_reporting_fence(text, kind, schema, coerce, unwrap_code_fence=False):
     """Parse the answer as-is; only if that fails, retry on the content of its single code fence.
 
     Returns (value, unwrapped): unwrapped is True when the fence had to be removed.
-    CSV is not handled here (its own fence rule lives with the CSV parser change).
+    CSV answers are never unwrapped.
     """
     try:
         return parse_document(text, kind, schema, coerce), False
@@ -182,6 +179,7 @@ def parse_reporting_fence(text, kind, schema, coerce, unwrap_code_fence=False):
 
 
 def parse(text, kind, schema, coerce, unwrap_code_fence=False):
+    """Parse the answer into a value; see parse_reporting_fence for the code-fence retry."""
     return parse_reporting_fence(text, kind, schema, coerce, unwrap_code_fence)[0]
 
 
