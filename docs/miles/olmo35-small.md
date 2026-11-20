@@ -253,8 +253,16 @@ snapshot/reset/republish checks after optimizer updates. This adds a second tran
 and extra gradient/update diagnostics. The check detects incomplete transfers over
 its selected tensors; it does not independently prove the export mapping. Keep a
 separate Core-versus-serving score comparison on identical tokens, prefixes and
-weights as a qualification requirement. HF-versus-SGLang greedy agreement and an
-always-zero training metric do not establish that comparison.
+weights as a qualification requirement. HF-versus-SGLang greedy agreement and the
+always-zero `train/ppo_kl` do not establish that comparison.
+
+`train/train_rollout_logprob_abs_diff` (masked mean |trainer − rollout logprob|) is
+nonzero on every update, about 0.008-0.010 in the measured runs;
+`collection_score_mean_abs` is about 0.0065-0.0067. These combine numerical and
+policy differences and do not replace a controlled same-weight parity check. The
+metric that reads exactly 0 is `train/ppo_kl`, which is expected with
+`use_rollout_logprobs = false` (the old logprobs are recomputed by the trainer on
+the same weights).
 
 Longer learning runs additionally need native checkpoint/save-resume and evaluation
 checks. The historical timing runs disabled saving; the current four-/eight-node starters
@@ -267,10 +275,6 @@ enable bounded recovery saves. Their inputs still have no held-out split.
   budget 3,680 and an auto-sized KV pool. Repeat after the terminal-cleanup fix
   and under the intended code-grading and batch/loss configuration.
 - Judge latency is not logged per call, so the judge's share of generation wait is unmeasured.
-- The earlier claim that `train_rollout_logprob_abs_diff` is always zero was incorrect.
-  Raw actor metric events record about 0.008 over the measured timing windows;
-  `collection_score_mean_abs` is about 0.0065-0.0067. These combine numerical and
-  policy differences; they do not replace a controlled same-weight parity check.
 
 ## Checkpoint settings in the current starters
 
