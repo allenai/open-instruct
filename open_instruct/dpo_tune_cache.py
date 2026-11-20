@@ -461,6 +461,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+    model_utils.restore_fp32_rotary(model)
     logger.info("=============accelerate prepared")
     print_gpu_stats(init_gpu_memory)
 
@@ -495,6 +496,7 @@ def main(args: dpo_utils.DPOExperimentConfig, tc: TokenizerConfig):
     if last_checkpoint_path:
         accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
         accelerator.load_state(last_checkpoint_path)
+        model_utils.restore_fp32_rotary(model)
         # Extract `epoch_{i}` or `step_{i}`
         last_checkpoint_path = os.path.basename(last_checkpoint_path)
         training_difference = os.path.splitext(last_checkpoint_path)[0]

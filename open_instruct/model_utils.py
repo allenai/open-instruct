@@ -43,6 +43,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 
 from open_instruct import logger_utils
 from open_instruct.ground_truth_utils import VerifierFunction
+from open_instruct.rotary_utils import restore_fp32_rotary
 from open_instruct.utils import retry_on_exception
 
 logger = logger_utils.setup_logger(__name__)
@@ -396,6 +397,7 @@ def load_ref_policy(
     ref_policy.config.use_cache = False
     disable_dropout_in_model(ref_policy)
     ref_policy, *_ = deepspeed.initialize(model=ref_policy, config=ds_config, mpu=mpu)
+    restore_fp32_rotary(ref_policy)
     ref_policy.eval()
 
     if checkpoint_path:
@@ -843,6 +845,7 @@ def prepare_deepspeed(model: torch.nn.Module, per_device_train_batch_size: int, 
                     }
                 )
     model, *_ = deepspeed.initialize(model=model, config=config_kwargs)
+    restore_fp32_rotary(model)
     model.eval()
     return model
 
