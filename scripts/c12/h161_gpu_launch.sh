@@ -17,7 +17,8 @@
 #          head_dim 256 on SM100) at --expert_parallel_degree 8, with --loss_implementation fused_linear (the default CE
 #          materialised 24.5 GiB of logits and OOMed at 235 GiB allocated per B300 in smoke 01M6XRDCCY49SEAJ5NPNCDEHFW). The smoke
 #          runs 100 steps and seeds the promoted rows of the unseeded HF export in memory for the reference CE, under
-#          transformers 5.15.1 (the export's remote code).
+#          transformers 5.15.1 (the export's remote code). The json keeps whole-block recompute but turns off the nested
+#          checkpoint_attn/_permute_moe_unpermute/_second_unpermute (a third forward): -16% s/step, same CE; with compile it OOMs.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -43,7 +44,10 @@
 # checkpoint. OUTPUT_DIR has no timestamp, so a requeued or retried job lands in the same place.
 #
 # Env: IMAGE (default the H111 image, built from open-instruct@37a119ffd, whose open_instruct/ is identical to
-# 97ac1b53a, the commit that built the C12 cache), PRIORITY (high), MIN_RUNTIME, TIMEOUT, SAVE_EVERY,
+# 97ac1b53a, the commit that built the C12 cache; for a4b and a4b8, 01M7VCQM65SD251KYS4Z1AD8FG, built from #2291's
+# e436f7647 with the CUDA 13 Dockerfile (transformer-engine), whose scripts/c12/a4b_sft_config.json has the inner
+# checkpoints off: --config_name is read from the image, not from this checkout), PRIORITY (high), MIN_RUNTIME,
+# TIMEOUT, SAVE_EVERY,
 # AUTO_RESUME (default 1 for resume and train, 0 for smoke: Beaker requeues the task after a preemption),
 # MAX_RETRIES (default 0, 1 for resume: Beaker reruns a task that failed, which then resumes the same way),
 # RESUME_FROM=<other dir>/stepNNNN to start from a checkpoint outside OUTPUT_DIR (ignored once OUTPUT_DIR holds one),
@@ -63,7 +67,7 @@ MODE="${3:?smoke or train}"
 case "$SEED" in 34521|34522) ;; *) echo "seed must be 34521 or 34522" >&2; exit 1 ;; esac
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
-IMAGE="${IMAGE:-01M5KX4ZAN00BJ00ARS7FNG79T}"
+DEFAULT_IMAGE=01M5KX4ZAN00BJ00ARS7FNG79T
 # B2's LM tensors as fp32 optimizer masters (scripts/c12/b2_lm_to_olmocore_dcp.py; RECEIPT.json one level up).
 MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt2-256k-amt/step22240-lm-olmocore/model_and_optim
 # H149's seeded B2 HF export (G4), the step-1 CE reference.
@@ -97,7 +101,7 @@ case "$ARM" in
          STEPS="${S_R:?S_R=<steps from H182 R4 prime>}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=14 ;;
     a4b) MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-4t-decay159k-causal/step162974/model_and_optim
          HF_REF=/weka/oe-training-default/tanushy/checkpoints/olmo35-small-hero-decay159k-causal-162974/hf
-         CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=100; SMOKE_HOURS=2; REF_TRANSFORMERS=5.15.1
+         CONFIG=scripts/c12/a4b_sft_config.json; DEFAULT_IMAGE=01M7VCQM65SD251KYS4Z1AD8FG; SMOKE_STEPS=100; SMOKE_HOURS=2; REF_TRANSFORMERS=5.15.1
          # <think> and </think> promoted into slots 100256 and 100266, seeded from their dolma2 pieces.
          SEED_ROWS='[[100256, [14023, 771, 29]], [100266, [524, 27963, 29]]]'
          LR="${A4B_LR:-7.3e-5}"; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r --expert_parallel_degree 8 --loss_implementation fused_linear"
@@ -108,7 +112,7 @@ case "$ARM" in
          # OLMo-core's max_checkpoints would otherwise delete the 0.5- and 1-pass states the read needs).
          MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-8t-decay318k-causal/step321974/model_and_optim
          HF_REF=/weka/oe-training-default/tanushy/checkpoints/olmo35-small-hero-decay318k-causal-321974/hf
-         CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=30; SMOKE_HOURS=1; REF_TRANSFORMERS=5.15.1
+         CONFIG=scripts/c12/a4b_sft_config.json; DEFAULT_IMAGE=01M7VCQM65SD251KYS4Z1AD8FG; SMOKE_STEPS=30; SMOKE_HOURS=1; REF_TRANSFORMERS=5.15.1
          SEED_ROWS='[[100256, [14023, 771, 29]], [100266, [524, 27963, 29]]]'
          F=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/rf
          MIXER="$F/filtered/00000-dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet 1.0 \
@@ -124,6 +128,7 @@ $F/identity/identity.jsonl 1.0"
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
 esac
+IMAGE="${IMAGE:-$DEFAULT_IMAGE}"
 GAS=1
 if [[ -n "${A4B_GAS:-}" ]]; then
     [[ "$ARM" == a4b8 && "$A4B_GAS" == 6 ]] || { echo "A4B_GAS is wired for a4b8 at 6 only" >&2; exit 1; }
