@@ -1113,6 +1113,15 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 DATASET_CACHE_VERSION = "v10"
 
 
+def _serializes_as_utf8(value: Any) -> bool:
+    """Whether a decoded JSON value can be rendered back as UTF-8 text, as templates and tokenizers need."""
+    try:
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except (UnicodeEncodeError, RecursionError):
+        return False
+    return True
+
+
 def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Parse JSON-string `tool_calls[].function.arguments` into mappings before rendering.
 
@@ -1121,15 +1130,17 @@ def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[
     store each call's `arguments` as a JSON string. Chat templates that iterate the arguments
     as a mapping (the Olmo 3.5 template's `| items`) reject the string, so decode it here.
     Rows without tool calls, and calls whose arguments are already a mapping, pass through
-    unchanged. So does a string that does not decode to a JSON object (or `null`, read as `{}`):
-    a template that needs a mapping still rejects it, and one that prints the string or ignores
-    tool calls renders the row as before. Messages are shallow-copied where they change so the
-    dataset row itself is not mutated.
+    unchanged. So does a string that does not decode to a JSON object (or `null`, read as `{}`),
+    or whose object cannot be written back as UTF-8 JSON (a lone surrogate such as `"\\ud800"`,
+    or nesting at the recursion limit): a template that needs a mapping still rejects it, and one
+    that prints the string or ignores tool calls renders the row as before. Messages are
+    shallow-copied where they change so the dataset row itself is not mutated.
 
     A template that prints a string argument verbatim and serializes only mappings (Qwen's
     `is string` branch) now renders its own `tojson` of the decoded mapping, so spacing and
-    escapes can differ from the dataset's string. Callers: `_tokenize_row_or_mask_out` (the SFT
-    and DPO tulu tokenizers) and the added-token filter. The older `sft_tokenize_v1`,
+    escapes can differ from the dataset's string, and one that `tojson`s arguments unconditionally
+    renders the object instead of a JSON-encoded string. Callers: `_tokenize_row_or_mask_out`
+    (the SFT and DPO tulu tokenizers) and the added-token filter. The older `sft_tokenize_v1`,
     `preference_tokenize_v1` and `rlvr_tokenize_*` paths render arguments as stored.
     """
     out: list[dict[str, Any]] = []
@@ -1151,7 +1162,7 @@ def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[
                     decoded = arguments
                 if decoded is None:
                     decoded = {}
-                if isinstance(decoded, dict):
+                if isinstance(decoded, dict) and _serializes_as_utf8(decoded):
                     new_calls.append({**call, "function": {**function, "arguments": decoded}})
                     changed = True
                     continue
