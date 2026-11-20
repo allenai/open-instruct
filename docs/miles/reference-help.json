@@ -22,6 +22,7 @@
     "compiler_cache_root": "Shared cache root; null selects maintained default. WEKA custom paths require a TTL component.",
     "layer_profile_interval": "Sample inclusive per-block forward/backward device and host timings and per-pack expert destination loads every N optimizer updates, starting at update 1; zero disables. Device intervals include stream waits and enqueue gaps, and checkpoint recomputation can overlap categories. Profiling overhead is reported separately.",
     "diagnostic_interval": "Interval for trainer contract diagnostics; zero disables periodic diagnostics.",
+    "refresh_min_group_size": "Refresh only; null (default) discards and requeues a whole prompt group when any member fails in transport. An integer k in [2, n_samples_per_prompt] keeps the group when at least k members succeed and the others failed with a router transport error or refresh_request_timeout; each failed member becomes a fully masked dummy excluded from the group's reward baseline. Biases slightly toward shorter responses, since timeouts hit the longest generations.",
     "refresh_request_timeout": "Positive seconds allowed for an entire refresh generation request, including admission, decode and publication pauses; separate from the lifecycle drain timeout.",
     "engine_drain_timeout": "Seconds to wait for already-reserved engine requests to finish; expiry fails the run without reopening the engine.",
     "engine_update_timeout": "Seconds allowed for an independent engine update and acknowledgement; expiry quarantines the engine and fails the run.",
