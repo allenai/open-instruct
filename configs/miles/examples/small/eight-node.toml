@@ -152,7 +152,7 @@ save_final_checkpoint = true
 publication_mode = "refresh"
 engine_drain_timeout = 900.0
 engine_update_timeout = 1800.0
-# Default 1800 s times out 32K responses at high R; a timeout discards the whole group.
+# Headroom for 32K responses; R=96 has not hit 1800 s (R>=224 did). A timeout discards the whole group.
 refresh_request_timeout = 3600.0
 pipeline_observation_interval = 2.0
 router_aux_loss_weight = 0.0

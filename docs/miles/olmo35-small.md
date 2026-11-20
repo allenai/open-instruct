@@ -65,7 +65,8 @@ checkpoints and do not establish learning quality.
 - Admission R=224 on four nodes: `sglang_max_running_requests` 224,
   `sglang_max_mamba_cache_size` 256, `sglang_server_concurrency` 448,
   `sglang_cuda_graph_max_bs_decode` 224, producer budget `async_max_concurrent_samples` =
-  224 × engines, `sglang_mem_fraction_static` 0.92, no `sglang_max_total_tokens`, and
+  224 × engines, `sglang_mem_fraction_static` 0.92, no `sglang_max_total_tokens` key (RunSpec's
+  default cap, R × context = 7,798,784 tokens, is above the 3,919,232-token memory-sized pool), and
   `core.refresh_request_timeout = 3600.0` (see [the timeout fix](#request-timeout-at-high-admission)).
   The eight-node example stays at R=96 (128 slots, concurrency 192, graph bs 96,
   3,342,336 KV tokens) with the same 3600 s timeout; R>96 is untested on 8 nodes.
@@ -99,9 +100,9 @@ figures (299/309/399/139 seconds) were not reproduced by this definition.
 | [timing4n-r160](https://beaker.org/ex/01M7NHRMV28ZX4S3HXD4BWAQVJ), u10-29 | 4-node, R=160 | 182.7 | 0.3 | 163.8 | 10.0 | — | Early buffered work; 50 updates total |
 | timing4n-r160, u30-49 | 4-node, R=160 | 248.9 | 64.8 | 173.3 | 9.8 | — | Later window; shutdown subsequently failed |
 | timing4n-r160, u40-49 | 4-node, R=160 | 246.8 | 69.5 | 172.3 | 10.3 | 3,414 | 0 retractions, full KV peak 55% |
-| [timing4n-r224](https://beaker.org/ex/01M7R62YRQ4PH9T5YF78MQJB8T), u30-39 | 4-node, R=224 | 350.9 | 171.3 | 165.3 | 11.7 | 4,094 | 883 timed-out group attempts; 40/40, then failed final drain |
+| [timing4n-r224](https://beaker.org/ex/01M7R62YRQ4PH9T5YF78MQJB8T), u30-39 | 4-node, R=224 | 350.9 (mean 401) | 171.3 | 165.3 | 11.7 | 4,094 | 883 timed-out group attempts; 40/40, then failed final drain |
 | [timing4n-r256](https://beaker.org/ex/01M7R8JNKYN72WEHXY5JGGF9MT), u30-36 | 4-node, R=256 | 313.0 | 160.7 | 152.6 | 9.8 | 4,395 | 622 timed-out group attempts; KV 100%, 51 retractions; aborted at 37/40 |
-| [timing4n-r224-t3600](https://beaker.org/ex/01M7V230Y5TM2K6J2X400XGG02), u30-39 | 4-node, R=224, request timeout 3600 s | 215.8 (mean 212.3) | 32.7 | 170.1 | 10.8 | 4,100 | 0 timeouts, 0 stale drops, KV peak 71%, 0 retractions; basis of `four-node.toml` ([W&B](https://wandb.ai/ai2-llm/open_instruct_internal/runs/6bo8weoa)) |
+| [timing4n-r224-t3600](https://beaker.org/ex/01M7V230Y5TM2K6J2X400XGG02), u30-39 | 4-node, R=224, request timeout 3600 s | 215.8 (mean 212.3) | 32.7 | 170.1 | 10.8 | 4,100 | 0 timeouts, 0 stale drops, KV peak 71%, 0 retractions; 40/40, then failed final drain (900 s); basis of `four-node.toml` ([W&B](https://wandb.ai/ai2-llm/open_instruct_internal/runs/6bo8weoa)) |
 
 The engine token rates above retain the original serving summaries; cycle and stage
 durations were audited directly. `driver_timing.jsonl`, `rollout_flow.jsonl`,
@@ -127,9 +128,10 @@ respectively, without skipped updates; those experiments still failed at shutdow
   2.2 for four-node R96. These are different operating regimes.
 - Four-node R160: the later u30-49 window reduces wait to **24.9%**, with median
   sample age 3.3 versions and no stale-token discards in that window. Its early
-  near-zero wait is not a steady-state result. This is a promising next candidate,
-  not a qualified replacement: it failed the same final-drain boundary and has not
-  been repeated with code grading or newer batch/loss settings.
+  near-zero wait is not a steady-state result. It failed the same final-drain boundary
+  and was not repeated; the example moved on to R=224 with a 3600 s request timeout
+  (see [the timeout fix](#request-timeout-at-high-admission)), which is also a single,
+  unqualified run.
 - HTTP permit wait and generation-admission wait are zero at the median in these
   windows; unfinished work is near its configured budget. This does not isolate
   the judge's contribution. Rollout wait includes production, filtering and grading,
@@ -196,7 +198,7 @@ and 17.5 at R=256. A 32,768-token response then needs about 1,750-1,870 s before
 and refresh pauses, which exceeds `core.refresh_request_timeout` = 1800 s. Once the policy
 produces long responses (from about update 30), whole groups time out and are retried
 (883 timed-out group attempts for R=224 over updates 31-40, 622 for R=256 over 31-37;
-none at R=160). Updates became slower (351/313 vs 241-247 s), truncated responses
+none at R=160). Updates became slower (medians 351/313 vs 241-247 s), truncated responses
 disappeared from training (0.7%/0.0% vs 3.6-3.8%), R=256 filled the KV pool (100%,
 51 retractions) and aborted at update 37 of 40 when the rollout failure rate stayed
 above 50%.
@@ -204,11 +206,14 @@ above 50%.
 The fix is `core.refresh_request_timeout = 3600.0` (the per-request deadline in refresh
 rollout; nothing else caps it). A timeout discards the whole group of eight, so a few
 slow 32K responses waste the other seven samples too. With 3600 s, R=224 (timing4n-r224-t3600,
-updates 31-40, 1-indexed) ran at 212 s/update mean vs 243 s at R=160 (-13%) and 401 s at
-R=224 with 1800 s: 0 timeouts, 0 stale drops, truncation 3.55% (r160 3.79%), and generation
+updates 31-40, 1-indexed; the table's u30-39) ran at 212 s/update mean vs 243 s at R=160 (-13%)
+and 401 s mean at R=224 with 1800 s: 0 timeouts, 0 stale drops, truncation 3.55% (r160 3.79%), and generation
 wait fell to 33 s, so the run is now train-bound. 4.7% of completed samples took 1,800-2,000 s
 end to end. Risk: the longest (>=30K-token) samples finish at policy lag 8-10 (median 9) against
 `max_policy_lag` = 12; if responses grow later in a long run, stale drops are the next limit.
+This was measured at batch 1,024; at the shipped 2,048 each update takes longer, so a sample
+should span fewer versions, but remeasure. The run completed 40/40 updates and then, like
+R=160 and timing8, exited 1 when the final generation drain hit `engine_drain_timeout` (900 s).
 One run per arm; no seed repeat. The eight-node example keeps R=96 but also sets 3600 s,
 which only removes a failure mode.
 
@@ -262,7 +267,7 @@ nonzero on every update, about 0.008-0.010 in the measured runs;
 policy differences and do not replace a controlled same-weight parity check. The
 metric that reads exactly 0 is `train/ppo_kl`, which is expected with
 `use_rollout_logprobs = false` (the old logprobs are recomputed by the trainer on
-the same weights).
+the same weights) and refresh mode's one optimizer step per collection.
 
 Longer learning runs additionally need native checkpoint/save-resume and evaluation
 checks. The historical timing runs disabled saving; the current four-/eight-node starters
