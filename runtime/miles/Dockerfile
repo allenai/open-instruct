@@ -32,9 +32,14 @@ COPY open_instruct /opt/core-rl/open_instruct
 COPY tests/miles /opt/core-rl/tests/miles
 COPY scripts/miles /opt/core-rl/scripts/miles
 COPY runtime/miles/Dockerfile /opt/core-rl/runtime/miles/Dockerfile
+COPY runtime/miles/router_shim /opt/core-rl/runtime/miles/router_shim
 COPY configs/miles /opt/core-rl/configs/miles
 COPY docs/miles /opt/core-rl/docs/miles
 COPY README.md /opt/core-rl/README.md
+# TEST-ONLY (hardening integration): shim that drops reqwest's TCP_USER_TIMEOUT in the Rust router;
+# enabled per run with MILES_ROUTER_LD_PRELOAD=/opt/core-rl/lib/no_tcp_user_timeout.so.
+RUN mkdir -p /opt/core-rl/lib && cc -shared -fPIC -O2 -o /opt/core-rl/lib/no_tcp_user_timeout.so \
+    /opt/core-rl/runtime/miles/router_shim/no_tcp_user_timeout.c -ldl
 ENV PYTHONPATH=/opt/core-rl/sources/sglang/python:/opt/core-rl/sources/olmo-sglang/src:/opt/core-rl:/opt/core-rl/sources/olmo-core/src:/opt/core-rl/sources/miles:/opt/core-rl/sources/megatron-lm:/opt/core-rl/sources/megatron-bridge/src
 WORKDIR /opt/core-rl
 RUN python -m compileall -q /opt/core-rl/open_instruct/miles /opt/core-rl/sources/olmo-core/src/olmo_core /opt/core-rl/sources/miles/miles
