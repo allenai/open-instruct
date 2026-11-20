@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Use bounded 10-update recovery saves with preserved 50-/100-update milestones in MILES learning starters, and enable checkpoint/resume in Small four-/eight-node examples (https://github.com/allenai/open-instruct/pull/2289).
-- Allow authenticated MILES resumes to adjust heartbeat patience and raise Small example heartbeat timeouts to 480 seconds (PR pending).
+- Allow authenticated MILES resumes to adjust heartbeat patience and raise Small example heartbeat timeouts to 480 seconds (https://github.com/allenai/open-instruct/pull/2293).
 - Allow unused MILES judge bindings when a dataset subset omits their verifiers, preserving required-binding and active grading checks (https://github.com/allenai/open-instruct/pull/2286).
 - Use 2,048-response optimizer batches at constant LR 6e-6 in Tiny MILES learning examples and token-mean loss in all maintained MILES examples, preserving omitted library defaults (https://github.com/allenai/open-instruct/pull/2271).
 - Align every Small MILES recipe with the Tiny baseline from #2271: 2,048-response batches at constant LR 6e-6 with no warmup and token-mean loss; retain historical timing provenance (https://github.com/allenai/open-instruct/pull/2280).
