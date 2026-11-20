@@ -21,7 +21,7 @@ experiment (H-numbers here are its internal tracking IDs).
   requeues the job after a preemption on its own.
 - **Other flags:** `--seed` (data order), `--steps`, `--workspace`, `--priority`, and
   `--dry_run`, which prints the mason command without launching it.
-- **Nothing to build:** each recipe pins the Beaker image that trained it, so the
+- **Nothing to build:** each recipe pins the Beaker image it runs with, so the
   training code comes from that image, not from your checkout.
 
 ### Olmo 3.5 Small (A4B)
