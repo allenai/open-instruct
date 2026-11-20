@@ -117,6 +117,18 @@ adapter rejects zero parameters that still trigger native random defaults. Copy
 indices now preserve explicit zero and include the end index; admission checks
 that `0 <= n_start <= n_end < len(prompt_to_repeat)`. Grading must not depend on a
 worker's RNG seed.
+Three native checkers read answers more literally than the instructions say.
+`detectable_format:number_bullet_lists` counts a line as a bullet only when
+`*` or `-` is followed by a space and item text, so horizontal rules (`---`),
+empty markers and `*italic*` lines do not count. `keywords:palindrome` needs
+at least three letters or digits ignoring case and punctuation, and also accepts
+phrase palindromes (a sentence, line, clause, quoted span or run of up to ten
+words); a hyphen between letters keeps its word together, so `non-profit` is
+one word. `first_word:first_word_answer`, `first_word:first_word_sent` and
+`length_constraints:nth_paragraph_first_word` ignore punctuation and Markdown
+around the first word (`**Hello,**` counts as `hello`); the paragraph checker
+also keeps its historical cut at the first of `. , ? ! ' "`. These changes
+affect grading only: admission screens and prepared data are unchanged.
 Known constructor normalization is accepted: lowercasing the paragraph's required
 first word or a frequency checker's letter, and trimming the specific text
 arguments that the native checker itself trims. For example, `first_word: "The"`
