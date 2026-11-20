@@ -582,8 +582,8 @@ def require_transformer_engine() -> None:
         raise RuntimeError(
             "MoE v2 (OLMoDDPModel) training needs transformer-engine: OLMo-core's MoE token permutation "
             "calls transformer_engine.pytorch.permutation, which is not importable here. Only open-instruct's "
-            "MoE image installs it: build it with `scripts/train/build_image_and_launch.sh --cuda-version 13 "
-            "--moe`."
+            "MoE image installs it: launch with `scripts/train/build_image_and_launch.sh --cuda-version 13 "
+            "--moe SCRIPT`."
         )
 
 
