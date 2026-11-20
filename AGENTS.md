@@ -34,7 +34,7 @@ Read and follow [CODE_REVIEW.md](CODE_REVIEW.md) when reviewing code.
   - To skip the check deliberately, put `CHANGELOG=<reason>` in the PR body.
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
-- Launch Beaker experiment and test scripts with `./scripts/train/build_image_and_launch.sh [--cuda-version 12|13] SCRIPT` after committing all changes. CUDA 13 images are for compatible clusters such as `ai2/holmes`. MILES uses `--miles CONFIG` and its pinned runtime.
+- Launch Beaker experiment and test scripts with `./scripts/train/build_image_and_launch.sh [--cuda-version 12|13 [--moe]] SCRIPT` after committing all changes. CUDA 13 images are for compatible clusters such as `ai2/holmes`. MoE v2 (`OLMoDDPModel`) models, such as Olmo 3.5 Small, need `--cuda-version 13 --moe`: that image adds transformer-engine. MILES uses `--miles CONFIG` and its pinned runtime.
 - For the Core/vLLM and DeepSpeed/vLLM GRPO workflows, we have three test scripts (for MILES checks, follow `docs/miles/architecture.md`):
   - `scripts/train/debug/single_gpu_on_beaker.sh`: single GPU, no tools (~8 minutes).
   - `scripts/train/debug/tools/olmo_3_parser_multigpu.sh`: multi GPU, with tools.
