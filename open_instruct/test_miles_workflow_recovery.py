@@ -229,3 +229,19 @@ def test_cadence_resume_persists_normalized_spec_and_preserves_artifacts(tmp_pat
                 resumed.to_dict()
             )
             assert all(artifact.read_bytes() == b"existing artifact" for artifact in artifacts)
+
+
+@pytest.mark.parametrize("invalid_change", [None, "recipe", "startup", "saved_spec"])
+def test_recovery_allows_heartbeat_patience_only(tmp_path, invalid_change):
+    document, previous = saved_run(tmp_path)
+    document["launch"]["coordination"] = {"heartbeat_timeout": 120, "startup_timeout": 3600}
+    previous["spec_sha256"] = workflow.fingerprint(document)
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    document["launch"]["coordination"]["heartbeat_timeout"] = 480
+    if invalid_change == "recipe":
+        document["optimizer"]["learning_rate"] = 6e-6
+    elif invalid_change == "startup":
+        document["launch"]["coordination"]["startup_timeout"] = 7200
+    elif invalid_change == "saved_spec":
+        workflow.write_json(tmp_path / "run-spec.json", document)
+    assert workflow.recovery_configuration_matches(tmp_path, previous, document) is (invalid_change is None)
