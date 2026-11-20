@@ -178,7 +178,7 @@ jobs:
       # Keep Codex last in this job; publishing runs on a separate runner.
       - name: Review with Codex
         id: codex
-        uses: openai/codex-action@1d82a3dba7c7988ec71ecae1ed5b8e8db96495c5 # v1
+        uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # v1.14
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           safety-strategy: drop-sudo

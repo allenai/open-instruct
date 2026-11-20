@@ -45,8 +45,10 @@ prompt_data = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-i
 reward_config = "/weka/oe-training-default/YOUR_USERNAME/open-instruct/data/math-ifeval-code/verifiers.json"
 
 [training]
+learning_rate = 6e-6
 num_rollouts = 200
-save_interval = 25
+# Recovery target: roughly 1–2h; recheck wall time and first-save cost before launch.
+save_interval = 10
 
 [evaluation]
 mode = "background"
@@ -90,9 +92,9 @@ packing_max_tokens = 34816
 [inference]
 placement_mode = "disaggregated"
 gpus = 6
-rollout_batch_size = 128
+rollout_batch_size = 256
 samples_per_prompt = 8
-global_batch_size = 1024
+global_batch_size = 2048
 max_response_length = 32768
 max_context_length = 34816
 # Pin the measured B300 preset; incompatible model/hardware/topology fails loudly.
@@ -113,7 +115,10 @@ reward_reasoning_mode = "required"
 max_policy_lag = 12
 # A response cut off at max_response_length scores 0 (capped = wrong).
 reward_zero_truncated = true
+# Keep the latest two native saves plus permanent milestones and the final save.
 checkpoint_keep_last = 2
+checkpoint_keep_every = 50
+save_final_checkpoint = true
 publication_mode = "refresh"
 engine_drain_timeout = 900.0
 pipeline_observation_interval = 2.0
@@ -129,8 +134,8 @@ use_distributed_post = true
 http_post_actors_per_node = 16
 http_post_num_cpus = 1.0
 rollout_executor_num_cpus = 2.0
-# Keep response weighting independent of generation length.
-calculate_per_token_loss = false
+# Weight contributing tokens equally across responses.
+calculate_per_token_loss = true
 # Trainer ranks only; do not change the serving allocator.
 train_env_vars = { PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True" }
 sglang_enable_metrics = true

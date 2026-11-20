@@ -15,8 +15,12 @@ The maintained examples enable final-answer grading with
 Use `"none"` explicitly for a non-thinking policy/template. The library default
 remains false for compatibility with existing runs; see [grading contracts](grading.md).
 
+- **Tiny learning batch and LR** (`node` and `three-node`): 256 prompts × 8 responses,
+  batch 2,048 and constant learning rate 6e-6 with no warmup. The Tiny LR/batch
+  exploration used response-mean loss; retaining the separately selected token-mean
+  example objective is an engineering choice, not a measured combined optimum.
 - **Policy lag** (12 in both `node` and `three-node`): a higher limit discards fewer slow groups but trains on older samples; reconsider it when learning rate, group size or response length changes.
-- **Loss weighting** (per response, `miles.calculate_per_token_loss = false`): keep the demo objective in throughput trials; token-weighted loss is an explicit learning-policy experiment.
+- **Loss weighting** (token mean, `miles.calculate_per_token_loss = true`): keep the demo objective in throughput trials; response-mean loss is an explicit learning-policy override. Omitted library settings retain response-mean weighting for compatibility.
 - **Off-policy correction** (TIS on, `use_rollout_logprobs = false`): TIS reweights samples toward the current policy; turning it off assumes inference and training probabilities agree closely.
 - **Group filtering** (`training.filter_zero_std_groups = true`): groups where every response gets the same reward carry no policy gradient, so dropping them saves training work at the cost of extra generation; disable it for tiny checks that cannot produce mixed rewards.
 - **Router auxiliary losses** (coefficients zero in the examples): the balancing and z-losses keep expert load even during pretraining; whether RL needs them is open, so watch the `train/moe/` load metrics if you leave them off.
@@ -36,7 +40,7 @@ remains false for compatibility with existing runs; see [grading contracts](grad
 - **Compiler cache** (on): shortens repeat startup and does not change training.
 - **Weight equality audit** (off in learning templates, on in mechanics templates): startup snapshot/reset qualification is separate from the required publication protocol.
 - **Trainer scoring** (`scoring_pass_required = false`): reuse the training forward only when the recipe permits it. Learning templates set `scoring_check_interval = 0` to retain startup/resume validation without periodic extra scoring forwards; TIS and required scoring remain active.
-- **Native checkpoints** (every 25 updates in learning templates): synchronous saves interrupt training. Adjust using measured save time and acceptable lost work after preemption; keep recovery enabled.
+- **Native checkpoints** (every10 updates in the learning starters): aim for roughly 1–2 hours between ephemeral recovery saves, using measured wall-clock update and save times. Retain the latest two saves, permanent 50-/100-update milestones as specified by the template, and the final checkpoint. Include startup/compilation and evaluation overhead when checking that the first complete save fits comfortably inside protected runtime. Verify actual saving, bounded retention and restored optimizer/cursor identity; automatic restart alone is not recovery. See [the template checkpoint policy](../../configs/miles/examples/README.md#recovery-checkpoints-and-preserved-milestones).
 
 ## Opt-in features
 

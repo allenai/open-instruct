@@ -285,13 +285,6 @@ async def train(args, *, export_hf=None):
                 # Persist newly compiled kernels even when model checkpointing is
                 # disabled. This schedules bounded background CPU work, not a save.
                 startup_cache.publish_progress(args, rollout_id)
-                if coordinator is not None and background is not None:
-                    collection_snapshots = []
-                    per_collection = args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
-                    for update in range(rollout_id * per_collection + 1, (rollout_id + 1) * per_collection + 1):
-                        target = background_eval.snapshot(background["root"], update)
-                        if (target / HF_EXPORT_COMPLETE_MARKER).is_file():
-                            collection_snapshots.append((update, target))
                 if rolling is not None:
                     await rolling.optimizer_step_completed()
             finally:
@@ -333,9 +326,27 @@ async def train(args, *, export_hf=None):
             if stopped_for_time:
                 logger.info("Graceful wall-clock stop after completed rollout %s (budget=%ss)", rollout_id, budget)
             final_stop = stopped_for_time and not resumable
-            if coordinator is not None and background is not None and not (final_stop and background["final"]):
-                coordinator.dispatch_batch(collection_snapshots)
+            if coordinator is not None and background is not None:
+                per_rollout = background_eval.updates_per_rollout(args)
+                end_update = (rollout_id + 1) * per_rollout
+                # The optimizer hook handles mid-rollout snapshots. At the boundary
+                # the native checkpoint has already committed if a save was due.
+                boundary = background_eval.training_snapshot(args, end_update)
+                if boundary and not (final_stop and background["final"] and export_hf):
+                    target = Path(boundary)
+                    if not target.exists():
+                        with stage(args, "evaluation_snapshot_export", rollout_id):
+                            await learner.export_hf(rollout_id, boundary)
+                    elif not (target / HF_EXPORT_COMPLETE_MARKER).is_file():
+                        logger.warning("BACKGROUND EVALUATION GAP: incomplete snapshot retained at %s", target)
                 collection_snapshots = []
+                for update in range(end_update - per_rollout + 1, end_update + 1):
+                    target = background_eval.snapshot(background["root"], update)
+                    if (target / HF_EXPORT_COMPLETE_MARKER).is_file():
+                        collection_snapshots.append((update, target))
+                if not (final_stop and background["final"]):
+                    coordinator.dispatch_batch(collection_snapshots)
+                    collection_snapshots = []
             if stopped_for_time:
                 break
             if (
@@ -393,11 +404,10 @@ async def train(args, *, export_hf=None):
             # both sides collectively destroy the weight-update NCCL group.
             (
                 manager if args.fully_async else None,
-                # A failed refresh can leave engines paused or partly updated.
-                # Cancel owned work instead of waiting for it to generate more.
-                lambda: manager.core_publication_boundary(
-                    True, **({"abort": True} if refresh and failure is not None else {})
-                ),
+                # Terminal refresh cleanup has no consumer for unfinished work.
+                # Cancel it even on success; draining long responses here can
+                # time out after every requested training update has completed.
+                lambda: manager.core_publication_boundary(True, **({"abort": True} if refresh else {})),
                 (
                     args.olmo_core.engine_drain_timeout + args.olmo_core.engine_update_timeout
                     if rolling or refresh

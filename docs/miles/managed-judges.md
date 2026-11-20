@@ -61,6 +61,9 @@ The three-node example binds `general-quality` and `general-quality_ref`.
 The node example uses only math, instruction-following and code verifiers and
 allocates no judge GPU.
 
+Binding tables may cover more sources than a selected dataset subset; unused
+bindings are permitted. Referenced judge services and rubrics must still be valid.
+
 At startup, data preparation checks training and held-out verifier requirements,
 even when no judges are configured. Missing bindings fail before training with the
 verifier name and the required `[judging.bindings."VERIFIER"]` entry. The same check

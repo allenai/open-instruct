@@ -66,4 +66,4 @@ def test_three_node_template_keeps_admission_and_selects_rust():
     assert options["http_post_num_cpus"] == 1.0
     assert options["rollout_executor_num_cpus"] == 2.0
     assert options["async_data_buffer_capacity_factor"] == 4.0
-    assert options["rollout_batch_size"] * options["n_samples_per_prompt"] == options["global_batch_size"] == 1024
+    assert options["rollout_batch_size"] * options["n_samples_per_prompt"] == options["global_batch_size"] == 2048

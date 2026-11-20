@@ -2,17 +2,27 @@
 
 These templates provide reviewable starting points for MILES training and policy
 evaluation. Choose a model-family directory, then adapt its paths and topology
-before launching. The `small` family currently contains only a copied dev starter.
+before launching. The `small` family holds measured OLMo 3.5 Small
+(A4B) B300 layouts; see [OLMo 3.5 Small on MILES](../../../docs/miles/olmo35-small.md).
 
 | Config | Purpose |
 |---|---|
 | [tiny/dev.toml](tiny/dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
 | [tiny/node.toml](tiny/node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
 | [tiny/three-node.toml](tiny/three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+| [small/two-node-mech.toml](small/two-node-mech.toml) | OLMo 3.5 Small mechanics check: 8 trainer GPUs (EP8), 7 engines, 1 judge; 4 updates |
+| [small/four-node.toml](small/four-node.toml) | Olmo 3.5 Small timing layout: 8 trainer GPUs (EP8), 23 engines (R=96), 1 judge; audited timing4n median ~302 s/update |
+| [small/eight-node.toml](small/eight-node.toml) | Olmo 3.5 Small timing layout: 16 trainer GPUs (2 × EP8), 47 engines (R=96), 1 judge; audited late-window median ~185 s/update |
 
-`tiny/` holds the existing recipes. `small/dev.toml` currently copies the settings
-of `tiny/dev.toml`, providing a starting file for upcoming model/topology work;
-it does not qualify a larger model on the one-GPU smoke-test layout.
+Use `tiny/dev.toml` for a single-GPU Tiny mechanics check and
+`small/two-node-mech.toml` for Small mechanics. Small has no single-GPU training
+recipe; the two-node layout is its smallest tested configuration.
+
+All three Small recipes use the Tiny learning baseline from
+[PR #2271](https://github.com/allenai/open-instruct/pull/2271): 256 prompts × 8
+responses, batch 2,048, constant LR 6e-6 with no warmup, and token-mean loss.
+The reported Small timings used batch 1,024, LR 1e-6 and response-mean loss;
+see the [Small audit](../../../docs/miles/olmo35-small.md#recipe-alignment).
 
 The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
 show current GPU allocations, batch sizes and publication settings directly from
@@ -20,8 +30,8 @@ these TOMLs. Run `plan` on your copy to inspect the resolved settings and unused
 
 **The demo configs are the baseline for configuration options unless otherwise
 stated.** Start a validation run from the applicable demo and record intentional
-differences. In particular, keep per-response loss weighting
-(`miles.calculate_per_token_loss=false`) and zero reward for truncated responses
+differences. In particular, keep token-mean loss weighting
+(`miles.calculate_per_token_loss=true`) and zero reward for truncated responses
 (`core.reward_zero_truncated=true`) and presented-response grading
 (`core.reward_final_answer_only=true`). The examples declare
 `core.reward_reasoning_mode="required"`; use `"none"` explicitly for a non-thinking
@@ -117,10 +127,10 @@ the template does not provision a code service.
 See [datasets and verifiers](../../../docs/miles/data-and-evaluation.md) and
 [managed judges](../../../docs/miles/managed-judges.md).
 
-The former two-GPU `small` example is retired; use `dev` for the mechanics check
-and `node` for disaggregated learning. A single-GPU run with the full policy needs
-its combined trainer/inference memory footprint checked before replacing the
-`dev` checkpoint; single-GPU inference alone does not establish that fit.
+The former topology tier named `small` is retired. For Tiny, use `tiny/dev.toml`
+for mechanics and `tiny/node.toml` for disaggregated learning. These are distinct
+from the Olmo 3.5 Small model recipes above. Single-GPU inference alone does not
+establish that a policy's combined trainer/inference memory footprint fits.
 
 `three-node` uses a three-node, 24-GPU footprint. The nodes contain 8 training
 GPUs, 8 inference GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs
@@ -158,9 +168,9 @@ checkpoint and export outputs.
 
 ## Capacity and qualification settings
 
-The three-node throughput candidate uses 128 prompts × 8 samples per collection
-and one 1,024-sample optimizer batch with policy lag 12. It admits 3,840 unfinished samples, keeps up
-to 512 completed prompt groups (4,096 samples), and runs 16 HTTP actors per node
+The three-node throughput candidate uses 256 prompts × 8 samples per collection
+and one 2,048-sample optimizer batch at constant LR 6e-6 with policy lag 12. It admits
+3,840 unfinished samples and keeps up to 1,024 completed prompt groups (8,192 samples), and runs 16 HTTP actors per node
 with one Ray CPU each. The rollout executor reserves two Ray CPUs and each node
 advertises 64 logical Ray CPUs through `launch.env.OI_MILES_RAY_CPUS` (default
 32 when omitted). The node example uses the same worker counts and reservations.
@@ -260,10 +270,11 @@ explicit limits would give 6,144 for node and 15,360 for three-node. Generic
 `async.async_max_concurrent_samples` wins. Completed siblings can remain outside
 the unfinished budget, so this is not a limit on all retained responses.
 
-Both learning examples use 128 prompts × 8 responses, batch 1,024 and lag 12.
+Both Tiny learning examples use 256 prompts × 8 responses, batch 2,048,
+constant LR 6e-6 and lag 12.
 Node buffers one completed batch; three-node buffers four. The three-node
-unfinished-sample budget represents 3.75 batches;
-adding the completed buffer gives 7.75 nominal batches. Sample backfill can retain
+unfinished-sample budget represents 1.875 batches;
+adding the completed buffer gives 5.875 nominal batches. Sample backfill can retain
 additional finished siblings, so this arithmetic is not an age guarantee. It is headroom, not
 a measured optimum or a guarantee of steady throughput. Full-recipe
 collection and judging can limit throughput even with spare engine capacity.
@@ -286,10 +297,9 @@ These templates inherit the disabled optional startup weight snapshot/reset audi
 audits (`scoring_check_interval = 0`). The first score check at startup/resume, required
 scoring passes, TIS, and publication acknowledgments remain. `dev`
 retains weight qualification. Re-enable audits when changing the publication or
-scoring implementation. Learning templates save every 25 updates; choose the
-cadence from measured save cost and acceptable recovery loss.
+scoring implementation. See the checkpoint policy below before launching a learning run.
 
-All three examples explicitly retain two native checkpoints and disable router
+The examples explicitly retain two native checkpoints and disable router
 auxiliary losses; these differ from the defaults. The learning recipes also keep
 their model-specific context, packing, cache and memory settings. Review these
 choices when changing models. `three-node` keeps its background evaluator configuration
@@ -314,3 +324,41 @@ evaluator does not expose top-p for that external task. Full nucleus-sampling
 alignment requires an evaluator update. Keep benchmark-specific protocols such
 as greedy RULER and BFCL explicit when adding them; do not override every task
 in a suite globally.
+
+## Recovery checkpoints and preserved milestones
+
+The Tiny learning and Small four-/eight-node templates enable native recovery
+saves every **10 updates**, retain the latest **two** saves, and preserve the
+following milestones plus the final checkpoint. Automatic resume is enabled.
+The short mechanics examples keep their separate checkpoint settings.
+
+| Template | Recovery interval | Preserved interval | Reason |
+|---|---:|---:|---|
+| Tiny `node` |10 updates|50 updates|Align native milestones with the existing 50-update development panel.|
+| Tiny `three-node` |10 updates|100 updates|Retain longer learning milestones; its evaluation remains initial/final.|
+| Small `four-node`, `eight-node` |10 updates|50 updates|Retain milestones for expensive runs when extending the 30-update budget.|
+
+Choose the recovery interval from measured **wall-clock update time**, aiming for
+roughly **1–2 hours** between saves. Ten updates is a starting point, not a timer:
+Tiny seed17 data runs at batch 2,048 recently took about 5–7 minutes/update
+(roughly 50–70 minutes per10 updates). This is workload-specific evidence, not a
+throughput claim for every template. The Small timing measurements above used an
+older batch/objective; remeasure the current recipe rather than treating those
+numbers as its checkpoint forecast. Native saves also add I/O time, which the
+historical checkpoint-disabled Small timing runs did not include.
+
+Before launch, budget startup/compilation, generation wait, training, evaluation
+and save time separately. Ensure the **first complete recovery save** should
+finish comfortably inside the protected minimum runtime; if it will not, shorten
+the interval or revise the run budget before submission. Review output storage
+for the latest saves, preserved milestones and evaluator snapshots. For a
+checkpoint-free timing experiment, explicitly disable saving and automatic
+resume and remove `save_interval`; do not carry that override into a learning run.
+
+Verify the first real save's completion manifest, latest pointer and data-cursor
+hash. On interruption, restore the latest complete save and check the first
+post-resume optimizer counter and cursor identity. Check that ordinary saves
+actually roll off while preserved milestones and pending evaluation inputs remain.
+Automatic job restart alone does not establish model/optimizer recovery. See
+[checkpoint retention](../../../docs/miles/models-and-checkpoints.md#save-resume-and-export)
+for native retention semantics.

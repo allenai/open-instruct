@@ -3,13 +3,14 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import numpy as np
 import pytest
 import torch
 from miles.backends.core_utils.publication import policy_refresh
-from miles.backends.core_utils.rollout import refreshing_rollout
+from miles.backends.core_utils.rollout import observation_io, refreshing_rollout
 from miles.backends.core_utils.rollout.async_buffer import RefreshPolicyDataBuffer
 from miles.backends.core_utils.rollout.generation_admission import GenerationAdmission
 from miles.backends.core_utils.rollout.refreshing_rollout import RefreshingRolloutFn
@@ -52,6 +53,7 @@ def args():
         max_weight_staleness=1,
         async_data_buffer_capacity_factor=1,
         dynamic_sampling_filter_path=None,
+        sglang_router_policy="round_robin",
         reward_key=None,
         olmo_core=SimpleNamespace(engine_drain_timeout=1),
     )
@@ -138,6 +140,10 @@ def producer():
     p._refreshing = p._publication_paused = p._stopping = p._shutdown_complete = False
     p._refresh_started = None
     p._boundary_capacity = None
+    p._prepared_prompt_ids = {}
+    p._prompt_preparer = SimpleNamespace(
+        prepare=AsyncMock(side_effect=lambda prompts: {prompt: [9] for prompt in prompts})
+    )
     p._output = RefreshPolicyDataBuffer(DataBufferConstructorInput(args(), lambda group: None))
     p._producer_resumed = asyncio.Event()
     p._producer_resumed.set()
@@ -451,6 +457,7 @@ def test_group_timing_records_before_buffering_and_preserves_error(monkeypatch, 
             assert caught.value is failure
         else:
             assert (await p._generate_group(values)).group is values
+        await observation_io.close(p)
         rows = next(tmp_path.glob("sibling_timing_*.jsonl")).read_text().splitlines()
         assert len(rows) == 1
         row = json.loads(rows[0])

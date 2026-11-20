@@ -97,7 +97,7 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     assert producer_budget < capacity["global_http_slots"]
     assert not any("Producer budget alone" in warning for warning in capacity["warnings"])
     assert config.miles["n_samples_per_prompt"] == 8
-    assert config.miles["global_batch_size"] == 1024
+    assert config.miles["global_batch_size"] == 2048
     assert config.core.max_policy_lag == 12
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"]
     assert config.miles["sglang_max_total_tokens"] == 512 * 34816
@@ -107,7 +107,10 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     assert plan["scoring_pass"]["standalone"] is False
     assert plan["scoring_pass"]["check_interval"] == 0
     assert not config.core.replay_diagnostics and config.core.diagnostic_interval == 0
-    assert config.miles["save_interval"] == 25
+    assert config.miles["save_interval"] == 10
+    assert config.core.checkpoint_keep_last == 2
+    assert config.core.checkpoint_keep_every == (50 if profile == "node" else 100)
+    assert config.core.save_final_checkpoint is True
 
 
 def test_dev_retains_weight_qualification():
@@ -117,13 +120,13 @@ def test_dev_retains_weight_qualification():
 
 def test_learning_template_still_requires_scores_for_multiple_optimizer_steps():
     with pytest.raises(ValueError, match="refresh currently requires one optimizer step"):
-        RunSpec.load("configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=128"])
+        RunSpec.load("configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=512"])
     config = RunSpec.load(
-        "configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=128", 'core.publication_mode="barrier"']
+        "configs/miles/examples/tiny/node.toml", ["inference.global_batch_size=512", 'core.publication_mode="barrier"']
     ).compile()
     decision = config.plan()["scoring_pass"]
     assert decision["standalone"] is True
-    assert decision["optimizer_steps_per_collection"] == 8
+    assert decision["optimizer_steps_per_collection"] == 4
     assert decision["check_interval"] == 0
 
 
@@ -342,10 +345,11 @@ def test_hardware_roles_follow_observed_ips_not_replica_order(tmp_path):
     assert throughput_occupancy.node_roles(tmp_path) == {"0": nodes[1], "1": nodes[0]}
 
 
-def test_terminal_unused_work_requires_final_boundary_and_uses_entire_run():
+@pytest.mark.parametrize("terminal_event", ["shutdown_complete", "shutdown_aborted"])
+def test_terminal_unused_work_requires_final_boundary_and_uses_entire_run(terminal_event):
     assert analyze_throughput.terminal_unused_work(None, delivered_tokens=80, stale_dropped_tokens=10) is None
     record = {
-        "event": "shutdown_complete",
+        "event": terminal_event,
         "completed_queue": dict(groups=2, samples=8, response_tokens=20),
         "producer_ready": dict(groups=0, samples=0, response_tokens=0),
         "shutdown_unqueued": dict(groups=1, samples=4, response_tokens=10),

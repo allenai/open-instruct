@@ -78,6 +78,12 @@ def recovery_configuration_matches(root, previous, document):
     for key in ("auto_resume", "max_retries"):
         if key in document["launch"]:
             recorded.setdefault("launch", {})[key] = document["launch"][key]
+    # Liveness patience is operational; authenticate the saved spec first and
+    # retain strict checks on startup coordination and all training settings.
+    old_coordination = recorded.get("launch", {}).get("coordination")
+    new_coordination = document.get("launch", {}).get("coordination")
+    if isinstance(old_coordination, dict) and isinstance(new_coordination, dict):
+        adopt_keys(old_coordination, new_coordination, ("heartbeat_timeout",))
     # Compiler-cache persistence is an optimization (a miss compiles locally), so a
     # resumed run may move or disable its cache, e.g. when the shared root is full.
     adopt_keys(recorded, document, ("compiler_cache",))
@@ -295,7 +301,7 @@ def train_config(config, *, export_hf=None, background_evaluation=None):
         args = parse_runtime(config)
     args.background_evaluation = background_evaluation
     args.core_evaluation_snapshot = (
-        "open_instruct.miles.evaluation.evaluation.training_snapshot" if background_evaluation else None
+        "open_instruct.miles.evaluation.evaluation.mid_rollout_snapshot" if background_evaluation else None
     )
     os.environ.setdefault("SGLANG_EXTERNAL_MODEL_PACKAGE", "olmo_sglang.models")
     with stage(args, "driver_module_import"):

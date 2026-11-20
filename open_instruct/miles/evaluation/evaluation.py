@@ -581,3 +581,15 @@ def training_snapshot(args, update):
     if groups(config, update, config["total_updates"]):
         return str(snapshot(config["root"], update))
     return None
+
+
+def updates_per_rollout(args):
+    return args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
+
+
+def mid_rollout_snapshot(args, update):
+    # Only the optimizer loop can capture intermediate weights. The driver owns
+    # the boundary so it can commit any native checkpoint before exporting HF.
+    if update % updates_per_rollout(args) == 0:
+        return None
+    return training_snapshot(args, update)
