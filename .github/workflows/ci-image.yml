@@ -1,0 +1,107 @@
+name: Build CI Image
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - pyproject.toml
+      - uv.lock
+      - .github/Dockerfile.ci
+      - .github/workflows/ci-image.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/Dockerfile.ci
+      - .github/workflows/ci-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-ci-image:
+    name: Build CI image
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Compute lockfile hash
+        id: meta
+        run: |
+          LOCK_HASH=$(sha256sum uv.lock | cut -c1-16)
+          echo "lock_hash=${LOCK_HASH}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-ci:${LOCK_HASH}" >> "$GITHUB_OUTPUT"
+          echo "latest=ghcr.io/${GITHUB_REPOSITORY,,}-ci:latest" >> "$GITHUB_OUTPUT"
+          echo "cache=ghcr.io/${GITHUB_REPOSITORY,,}-ci:buildcache" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if image tag already exists
+        id: check
+        run: |
+          if docker manifest inspect "${{ steps.meta.outputs.image }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Image ${{ steps.meta.outputs.image }} already exists."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push CI image
+        if: github.event_name != 'pull_request' && (steps.check.outputs.exists != 'true' || github.event_name == 'workflow_dispatch')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/Dockerfile.ci
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.latest }}
+          outputs: type=registry,compression=zstd,compression-level=3,force-compression=true
+          cache-from: type=registry,ref=${{ steps.meta.outputs.cache }}
+          cache-to: type=registry,ref=${{ steps.meta.outputs.cache }},mode=max
+
+      - name: Build and smoke-test CI image (PR)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/Dockerfile.ci
+          platforms: linux/amd64
+          load: true
+          tags: open-instruct-ci:pr-test
+          cache-from: type=registry,ref=${{ steps.meta.outputs.cache }}
+
+      - name: Smoke-test CI image (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm --ipc=host \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e PYTHONPATH=/workspace \
+            open-instruct-ci:pr-test \
+            bash -euo pipefail -c '
+              python -c "import torch, vllm, nltk; nltk.data.find(\"tokenizers/punkt_tab\"); print(\"imports ok\")"
+              ruff --version
+              ty check
+              pytest open_instruct/test_grpo_cpu_adam.py
+            '
