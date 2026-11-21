@@ -21,6 +21,7 @@ from open_instruct.miles.configuration import advisories, specs, validation
 from open_instruct.miles.configuration.config import RunConfig
 from open_instruct.miles.distillation import opd_config
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.execution import shutdown
 
 
 def main() -> None:
@@ -107,6 +108,10 @@ def execute(parser, options):
         workflow.execute(config)
     else:
         workflow.train_config(config)
+    # The result is recorded (workflow.json for run files). Exit now so a stray
+    # non-daemon thread, such as a stuck W&B close, cannot keep the job alive.
+    # Failures raise above and keep their normal exit codes.
+    shutdown.exit_process(0)
 
 
 if __name__ == "__main__":

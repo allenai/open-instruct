@@ -28,13 +28,25 @@ from miles.utils.tracking_utils.tracking import define_step_key_metric_group, fi
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
 from open_instruct.miles.evaluation import evaluation as background_eval
-from open_instruct.miles.execution import serving, startup
+from open_instruct.miles.execution import serving, shutdown, startup
 from open_instruct.miles.execution.timing import evaluation_stage, stage
 from open_instruct.miles.infrastructure import infra_timeouts
 from open_instruct.miles.rewards import rewards
 from open_instruct.miles.rollout import pool_metrics
 
 logger = logger_utils.setup_logger(__name__)
+
+
+def close_tracking(failed):
+    try:
+        # The pinned Miles finish_tracking() has no exit-code parameter.
+        # Finish W&B's run explicitly on failure before generic backend teardown.
+        if failed and wandb.run is not None:
+            wandb.run.finish(exit_code=1)
+    except Exception:
+        logger.exception("Failed to mark W&B run as failed")
+    finally:
+        finish_tracking()
 
 
 async def train(args, *, export_hf=None):
@@ -433,15 +445,13 @@ async def train(args, *, export_hf=None):
             await startup_cache.finish(args, success=failure is None and cleanup_error is None)
         except Exception:
             logger.exception("Optional compiler-cache finalization failed")
-        try:
-            # The pinned Miles finish_tracking() has no exit-code parameter.
-            # Finish W&B's run explicitly on failure before generic backend teardown.
-            if (failure is not None or cleanup_error is not None) and wandb.run is not None:
-                wandb.run.finish(exit_code=1)
-        except Exception:
-            logger.exception("Failed to mark W&B run as failed")
-        finally:
-            finish_tracking()
+        # wandb.finish/teardown once hung the driver for an hour after every other
+        # cleanup stage finished; bound it so the workflow can still record completion.
+        shutdown.run_bounded(
+            partial(close_tracking, failure is not None or cleanup_error is not None),
+            "W&B finish",
+            timeout=shutdown.TRACKING_CLOSE_TIMEOUT,
+        )
         if failure is None and cleanup_error is not None:
             raise cleanup_error
     return {
