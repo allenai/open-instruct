@@ -302,9 +302,21 @@ forced save (~10-20 min) and teardown. To continue:
 
 Each resubmission pays startup again (about 35-40 minutes to the end of the first
 update, plus checkpoint load). A 660-update run at ~370 s/update is about 3 days of
-training, so plan on three or four jobs. To keep one W&B run across jobs, set
-`tracking.wandb_run_name` and `wandb_random_suffix = false` (the real100 runs did
-this; continuity across separate jobs is not yet verified).
+training, so plan on three or four jobs.
+
+All attempts on one `output.root` log to one W&B run. On first start the workflow
+writes a random id to `OUTPUT/wandb_run_id` (with `OUTPUT/wandb_run_id.json`
+recording when it was created and a hash of the model source, data section and W&B
+project, entity and group). Every later start, whether a preemption auto-resume or a
+resubmission, reads that file and passes the id to `wandb.init(id=..., resume="allow")`.
+An explicit `miles.wandb_run_id` takes precedence, and no file is written. If the
+stored hash differs from the current configuration, the log shows a
+`W&B RUN CONFIG MISMATCH` warning and the stored run is still continued. A new run
+needs a new `output.root`.
+
+MILES logs without an explicit W&B step, so updates redone after a resume (those
+since the last save) appear again as extra points for those steps; the later points
+are the ones the resumed run trained from.
 
 If a job does hit its timeout, the run resumes from the last periodic save when you
 resubmit as above; the updates since that save are redone.
