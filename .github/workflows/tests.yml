@@ -34,4 +34,4 @@ jobs:
       - name: Run unit tests
         env:
           OMP_NUM_THREADS: "1"
-        run: uv run --frozen pytest -n logical --dist worksteal --durations=15
+        run: uv run --frozen pytest -n auto --dist worksteal --durations=15
