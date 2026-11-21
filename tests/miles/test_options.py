@@ -167,4 +167,6 @@ def test_direct_native_cli_resolves_default_group_filter(monkeypatch, enabled, e
     monkeypatch.setattr(sys, "argv", argv)
     with contextlib.redirect_stderr(io.StringIO()):
         parsed = core_arguments.load_core_args(arguments.get_miles_extra_args_provider())
-    assert parsed.dynamic_sampling_filter_path == expected
+    # The observer wraps the resolved filter so pre-filter outcomes are measured.
+    assert parsed.prefilter_inner_filter_path == expected
+    assert parsed.dynamic_sampling_filter_path == "open_instruct.miles.rollout.prefilter.observed_filter"
