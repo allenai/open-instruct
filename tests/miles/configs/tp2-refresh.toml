@@ -1,5 +1,5 @@
 # Four-GPU mechanics test: EP2 Tiny trainer plus one TP2 inference engine.
-# This deliberately small batch checks refresh machinery, not Small throughput.
+# Check full decode graph replay across in-place refresh with a small batch.
 # Synthetic sibling rewards ensure nonzero gradients despite capped responses.
 # Replace YOUR_USERNAME and inspect `plan` before launching.
 schema_version = 1
@@ -18,7 +18,7 @@ workspace = "ai2/olmo-instruct"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "high"
-min_runtime = "30m"
+min_runtime = "0s"
 timeout = "1h"
 auto_resume = false
 gpus_per_replica = 4
@@ -75,7 +75,8 @@ sglang_max_total_tokens = 16384
 sglang_max_mamba_cache_size = 16
 sglang_mem_fraction_static = 0.6
 sglang_disable_radix_cache = true
-sglang_cuda_graph_backend_decode = "disabled"
+sglang_cuda_graph_backend_decode = "full"
+sglang_cuda_graph_max_bs_decode = 8
 sglang_cuda_graph_backend_prefill = "disabled"
 sglang_attention_backend = "fa4"
 check_weight_update_equal = true

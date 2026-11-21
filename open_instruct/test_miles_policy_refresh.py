@@ -41,6 +41,9 @@ def test_tp2_refresh_smoke_compiles_one_engine_and_two_trainer_ranks():
     assert config.miles["rollout_num_gpus_per_engine"] == 2
     assert config.miles["rollout_num_gpus"] == 2
     assert config.miles["actor_num_gpus_per_node"] == 2
+    assert config.miles["sglang_cuda_graph_backend_decode"] == "full"
+    assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"] == 8
+    assert config.miles["sglang_cuda_graph_backend_prefill"] == "disabled"
     assert topology.plan(spec, config)["replicas"] == 1
 
 
