@@ -24,6 +24,7 @@ from open_instruct import logger_utils
 from open_instruct.miles.configuration import advisories, inference_profiles, topology
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
+from open_instruct.miles.execution import wandb_identity
 from open_instruct.miles.execution.timing import stage
 from open_instruct.miles.infrastructure import artifacts
 from open_instruct.miles.rewards import judging
@@ -406,6 +407,8 @@ def execute(spec):
         checkpoint_root = Path(config.miles["save"])
         if spec.launch["auto_resume"] and (checkpoint_root / "core-latest.json").exists():
             config.miles["load"] = str(checkpoint_root)
+        # Every attempt on this output root continues one W&B run; miles.wandb_run_id wins.
+        wandb_identity.apply(root, spec, config.miles)
         resolved_plan = config.plan()
         write_json(root / "resolved-plan.json", resolved_plan)
         advisories.emit(resolved_plan)
