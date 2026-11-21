@@ -20,7 +20,7 @@ permissions:
 jobs:
   contracts:
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 20
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
