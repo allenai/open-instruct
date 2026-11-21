@@ -211,3 +211,49 @@ def test_nemotron_target_rejects_unknown_comparison():
         complete_code.validate_target(
             {"mode": "stdio", "tests": [{"input": "", "output": "YES", "comparison": "typo"}]}
         )
+
+
+def test_partial_credit_is_test_weighted_pass_fraction(monkeypatch):
+    thresholds, calls = [], []
+
+    class Client:
+        def __init__(self, config):
+            thresholds.append(config.pass_rate_reward_threshold)
+            assert not hasattr(config, "partial_credit")
+            assert config.fresh_process_per_test is True
+
+        async def async_call(self, tokens, prediction, tests):
+            calls.append(tests)
+            return SimpleNamespace(score=0.5 if len(calls) == 1 else 1.0, diagnostics={"status": "ok"})
+
+    monkeypatch.setattr(
+        complete_code, "execution_verifier", SimpleNamespace(CodeVerifier=Client, ServiceConfig=SimpleNamespace)
+    )
+    config = dataclasses.replace(CONFIG, partial_credit=True)
+    tests = [f"assert f({i}) == {i}" for i in range(2001)]
+    result = asyncio.run(
+        complete_code.CompleteCodeVerifier(config).async_call(
+            [], "<think>r</think>```python\ndef f(x): return x\n```", {"mode": "assert", "tests": tests}
+        )
+    )
+    assert thresholds == [0.0]
+    assert [len(chunk) for chunk in calls] == [2000, 1]
+    assert result.score == pytest.approx((0.5 * 2000 + 1.0) / 2001)
+    assert result.diagnostics["partial_credit"] is True and result.diagnostics["status"] == "ok"
+
+
+def test_partial_credit_off_keeps_binary_reward_and_diagnostics(monkeypatch):
+    mock_client(monkeypatch, iter([1, 1]))
+    tests = [f"assert f({i}) == {i}" for i in range(2001)]
+    result = asyncio.run(
+        complete_code.CompleteCodeVerifier(CONFIG).async_call(
+            [], "```python\ndef f(x): return x\n```", {"mode": "assert", "tests": tests}
+        )
+    )
+    assert result.score == 1.0
+    assert "partial_credit" not in result.diagnostics
+
+
+def test_partial_credit_must_be_boolean():
+    with pytest.raises(ValueError, match="partial_credit"):
+        complete_code.CompleteCodeVerifier(dataclasses.replace(CONFIG, partial_credit="yes"))

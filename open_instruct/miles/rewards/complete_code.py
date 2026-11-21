@@ -2,6 +2,7 @@
 
 Only the external service executes submitted code. A failed test scores zero;
 missing results and infrastructure failures propagate rather than inventing a grade.
+With ``partial_credit`` (opt-in) the reward is the fraction of tests passed instead.
 """
 
 import dataclasses
@@ -23,9 +24,13 @@ class Config:
     expected_source_sha256: str
     max_execution_time: float = 1.0
     total_timeout: float = 600.0
+    # Opt-in: reward = fraction of all tests passed. Off: 1.0 only when every test passes.
+    partial_credit: bool = False
 
 
 def validate_config(config):
+    if type(config.partial_credit) is not bool:
+        raise ValueError("Code partial_credit must be a boolean")
     url = urlsplit(config.api_url)
     if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
         raise ValueError("Code service requires an HTTPS URL without credentials, query or fragment")
@@ -99,24 +104,33 @@ class CompleteCodeVerifier:
 
     async def async_call(self, tokens, prediction, label, **kwargs):
         validate_target(label)
+        partial = self.config.partial_credit
+        service = {key: value for key, value in dataclasses.asdict(self.config).items() if key != "partial_credit"}
         verifier = execution_verifier.CodeVerifier(
             execution_verifier.ServiceConfig(
-                **dataclasses.asdict(self.config),
+                **service,
                 stdio=label["mode"] == "stdio",
-                pass_rate_reward_threshold=1.0,
+                pass_rate_reward_threshold=0.0 if partial else 1.0,
                 fresh_process_per_test=True,
             )
         )
         final = common.answer_text(prediction, selected_input=kwargs.get("selected_input", False))
-        score, partitions = 1.0, []
+        score, passed, partitions = 1.0, 0.0, []
         # The client batches each partition within its gateway/payload limits.
         # Keep all tests, even beyond its per-suite limit and after a failed test.
         for start in range(0, len(label["tests"]), _SUITE_LIMIT):
-            result = await verifier.async_call(tokens, final, label["tests"][start : start + _SUITE_LIMIT])
-            if result.score not in (0.0, 1.0):
+            chunk = label["tests"][start : start + _SUITE_LIMIT]
+            result = await verifier.async_call(tokens, final, chunk)
+            if partial:
+                if not 0.0 <= result.score <= 1.0:
+                    raise RuntimeError("Complete-code service returned a pass fraction outside [0, 1]")
+                passed += result.score * len(chunk)
+            elif result.score not in (0.0, 1.0):
                 raise RuntimeError("Complete-code service returned a nonbinary aggregate")
             score *= result.score
             partitions.append(result.diagnostics)
+        if partial:
+            score = passed / len(label["tests"])
         # The in-tree client raises infrastructure failures, but never trust a
         # returned zero without a completed-grade status. Preserve failures at
         # the boundary consumed by qualification and training omission checks.
@@ -131,6 +145,7 @@ class CompleteCodeVerifier:
                 "status": "service_error" if failed else "ok",
                 "mode": label["mode"],
                 "tests": len(label["tests"]),
+                **({"partial_credit": True} if partial else {}),
                 "service_source_sha256": self.config.expected_source_sha256,
                 "partitions": partitions,
             },
