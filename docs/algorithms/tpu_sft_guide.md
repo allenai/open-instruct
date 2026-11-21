@@ -173,7 +173,7 @@ new or empty. Upload the shards to `gs://ai2-olmo-dev/post-training/data/<name>/
 arm and seed into 512 files with `experiments/h067/shard.py` in olmo-post-training-ledger.
 
 The tokenizer is a directory on the bucket. For Olmo 3.5, `olmo35/tok_oi35.py` saves H045's tokenizer and template
-(`allenai/dolma2-tokenizer-olmo35` @8b971706, `olmo35`). For Olmo 3, save
+(`allenai/dolma2-tokenizer-olmo35` @03c29652, `olmo35`). For Olmo 3, save
 `PreTrainedTokenizerFast.from_pretrained("allenai/olmo-3-tokenizer-instruct-dev")` (see Traps).
 
 Plain-text rows (long-context replay documents) need `scripts/tpu/maxtext/image-olmo35-dr/`: a conversation of exactly
