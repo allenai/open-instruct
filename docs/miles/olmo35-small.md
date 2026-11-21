@@ -332,7 +332,9 @@ export is a synchronous trainer collective, and a failed export fails training. 
 requires an image built from main at or after #2293, which brought the writer-only
 HF-export memory fix (miles 9eff46a4); with older images the snapshot export can run
 out of memory. Snapshot export is not yet qualified on Small. The in-run evaluator
-image is the Tiny one and is best effort: its job failures do not affect training.
+must disable the prefill CUDA graph for Small, because KDA prefill-graph padding
+crashes it; the example sets `cuda_graph_backend_prefill = "disabled"` in
+`provider_kwargs`. Evaluator job failures do not affect training.
 
 ### Changing the start checkpoint
 
