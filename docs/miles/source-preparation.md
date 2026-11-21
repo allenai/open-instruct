@@ -51,7 +51,7 @@ and are recorded as omissions rather than moved across conversation turns.
 | Adapter | Target and scope |
 |---|---|
 | `nemo_v1` | Structural dispatch for formatting, structured formats, native IF, calendars and MCQA; unknown routes are reported |
-| `structured_v1` | `schema_type`/`schema_str`; explicit schema policy, all five formats and non-executing final tool calls |
+| `structured_v1` | `schema_type`/`schema_str`; explicit schema policy, all five formats and non-executing final tool calls; non-CSV document targets also get `code_fence` (`allowed`/`forbidden`, from the rendered prompt) |
 | `instruction_v1` | Native instruction IDs and kwargs, including bundles in verifier metadata or args |
 | `dolci_if_v1` | Published single-user Dolci IF rows or structured chat exports, with one encoded `ground_truth` bundle; optional recorded keyword correction |
 | `calendar_v1` | Full final calendar feasibility from `exp_cal_state`, without a 20-event cutoff |
