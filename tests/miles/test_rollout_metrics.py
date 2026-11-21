@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from miles.backends.core_utils.rollout import sibling_timing
 
-from open_instruct.miles.rollout import rollout_metrics
+from open_instruct.miles.rollout import prefilter, rollout_metrics
 
 
 def _sample(diagnostics):
@@ -80,3 +80,22 @@ def test_general_judge_failures_are_separate_from_valid_zero_scores():
     assert metrics["rollout/general_judge/samples"] == 2
     assert metrics["rollout/general_judge/errors"] == 1
     assert metrics["rollout/general_judge/error_fraction"] == 0.5
+
+
+def test_prefilter_metrics_reach_the_update_metrics(monkeypatch, tmp_path):
+    monkeypatch.setattr(prefilter, "OBSERVER", prefilter.Observer())
+    group = [
+        SimpleNamespace(
+            reward=reward,
+            response_length=3,
+            status=SimpleNamespace(value="completed"),
+            metadata={"verifiers": [{"name": "code"}]},
+        )
+        for reward in (0.0, 0.0)
+    ]
+    args = SimpleNamespace(prefilter_inner_filter_path=None, reward_key=None, olmo_core=None)
+    prefilter.observed_filter(args, group)
+    metrics = {}
+    assert rollout_metrics.log_rollout_data(1, SimpleNamespace(save=str(tmp_path)), [], metrics, 1.0) is False
+    assert metrics["rollout/prefilter/code/all_zero_fraction"] == 1
+    assert metrics["rollout/prefilter/all/groups"] == 1
