@@ -7,6 +7,9 @@ on:
       - benchmark
   pull_request:
   merge_group:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 permissions:
   contents: write
   pull-requests: write
@@ -23,20 +26,17 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
       - name: Build docs from PR branch
         run: |
-          uv sync --group dev --no-install-project
-          uv run mkdocs build
+          uv sync --frozen --only-group dev --no-install-project
+          uv run --no-sync mkdocs build
           cp -r site site-pr
       - name: Build docs from base branch
         run: |
           git fetch origin ${{ github.base_ref }}
           git checkout origin/${{ github.base_ref }}
-          uv sync --group dev --no-install-project
-          uv run mkdocs build
+          uv sync --frozen --only-group dev --no-install-project
+          uv run --no-sync mkdocs build
           cp -r site site-base
       - name: Compare docs and comment if different
         run: |
@@ -120,9 +120,6 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
       - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV
       - uses: actions/cache@v4
         with:
@@ -130,5 +127,5 @@ jobs:
           path: .cache
           restore-keys: |
             mkdocs-material-
-      - run: uv sync --group dev --no-install-project
-      - run: uv run mkdocs gh-deploy --force
+      - run: uv sync --frozen --only-group dev --no-install-project
+      - run: uv run --no-sync mkdocs gh-deploy --force
