@@ -32,4 +32,6 @@ jobs:
           echo "NLTK_DATA=$RUNNER_TEMP/nltk_data" >> "$GITHUB_ENV"
           uv run --frozen python -m nltk.downloader --exit-on-error --dir "$RUNNER_TEMP/nltk_data" punkt_tab
       - name: Run unit tests
-        run: uv run --frozen pytest
+        env:
+          OMP_NUM_THREADS: "1"
+        run: uv run --frozen pytest -n auto --dist worksteal
