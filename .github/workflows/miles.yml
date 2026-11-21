@@ -39,7 +39,7 @@ jobs:
         env:
           OMP_NUM_THREADS: '1'
         run: |
-          uv run --frozen pytest -n auto --dist worksteal open_instruct/test_miles*.py
+          uv run --frozen pytest -n logical --dist worksteal open_instruct/test_miles*.py
           uv run --frozen python -m scripts.miles.generate_docs --check
       - name: Check application integration types
         run: uv run --frozen ty check open_instruct/miles --config 'src.exclude = []'
