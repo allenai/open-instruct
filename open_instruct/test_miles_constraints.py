@@ -96,7 +96,7 @@ def test_structured_cli_constraints_still_stop_before_training(override, categor
     "change,category",
     [
         ({"fully_async": False}, constraints.Category.INVALID),
-        ({"rollout_num_gpus_per_engine": 2}, constraints.Category.NOT_IMPLEMENTED),
+        ({"rollout_num_gpus_per_engine": 4}, constraints.Category.NOT_IMPLEMENTED),
         ({"rollout_temperature": 0.7}, constraints.Category.NOT_VALIDATED),
     ],
 )

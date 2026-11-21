@@ -2,9 +2,11 @@
 
 import dataclasses
 import json
+from pathlib import Path
 
 import pytest
 
+from open_instruct.miles.configuration import specs, topology
 from open_instruct.miles.configuration.config import EXCLUDE_TRUNCATED, EXCLUDE_UNGRADED, CoreConfig, RunConfig
 
 
@@ -32,13 +34,23 @@ def test_refresh_is_explicit_and_compiles_into_core_config():
     assert CoreConfig().publication_mode == "barrier"
 
 
+def test_tp2_refresh_smoke_compiles_one_engine_and_two_trainer_ranks():
+    spec = specs.load(Path(__file__).parents[1] / "tests/miles/configs/tp2-refresh.toml")
+    config = spec.compile()
+    assert config.core.publication_mode == "refresh"
+    assert config.miles["rollout_num_gpus_per_engine"] == 2
+    assert config.miles["rollout_num_gpus"] == 2
+    assert config.miles["actor_num_gpus_per_node"] == 2
+    assert topology.plan(spec, config)["replicas"] == 1
+
+
 @pytest.mark.parametrize(
     "change,match",
     [
         ({"fully_async": False}, "fully_async"),
         ({"use_tis": False}, "use_tis"),
         ({"use_rollout_logprobs": True}, "use_rollout_logprobs"),
-        ({"rollout_num_gpus_per_engine": 2}, "TP1"),
+        ({"rollout_num_gpus_per_engine": 4}, "TP1 or TP2"),
         ({"use_fault_tolerance": True}, "use_fault_tolerance"),
         ({"rollout_temperature": 0.7}, "temperature"),
         ({"rollout_top_p": 0.9}, "top_p"),
@@ -52,6 +64,17 @@ def test_refresh_rejects_unqualified_contracts(change, match):
     config = configured()
     with pytest.raises(ValueError, match=match):
         dataclasses.replace(config, miles=config.miles | change).validate()
+
+
+@pytest.mark.parametrize("decode", ["disabled", "full"])
+def test_refresh_supports_tp2_without_expanding_engine_drain_scope(decode):
+    config = configured()
+    config = dataclasses.replace(
+        config, miles=config.miles | {"rollout_num_gpus_per_engine": 2, "sglang_cuda_graph_backend_decode": decode}
+    )
+    config.validate()
+    with pytest.raises(ValueError, match="TP1 serving"):
+        dataclasses.replace(config, core=dataclasses.replace(config.core, publication_mode="engine_drain")).validate()
 
 
 def test_refresh_full_decode_graphs_preserve_prefill_restriction():
