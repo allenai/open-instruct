@@ -27,6 +27,10 @@
 #          (--gradient_accumulation_steps 6 over 16 DP ranks, as H244's A4B_GAS=6), peak LR A4B_LR (1.8e-4), 2,692
 #          updates = 16,936,599,552 token slots, warmup 3% then linear to 0 at update 2,692, --num_epochs 1. Final save
 #          at 2,692; ephemeral every SAVE_EVERY (default 142) updates. Smoke: 5 updates (30 micro-steps), 2 h.
+#   h266a20  ledger H266 (c16-agentic20): the a4b14c16 recipe with the data changed: the arm cache (H260's consumed
+#          C16 documents less H263's debit, plus the agent documents; ledger experiments/h266/build_arm.py) and the
+#          replay dir of the H182 documents H260 consumed, both under H266=/weka/olmo-3p5-post-checkpoints/abhishekr/h266/pack.
+#          H266_CACHE=<arm cache name> is required. W&B on, abhishekr secrets.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -121,6 +125,26 @@ $F/identity/identity.jsonl 1.0"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/chrisg/a4b-gpu; DESC="ledger H260 a4b14t-c16 (96 rows per update)"; SECRETS=chrisg; SYNC_START=30m
          IMAGE=01M6XV36F2WWV7GZ9B7X7K3PB2   # H203/H228 A4B image (expert parallelism); the launcher default predates it
          GAS=6; STEPS=2692; EPOCHS=1; CKPT=2692; HOURS=72; SAVE_EVERY="${SAVE_EVERY:-142}" ;;
+    h266a20) # ledger H266 (c16-agentic20): a4b14c16 with the data changed; see the header.
+         MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-14t-decay548k-causal/step556000/model_and_optim
+         HF_REF=/weka/oe-training-default/tanushy/checkpoints/olmo35-small-hero-decay548k-200b-causal-556000/hf
+         CONFIG=scripts/c12/a4b_sft_config.json; SMOKE_STEPS=5; SMOKE_HOURS=2; REF_TRANSFORMERS=5.15.1
+         SEED_ROWS='[[100256, [14023, 771, 29]], [100266, [524, 27963, 29]]]'
+         F=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/rf
+         H266=/weka/olmo-3p5-post-checkpoints/abhishekr/h266/pack
+         # C16's mixer plus the arm's selection manifest: the extra entry only changes the cache hash, so the
+         # EXPECTED_NUMPY_CACHE check resolves to the arm cache (a symlink to $H266/arm), never to C16's.
+         MIXER="/weka/olmo-3p5-post-checkpoints/chrisg/h257/c16/c16-dolci-2cb5a8ad.parquet 1.0 \
+$F/filtered/00001-nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
+$F/filtered/00002-nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
+$F/filtered/00003-nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456 \
+$F/identity/identity.jsonl 1.0 \
+$H266/selection.jsonl 1.0"
+         CACHE="${H266_CACHE:?H266_CACHE=<arm cache name from the H266 build receipt>}"; TOKREV=03c29652a9d74902fe9d39bc0ad211748c7e7ae6; KEEP_LAST=-1
+         LR="${A4B_LR:?A4B_LR=<peak LR, the same as H260 a4b14c16>}"; EXTRA_ARGS="--extra_numpy_dirs $H266/replay --expert_parallel_degree 8 --loss_implementation fused_linear"
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/a4b-gpu; DESC="ledger H266 c16-agentic20"; SYNC_START=30m
+         IMAGE=01M6XV36F2WWV7GZ9B7X7K3PB2   # H260's image
+         GAS=6; STEPS=2692; EPOCHS=1; CKPT=2692; HOURS=72; SAVE_EVERY="${SAVE_EVERY:-142}" ;;
     a4b8c16) # ledger H260 (a4b8t-c16): a4b8 below with C16's Dolci parquet; see the header.
          MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-8t-decay318k-causal/step321974/model_and_optim
          HF_REF=/weka/oe-training-default/tanushy/checkpoints/olmo35-small-hero-decay318k-causal-321974/hf
@@ -171,6 +195,8 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == a4b8c16 ]] && RUN_NAME="a4bgpu-8t-c16-2pass-lr${A4B_LR}-s${SEED}"
 [[ "$ARM" == a4b14c16 ]] && RUN_NAME="a4bgpu-14t-c16-half-gas6-lr${A4B_LR}-s${SEED}"
 [[ "$ARM" == a4b14c16 && -n "${RESUME_FROM:-}" ]] && { echo "a4b14c16 starts from the base: RESUME_FROM is refused" >&2; exit 1; }
+[[ "$ARM" == h266a20 ]] && RUN_NAME="a4bgpu-14t-h266a20-gas6-lr${A4B_LR}-s${SEED}"
+[[ "$ARM" == h266a20 && -n "${RESUME_FROM:-}" ]] && { echo "h266a20 starts from the base: RESUME_FROM is refused" >&2; exit 1; }
 [[ "$ARM" == a4b8c16 && -n "${RESUME_FROM:-}" ]] && { echo "a4b8c16 starts from the base: RESUME_FROM is refused" >&2; exit 1; }
 case "$MODE" in
     smoke) STEPS=$SMOKE_STEPS; CKPT=1000000; SAVE_EVERY=1024; HOURS=$SMOKE_HOURS; RUN_NAME="${RUN_NAME}-smoke"
@@ -262,7 +288,7 @@ else
 $TORCHRUN"
     # An LR arm must start from the base: its first attempt requires an output dir with no stepN and leaves a
     # marker, so a later auto-resume (marker present) continues from its own checkpoints.
-    if [[ ( "$ARM" == a4b && -n "${A4B_LR:-}" ) || "$ARM" == a4b8 || "$ARM" == a4b8c16 || "$ARM" == a4b14c16 ]]; then
+    if [[ ( "$ARM" == a4b && -n "${A4B_LR:-}" ) || "$ARM" == a4b8 || "$ARM" == a4b8c16 || "$ARM" == a4b14c16 || "$ARM" == h266a20 ]]; then
         CMD="if [ ! -e $OUTPUT_DIR/.a4b_fresh_start ]; then
   if ls -d $OUTPUT_DIR/step* >/dev/null 2>&1; then echo A4B-NOT-FRESH $OUTPUT_DIR; ls -d $OUTPUT_DIR/step*; exit 6; fi
   mkdir -p $OUTPUT_DIR && touch $OUTPUT_DIR/.a4b_fresh_start; echo A4B-FRESH-START $OUTPUT_DIR \$(date -u +%FT%TZ)
@@ -274,7 +300,7 @@ fi
 
 # H228's G2 receipt: the cache path and its statistics file's sha256, against H210's C12rf build. (The smoke already
 # logs H161-BH batch indices, compared with H210's G2 smoke for steps 1-20: same cache, replay and seed.)
-if [[ ( "$ARM" == a4b8 || "$ARM" == a4b8c16 || "$ARM" == a4b14c16 ) && "$MODE" == smoke ]]; then
+if [[ ( "$ARM" == a4b8 || "$ARM" == a4b8c16 || "$ARM" == a4b14c16 || "$ARM" == h266a20 ) && "$MODE" == smoke ]]; then
     CD=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/$CACHE
     CMD="echo A4B8-CACHE $CD \$(readlink -f $CD)
 sha256sum $CD/dataset_statistics.json
@@ -283,7 +309,7 @@ fi
 
 # A4B takes its pretraining recipe's allocator setting: smoke 01M6XSN6K34KCM946JH8429T8X OOMed in the dry-run
 # backward needing 7.79 GiB with 7.57 GiB free and 31 GiB reserved but unallocated.
-[[ "$ARM" == a4b || "$ARM" == a4b8 || "$ARM" == a4b8c16 || "$ARM" == a4b14c16 ]] && EXTRA_ENV="$EXTRA_ENV {\"name\": \"PYTORCH_CUDA_ALLOC_CONF\", \"value\": \"expandable_segments:True\"},"
+[[ "$ARM" == a4b || "$ARM" == a4b8 || "$ARM" == a4b8c16 || "$ARM" == a4b14c16 || "$ARM" == h266a20 ]] && EXTRA_ENV="$EXTRA_ENV {\"name\": \"PYTORCH_CUDA_ALLOC_CONF\", \"value\": \"expandable_segments:True\"},"
 SPEC=$(mktemp -t h161spec.XXXXXX)
 CMD="$CMD" python3 - "$SPEC" <<EOF
 import json, os, sys
