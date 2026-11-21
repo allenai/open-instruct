@@ -69,7 +69,6 @@ jobs:
     - name: Install uv
       uses: astral-sh/setup-uv@v5
       with:
-        version: "0.8.8"
         enable-cache: true
 
     - name: Fast style, lint, keyword, and syntax checks
