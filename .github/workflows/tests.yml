@@ -21,15 +21,47 @@ jobs:
         uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve pre-built CI image
+        id: ci-image
+        run: |
+          LOCK_HASH=$(sha256sum uv.lock | cut -c1-16)
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}-ci:${LOCK_HASH}"
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "use_image=true" >> "$GITHUB_OUTPUT"
+            echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+            echo "Using pre-built CI image: $IMAGE"
+          else
+            echo "use_image=false" >> "$GITHUB_OUTPUT"
+            echo "Pre-built CI image $IMAGE not found; falling back to uv sync."
+          fi
+      - name: Run unit tests (pre-built CI image)
+        if: steps.ci-image.outputs.use_image == 'true'
+        run: |
+          docker run --rm --ipc=host \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e PYTHONPATH=/workspace \
+            "${{ steps.ci-image.outputs.image }}" \
+            pytest
       - name: Install uv
+        if: steps.ci-image.outputs.use_image != 'true'
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.8.6"
       - name: Set up Python
+        if: steps.ci-image.outputs.use_image != 'true'
         run: uv sync --frozen
       - name: Install native instruction tokenizer data
+        if: steps.ci-image.outputs.use_image != 'true'
         run: |
           echo "NLTK_DATA=$RUNNER_TEMP/nltk_data" >> "$GITHUB_ENV"
           uv run --frozen python -m nltk.downloader --exit-on-error --dir "$RUNNER_TEMP/nltk_data" punkt_tab
       - name: Run unit tests
+        if: steps.ci-image.outputs.use_image != 'true'
         run: uv run --frozen pytest

@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   contracts:
@@ -23,27 +24,68 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve pre-built CI image
+        id: ci-image
+        run: |
+          LOCK_HASH=$(sha256sum uv.lock | cut -c1-16)
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}-ci:${LOCK_HASH}"
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "use_image=true" >> "$GITHUB_OUTPUT"
+            echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_image=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run MILES contracts (pre-built CI image)
+        if: steps.ci-image.outputs.use_image == 'true'
+        run: |
+          docker run --rm --ipc=host \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e PYTHONPATH=/workspace \
+            -e OMP_NUM_THREADS=1 \
+            "${{ steps.ci-image.outputs.image }}" \
+            bash -euo pipefail -c '
+              ruff check open_instruct/miles scripts/miles tests/miles tests/miles_eval
+              ruff format --check open_instruct/miles scripts/miles tests/miles tests/miles_eval
+              pytest open_instruct/test_miles*.py
+              python -m scripts.miles.generate_docs --check
+              ty check open_instruct/miles --config "src.exclude = []"
+              pytest open_instruct/test_structured_outputs.py open_instruct/test_miles_source_preparation.py
+            '
       - uses: astral-sh/setup-uv@v5
+        if: steps.ci-image.outputs.use_image != 'true'
         with:
           version: '0.8.6'
-      - run: uv sync --frozen
+      - if: steps.ci-image.outputs.use_image != 'true'
+        run: uv sync --frozen
       - name: Install native instruction tokenizer data
+        if: steps.ci-image.outputs.use_image != 'true'
         run: |
           echo "NLTK_DATA=$RUNNER_TEMP/nltk_data" >> "$GITHUB_ENV"
           uv run --frozen python -m nltk.downloader --exit-on-error --dir "$RUNNER_TEMP/nltk_data" punkt_tab
       - name: Check integration, scripts and runtime test style
+        if: steps.ci-image.outputs.use_image != 'true'
         run: |
           uv run --frozen ruff check open_instruct/miles scripts/miles tests/miles tests/miles_eval
           uv run --frozen ruff format --check open_instruct/miles scripts/miles tests/miles tests/miles_eval
       - name: Check CPU contracts and generated references
+        if: steps.ci-image.outputs.use_image != 'true'
         env:
           OMP_NUM_THREADS: '1'
         run: |
           uv run --frozen pytest open_instruct/test_miles*.py
           uv run --frozen python -m scripts.miles.generate_docs --check
       - name: Check application integration types
+        if: steps.ci-image.outputs.use_image != 'true'
         run: uv run --frozen ty check open_instruct/miles --config 'src.exclude = []'
       - name: Check structured-output verifiers
+        if: steps.ci-image.outputs.use_image != 'true'
         run: >-
           uv run --frozen
           pytest open_instruct/test_structured_outputs.py open_instruct/test_miles_source_preparation.py
