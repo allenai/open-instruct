@@ -1675,3 +1675,59 @@ def count_sentences(text):
 def generate_keywords(num_keywords):
     """Randomly generates a few keywords."""
     return random.sample(WORD_LIST, k=num_keywords)
+
+
+def edge_stripped(word):
+    """Lower-cased word without leading/trailing punctuation or markup (e.g. '**Hello,**' -> 'hello')."""
+    return re.sub(r"^[\W_]+|[\W_]+$", "", word).casefold()
+
+
+def first_word_matches(text, expected, *, keep_exact_match=True):
+    """Whether the first word of `text` is `expected` (case-insensitive), ignoring markup around it.
+
+    Punctuation or markup on the edges of the response's word is ignored ('**Hello,**' counts as 'hello').
+    `keep_exact_match` also accepts the raw token, so a target that itself ends in punctuation still matches.
+    """
+    tokens = text.split()
+    if not tokens:
+        return False
+    want = expected.casefold()
+    return edge_stripped(tokens[0]) == want or (keep_exact_match and tokens[0].casefold() == want)
+
+
+# an ASCII hyphen between letters or digits ("non-profit") keeps its word together; any other dash cuts
+CLAUSE_SEPARATORS = r"[.!?\n:;,()\"\u201c\u201d\u2014\u2013\u2015]|(?<![^\W_])-|-(?![^\W_])"
+QUOTED_SPAN = re.compile(
+    r'"([^"]*)"|\u201c([^\u201d]*)\u201d|\u2018([^\u2019]*)\u2019|(?<!\w)\'([^\']*)\'(?!\w)|\(([^()]*)\)', re.DOTALL
+)
+
+
+def is_palindrome_core(text, min_len, need_letter=False):
+    """Whether `text` reads the same backwards ignoring case and non-alphanumerics, with >= min_len characters."""
+    core = re.sub(r"[\W_]", "", text).casefold()
+    if len(core) < min_len or core != core[::-1]:
+        return False
+    return not need_letter or any(c.isalpha() for c in core)
+
+
+def phrase_palindrome(parts, max_parts):
+    """Whether up to `max_parts` consecutive strings of `parts` concatenate into a palindrome phrase.
+
+    The phrase needs 5+ characters, at least 3 different ones including a letter, and one part of 3+ characters,
+    so strings of single letters ("a b a b a") do not count.
+    """
+    for start in range(len(parts)):
+        window = ""
+        longest = 0
+        for part in parts[start : start + max_parts]:
+            window += part
+            longest = max(longest, len(part))
+            if (
+                len(window) >= 5
+                and longest >= 3
+                and window == window[::-1]
+                and len(set(window)) >= 3
+                and any(c.isalpha() for c in window)
+            ):
+                return True
+    return False
