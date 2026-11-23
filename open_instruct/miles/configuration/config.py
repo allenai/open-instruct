@@ -668,6 +668,18 @@ class RunConfig:
                 raise constraints.error("core.refresh_min_group_size requires core.publication_mode=refresh")
             if minimum > options.get("n_samples_per_prompt", 1):
                 raise constraints.error("core.refresh_min_group_size cannot exceed miles.n_samples_per_prompt")
+            post_process = options.get("custom_reward_post_process_path")
+            if minimum < options.get("n_samples_per_prompt", 1) and post_process not in (
+                None,
+                EXCLUDE_UNGRADED,
+                EXCLUDE_TRUNCATED,
+            ):
+                # Mirrors MILES: partial groups pass masked dummies to the post-process,
+                # which must declare honors_exclude_from_reward_baseline (ours do).
+                raise constraints.error(
+                    "core.refresh_min_group_size below miles.n_samples_per_prompt requires the built-in reward "
+                    f"post-process or {EXCLUDE_UNGRADED} / {EXCLUDE_TRUNCATED}; got {post_process}"
+                )
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
         if collection and collection % samples:
             raise constraints.error(

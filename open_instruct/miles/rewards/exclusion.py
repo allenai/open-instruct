@@ -140,3 +140,8 @@ def filter_finished_responses(args, samples, **kwargs):
 # Assign through __dict__ because functions do not declare this attribute to the type checker.
 exclude_ungraded.__dict__["masks_ungraded"] = True
 exclude_truncated.__dict__["masks_ungraded"] = True
+# MILES accepts a post-process with partial refresh groups (core.refresh_min_group_size
+# below n_samples_per_prompt) only if it declares this: rows flagged NO_BASELINE_KEY
+# stay out of each group's mean and std and get reward 0 (see _excluded and _exclude).
+exclude_ungraded.__dict__["honors_exclude_from_reward_baseline"] = True
+exclude_truncated.__dict__["honors_exclude_from_reward_baseline"] = True

@@ -200,6 +200,12 @@ def test_partial_group_dummies_stay_out_of_the_baseline(exclusion, make_sample, 
     assert [sample.remove_sample for sample in samples] == [False, False, False, True]
 
 
+def test_exclusion_hooks_declare_that_they_honor_the_baseline_flag(exclusion):
+    # MILES refuses partial refresh groups with a post-process that lacks this declaration.
+    for hook in (exclusion.exclude_ungraded, exclusion.exclude_truncated):
+        assert hook.honors_exclude_from_reward_baseline is True
+
+
 def test_exclusion_requires_group_index_and_single_segment_rollouts(exclusion, make_sample):
     with pytest.raises(ValueError, match="group index"):
         exclusion.exclude_ungraded(args(), [make_sample(1.0, group_index=None, index=0)])

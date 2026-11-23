@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.config import EXCLUDE_TRUNCATED, EXCLUDE_UNGRADED, CoreConfig, RunConfig
 
 
 def configured():
@@ -94,6 +94,33 @@ def test_refresh_min_group_size_defaults_off_and_compiles_into_core_config():
 def test_refresh_min_group_size_must_be_an_integer_of_at_least_two(value):
     with pytest.raises(ValueError, match="refresh_min_group_size"):
         CoreConfig(publication_mode="refresh", max_policy_lag=2, refresh_min_group_size=value)
+
+
+def test_partial_groups_accept_only_baseline_aware_post_processes():
+    config = configured()
+    n = 4
+
+    def with_post_process(path):
+        miles = {**config.miles, "n_samples_per_prompt": n, "global_batch_size": 2 * n}
+        if path is not None:
+            miles["custom_reward_post_process_path"] = path
+        core = dataclasses.replace(config.core, refresh_min_group_size=n - 1, reward_zero_truncated=False)
+        return RunConfig(core, miles)
+
+    for accepted in (None, EXCLUDE_UNGRADED, EXCLUDE_TRUNCATED):
+        with_post_process(accepted).validate()
+    with pytest.raises(ValueError, match="requires the built-in reward post-process"):
+        with_post_process("custom.post_process").validate()
+    # Full groups keep any post-process.
+    miles = {
+        **config.miles,
+        "n_samples_per_prompt": n,
+        "global_batch_size": 2 * n,
+        "custom_reward_post_process_path": "custom.post_process",
+    }
+    RunConfig(
+        dataclasses.replace(config.core, refresh_min_group_size=n, reward_zero_truncated=False), miles
+    ).validate()
 
 
 def test_refresh_min_group_size_requires_refresh_and_fits_the_group():
