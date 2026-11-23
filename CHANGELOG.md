@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed
+- Pin SGLang `4dec23a` and MILES `a7e2153` so score-centering top-k candidates travel as dense arrays (one decode copy per step, flat base64 responses); top-20 recording drops from 0.51× to 0.97× of no-recording serving throughput on Olmo 3.5 (https://github.com/allenai/open-instruct/pull/2312).
 - SFT and DPO tokenization decode JSON-string `tool_calls[].function.arguments` into mappings before rendering, so templates that iterate them (Olmo 3.5) accept tool data; the dataset cache version goes to v10 (https://github.com/allenai/open-instruct/pull/2300).
 - Raise the MILES `core.refresh_request_timeout` default from 1,800 s to 3,600 s so 32K-token responses at high SGLang concurrency are not timed out and their groups discarded (https://github.com/allenai/open-instruct/pull/2297).
 - Add a CUDA 13 MoE image (`build_image_and_launch.sh --cuda-version 13 --moe`) with transformer-engine 2.16.1, which MoE v2 (`OLMoDDPModel`) SFT needs. The default images are unchanged (https://github.com/allenai/open-instruct/pull/2298).

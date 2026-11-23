@@ -1,0 +1,680 @@
+{
+  "hardware": "1x B300 (ai2/holmes)",
+  "model": "/weka/olmo-3p5-post-checkpoints/robertb/miles/h196-dolci-control-20261113/prepared/hf",
+  "image": "01M7R8H8C37ZHD1Y7V2XGV3B2E",
+  "client": "MILES request builder and sample conversion",
+  "workloads": {
+    "short": "128 requests x 512 forced tokens",
+    "long": "205 requests x 8192 forced tokens"
+  },
+  "repetitions": 2,
+  "runs": [
+    {
+      "experiment": "https://beaker.org/ex/01M84MNGPZ3C8JY2YBVK29P57G",
+      "pinned_code": true,
+      "servers": {
+        "base": "SGLang b84bec5 (image)",
+        "fast": "SGLang 4dec23a (pinned)",
+        "fast-fp32": "SGLang 4dec23a with enable_fp32_lm_head"
+      },
+      "client": "MILES a7e2153 (return_flat_raw_output_top_logprobs + return_flat_raw_top_logprobs_b64)",
+      "parity": {
+        "fast-nested": true,
+        "fast-b64": true
+      },
+      "summary": [
+        {
+          "server": "base",
+          "arm": "top0",
+          "workload": "long",
+          "tokens_per_second": 18886.727359379,
+          "trial_tokens_per_second": [
+            18651.488480245698,
+            19124.93315079463
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 1.0,
+          "median_server_e2e_seconds": 78.79713889746927,
+          "median_http_seconds": 85.22390345751774,
+          "wire_bytes_per_token": 1454.302769805164,
+          "client_cpu_seconds": 5.380793096499879
+        },
+        {
+          "server": "base",
+          "arm": "top20-nested",
+          "workload": "long",
+          "tokens_per_second": 9699.215620505254,
+          "trial_tokens_per_second": [
+            9722.430556580786,
+            9676.0561163769
+          ],
+          "vs_same_server_top0": 0.5135466529456041,
+          "vs_base_bf16_top0": 0.5135466529456041,
+          "median_server_e2e_seconds": 146.32815365295392,
+          "median_http_seconds": 162.46024518401828,
+          "wire_bytes_per_token": 2079.242748725705,
+          "client_cpu_seconds": 17.5510666980001
+        },
+        {
+          "server": "fast",
+          "arm": "top0",
+          "workload": "long",
+          "tokens_per_second": 17160.745208851542,
+          "trial_tokens_per_second": [
+            16769.752193918306,
+            17560.85437147492
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 0.9086140167279775,
+          "median_server_e2e_seconds": 86.04629793949425,
+          "median_http_seconds": 93.9462295609992,
+          "wire_bytes_per_token": 1454.2145192216083,
+          "client_cpu_seconds": 5.698487349500176
+        },
+        {
+          "server": "fast",
+          "arm": "top10-b64",
+          "workload": "long",
+          "tokens_per_second": 16812.09242763866,
+          "trial_tokens_per_second": [
+            17105.31519024168,
+            16523.89614876608
+          ],
+          "vs_same_server_top0": 0.9796831211599689,
+          "vs_base_bf16_top0": 0.8901538158377612,
+          "median_server_e2e_seconds": 88.30717120342888,
+          "median_http_seconds": 95.2128926620353,
+          "wire_bytes_per_token": 1560.617633205507,
+          "client_cpu_seconds": 5.489720481999981
+        },
+        {
+          "server": "fast",
+          "arm": "top20-b64",
+          "workload": "long",
+          "tokens_per_second": 16570.077561771188,
+          "trial_tokens_per_second": [
+            16869.016392375725,
+            16276.436279189831
+          ],
+          "vs_same_server_top0": 0.965580303192446,
+          "vs_base_bf16_top0": 0.8773397977571068,
+          "median_server_e2e_seconds": 89.20229324605316,
+          "median_http_seconds": 96.73833780107088,
+          "wire_bytes_per_token": 1667.668340915587,
+          "client_cpu_seconds": 6.000000520499995
+        },
+        {
+          "server": "fast",
+          "arm": "top20-nested",
+          "workload": "long",
+          "tokens_per_second": 13894.91489601948,
+          "trial_tokens_per_second": [
+            13794.80073292098,
+            13995.755626021495
+          ],
+          "vs_same_server_top0": 0.8096918127338933,
+          "vs_base_bf16_top0": 0.7356973302799001,
+          "median_server_e2e_seconds": 95.71956141991541,
+          "median_http_seconds": 109.98759265197441,
+          "wire_bytes_per_token": 2078.6605733731894,
+          "client_cpu_seconds": 17.370850783999742
+        },
+        {
+          "server": "fast",
+          "arm": "top5-b64",
+          "workload": "long",
+          "tokens_per_second": 16940.371171109182,
+          "trial_tokens_per_second": [
+            17101.108114565068,
+            16781.145028287894
+          ],
+          "vs_same_server_top0": 0.9871582477881735,
+          "vs_base_bf16_top0": 0.8969458206689644,
+          "median_server_e2e_seconds": 87.51888904848602,
+          "median_http_seconds": 94.85975536785554,
+          "wire_bytes_per_token": 1507.6696149128238,
+          "client_cpu_seconds": 5.552621024999894
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top0",
+          "workload": "long",
+          "tokens_per_second": 17398.60563744989,
+          "trial_tokens_per_second": [
+            17042.423301128045,
+            17762.232094508934
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 0.9212080688404642,
+          "median_server_e2e_seconds": 85.12449622002896,
+          "median_http_seconds": 92.67358930106275,
+          "wire_bytes_per_token": 1453.923328529916,
+          "client_cpu_seconds": 5.329244353000405
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top20-b64",
+          "workload": "long",
+          "tokens_per_second": 17386.266529876502,
+          "trial_tokens_per_second": [
+            16384.709327814006,
+            18449.04647376085
+          ],
+          "vs_same_server_top0": 0.9992907990542168,
+          "vs_base_bf16_top0": 0.9205547472067794,
+          "median_server_e2e_seconds": 85.26523917797022,
+          "median_http_seconds": 91.84881920355838,
+          "wire_bytes_per_token": 1667.2231355992758,
+          "client_cpu_seconds": 5.289326484499725
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top5-b64",
+          "workload": "long",
+          "tokens_per_second": 17464.90097180025,
+          "trial_tokens_per_second": [
+            16302.552222596465,
+            18710.123530965113
+          ],
+          "vs_same_server_top0": 1.0038103820347337,
+          "vs_base_bf16_top0": 0.9247182235162258,
+          "median_server_e2e_seconds": 85.78903632296715,
+          "median_http_seconds": 91.7864459103439,
+          "wire_bytes_per_token": 1507.2674375952743,
+          "client_cpu_seconds": 5.417763062499631
+        },
+        {
+          "server": "base",
+          "arm": "top0",
+          "workload": "short",
+          "tokens_per_second": 8665.38464699326,
+          "trial_tokens_per_second": [
+            9928.048543709354,
+            7563.308212057897
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 1.0,
+          "median_server_e2e_seconds": 5.7098242124775425,
+          "median_http_seconds": 7.158274959714618,
+          "wire_bytes_per_token": 2088.2332153320312,
+          "client_cpu_seconds": 0.2171964639999251
+        },
+        {
+          "server": "base",
+          "arm": "top20-nested",
+          "workload": "short",
+          "tokens_per_second": 5749.804039671914,
+          "trial_tokens_per_second": [
+            6226.324950660645,
+            5309.752824757333
+          ],
+          "vs_same_server_top0": 0.6635370816074504,
+          "vs_base_bf16_top0": 0.6635370816074504,
+          "median_server_e2e_seconds": 8.567798931268044,
+          "median_http_seconds": 10.762285773642361,
+          "wire_bytes_per_token": 2687.5750427246094,
+          "client_cpu_seconds": 0.9201580970000585
+        },
+        {
+          "server": "fast",
+          "arm": "top0",
+          "workload": "short",
+          "tokens_per_second": 11431.716837085614,
+          "trial_tokens_per_second": [
+            12613.161230286314,
+            10360.93549089915
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 1.3192393993787945,
+          "median_server_e2e_seconds": 4.72283270774642,
+          "median_http_seconds": 5.2768216042313725,
+          "wire_bytes_per_token": 2088.0547790527344,
+          "client_cpu_seconds": 0.2070402330000931
+        },
+        {
+          "server": "fast",
+          "arm": "top10-b64",
+          "workload": "short",
+          "tokens_per_second": 9482.394929655988,
+          "trial_tokens_per_second": [
+            9074.220361782298,
+            9908.92991541865
+          ],
+          "vs_same_server_top0": 0.829481263819811,
+          "vs_base_bf16_top0": 1.0942843642776108,
+          "median_server_e2e_seconds": 4.443393182824366,
+          "median_http_seconds": 6.4533785140374675,
+          "wire_bytes_per_token": 2194.8916244506836,
+          "client_cpu_seconds": 0.2244518789999006
+        },
+        {
+          "server": "fast",
+          "arm": "top20-b64",
+          "workload": "short",
+          "tokens_per_second": 9206.592877351888,
+          "trial_tokens_per_second": [
+            9607.377429738319,
+            8822.527586658482
+          ],
+          "vs_same_server_top0": 0.8053552242900904,
+          "vs_base_bf16_top0": 1.0624563423790332,
+          "median_server_e2e_seconds": 5.097534683998674,
+          "median_http_seconds": 6.699768472753931,
+          "wire_bytes_per_token": 2301.2897338867188,
+          "client_cpu_seconds": 0.22940569149996293
+        },
+        {
+          "server": "fast",
+          "arm": "top20-nested",
+          "workload": "short",
+          "tokens_per_second": 8129.768014305319,
+          "trial_tokens_per_second": [
+            8114.61666025824,
+            8144.947658478605
+          ],
+          "vs_same_server_top0": 0.7111589737712495,
+          "vs_base_bf16_top0": 0.938188937420823,
+          "median_server_e2e_seconds": 4.360432144196238,
+          "median_http_seconds": 7.307445901329629,
+          "wire_bytes_per_token": 2688.5959396362305,
+          "client_cpu_seconds": 0.8999061019998464
+        },
+        {
+          "server": "fast",
+          "arm": "top5-b64",
+          "workload": "short",
+          "tokens_per_second": 8833.076166864212,
+          "trial_tokens_per_second": [
+            9446.496618767169,
+            8259.488963836326
+          ],
+          "vs_same_server_top0": 0.7726815046895531,
+          "vs_base_bf16_top0": 1.0193518841577491,
+          "median_server_e2e_seconds": 4.4237991739064455,
+          "median_http_seconds": 6.956068082945421,
+          "wire_bytes_per_token": 2141.6161499023438,
+          "client_cpu_seconds": 0.2136674014999329
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top0",
+          "workload": "short",
+          "tokens_per_second": 9387.066526169114,
+          "trial_tokens_per_second": [
+            8792.799155288512,
+            10021.497865526235
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 1.0832833057706521,
+          "median_server_e2e_seconds": 4.432202591677196,
+          "median_http_seconds": 6.536217623215634,
+          "wire_bytes_per_token": 2087.445266723633,
+          "client_cpu_seconds": 0.22846969850024834
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top20-b64",
+          "workload": "short",
+          "tokens_per_second": 9044.076276377846,
+          "trial_tokens_per_second": [
+            9205.218188622797,
+            8885.755233269276
+          ],
+          "vs_same_server_top0": 0.9634614020434301,
+          "vs_base_bf16_top0": 1.0437016525880343,
+          "median_server_e2e_seconds": 4.497207003005315,
+          "median_http_seconds": 6.766783814993687,
+          "wire_bytes_per_token": 2301.3683013916016,
+          "client_cpu_seconds": 0.22265044450008986
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top5-b64",
+          "workload": "short",
+          "tokens_per_second": 9000.921998614323,
+          "trial_tokens_per_second": [
+            9093.568213263601,
+            8909.21967319398
+          ],
+          "vs_same_server_top0": 0.9588641961279061,
+          "vs_base_bf16_top0": 1.0387215761665571,
+          "median_server_e2e_seconds": 4.532328495581169,
+          "median_http_seconds": 6.827140588313341,
+          "wire_bytes_per_token": 2141.848587036133,
+          "client_cpu_seconds": 0.22185596600039048
+        }
+      ]
+    },
+    {
+      "experiment": "https://beaker.org/ex/01M83J7N3BQ4VZ3CXBD3B95EVT",
+      "pinned_code": false,
+      "note": "Earlier variant with a fork-specific return_output_top_logprobs_b64 flag (SGLang 1113b90, MILES bd26fb5); same scheduler transport.",
+      "parity": {
+        "fast-nested": true,
+        "fast-b64": true
+      },
+      "summary": [
+        {
+          "server": "base",
+          "arm": "top0",
+          "workload": "long",
+          "tokens_per_second": 17781.25890516687,
+          "trial_tokens_per_second": [
+            18370.697901318206,
+            17210.732545435232
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 1.0,
+          "median_server_e2e_seconds": 79.96025220258161,
+          "median_http_seconds": 89.80594997201115,
+          "wire_bytes_per_token": 1454.347904261147,
+          "client_cpu_seconds": 7.481916973499876
+        },
+        {
+          "server": "base",
+          "arm": "top20-nested",
+          "workload": "long",
+          "tokens_per_second": 8585.666560252715,
+          "trial_tokens_per_second": [
+            8512.520177674098,
+            8659.44147506064
+          ],
+          "vs_same_server_top0": 0.482849195663975,
+          "vs_base_bf16_top0": 0.482849195663975,
+          "median_server_e2e_seconds": 165.16255442996044,
+          "median_http_seconds": 183.4781537905801,
+          "wire_bytes_per_token": 2079.556216356231,
+          "client_cpu_seconds": 19.86208541000006
+        },
+        {
+          "server": "fast",
+          "arm": "top0",
+          "workload": "long",
+          "tokens_per_second": 17022.81762922792,
+          "trial_tokens_per_second": [
+            16971.161318197497,
+            17074.63117018621
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 0.9573460304479026,
+          "median_server_e2e_seconds": 86.36581072444096,
+          "median_http_seconds": 94.29065110557713,
+          "wire_bytes_per_token": 1454.2684555425876,
+          "client_cpu_seconds": 5.679310561500429
+        },
+        {
+          "server": "fast",
+          "arm": "top10-b64",
+          "workload": "long",
+          "tokens_per_second": 16248.55887372282,
+          "trial_tokens_per_second": [
+            16299.802363973491,
+            16197.476483296217
+          ],
+          "vs_same_server_top0": 0.9545164160029707,
+          "vs_base_bf16_top0": 0.9138025018578028,
+          "median_server_e2e_seconds": 90.86913253099192,
+          "median_http_seconds": 98.31029499147553,
+          "wire_bytes_per_token": 1561.0789107159871,
+          "client_cpu_seconds": 5.997215100499801
+        },
+        {
+          "server": "fast",
+          "arm": "top20-b64",
+          "workload": "long",
+          "tokens_per_second": 16635.287741959644,
+          "trial_tokens_per_second": [
+            16954.585708525334,
+            16322.002968119814
+          ],
+          "vs_same_server_top0": 0.977234680197543,
+          "vs_base_bf16_top0": 0.9355517419031434,
+          "median_server_e2e_seconds": 88.68056511890609,
+          "median_http_seconds": 96.10315617907327,
+          "wire_bytes_per_token": 1667.7994810523055,
+          "client_cpu_seconds": 5.752310519999909
+        },
+        {
+          "server": "fast",
+          "arm": "top20-nested",
+          "workload": "long",
+          "tokens_per_second": 15092.74636648211,
+          "trial_tokens_per_second": [
+            15904.463088946979,
+            14322.457263034888
+          ],
+          "vs_same_server_top0": 0.8866185783820002,
+          "vs_base_bf16_top0": 0.8488007765353704,
+          "median_server_e2e_seconds": 85.36879900295753,
+          "median_http_seconds": 100.77501183340792,
+          "wire_bytes_per_token": 2079.7571902391387,
+          "client_cpu_seconds": 17.078567912999958
+        },
+        {
+          "server": "fast",
+          "arm": "top5-b64",
+          "workload": "long",
+          "tokens_per_second": 16499.188590255642,
+          "trial_tokens_per_second": [
+            16578.943195267722,
+            16419.81765246202
+          ],
+          "vs_same_server_top0": 0.9692395788771646,
+          "vs_base_bf16_top0": 0.9278976633910503,
+          "median_server_e2e_seconds": 89.87160651606973,
+          "median_http_seconds": 97.44086797453929,
+          "wire_bytes_per_token": 1507.3771365282012,
+          "client_cpu_seconds": 5.65217037650001
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top0",
+          "workload": "long",
+          "tokens_per_second": 17910.968857353186,
+          "trial_tokens_per_second": [
+            18752.091081661703,
+            17107.575043873327
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 1.0072947563993135,
+          "median_server_e2e_seconds": 82.59042681998108,
+          "median_http_seconds": 89.5486465570284,
+          "wire_bytes_per_token": 1454.0721227134145,
+          "client_cpu_seconds": 5.209314633000275
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top20-b64",
+          "workload": "long",
+          "tokens_per_second": 16128.985483866536,
+          "trial_tokens_per_second": [
+            16043.712002230066,
+            16214.71220018267
+          ],
+          "vs_same_server_top0": 0.9005088229632495,
+          "vs_base_bf16_top0": 0.907077815462199,
+          "median_server_e2e_seconds": 91.00816711899824,
+          "median_http_seconds": 98.4228056166321,
+          "wire_bytes_per_token": 1667.3687261814025,
+          "client_cpu_seconds": 6.138767565000052
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top5-b64",
+          "workload": "long",
+          "tokens_per_second": 16284.474365859589,
+          "trial_tokens_per_second": [
+            16228.430937164228,
+            16340.711335502405
+          ],
+          "vs_same_server_top0": 0.909190032965422,
+          "vs_base_bf16_top0": 0.9158223527765885,
+          "median_server_e2e_seconds": 90.87894866603892,
+          "median_http_seconds": 98.63751664804295,
+          "wire_bytes_per_token": 1508.1637335056212,
+          "client_cpu_seconds": 5.921333827000325
+        },
+        {
+          "server": "base",
+          "arm": "top0",
+          "workload": "short",
+          "tokens_per_second": 8275.980293042025,
+          "trial_tokens_per_second": [
+            9593.424033246421,
+            7139.458192763965
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 1.0,
+          "median_server_e2e_seconds": 6.210322969069239,
+          "median_http_seconds": 7.4818000487284735,
+          "wire_bytes_per_token": 2087.3642959594727,
+          "client_cpu_seconds": 0.2910334714999623
+        },
+        {
+          "server": "base",
+          "arm": "top20-nested",
+          "workload": "short",
+          "tokens_per_second": 5301.81333911666,
+          "trial_tokens_per_second": [
+            5847.5946566085095,
+            4806.972154109288
+          ],
+          "vs_same_server_top0": 0.6406266268630587,
+          "vs_base_bf16_top0": 0.6406266268630587,
+          "median_server_e2e_seconds": 9.976989865186624,
+          "median_http_seconds": 11.6243371621822,
+          "wire_bytes_per_token": 2687.577079772949,
+          "client_cpu_seconds": 1.0691523254999922
+        },
+        {
+          "server": "fast",
+          "arm": "top0",
+          "workload": "short",
+          "tokens_per_second": 11858.599131067873,
+          "trial_tokens_per_second": [
+            13423.931552276968,
+            10475.796364404947
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 1.4328935921993327,
+          "median_server_e2e_seconds": 4.514744657906704,
+          "median_http_seconds": 5.212464315292891,
+          "wire_bytes_per_token": 2087.565719604492,
+          "client_cpu_seconds": 0.2281710170000224
+        },
+        {
+          "server": "fast",
+          "arm": "top10-b64",
+          "workload": "short",
+          "tokens_per_second": 8812.478372660691,
+          "trial_tokens_per_second": [
+            9456.113501999613,
+            8212.652592652388
+          ],
+          "vs_same_server_top0": 0.7431297976481243,
+          "vs_base_bf16_top0": 1.0648259252223842,
+          "median_server_e2e_seconds": 4.36801709147403,
+          "median_http_seconds": 6.9802792957634665,
+          "wire_bytes_per_token": 2194.664306640625,
+          "client_cpu_seconds": 0.22921105550015852
+        },
+        {
+          "server": "fast",
+          "arm": "top20-b64",
+          "workload": "short",
+          "tokens_per_second": 10101.987425245616,
+          "trial_tokens_per_second": [
+            10477.18922492116,
+            9740.2220909672
+          ],
+          "vs_same_server_top0": 0.8518702178556504,
+          "vs_base_bf16_top0": 1.220639376550811,
+          "median_server_e2e_seconds": 4.946172019757796,
+          "median_http_seconds": 6.05423226224957,
+          "wire_bytes_per_token": 2301.1701431274414,
+          "client_cpu_seconds": 0.24544235900006584
+        },
+        {
+          "server": "fast",
+          "arm": "top20-nested",
+          "workload": "short",
+          "tokens_per_second": 7957.059745446666,
+          "trial_tokens_per_second": [
+            7949.908904084305,
+            7964.217018899373
+          ],
+          "vs_same_server_top0": 0.6709949174856819,
+          "vs_base_bf16_top0": 0.9614643176635536,
+          "median_server_e2e_seconds": 4.801819592015818,
+          "median_http_seconds": 7.484274702263065,
+          "wire_bytes_per_token": 2688.5065994262695,
+          "client_cpu_seconds": 1.0168857209997384
+        },
+        {
+          "server": "fast",
+          "arm": "top5-b64",
+          "workload": "short",
+          "tokens_per_second": 8917.903586611048,
+          "trial_tokens_per_second": [
+            9412.783424240466,
+            8449.042200979728
+          ],
+          "vs_same_server_top0": 0.7520199888743508,
+          "vs_base_bf16_top0": 1.0775646232638707,
+          "median_server_e2e_seconds": 4.564830384741072,
+          "median_http_seconds": 6.91067655821098,
+          "wire_bytes_per_token": 2141.259780883789,
+          "client_cpu_seconds": 0.357062655999826
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top0",
+          "workload": "short",
+          "tokens_per_second": 9367.19210697682,
+          "trial_tokens_per_second": [
+            8835.548845362004,
+            9930.824842315043
+          ],
+          "vs_same_server_top0": 1.0,
+          "vs_base_bf16_top0": 1.1318528772781424,
+          "median_server_e2e_seconds": 4.583020031452179,
+          "median_http_seconds": 6.5612536167609505,
+          "wire_bytes_per_token": 2088.0810470581055,
+          "client_cpu_seconds": 0.21881137450048982
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top20-b64",
+          "workload": "short",
+          "tokens_per_second": 8445.563800133821,
+          "trial_tokens_per_second": [
+            8575.28313848236,
+            8317.806741802127
+          ],
+          "vs_same_server_top0": 0.9016110381512773,
+          "vs_base_bf16_top0": 1.0204910477172562,
+          "median_server_e2e_seconds": 4.660777245473582,
+          "median_http_seconds": 7.28132592048496,
+          "wire_bytes_per_token": 2301.6379776000977,
+          "client_cpu_seconds": 0.24250129150001953
+        },
+        {
+          "server": "fast-fp32",
+          "arm": "top5-b64",
+          "workload": "short",
+          "tokens_per_second": 9188.859888355264,
+          "trial_tokens_per_second": [
+            9828.176575506579,
+            8591.130348456576
+          ],
+          "vs_same_server_top0": 0.9809620410700522,
+          "vs_base_bf16_top0": 1.1103047086857778,
+          "median_server_e2e_seconds": 4.56423907604767,
+          "median_http_seconds": 6.621726586832665,
+          "wire_bytes_per_token": 2141.23250579834,
+          "client_cpu_seconds": 0.27440440649942843
+        }
+      ]
+    }
+  ]
+}
