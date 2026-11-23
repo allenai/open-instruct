@@ -82,6 +82,20 @@ class NumpyDirIsPopulatedTest(unittest.TestCase):
             self.assertFalse(olmo_core_finetune._numpy_dir_is_populated(tmp))
 
 
+class ExpectedNumpyCacheTest(unittest.TestCase):
+    def test_unset_or_matching_passes(self):
+        numpy_dir = "/cache/numpy_sft/1edd51f3e3-6068a350-rowaligned"
+        olmo_core_finetune._check_expected_numpy_cache(numpy_dir, None)
+        olmo_core_finetune._check_expected_numpy_cache(numpy_dir, "")
+        olmo_core_finetune._check_expected_numpy_cache(numpy_dir, "1edd51f3e3-6068a350-rowaligned")
+
+    def test_other_cache_raises(self):
+        with self.assertRaisesRegex(RuntimeError, "EXPECTED_NUMPY_CACHE=bf82a8fab8-6068a350-rowaligned"):
+            olmo_core_finetune._check_expected_numpy_cache(
+                "/cache/numpy_sft/1edd51f3e3-6068a350-rowaligned", "bf82a8fab8-6068a350-rowaligned"
+            )
+
+
 class DocumentBoundariesFromMetadataTest(unittest.TestCase):
     def test_legacy_layout_cache_dir_is_unchanged(self) -> None:
         # The Dolci-Think cache that H038 and H045 trained on.

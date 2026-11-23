@@ -112,12 +112,11 @@ RECIPES = {
     # a4b-bigbatch (ledger H203). 2 x 8 B300 on holmes with experts sharded 8 ways inside each node; estimated ~38 h
     # of training (~7.4 s/step from the #2291 300-step benchmark with nested checkpoints off).
     "a4b": {
-        # Built from the a4b-bigbatch line with #2291 (open-instruct e436f7647). main's image cannot run A4B: its
-        # MoE needs transformer-engine, which only that line's CUDA 13 Dockerfile installs. The image also holds
-        # scripts/c12/a4b_sft_config.json, which main does not: EMO off, sync_1d EP, flash_2 attention (the
-        # image's FA4 rejects head_dim 256 on SM100), whole-block recompute (recompute_each_block) with the
-        # nested checkpoint_attn / checkpoint_permute_moe_unpermute / checkpoint_second_unpermute off (#2291:
-        # -16% s/step at the same CE; turning off block recompute instead OOMs).
+        # Built from main (this repo's -cuda13-moe image: CUDA 13 + transformer-engine, which the A4B MoE needs).
+        # The model config is configs/olmo_core/olmo35_small_a4b_sft.json: EMO off, sync_1d EP, flash_2 attention
+        # (FA4 rejects head_dim 256 on SM100), whole-block recompute (recompute_each_block) with the nested
+        # checkpoint_attn / checkpoint_permute_moe_unpermute / checkpoint_second_unpermute off (#2291: -16%
+        # s/step at the same CE; turning off block recompute instead OOMs).
         "image": "01M7VCQM65SD251KYS4Z1AD8FG",
         "checkpoint": "/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-4t-decay159k-causal/step162974/model_and_optim",
         # c12r's half epoch: same cache, replay and loader seed, so the same step. EP shards experts over
@@ -127,13 +126,13 @@ RECIPES = {
         "cache": "bf82a8fab8-6068a350-rowaligned",
         "train_args": [
             "--config_name",
-            "scripts/c12/a4b_sft_config.json",
+            "configs/olmo_core/olmo35_small_a4b_sft.json",
             "--tokenizer_name_or_path",
             "allenai/dolma2-tokenizer-olmo35",
             "--tokenizer_revision",
             "8b9717061fae09d5be814373d189919a62a9a00d",
             "--chat_template_name",
-            "olmo35",
+            "tokenizer_default",
             "--reserved_slot_tokens",
             "<think>",
             "</think>",

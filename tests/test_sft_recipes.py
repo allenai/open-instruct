@@ -1,6 +1,7 @@
 """scripts/train/sft.py: every recipe plans a launch, and the A4B recipe keeps what makes it run."""
 
 import importlib.util
+import json
 import pathlib
 import shlex
 import sys
@@ -54,7 +55,15 @@ def test_a4b_recipe(monkeypatch, capsys):
     cmd = plan(monkeypatch, capsys, "--recipe", "a4b")
     # main's image has no transformer-engine, so A4B must run on its own image.
     assert value(cmd, "--image") != sft.RECIPES["c12r"]["image"]
-    assert value(cmd, "--config_name") == "scripts/c12/a4b_sft_config.json"
+    assert value(cmd, "--config_name") == "configs/olmo_core/olmo35_small_a4b_sft.json"
+    # The image runs the config from its copy of this repo, so the file must be here, with whole-block
+    # recompute and the nested checkpoints off (#2291: -16% s/step at the same loss).
+    config = json.loads((SFT_PATH.parents[2] / value(cmd, "--config_name")).read_text())
+    assert config["model"]["recompute_each_block"] is True
+    blocks = [config["model"]["block"], *config["model"]["block_overrides"].values()]
+    for block in blocks:
+        for flag in ("checkpoint_attn", "checkpoint_permute_moe_unpermute", "checkpoint_second_unpermute"):
+            assert block.get(flag) is False, flag
     assert value(cmd, "--model_name_or_path").startswith(
         "/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-4t-decay159k-causal/"
     )
