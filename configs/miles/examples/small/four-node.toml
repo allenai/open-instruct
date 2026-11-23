@@ -122,6 +122,7 @@ save_interval = 10
 skip_eval_before_train = true
 
 [trainer]
+fp32_lm_head = true
 gpus = 8
 expert_parallel_size = 8
 sequence_packing = true

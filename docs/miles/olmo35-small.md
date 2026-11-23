@@ -9,6 +9,10 @@ use the Tiny batch/LR/loss baseline from PR #2271; historical measurements below
 used the earlier settings. They run four mechanics or 30 timing updates without
 checkpoints and do not establish learning quality.
 
+The maintained Small examples opt into [FP32 vocabulary-head output](core.md#fp32-output-vocabulary-head)
+for both the trainer and SGLang. The historical timings and H253 LR comparison
+used the default head precision.
+
 ## Model and start checkpoint
 
 - Start checkpoint: H203 SFT export

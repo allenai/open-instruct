@@ -1108,8 +1108,67 @@ EMPTY_DATASET_STATISTICS = {"per_dataset_stats": [], "dataset_order": []}
 # template (parsing JSON-string schemas) and derives assistant labels from offset mappings.
 # v8: preserve the serialized GPT-2 pre-tokenizer, including Dolma 2's Split regex, when
 # loading tokenizer-only repositories. v9: SFT and DPO derive assistant labels from
-# explicit generation ranges.
-DATASET_CACHE_VERSION = "v9"
+# explicit generation ranges. v10: SFT and DPO decode JSON-string tool-call arguments
+# before rendering, which changes what templates that print a string argument verbatim render.
+DATASET_CACHE_VERSION = "v10"
+
+
+def _serializes_as_utf8(value: Any) -> bool:
+    """Whether a decoded JSON value can be rendered back as UTF-8 text, as templates and tokenizers need."""
+    try:
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except (UnicodeEncodeError, RecursionError):
+        return False
+    return True
+
+
+def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Parse JSON-string `tool_calls[].function.arguments` into mappings before rendering.
+
+    Arrow cannot hold a struct whose field types vary across rows, so datasets prepared for
+    open-instruct SFT (allenai/simfc-thinking-qwen35, allenai/nemotron-sft-agentic-v2-tool-calling-oi)
+    store each call's `arguments` as a JSON string. Chat templates that iterate the arguments
+    as a mapping (the Olmo 3.5 template's `| items`) reject the string, so decode it here.
+    Rows without tool calls, and calls whose arguments are already a mapping, pass through
+    unchanged. So does a string that does not decode to a JSON object (or `null`, read as `{}`),
+    or whose object cannot be written back as UTF-8 JSON (a lone surrogate such as `"\\ud800"`,
+    or nesting at the recursion limit): a template that needs a mapping still rejects it, and one
+    that prints the string or ignores tool calls renders the row as before. Messages are
+    shallow-copied where they change so the dataset row itself is not mutated.
+
+    A template that prints a string argument verbatim and serializes only mappings (Qwen's
+    `is string` branch) now renders its own `tojson` of the decoded mapping, so spacing and
+    escapes can differ from the dataset's string, and one that `tojson`s arguments unconditionally
+    renders the object instead of a JSON-encoded string. Callers: `_tokenize_row_or_mask_out`
+    (the SFT and DPO tulu tokenizers) and the added-token filter. The older `sft_tokenize_v1`,
+    `preference_tokenize_v1` and `rlvr_tokenize_*` paths render arguments as stored.
+    """
+    out: list[dict[str, Any]] = []
+    for message in messages:
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if not tool_calls:
+            out.append(message)
+            continue
+        new_calls = []
+        changed = False
+        for call in tool_calls:
+            function = call.get("function") if isinstance(call, dict) else None
+            arguments = function.get("arguments") if isinstance(function, dict) else None
+            if isinstance(arguments, str):
+                try:
+                    decoded = json.loads(arguments)
+                except (ValueError, RecursionError):
+                    # Malformed JSON, an integer past Python's digit limit, or nesting too deep.
+                    decoded = arguments
+                if decoded is None:
+                    decoded = {}
+                if isinstance(decoded, dict) and _serializes_as_utf8(decoded):
+                    new_calls.append({**call, "function": {**function, "arguments": decoded}})
+                    changed = True
+                    continue
+            new_calls.append(call)
+        out.append({**message, "tool_calls": new_calls} if changed else message)
+    return out
 
 
 def _normalize_tools_for_chat_template(tools: Any) -> list | None:
@@ -1840,6 +1899,7 @@ def _tokenize_row_or_mask_out(
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
+    messages = _normalize_tool_call_arguments(messages)
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
     try:
         input_ids, attention_mask, labels, truncated = _tokenize_tulu_sft_with_assistant_labels(
@@ -2013,7 +2073,8 @@ def sft_added_token_strings_filter_v2(
 def _non_content_texts(row: Mapping[str, Any], sft_messages_key: str) -> list[str]:
     """The other raw fields the olmo35 template renders: reasoning, tool calls and tool schemas."""
     texts = []
-    for message in row[sft_messages_key] or []:
+    # Tool-call arguments as the SFT tokenizers render them: a JSON-escaped spelling reads as the token.
+    for message in _normalize_tool_call_arguments(row[sft_messages_key] or []):
         if isinstance(message, Mapping):
             if isinstance(message.get("reasoning_content"), str):
                 texts.append(message["reasoning_content"])
@@ -2021,7 +2082,7 @@ def _non_content_texts(row: Mapping[str, Any], sft_messages_key: str) -> list[st
             # added token holds a character JSON escapes, so a literal survives `json.dumps`.
             if message.get("tool_calls"):
                 texts.append(json.dumps(message["tool_calls"], ensure_ascii=False))
-    # Decoded as the SFT tokenizers decode it, so a JSON-escaped spelling reads as the token.
+    # Tool schemas, decoded the same way.
     tools = _normalize_tools_for_chat_template(row.get(TOOLS_COLUMN_KEY))
     if tools:
         texts.append(json.dumps(tools, ensure_ascii=False))
