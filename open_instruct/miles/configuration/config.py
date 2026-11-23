@@ -65,7 +65,11 @@ class CoreConfig:
     prepared_batch_overlap: bool = True
     engine_drain_timeout: float = 180.0
     engine_update_timeout: float = 180.0
-    refresh_request_timeout: float = 1800.0
+    # Deadline for a whole refresh request: SGLang queueing, decode and refresh pauses.
+    # 32K-token responses at high engine concurrency took up to ~2,000 s (see #2297).
+    # It is also what ends a request on a stalled engine, so a hang is noticed after
+    # this long. The default router timeout (14,400 s) is above it.
+    refresh_request_timeout: float = 3600.0
     # Refresh only: keep a prompt group when at least this many members succeed
     # and the rest failed with a transport error or refresh_request_timeout;
     # each failed member becomes a fully masked dummy. None keeps whole groups.

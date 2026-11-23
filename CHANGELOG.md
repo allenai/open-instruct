@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 - Remove the dataset readiness scripts (`scripts/data/rl_readiness/`), the standalone IF-target filter and the first-pass data handoff page; the RL Data Workbench now owns qualification, screening and release evidence, while Open Instruct keeps source adapters, catalog resolution, verifiers and the training loader (https://github.com/allenai/open-instruct/pull/2220).
 
 ### Changed
+- SFT and DPO tokenization decode JSON-string `tool_calls[].function.arguments` into mappings before rendering, so templates that iterate them (Olmo 3.5) accept tool data; the dataset cache version goes to v10 (https://github.com/allenai/open-instruct/pull/2300).
+- Raise the MILES `core.refresh_request_timeout` default from 1,800 s to 3,600 s so 32K-token responses at high SGLang concurrency are not timed out and their groups discarded (https://github.com/allenai/open-instruct/pull/2297).
 - Add a CUDA 13 MoE image (`build_image_and_launch.sh --cuda-version 13 --moe`) with transformer-engine 2.16.1, which MoE v2 (`OLMoDDPModel`) SFT needs. The default images are unchanged (https://github.com/allenai/open-instruct/pull/2298).
 - Pin the MILES runtime with writer-only HF export storage and the startup weight-check fix (https://github.com/allenai/open-instruct/pull/2293).
 - Use bounded 10-update recovery saves with preserved 50-/100-update milestones in MILES learning starters, and enable checkpoint/resume in Small four-/eight-node examples (https://github.com/allenai/open-instruct/pull/2289).
@@ -50,6 +52,7 @@ All notable changes to this project will be documented in this file.
 - MILES retains the strict standalone/training scoring check: drift above `core.scoring_check_tolerance` (default 0.001) stops training; eager scoring uses the same activation arithmetic as training (https://github.com/allenai/open-instruct/pull/2187).
 
 ### Added
+- Add opt-in MILES `core.refresh_min_group_size` (refresh only): keep a prompt group when enough members succeed and mask the transport-failed ones as dummies, which the default reward exclusion leaves out of the group baseline; the default `None` keeps whole-group requeue (https://github.com/allenai/open-instruct/pull/2299).
 - Add opt-in MILES historical-priority sampling that visits groups 1–4 in order each epoch, with deterministic within-group shuffle, optional source weights inside the active group, validated labels, and recoverable epoch cursors (https://github.com/allenai/open-instruct/pull/2251).
 - Add opt-in MILES training prompt exclusion with recorded source counts, preserved mixture weights, and empty-source protection (https://github.com/allenai/open-instruct/pull/2244).
 - Add versioned long-context dataset adapters and deterministic reward contracts, for consuming Workbench-prepared DocQA-RL and GoLongRL sources; preserve routed adapter identity and external pool assignments (https://github.com/allenai/open-instruct/pull/2199).
