@@ -15,7 +15,6 @@ import argparse
 import importlib
 import json
 import sys
-import traceback
 from pathlib import Path
 
 from open_instruct.miles.configuration import advisories, specs, validation
@@ -115,7 +114,7 @@ def execute(parser, options):
         # but do not let an abandoned tracking close or a hung shutdown hold the job.
         code = error.code if isinstance(error, SystemExit) and isinstance(error.code, int) else 1
         if shutdown.abandoned():
-            traceback.print_exc()
+            shutdown.print_exception()
         shutdown.finish_process(code)
         raise
     # Exit through normal interpreter shutdown, or at once if tracking close was

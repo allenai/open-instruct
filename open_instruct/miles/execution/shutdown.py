@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import threading
+import traceback
 
 from open_instruct import logger_utils
 
@@ -23,9 +24,9 @@ TRACKING_CLOSE_TIMEOUT = 120
 RAY_SHUTDOWN_TIMEOUT = 60
 # Upper bound on normal interpreter shutdown after the result is recorded.
 EXIT_WATCHDOG_SECONDS = 300
-# Logging and flushing take handler and stream locks that an abandoned or stuck
-# thread may hold, so on the forced-exit paths they run in a daemon thread for at
-# most this long.
+# Logging, flushing and stderr writes can block on locks an abandoned or stuck
+# thread holds, or on a full output pipe, so on the forced-exit paths they run in a
+# daemon thread for at most this long.
 LOCKED_IO_TIMEOUT = 5
 
 # Names of bounded operations whose threads were abandoned in this process.
@@ -56,8 +57,12 @@ def run_bounded(operation, name, timeout=TRACKING_CLOSE_TIMEOUT):
     thread.join(timeout)
     if thread.is_alive():
         _abandoned.append(name)
-        faulthandler.dump_traceback(all_threads=True)
-        _bounded(lambda: logger.warning("%s did not finish within %ss; continuing shutdown without it", name, timeout))
+
+        def report():
+            logger.warning("%s did not finish within %ss; continuing shutdown without it", name, timeout)
+            faulthandler.dump_traceback(all_threads=True)
+
+        _bounded(report)
         return False
     return True
 
@@ -113,13 +118,15 @@ def arm_exit_watchdog(code, timeout=None):
 
     timeout = EXIT_WATCHDOG_SECONDS if timeout is None else timeout
 
+    def report():
+        message = f"Process still alive {timeout}s after its result was recorded; forcing exit {code}\n"
+        os.write(2, message.encode())
+        faulthandler.dump_traceback(all_threads=True)
+
     def expire():
-        # Only lock-free writes here: a thread stuck in shutdown may hold logging or
-        # stream locks.
+        # Diagnostics may block on a lock or a full stderr pipe; never wait on them long.
         with contextlib.suppress(Exception):
-            message = f"Process still alive {timeout}s after its result was recorded; forcing exit {code}\n"
-            os.write(2, message.encode())
-            faulthandler.dump_traceback(all_threads=True)
+            _bounded(report, timeout=1)
         os._exit(code)
 
     timer = threading.Timer(timeout, expire)
@@ -147,3 +154,9 @@ def _flush_output():
     for stream in (sys.stdout, sys.stderr):
         with contextlib.suppress(Exception):
             stream.flush()
+
+
+def print_exception():
+    """Print the current exception's traceback without risking a blocked exit."""
+    info = sys.exc_info()
+    _bounded(lambda: traceback.print_exception(*info))

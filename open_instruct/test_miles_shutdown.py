@@ -267,3 +267,41 @@ def test_forced_exit_survives_a_held_logging_lock(scenario, code):
     )
     assert result.returncode == code
     assert time.monotonic() - started < 30
+
+
+FULL_STDERR = """
+import fcntl, os, threading
+from open_instruct.miles.execution import shutdown
+shutdown.LOCKED_IO_TIMEOUT = 0.2
+read, write = os.pipe()
+fcntl.fcntl(write, fcntl.F_SETFL, os.O_NONBLOCK)
+try:
+    while True:
+        os.write(write, b"x" * 65536)  # Fill the pipe; nobody reads it.
+except BlockingIOError:
+    pass
+fcntl.fcntl(write, fcntl.F_SETFL, 0)
+os.dup2(write, 2)
+threading.Thread(target=threading.Event().wait, daemon=False).start()
+"""
+
+
+@pytest.mark.parametrize(
+    ("scenario", "code"),
+    [
+        ("shutdown.EXIT_WATCHDOG_SECONDS = 0.3\nshutdown.enable_exit_watchdog()\nshutdown.finish_process(7)", 7),
+        (
+            "shutdown.run_bounded(threading.Event().wait, 'tracking close', timeout=0.1)\n"
+            "try:\n    raise RuntimeError('training failed')\nexcept RuntimeError:\n"
+            "    shutdown.print_exception()\n    shutdown.finish_process(1)",
+            1,
+        ),
+    ],
+)
+def test_forced_exit_survives_a_full_stderr_pipe(scenario, code):
+    started = time.monotonic()
+    result = subprocess.run(
+        [sys.executable, "-c", FULL_STDERR + scenario], cwd=Path(__file__).parent.parent, timeout=60
+    )
+    assert result.returncode == code
+    assert time.monotonic() - started < 30
