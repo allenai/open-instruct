@@ -53,9 +53,11 @@ cluster = "ai2/holmes"
 priority = "high"
 # Historical budget used the older batch without saves; remeasure current wall time and save cost.
 min_runtime = "4h"
-# Beaker cancels a job at its timeout; autoResume does not requeue a timed-out job. core.max_run_seconds
-# (22 h) stops and saves first, leaving 2 h for the last collection, the forced save and teardown.
-timeout = "24h"
+# One long job for the whole run: set the timeout above the expected run length
+# (~3.4 days for 660 updates on 4 nodes, so use ~96h for that).
+# Beaker cancels a job at its timeout (autoResume does not requeue it); preemptions auto-resume
+# from the last save. ai2/holmes has no maximum job duration.
+timeout = "72h"
 auto_resume = true
 gpus_per_replica = 8
 memory = "1500 GiB"
@@ -171,9 +173,9 @@ reward_zero_truncated = true
 checkpoint_keep_last = 2
 checkpoint_keep_every = 100
 save_final_checkpoint = true
-# Resumable wall-clock stop (22 h of driver time): saves at the next completed collection and exits
-# with workflow "stopped". Resubmit the unchanged TOML with the same image to continue.
-max_run_seconds = 79200.0
+# Optional resumable wall-clock stop, only for clusters or budgets that cap job length: saves at the
+# next completed collection and exits with workflow "stopped"; resubmit the unchanged TOML to continue.
+# max_run_seconds = 79200.0
 publication_mode = "refresh"
 # Matches refresh_request_timeout for evaluation and final HF export drains (terminal refresh cleanup cancels unused generation).
 engine_drain_timeout = 3600.0

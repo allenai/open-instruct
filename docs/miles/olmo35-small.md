@@ -81,8 +81,8 @@ checkpoints and do not establish learning quality.
   overhead relative to the original mechanics run and remain off in timing recipes
   (which retain the default startup scoring check).
 - The four/eight-node recipes request 4h/3h of protected runtime, respectively,
-  based on historical startup and update times plus headroom. They set a 24h job
-  timeout with a 22h `core.max_run_seconds` stop; see [Long runs](#long-runs).
+  based on historical startup and update times plus headroom. They set a 72h job
+  timeout so a multi-day run is one job; see [Long runs](#long-runs).
 
 ## Results
 
@@ -304,8 +304,9 @@ See [the shared checkpoint policy](../../configs/miles/examples/README.md#recove
 
 ## Long runs
 
-The four- and eight-node starters are set up so that raising `training.num_rollouts`
-is the only change a multi-day run needs. Check each item below before launch.
+The four- and eight-node starters are set up so that raising `training.num_rollouts`,
+and `launch.timeout` when the run is expected to exceed 72h, are the only changes a
+multi-day run needs. Check each item below before launch.
 
 ### Mounts
 
@@ -332,35 +333,37 @@ again before launch with a CPU job that mounts the bucket and runs
 `df -h /weka/olmo-3p5-post-checkpoints`. Do not write to `olmo-3p5-checkpoints`
 (95% used on the same date).
 
-### Job timeout, wall-clock stop and resubmission
+### Job timeout and preemption
+
+Run a multi-day job as one Beaker job with a `launch.timeout` longer than the expected
+run. The starters set `timeout = "72h"`. On 8 nodes (eight-node.toml) updates took
+~264 s vs ~402 s on 4 nodes (updates 11-30 means at batch 2,048), so a 660-update run
+is about 2.3 days on 8 nodes and 3.4 days on 4 nodes with startup (about 35-40
+minutes to the end of the first update) and saves. 72h covers the eight-node run; for
+660 updates on 4 nodes raise it to about 96h. `ai2/holmes` has no maximum job
+duration (`beaker cluster get ai2/holmes`), so the spec timeout is the only limit.
 
 Beaker cancels a job when its `timeout` expires. A canceled job is not preempted:
 `autoResume` requeues only preempted jobs, and Beaker's task retries apply only to
 failed tasks (the launcher does not set them). A timeout therefore ends the run
-without a final save. `launch.auto_resume` covers preemption only.
+without a final save, so leave headroom. Preemptions are handled by
+`launch.auto_resume`: Beaker restarts the job and the run loads the newest complete
+checkpoint under the same `output.root`; the updates since that save are redone.
+Every start appends to `attempts.json`; if you set `launch.max_retries`, allow for
+preemptions (default -1, no cap).
 
-For a run longer than one job, the starters set `core.max_run_seconds = 79200`
-(22 h of driver wall clock, counted from driver start) under a 24h `launch.timeout`.
-At the first completed collection after 22 h, the run forces a native save and exits
-with `workflow.json` status `stopped`. The final HF export and final evaluation are
-skipped. The remaining 2 h cover the last collection (~6-8 min at batch 2,048), the
-forced save (~10-20 min) and teardown. To continue:
+If a job does hit its timeout, resubmit the unchanged TOML with the same image:
+`MILES_EXISTING_IMAGE=<image id from the launch receipt> python -m open_instruct.miles run <toml>`.
+The run resumes from the last periodic save. `beaker experiment resume` applies only
+to preempted experiments, so it does not restart a timed-out run.
 
-1. Confirm the stop: the job exited 0, `OUTPUT/workflow.json` says `stopped`, and the
-   newest checkpoint has its completion marker.
-2. Resubmit the unchanged TOML with the same image:
-   `MILES_EXISTING_IMAGE=<image id from the launch receipt> python -m open_instruct.miles run <toml>`.
-   The run loads the newest complete checkpoint under the same `output.root`. The
-   updates since the last save are redone; with a forced save at the stop, that is none.
-   `beaker experiment resume` applies only to preempted experiments, so it does not
-   restart a stopped or timed-out run.
-3. Every start, including resubmissions, appends to `attempts.json`. If you set
-   `launch.max_retries`, count planned resubmissions in it (default -1, no cap).
-
-Each resubmission pays startup again (about 35-40 minutes to the end of the first
-update, plus checkpoint load). A 660-update run at ~370 s/update is about 3 days of
-training, so plan on three or four jobs. On 8 nodes (eight-node.toml) updates took ~264 s
-vs ~402 s on 4 nodes (updates 11-30 means at batch 2,048), ~2.0 vs ~3.1 days per 660 updates (1.5x faster).
+`core.max_run_seconds` is optional, for clusters or budgets that cap job length. It
+counts driver wall clock from driver start; at the first completed collection after
+it, the run forces a native save and exits with `workflow.json` status `stopped`
+(final HF export and final evaluation skipped), and the resubmission above continues
+it with no updates redone. Set it below the job timeout with room for the last
+collection (~6-8 min at batch 2,048), the forced save (~10-20 min) and teardown, e.g.
+`79200` (22 h) under a 24h cap. Each resubmission pays startup again.
 
 All attempts on one `output.root` log to one W&B run. On first start the workflow
 writes a random id to `OUTPUT/wandb_run_id` (with `OUTPUT/wandb_run_id.json`
@@ -375,9 +378,6 @@ needs a new `output.root`.
 MILES logs without an explicit W&B step, so updates redone after a resume (those
 since the last save) appear again as extra points for those steps; the later points
 are the ones the resumed run trained from.
-
-If a job does hit its timeout, the run resumes from the last periodic save when you
-resubmit as above; the updates since that save are redone.
 
 ### Evaluation snapshots
 
