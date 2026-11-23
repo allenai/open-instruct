@@ -2,6 +2,7 @@
 
 import gzip
 import json
+from pathlib import Path
 
 import pytest
 from scripts.miles import rerender_prompts
@@ -141,3 +142,23 @@ def test_null_metadata_reports_source_and_row(tmp_path):
     write(source, [{"input": "x", "metadata": None}])
     with pytest.raises(rerender_prompts.RerenderError, match="row 1: row has no metadata object"):
         rerender_prompts.rerender(source, tmp_path / "out.jsonl.gz", new)
+
+
+def test_fails_closed_without_hard_links(tmp_path, monkeypatch):
+    old = run_data._tokenizer(str(checkpoint(tmp_path, OLD_TEMPLATE)))
+    new = run_data._tokenizer(str(checkpoint(tmp_path, NEW_TEMPLATE)))
+    source = tmp_path / "in.jsonl.gz"
+    write(source, rows(old))
+    output = tmp_path / "out.jsonl.gz"
+
+    def no_links(src, dst):
+        # Another invocation publishes first; no fallback may replace it.
+        Path(dst).write_bytes(b"concurrent output")
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(rerender_prompts.os, "link", no_links)
+    with pytest.raises(rerender_prompts.RerenderError, match="hard links"):
+        rerender_prompts.rerender(source, output, new)
+    assert output.read_bytes() == b"concurrent output"
+    assert not (tmp_path / "out.jsonl.gz.report.json").exists()
+    assert not list(tmp_path.glob(".out.jsonl.gz.*"))

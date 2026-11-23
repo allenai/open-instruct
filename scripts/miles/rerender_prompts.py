@@ -21,7 +21,6 @@ atomically to a new path, with a JSON report beside it.
 
 import argparse
 import collections
-import errno
 import gzip
 import hashlib
 import json
@@ -53,18 +52,23 @@ def _sha256(path):
 
 
 def _publish(staged, output):
-    """Move `staged` to `output` without replacing an existing file."""
+    """Move `staged` to `output` atomically, never replacing an existing file."""
     try:
         os.link(staged, output)
     except FileExistsError:
         raise RerenderError(f"{output} already exists; write to a new path") from None
     except OSError as error:
-        if error.errno not in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV):
-            raise
-        # Filesystems without hard links: best-effort no-clobber check before the rename.
-        if os.path.lexists(output):
-            raise RerenderError(f"{output} already exists; write to a new path") from None
-        os.replace(staged, output)
+        # No atomic no-clobber publish without hard links; fail closed.
+        raise RerenderError(
+            f"Cannot publish {output} without risking an overwrite ({error.strerror}); "
+            "write the output on a filesystem that supports hard links"
+        ) from error
+
+
+def _stage(output, suffix):
+    descriptor, staged = tempfile.mkstemp(prefix=f".{output.name}.", suffix=suffix, dir=output.parent)
+    os.close(descriptor)
+    return Path(staged)
 
 
 def template_sha256(tokenizer):
@@ -117,11 +121,8 @@ def rerender(source, output, tokenizer, *, examples=3):
     old_hashes = collections.Counter()
     changed_examples = []
     output.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(
-        prefix=f".{output.name}.", suffix=".tmp.gz" if output.name.endswith(".gz") else ".tmp", dir=output.parent
-    )
-    os.close(descriptor)
-    temporary = Path(temporary)
+    temporary = _stage(output, ".tmp.gz" if output.name.endswith(".gz") else ".tmp")
+    staged_report = _stage(output, ".report.tmp")
     try:
         with _open(source, "r") as reader, _open(temporary, "w") as writer:
             for index, line in enumerate(reader, 1):
@@ -143,23 +144,26 @@ def rerender(source, output, tokenizer, *, examples=3):
                         {"row": index, "old_tail": str(old_input)[-300:], "new_tail": row["input"][-300:]}
                     )
                 writer.write(json.dumps(row, ensure_ascii=False) + "\n")
+        report = {
+            "source": str(source),
+            "source_sha256": _sha256(source),
+            "output": str(output),
+            "output_sha256": _sha256(temporary),
+            "rendering_template_sha256": new_hash,
+            "rows": counts["changed"] + counts["identical"],
+            "inputs_changed": counts["changed"],
+            "inputs_identical": counts["identical"],
+            "previous_template_hashes": dict(old_hashes),
+            "changed_examples": changed_examples,
+        }
+        # Write the report in full before publishing anything, so a write error
+        # leaves nothing behind that would block a retry.
+        staged_report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         _publish(temporary, output)
+        _publish(staged_report, report_path)
     finally:
         temporary.unlink(missing_ok=True)
-    report = {
-        "source": str(source),
-        "source_sha256": _sha256(source),
-        "output": str(output),
-        "output_sha256": _sha256(output),
-        "rendering_template_sha256": new_hash,
-        "rows": counts["changed"] + counts["identical"],
-        "inputs_changed": counts["changed"],
-        "inputs_identical": counts["identical"],
-        "previous_template_hashes": dict(old_hashes),
-        "changed_examples": changed_examples,
-    }
-    with open(report_path, "x", encoding="utf-8") as stream:
-        stream.write(json.dumps(report, indent=2) + "\n")
+        staged_report.unlink(missing_ok=True)
     return report
 
 
