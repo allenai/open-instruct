@@ -15,6 +15,7 @@ import argparse
 import importlib
 import json
 import sys
+import traceback
 from pathlib import Path
 
 from open_instruct.miles.configuration import advisories, specs, validation
@@ -104,15 +105,24 @@ def execute(parser, options):
             workflow.parse_runtime(config)
             print("MILES arguments validated for OLMo-core")
         return
-    if structured:
-        workflow.execute(config)
-    else:
-        workflow.train_config(config)
-    # The result is recorded (workflow.json for run files). Exit now so a stray
-    # non-daemon thread, such as a stuck W&B close, cannot keep the job alive.
-    # Failures raise above and keep their normal exit codes.
-    shutdown.exit_process(0)
+    try:
+        if structured:
+            workflow.execute(config)
+        else:
+            workflow.train_config(config)
+    except BaseException as error:
+        # The failure is recorded (workflow.json for run files). Keep its exit code,
+        # but do not let an abandoned tracking close or a hung shutdown hold the job.
+        code = error.code if isinstance(error, SystemExit) and isinstance(error.code, int) else 1
+        if shutdown.abandoned():
+            traceback.print_exc()
+        shutdown.finish_process(code)
+        raise
+    # Exit through normal interpreter shutdown, or at once if tracking close was
+    # abandoned, so a stray non-daemon thread cannot keep the job alive.
+    shutdown.finish_process(0)
 
 
 if __name__ == "__main__":
+    shutdown.enable_exit_watchdog()
     main()

@@ -1,7 +1,8 @@
 # OLMo 3.5 Small ("Hero Small", A4B, olmo35-small-e256k8-sh2x) on B300: 8 nodes / 64 GPUs.
 # 16 trainer GPUs (2 nodes x EP8), 47 TP1 engines at admission R=224, 1 Qwen3-32B judge.
 # Measured at this batch (256 prompts x 8, R=224, refresh_request_timeout 3600 s, buffer factor 1.5,
-# 400 GiB shm, 360 GB Ray object store; H258 SFT start, H258-template Dolci; kf-hero-miles-real-8node-b,
+# 400 GiB shm, 360 GB Ray object store; measured from the H258 SFT start with H258-template Dolci,
+# while this file ships the H203 start below; kf-hero-miles-real-8node-b,
 # Beaker 01M7Y46DG23X1WXQCDNR2RWZDS):
 #   updates 11-30 263.8 s/update mean (264.9 median) vs 402.5 s on 4 nodes (1.5x), train-bound
 #   (train 244 s, generation wait 0.3 s, publication 19 s); 0 request timeouts, all 30 updates.

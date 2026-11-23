@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import json
+import subprocess
 import sys
 import threading
 import time
@@ -20,6 +21,7 @@ class Exited(BaseException):
 
 
 def test_run_bounded_abandons_a_blocked_operation(monkeypatch):
+    monkeypatch.setattr(shutdown, "_abandoned", [])
     release = threading.Event()
     dumps = []
     monkeypatch.setattr(shutdown.faulthandler, "dump_traceback", lambda **kw: dumps.append(kw))
@@ -30,14 +32,18 @@ def test_run_bounded_abandons_a_blocked_operation(monkeypatch):
         release.set()
     assert time.monotonic() - started < 5
     assert dumps == [{"all_threads": True}]
+    assert shutdown.abandoned() == ["blocked"]
 
 
-def test_run_bounded_logs_operation_errors():
+def test_run_bounded_logs_operation_errors(monkeypatch):
+    monkeypatch.setattr(shutdown, "_abandoned", [])
+
     def fail():
         raise RuntimeError("wandb unavailable")
 
     assert shutdown.run_bounded(fail, "failing", timeout=5) is True
     assert shutdown.run_bounded(lambda: None, "quick", timeout=5) is True
+    assert shutdown.abandoned() == []
 
 
 def load_driver(monkeypatch, finish_tracking):
@@ -86,6 +92,7 @@ def test_driver_returns_when_wandb_finish_blocks(monkeypatch):
         release.wait(30)
 
     driver = load_driver(monkeypatch, blocked_finish)
+    monkeypatch.setattr(driver.shutdown, "_abandoned", [])
     monkeypatch.setattr(driver.shutdown, "TRACKING_CLOSE_TIMEOUT", 0.2)
     monkeypatch.setattr(driver.shutdown.faulthandler, "dump_traceback", lambda **kw: None)
     monkeypatch.setattr(driver.startup, "wait_ready", AsyncMock(side_effect=RuntimeError("ray unavailable")))
@@ -101,6 +108,8 @@ def test_driver_returns_when_wandb_finish_blocks(monkeypatch):
         release.set()
     assert entered.is_set()
     assert time.monotonic() - started < 5
+    # The CLI sees the abandoned close and forces the failure exit.
+    assert driver.shutdown.abandoned() == ["tracking close"]
 
 
 def write_run(tmp_path):
@@ -109,30 +118,114 @@ def write_run(tmp_path):
     return path
 
 
-def test_successful_train_exits_process(tmp_path, monkeypatch):
-    exits = []
+class FakeRay:
+    def __init__(self):
+        self.calls = []
+
+    def is_initialized(self):
+        return True
+
+    def shutdown(self):
+        self.calls.append("shutdown")
+
+
+@pytest.fixture
+def exit_hooks(monkeypatch):
+    """Record forced exits, Ray shutdowns and watchdogs instead of performing them."""
+    hooks = SimpleNamespace(exits=[], watchdogs=[], ray=FakeRay())
 
     def fake_exit(code):
-        exits.append(code)
+        hooks.exits.append(code)
         raise Exited
 
+    monkeypatch.setattr(shutdown, "_abandoned", [])
+    monkeypatch.setattr(shutdown, "_exit_watchdog_enabled", True)
     monkeypatch.setattr(shutdown.os, "_exit", fake_exit)
+    monkeypatch.setattr(shutdown, "arm_exit_watchdog", hooks.watchdogs.append)
+    monkeypatch.setitem(sys.modules, "ray", hooks.ray)
+    return hooks
+
+
+def run_cli(tmp_path, monkeypatch, train):
     monkeypatch.setattr(sys, "argv", ["miles", "train", str(write_run(tmp_path))])
-    monkeypatch.setattr(cli.importlib, "import_module", lambda name: SimpleNamespace(train_config=lambda c: {}))
+    monkeypatch.setattr(cli.importlib, "import_module", lambda name: SimpleNamespace(train_config=train))
+    cli.main()
+
+
+def test_successful_train_exits_normally_with_a_watchdog(tmp_path, monkeypatch, exit_hooks):
+    run_cli(tmp_path, monkeypatch, lambda config: {})
+    assert exit_hooks.exits == [] and exit_hooks.ray.calls == []
+    assert exit_hooks.watchdogs == [0]
+
+
+def test_successful_train_with_abandoned_close_shuts_down_ray_then_exits(tmp_path, monkeypatch, exit_hooks):
+    def train(config):
+        shutdown._abandoned.append("tracking close")
+        return {}
+
     with pytest.raises(Exited):
-        cli.main()
-    assert exits == [0]
+        run_cli(tmp_path, monkeypatch, train)
+    assert exit_hooks.ray.calls == ["shutdown"]
+    assert exit_hooks.exits == [0]
 
 
-def test_failed_train_keeps_its_exception(tmp_path, monkeypatch):
-    exit_hook = Mock()
-    monkeypatch.setattr(shutdown.os, "_exit", exit_hook)
-    monkeypatch.setattr(sys, "argv", ["miles", "train", str(write_run(tmp_path))])
-
+def test_failed_train_keeps_its_exception(tmp_path, monkeypatch, exit_hooks):
     def broken(config):
         raise RuntimeError("training failed")
 
-    monkeypatch.setattr(cli.importlib, "import_module", lambda name: SimpleNamespace(train_config=broken))
     with pytest.raises(RuntimeError, match="training failed"):
-        cli.main()
-    exit_hook.assert_not_called()
+        run_cli(tmp_path, monkeypatch, broken)
+    assert exit_hooks.exits == []
+    assert exit_hooks.watchdogs == [1]
+
+
+def test_failed_train_with_abandoned_close_exits_nonzero(tmp_path, monkeypatch, exit_hooks, capsys):
+    def broken(config):
+        shutdown._abandoned.append("tracking close")
+        raise RuntimeError("training failed")
+
+    with pytest.raises(Exited):
+        run_cli(tmp_path, monkeypatch, broken)
+    assert exit_hooks.ray.calls == ["shutdown"]
+    assert exit_hooks.exits == [1]
+    assert "training failed" in capsys.readouterr().err
+
+
+def test_watchdog_is_off_unless_the_entry_point_enables_it(monkeypatch):
+    armed = []
+    monkeypatch.setattr(shutdown, "_abandoned", [])
+    monkeypatch.setattr(shutdown, "_exit_watchdog_enabled", False)
+    monkeypatch.setattr(shutdown, "arm_exit_watchdog", armed.append)
+    shutdown.finish_process(0)
+    assert armed == []
+
+
+def test_watchdog_forces_exit_with_the_recorded_code(monkeypatch):
+    exited = threading.Event()
+    codes = []
+
+    def fake_exit(code):
+        codes.append(code)
+        exited.set()
+
+    monkeypatch.setattr(shutdown, "exit_process", fake_exit)
+    monkeypatch.setattr(shutdown.faulthandler, "dump_traceback", lambda **kw: None)
+    timer = shutdown.arm_exit_watchdog(3, timeout=0.05)
+    assert timer.daemon
+    assert exited.wait(5)
+    assert codes == [3]
+
+
+def test_watchdog_ends_a_real_process_held_by_a_non_daemon_thread():
+    script = """
+import threading
+from open_instruct.miles.execution import shutdown
+shutdown.EXIT_WATCHDOG_SECONDS = 0.5
+shutdown.enable_exit_watchdog()
+threading.Thread(target=threading.Event().wait, daemon=False).start()
+shutdown.finish_process(4)
+"""
+    started = time.monotonic()
+    result = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).parent.parent, timeout=60)
+    assert result.returncode == 4
+    assert time.monotonic() - started < 30

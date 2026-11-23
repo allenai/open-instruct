@@ -54,7 +54,8 @@ priority = "high"
 # Historical budget used the older batch without saves; remeasure current wall time and save cost.
 min_runtime = "4h"
 # One long job for the whole run: set the timeout above the expected run length
-# (~3.4 days for 660 updates on 4 nodes, so use ~96h for that).
+# (~3.4 days for 660 updates on 4 nodes, so raise this to ~96h for that; 72h covers
+# ~530 updates). Set it before the first launch: the timeout is part of the resume fingerprint.
 # Beaker cancels a job at its timeout (autoResume does not requeue it); preemptions auto-resume
 # from the last save. ai2/holmes has no maximum job duration.
 timeout = "72h"

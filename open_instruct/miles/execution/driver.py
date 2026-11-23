@@ -447,9 +447,11 @@ async def train(args, *, export_hf=None):
             logger.exception("Optional compiler-cache finalization failed")
         # wandb.finish/teardown once hung the driver for an hour after every other
         # cleanup stage finished; bound it so the workflow can still record completion.
+        # A timeout is recorded in shutdown.abandoned(); the CLI then forces the exit
+        # with the run's success or failure code.
         shutdown.run_bounded(
             partial(close_tracking, failure is not None or cleanup_error is not None),
-            "W&B finish",
+            "tracking close",
             timeout=shutdown.TRACKING_CLOSE_TIMEOUT,
         )
         if failure is None and cleanup_error is not None:

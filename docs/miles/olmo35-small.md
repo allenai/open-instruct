@@ -50,7 +50,7 @@ checkpoints and do not establish learning quality.
 - Engine at R=160 (previous four-node example): KDA state for 192 slots 26.7 GB (SSM 26.39 + conv
   0.31); KV pool auto-sized to 3,823,488 tokens, 72.9 GB (K 36.46 + V 36.46); 32.0 GB free
   after pools and 30.5 GB after CUDA graphs at `mem_fraction_static` 0.88.
-- Engine at R=224 (four-node example): 256 KDA slots; KV pool auto-sized to 3,919,232 tokens
+- Engine at R=224 (four- and eight-node examples): 256 KDA slots; KV pool auto-sized to 3,919,232 tokens
   at `mem_fraction_static` 0.92; 19.7 GB free after CUDA graphs; full-attention KV peak 71%.
 
 ## Settings that matter
@@ -229,8 +229,7 @@ One run per arm; no seed repeat. The eight-node R=224 settings come from one 30-
 
 - `fa4` attention: crashes on head_dim 256 (above).
 - R=224 at the default 1800 s request timeout and R=256: slower than R=160 and failing on request
-  timeouts (above); R=256 also fills the KV pool. R>96 on 8 nodes was untested when this list was
-  written; `eight-node.toml` now uses R=224 with the 3600 s timeout (see its header).
+  timeouts (above); R=256 also fills the KV pool.
 - R=64: slower (396 vs 302 s/update); engines gain throughput up to R=96. In single-engine
   forced decodes, R=144 matched R=96 and R=192 gave +19% total tok/s with each request ~40%
   slower.
@@ -306,8 +305,11 @@ See [the shared checkpoint policy](../../configs/miles/examples/README.md#recove
 ## Long runs
 
 The four- and eight-node starters are set up so that raising `training.num_rollouts`,
-and `launch.timeout` when the run is expected to exceed 72h, are the only changes a
-multi-day run needs. Check each item below before launch.
+and `launch.timeout` when the run is expected to exceed the starter's timeout (72h
+four-node, 120h eight-node), are the only changes a multi-day run needs. Set
+`launch.timeout` before the first launch: it is part of the resume fingerprint, so a
+resubmission with a different timeout stops with "Run configuration changed". Check each
+item below before launch.
 
 ### Mounts
 
@@ -326,9 +328,10 @@ Write run outputs to `/weka/olmo-3p5-post-checkpoints/YOUR_USERNAME/miles/...`, 
 `oe-training-default` (timing4 failed when that volume filled). One A4B native save
 is about 0.81-0.87 TB (model, optimizer and RNG state). With `checkpoint_keep_last
 = 2`, `checkpoint_keep_every = 100` and the final save, a 660-update run peaks at
-about 2 rolling + 6 milestones + 1 final = 9 saves, ~7.7 TB, plus ~145 GB per
-evaluation snapshot if enabled (14 snapshots at interval 50, ~2 TB). Rolling saves
-roll off only after the next save completes, so budget one extra save of headroom.
+about 2 rolling + 6 milestones + 1 final = 9 saves, ~7.7 TB (the figure in the
+starters), plus ~145 GB per evaluation snapshot if enabled (14 snapshots at interval
+50, ~2 TB). Rolling saves roll off only after the next save completes, so budget one
+extra save of headroom: ~8.5 TB without snapshots.
 On November 20, 2026 the volume had 81 TB free of 180 TB (56% used); measure it
 again before launch with a CPU job that mounts the bucket and runs
 `df -h /weka/olmo-3p5-post-checkpoints`. Do not write to `olmo-3p5-checkpoints`
@@ -366,7 +369,8 @@ it with no updates redone. Set it below the job timeout with room for the last
 collection (~6-8 min at batch 2,048), the forced save (~10-20 min) and teardown, e.g.
 `79200` (22 h) under a 24h cap. Each resubmission pays startup again.
 
-All attempts on one `output.root` log to one W&B run. On first start the workflow
+With `miles.wandb_mode = "online"`, all attempts on one `output.root` log to one W&B
+run (offline mode, which the starters use, is covered below). On first start the workflow
 writes a random id to `OUTPUT/wandb_run_id` (with `OUTPUT/wandb_run_id.json`
 recording when it was created and a hash of the model source, data section and W&B
 project, entity and group). Every later start, whether a preemption auto-resume or a
@@ -379,7 +383,8 @@ needs a new `output.root`.
 This continuity needs `miles.wandb_mode = "online"`. The starters log offline, and
 W&B offline mode ignores `resume`: each attempt writes its own local run directory
 under `OUTPUT/wandb/` with the same id, so syncing them later does not append one
-attempt's history to the previous one automatically.
+attempt's history to the previous one automatically. For one continuous W&B history,
+switch to online mode before the first launch.
 
 MILES logs without an explicit W&B step, so updates redone after a resume (those
 since the last save) appear again as extra points for those steps; the later points
@@ -412,5 +417,6 @@ inputs". Re-render the prompts with the new checkpoint's tokenizer before launch
 The four- and eight-node starters set `core.engine_drain_timeout = 3600`, matching
 `core.refresh_request_timeout`, so a final drain or a shared-engine evaluation drain
 is not cut off at 900 s (the `two-node-mech.toml` mechanics check keeps 900 s). With
-`export_hf = false` and background evaluation, no stage that drains generation runs
-before shutdown, and terminal refresh cleanup cancels unused generation.
+the shipped `export_hf = false` and no evaluation block (or the commented background
+evaluation block enabled), no stage that drains generation runs before shutdown, and
+terminal refresh cleanup cancels unused generation.
