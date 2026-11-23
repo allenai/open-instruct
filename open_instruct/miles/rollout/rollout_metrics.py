@@ -17,6 +17,7 @@ from miles.utils.tracking_utils import tracking
 
 from open_instruct import logger_utils
 from open_instruct.miles.rewards import rewards
+from open_instruct.miles.rollout import prefilter
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -107,6 +108,15 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
     # counter, which is transported from async producer/buffer actors as well.
     omitted = (rollout_extra_metrics or {}).get("rollout/dynamic_filter/drop_group_has_missing_reward", 0)
     metrics = {"rollout/verification/omitted_records": omitted}
+    # Groups that reached the group filter since the previous update, kept or dropped.
+    prefilter_metrics = prefilter.drain(rollout_id)
+    if prefilter_metrics:
+        logger.info(
+            "prefilter %d: %s",
+            rollout_id,
+            {key: value for key, value in prefilter_metrics.items() if key.startswith("rollout/prefilter/all/")},
+        )
+        metrics.update(prefilter_metrics)
     if omitted:
         logger.warning("verification %d: omitted %d prompt records with missing rewards", rollout_id, omitted)
     if samples:

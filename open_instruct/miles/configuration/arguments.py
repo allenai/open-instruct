@@ -11,6 +11,7 @@ from miles.backends.fsdp_utils.arguments import load_fsdp_args
 
 from open_instruct.miles.configuration import constraints
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.rollout import prefilter
 
 
 def load_core_args(extra_args_provider):
@@ -25,7 +26,9 @@ def load_core_args(extra_args_provider):
     fields = constraints.native_values(args, supplied)
     config = RunConfig(core, fields)
     config.validate()
-    args.dynamic_sampling_filter_path = config.resolved_miles().get("dynamic_sampling_filter_path")
+    # The observer records each group's pre-filter outcome, then applies the configured filter unchanged.
+    args.prefilter_inner_filter_path = config.resolved_miles().get("dynamic_sampling_filter_path")
+    args.dynamic_sampling_filter_path = prefilter.OBSERVED_FILTER
     args.rollout_sample_filter_path = config.resolved_miles().get("rollout_sample_filter_path")
     args.core_records_factory = "open_instruct.miles.datasets.recording.create_recorder"
     args.olmo_core = core

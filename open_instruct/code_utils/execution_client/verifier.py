@@ -19,6 +19,8 @@ import requests
 
 from open_instruct.code_utils.execution_client import CodeExecutionClient, ServiceError, protocol
 
+# Per-test outcome letters in diagnostics; "?" marks a status this map does not know.
+OUTCOME_CODES = {"passed": "p", "failed": "f", "timeout": "t", "error": "e", "crashed": "c"}
 _FENCE = re.compile(r" {0,3}(`{3,}|~{3,})([^\r\n]*)")
 _PYTHON = {"python", "python3", "py"}
 _END_TOKENS = re.compile(r"(?:(?:<\|endoftext\|>|<\|im_end\|>|<\|eot_id\|>)\s*)+\Z")
@@ -172,5 +174,7 @@ class CodeVerifier:
                 "request_ids": result.request_ids,
                 "attempts": result.attempts,
                 "wall_seconds": result.wall_seconds,
+                # One letter per test, in order: passed, failed, timeout, error, crashed.
+                "outcomes": "".join(OUTCOME_CODES.get(outcome.status, "?") for outcome in result.outcomes),
             },
         )
