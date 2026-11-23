@@ -160,6 +160,8 @@ Each of these cost real time; the fixes are in the configs and tools here.
 
 ## Open questions and suggested next steps
 
+See `notes/paper-followups-todo.md` for a prioritized, implementor-ready list of follow-ups tied to Section 4.2 of the Olmicro technical report (highest priority: `810M combined + filter_zero_std_groups = true` and CPU-only response-length extraction from Weka records).
+
 - **Minerva/AIME for the small-model runs** (810M combined, 450M/275M zero-std, 1.4B combined): HF exports exist, and each eval takes ~10–20 min of one node.
 - **Zero-std filtering at 810M and 1.4B.** It helped a lot below 810M. At 810M the combined set has 19–35% signal, so the filter would likely help there too.
 - **More updates for 450M/275M.** Both were still rising at update 400.
