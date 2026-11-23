@@ -1,0 +1,721 @@
+{
+ "kernel_name": "causal_conv1d_bwd_kernel",
+ "triton_version": null,
+ "default_config": {
+  "kwargs": {
+   "BD": 32
+  },
+  "num_warps": 4,
+  "num_stages": 3,
+  "num_ctas": 1,
+  "maxnreg": null
+ },
+ "autotune_entries": {
+  "6c8c6621ba231afefb8637a44755c5b0": {
+   "autotune_key": [
+    4096,
+    4,
+    8,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "8a4765f0ce162b5f2c2da6b8c16f05aa": {
+   "autotune_key": [
+    2048,
+    4,
+    8,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "b2e471be43ef27563fbca078ded0b4ed": {
+   "autotune_key": [
+    4096,
+    4,
+    40,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "d8954e106d02447c0c3ef8ea82259c60": {
+   "autotune_key": [
+    2048,
+    4,
+    40,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "43d5c75c08206e80a620c285d2c561f9": {
+   "autotune_key": [
+    4096,
+    4,
+    38,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "9aba4ca4321432271126011afde6c428": {
+   "autotune_key": [
+    2048,
+    4,
+    38,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "bcf8c761f11f76ac09595a0a602cc23d": {
+   "autotune_key": [
+    4096,
+    4,
+    36,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "87077f986da7d74dd5f2e260b3d196c7": {
+   "autotune_key": [
+    2048,
+    4,
+    36,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "a146d626c3634fe225cdcf5a8e42cee7": {
+   "autotune_key": [
+    4096,
+    4,
+    33,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "ee50863c793385ddc3e40b2f6f6a6230": {
+   "autotune_key": [
+    2048,
+    4,
+    33,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "9129974aadaa5efc85cef08285aae469": {
+   "autotune_key": [
+    4096,
+    4,
+    29,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "260a9f3aa5b32380e6e3b293c9edb6b9": {
+   "autotune_key": [
+    2048,
+    4,
+    29,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "5dbd5e4f11df5eff4035cad955095d5a": {
+   "autotune_key": [
+    4096,
+    4,
+    37,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  },
+  "8bde0ce52f33d5687cbdb8fe024b10f8": {
+   "autotune_key": [
+    2048,
+    4,
+    37,
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.bfloat16",
+    "torch.bfloat16",
+    "torch.float32",
+    "torch.int32",
+    "torch.int32"
+   ],
+   "config": {
+    "kwargs": {
+     "BD": 32
+    },
+    "num_warps": 4,
+    "num_stages": 3,
+    "num_ctas": 1,
+    "maxnreg": null
+   }
+  }
+ },
+ "provenance": {
+  "source_logs": [
+   "flash_4.log"
+  ],
+  "default_from_key": [
+   4096,
+   4,
+   40,
+   "torch.bfloat16",
+   "torch.bfloat16",
+   "torch.float32",
+   "torch.bfloat16",
+   "torch.bfloat16",
+   "torch.float32",
+   "torch.int32",
+   "torch.int32"
+  ],
+  "observed": [
+   [
+    [
+     4096,
+     4,
+     8,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    13.18
+   ],
+   [
+    [
+     2048,
+     4,
+     8,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    12.65
+   ],
+   [
+    [
+     4096,
+     4,
+     40,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    9.91
+   ],
+   [
+    [
+     2048,
+     4,
+     40,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    9.74
+   ],
+   [
+    [
+     4096,
+     4,
+     38,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    10.0
+   ],
+   [
+    [
+     2048,
+     4,
+     38,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    9.73
+   ],
+   [
+    [
+     4096,
+     4,
+     36,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    9.74
+   ],
+   [
+    [
+     2048,
+     4,
+     36,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    10.07
+   ],
+   [
+    [
+     4096,
+     4,
+     33,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    9.62
+   ],
+   [
+    [
+     2048,
+     4,
+     33,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    9.68
+   ],
+   [
+    [
+     4096,
+     4,
+     29,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    9.77
+   ],
+   [
+    [
+     2048,
+     4,
+     29,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    10.06
+   ],
+   [
+    [
+     4096,
+     4,
+     37,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    10.03
+   ],
+   [
+    [
+     2048,
+     4,
+     37,
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.bfloat16",
+     "torch.bfloat16",
+     "torch.float32",
+     "torch.int32",
+     "torch.int32"
+    ],
+    {
+     "kwargs": {
+      "BD": 32
+     },
+     "num_warps": 4,
+     "num_stages": 3,
+     "num_ctas": 1,
+     "maxnreg": null
+    },
+    10.08
+   ]
+  ]
+ }
+}

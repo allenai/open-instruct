@@ -1,0 +1,56 @@
+version: v2
+budget: ai2/oe-other
+description: "Olmicro 2.7B base prompt-template probe for RL-zero math (native SGLang, RL sampling settings)"
+tasks:
+  - name: olmicro-2.7b-format-probe-20261118
+    image:
+      beaker: 01M6HMYBFW8D9ZK4SKGJ1XD6HW
+    command: [bash, -c]
+    arguments:
+      - |
+        set -uo pipefail
+        cd /opt/core-rl
+        OUT=/weka/oe-adapt-default/jacobm/olmicro/monitor/format-probe-20261118
+        mkdir -p "$OUT" /output
+        run() {
+          gpu=$1; shift
+          CUDA_VISIBLE_DEVICES=$gpu python /weka/oe-adapt-default/jacobm/olmicro/tools/format_probe.py \
+            --model /weka/oe-adapt-default/jacobm/olmicro/models/olmicro-2.7b-base/stage2-step0011921 \
+            --data /weka/oe-adapt-default/jacobm/olmicro/data/dolci-math-base-boxed-v1 \
+            --out "$OUT" --templates "$@" > "$OUT/gpu$gpu.log" 2>&1
+          echo "gpu$gpu exit=$?" | tee -a "$OUT/exit-status"
+        }
+        run 0 qa_boxed r1 &
+        run 1 qa_boxed_think &
+        run 2 problem_solution &
+        run 3 chatml &
+        wait
+        grep -h FORMAT_PROBE_GENERATED "$OUT"/gpu*.log | tee /output/results.txt
+        cp "$OUT"/exit-status /output/ || true
+    envVars:
+      - name: TOKENIZERS_PARALLELISM
+        value: "false"
+      - name: OMP_NUM_THREADS
+        value: "2"
+      - name: HF_HOME
+        value: /tmp/hf-cache
+      - name: SGLANG_EXTERNAL_MODEL_PACKAGE
+        value: ""
+      - name: MILES_HYBRID_REFERENCE_BACKBONE
+        value: "0"
+    datasets:
+      - mountPath: /weka/oe-adapt-default
+        source:
+          weka: oe-adapt-default
+    result:
+      path: /output
+    resources:
+      gpuCount: 4
+      memory: 128 GiB
+      sharedMemory: 32 GiB
+    context:
+      priority: urgent
+    constraints:
+      cluster:
+        - ai2/holmes
+    timeout: 1h30m0s

@@ -1,0 +1,60 @@
+{
+  "prompt_format": "olmicro_base_boxed_v1",
+  "instruction": "Solve the following problem step by step, and put your final answer within \\boxed{}.",
+  "template": "Solve the following problem step by step, and put your final answer within \\boxed{}.\n\nQuestion: {problem}\nAnswer:",
+  "tokenizer": "/weka/oe-adapt-default/jacobm/olmicro/models/olmicro-2.7b-base/stage2-step0011921",
+  "tokenizer_sha256": "18e309ad7f9c60037eaf26aca401a96128187cad2bdfa01a508dca7526bf6300",
+  "max_prompt_tokens": 512,
+  "seed": 1,
+  "inputs": {
+    "train": [
+      "allenai/Dolci-RL-Zero-Math-7B",
+      "93b5e498577804a93fb11bfe8821428f8535f2d8",
+      "data/train-00000-of-00001.parquet"
+    ],
+    "math500": [
+      "HuggingFaceH4/MATH-500",
+      "6e4ed1a2a79af7d8630a6b768ec859cb5af4d3be",
+      "test.jsonl"
+    ],
+    "gsm8k_platinum": [
+      "mnoukhov/gsm8k-platinum-openinstruct",
+      "409e774196520a279cfc6b08cc4924b1cfd4927f",
+      "data/test-00000-of-00001.parquet"
+    ]
+  },
+  "sources": {
+    "train": {
+      "dropped_over_length": 54
+    },
+    "math500": {
+      "dropped_over_length": 3
+    },
+    "gsm8k_platinum": {
+      "dropped_over_length": 0
+    }
+  },
+  "artifacts": {
+    "train": {
+      "path": "train.jsonl",
+      "records": 13260,
+      "sha256": "6bd18e60964b8e5565df535a8b421b8cbd541a4f83d2192755f5da857c0d9de2"
+    },
+    "math500": {
+      "path": "eval-math500.jsonl",
+      "records": 497,
+      "sha256": "44761bc70bb695dad82e433114413642773d4864e847b792cb6bcca6385c79c9"
+    },
+    "gsm8k_platinum": {
+      "path": "eval-gsm8k_platinum.jsonl",
+      "records": 1209,
+      "sha256": "979e49c1eba9e0123d7ef32732fd5e740bca81286de947f106f9c25d1eddbbd2"
+    },
+    "smoke": {
+      "path": "eval-smoke.jsonl",
+      "records": 8,
+      "sha256": "f72ee5ac19519324a653a8a64359db91ccedb78d5b14f2f7d880b994f075c78d"
+    }
+  },
+  "script_sha256": "523bebaad97a9af1dd77a23fec25d207887106a5498354b1f65e321dff250f46"
+}

@@ -1,0 +1,59 @@
+version: v2
+budget: ai2/oe-other
+retry:
+  allowedTaskRetries: 3
+description: "Preemption-tolerant (32 resumable shards) Olmicro 2.7B base-model pass-rate sweep over dolci-math-base-r1-v1 train (long-context final stage3-step0023842, 16 samples, 32768 new tokens)"
+tasks:
+  - name: olmicro-2.7b-passrate-sweep-lc2.7b-32k-20261118
+    image:
+      beaker: 01M6HMYBFW8D9ZK4SKGJ1XD6HW
+    command: [bash, -c]
+    arguments:
+      - |
+        set -uo pipefail
+        cd /opt/core-rl
+        OUT=/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-lc2.7b-32k-20261118
+        mkdir -p "$OUT" /output
+        for gpu in 0 1 2 3 4 5 6 7; do
+          (
+            CUDA_VISIBLE_DEVICES=$gpu python /weka/oe-adapt-default/jacobm/olmicro/tools/format_probe.py \
+              --model /weka/oe-adapt-default/jacobm/olmicro/models/olmicro-2.7b-base/stage3-step0023842 \
+              --data /weka/oe-adapt-default/jacobm/olmicro/data/dolci-math-base-r1-v1 \
+              --out "$OUT" --templates r1 --from-input --n-train -1 --n-math500 0 \
+              --samples 16 --max-new 32768 --context-length 33280 --concurrency 128 \
+              --shard $gpu $((gpu + 8)) $((gpu + 16)) $((gpu + 24)) --num-shards 32 >> "$OUT/gpu$gpu.log" 2>&1
+            echo "gpu$gpu exit=$?" | tee -a "$OUT/exit-status"
+          ) &
+        done
+        wait
+        grep -h FORMAT_PROBE_GENERATED "$OUT"/gpu*.log | tee /output/results.txt
+        cp "$OUT"/exit-status /output/ || true
+    envVars:
+      - name: TOKENIZERS_PARALLELISM
+        value: "false"
+      - name: OMP_NUM_THREADS
+        value: "2"
+      - name: HF_HOME
+        value: /tmp/hf-cache
+      - name: SGLANG_EXTERNAL_MODEL_PACKAGE
+        value: ""
+      - name: MILES_HYBRID_REFERENCE_BACKBONE
+        value: "0"
+    datasets:
+      - mountPath: /weka/oe-adapt-default
+        source:
+          weka: oe-adapt-default
+    result:
+      path: /output
+    resources:
+      gpuCount: 8
+      memory: 256 GiB
+      sharedMemory: 64 GiB
+    context:
+      priority: urgent
+      minRuntime: 4h0m0s
+      autoResume: true
+    constraints:
+      cluster:
+        - ai2/holmes
+    timeout: 8h0m0s

@@ -1,0 +1,39 @@
+{
+  "source": "/weka/oe-adapt-default/jacobm/olmicro/data/dolci-math-base-r1-v1",
+  "records": [
+    "/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-20261118/r1.shard00of08.scored.json",
+    "/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-20261118/r1.shard01of08.scored.json",
+    "/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-20261118/r1.shard02of08.scored.json",
+    "/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-20261118/r1.shard03of08.scored.json",
+    "/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-20261118/r1.shard04of08.scored.json",
+    "/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-20261118/r1.shard05of08.scored.json",
+    "/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-20261118/r1.shard06of08.scored.json",
+    "/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-20261118/r1.shard07of08.scored.json"
+  ],
+  "thresholds": {
+    "min_pass": 0.0625,
+    "max_pass": 0.875,
+    "min_samples": 16,
+    "max_version": null,
+    "unobserved": "drop"
+  },
+  "observed_prompts": 13251,
+  "kept": 4029,
+  "reasons": {
+    "too_hard": 9222,
+    "in_band": 4029
+  },
+  "pass_rate_histogram_deciles": {
+    "0.0": 11248,
+    "0.1": 1379,
+    "0.2": 233,
+    "0.3": 265,
+    "0.4": 43,
+    "0.5": 61,
+    "0.6": 19,
+    "0.7": 1,
+    "0.8": 2
+  },
+  "train_sha256": "bc0e08f7ae5e8751cac18adc187ef62262531175049e4cb49745070077a757d2",
+  "script_sha256": "83badd3c7d469968c7b73fe72692aa5f72619cd698fe307d79bdbbb9ab66cbe1"
+}

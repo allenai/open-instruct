@@ -1,0 +1,31 @@
+{
+  "template": "r1",
+  "required_miles_stop": {
+    "rollout_stop": [
+      "\nUser:"
+    ]
+  },
+  "sets": {
+    "minerva_math": {
+      "rows": 5000,
+      "dropped_over_length": 0,
+      "sha256": "70fe69db24e1b9d6880ed824b4418f1195bae13cdc849f29b5e72f553dd56ea2"
+    },
+    "minerva_ocw": {
+      "rows": 1088,
+      "dropped_over_length": 0,
+      "sha256": "ce2c2d07ef219cbfad5772554878d122a4c0e8b17dae56cd388d579b780c4d9c"
+    },
+    "aime2026": {
+      "rows": 960,
+      "dropped_over_length": 0,
+      "sha256": "a455db783398576623758bc87015a42e2e64e89c26be7c8c3ba8f36d6d68c5a8"
+    }
+  },
+  "repeats": {
+    "aime2026": 32,
+    "minerva_ocw": 4,
+    "minerva_math": 1
+  },
+  "script_sha256": "32a5aa9c15e5cd2f3654ad188efd9daeb51f540f4915b6d9862bad61e786969d"
+}

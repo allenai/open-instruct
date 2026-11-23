@@ -1,0 +1,8 @@
+{
+  "selection": "union of dolci-math-base-r1-v1-passband-lc450m-32k-full (this size's own 1-14/16 band over all 13,251 prompts) and dolci-math-base-r1-v1-passband-lc2.7b-32k (the 2.7B long-context final's band)",
+  "rows": 5283,
+  "own": 1408,
+  "lc2.7b": 4900,
+  "both": 1025,
+  "train_sha256": "c9af2c5fae73a0803f656806293cf9706d22c5c4eae8b6479c9975abe6c2f004"
+}

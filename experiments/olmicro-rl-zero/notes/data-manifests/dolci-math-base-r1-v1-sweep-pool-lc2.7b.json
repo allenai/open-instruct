@@ -1,0 +1,9 @@
+{
+  "source": "data/dolci-math-base-r1-v1",
+  "selection": "prompts the 2.7B long-context final solved >= 1/16 at 32k (monitor/passrate-sweep-lc2.7b-32k-20261118) plus a seeded random control of 800 it never solved (seed 20261118)",
+  "solved": 4901,
+  "unsolved_total": 8350,
+  "control": 800,
+  "rows": 5701,
+  "train_sha256": "e45e8b418773486f98a088d8631a8c59f27eef09a0698ca794118e9bf73d4333"
+}

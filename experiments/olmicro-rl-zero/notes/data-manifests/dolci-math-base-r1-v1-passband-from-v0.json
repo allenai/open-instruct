@@ -1,0 +1,35 @@
+{
+  "source": "/weka/oe-adapt-default/jacobm/olmicro/data/dolci-math-base-r1-v1",
+  "records": [
+    "/weka/oe-adapt-default/jacobm/olmicro/inference-records/726d2acae8585f8b/olmicro-2.7b-math-rl-v0-r1-20261118-01M7PV187ND4JH9QGPJ4KCABGF/records-b1a48a4660c9.jsonl"
+  ],
+  "thresholds": {
+    "min_pass": 0.125,
+    "max_pass": 0.875,
+    "min_samples": 8,
+    "max_version": null,
+    "unobserved": "drop"
+  },
+  "observed_prompts": 12834,
+  "kept": 4062,
+  "reasons": {
+    "too_hard": 8709,
+    "in_band": 4062,
+    "unobserved_dropped": 417,
+    "too_easy": 63
+  },
+  "pass_rate_histogram_deciles": {
+    "0.0": 8709,
+    "0.1": 1775,
+    "0.2": 899,
+    "0.3": 531,
+    "0.4": 2,
+    "0.5": 352,
+    "0.6": 235,
+    "0.7": 158,
+    "0.8": 110,
+    "0.9": 63
+  },
+  "train_sha256": "87c374a47ade3f3205d628896fd64e2d20498ff78c5b3d687c5eabe78debf0b5",
+  "script_sha256": "a2f60d9cfcf728bf20c0a97e3e4f3684346fb5e33efaf4ac193212755e11bdf6"
+}

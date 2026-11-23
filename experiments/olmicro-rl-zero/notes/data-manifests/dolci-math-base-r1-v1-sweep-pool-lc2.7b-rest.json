@@ -1,0 +1,8 @@
+{
+  "source": "data/dolci-math-base-r1-v1",
+  "selection": "the prompts of dolci-math-base-r1-v1 not in sweep-pool-lc2.7b: those the 2.7B long-context final never solved (0/16 at 32k) and that were not in the 800-prompt control",
+  "rows": 7550,
+  "pool_rows": 5701,
+  "total": 13251,
+  "train_sha256": "1822661f8a4a918c144acfc86875bf766ccba28b58cddac6d30e64cb131339ea"
+}

@@ -1,0 +1,14 @@
+# Against allenai/miles-olmo-core codex/olmicro-mainline-sync b83a66f895d4e83211fbeb61f3a5571b3c1c2cfc. NOT APPLIED; needs image rebuild + maintainer review.
+--- a/miles/utils/compiler_cache/startup_cache.py	2026-11-19 00:04:56.450202038 +0000
++++ b/miles/utils/compiler_cache/startup_cache.py	2026-11-19 00:05:02.802139126 +0000
+@@ -79,6 +79,10 @@
+     for key in tuple(core):
+         if key.startswith("compiler_cache"):
+             del core[key]
++    if core.get("model_config"):
++        # An external Core model document defines the trained architecture. Key
++        # artifacts by its content rather than its path so the run qualifies.
++        core["model_config_sha256"] = cache.sha256(Path(core.pop("model_config")))
+     # Include shape, precision and execution switches; exclude labels and paths.
+     miles = {
+         key: value

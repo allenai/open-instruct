@@ -1,0 +1,55 @@
+version: v2
+budget: ai2/oe-other
+description: "Olmicro 2.7B base-model pass-rate sweep over dolci-math-base-r1-v1 train (16 samples, 7680 new tokens)"
+tasks:
+  - name: olmicro-2.7b-passrate-sweep-20261118
+    image:
+      beaker: 01M6HMYBFW8D9ZK4SKGJ1XD6HW
+    command: [bash, -c]
+    arguments:
+      - |
+        set -uo pipefail
+        cd /opt/core-rl
+        OUT=/weka/oe-adapt-default/jacobm/olmicro/monitor/passrate-sweep-20261118
+        mkdir -p "$OUT" /output
+        for gpu in 0 1 2 3 4 5 6 7; do
+          (
+            CUDA_VISIBLE_DEVICES=$gpu python /weka/oe-adapt-default/jacobm/olmicro/tools/format_probe.py \
+              --model /weka/oe-adapt-default/jacobm/olmicro/models/olmicro-2.7b-base/stage2-step0011921 \
+              --data /weka/oe-adapt-default/jacobm/olmicro/data/dolci-math-base-r1-v1 \
+              --out "$OUT" --templates r1 --from-input --n-train -1 --n-math500 0 \
+              --samples 16 --max-new 7680 --context-length 8192 --concurrency 128 \
+              --shard $gpu --num-shards 8 > "$OUT/gpu$gpu.log" 2>&1
+            echo "gpu$gpu exit=$?" | tee -a "$OUT/exit-status"
+          ) &
+        done
+        wait
+        grep -h FORMAT_PROBE_GENERATED "$OUT"/gpu*.log | tee /output/results.txt
+        cp "$OUT"/exit-status /output/ || true
+    envVars:
+      - name: TOKENIZERS_PARALLELISM
+        value: "false"
+      - name: OMP_NUM_THREADS
+        value: "2"
+      - name: HF_HOME
+        value: /tmp/hf-cache
+      - name: SGLANG_EXTERNAL_MODEL_PACKAGE
+        value: ""
+      - name: MILES_HYBRID_REFERENCE_BACKBONE
+        value: "0"
+    datasets:
+      - mountPath: /weka/oe-adapt-default
+        source:
+          weka: oe-adapt-default
+    result:
+      path: /output
+    resources:
+      gpuCount: 8
+      memory: 256 GiB
+      sharedMemory: 64 GiB
+    context:
+      priority: urgent
+    constraints:
+      cluster:
+        - ai2/holmes
+    timeout: 3h0m0s

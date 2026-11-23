@@ -1,0 +1,121 @@
+{
+ "version": "v2",
+ "budget": "ai2/oe-other",
+ "description": "Validate FLA config cache (FLA_CACHE_MODE=default) removes per-pack-length autotune; 1 GPU, not for training [parallel arms, 2 GPUs]",
+ "tasks": [
+  {
+   "name": "bench-fla-config-cache",
+   "image": {
+    "beaker": "01M6HMYBFW8D9ZK4SKGJ1XD6HW"
+   },
+   "command": [
+    "bash",
+    "-c"
+   ],
+   "arguments": [
+    "set -uo pipefail; cd /opt/core-rl; mkdir -p /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-fla-config-cache /output; python -c 'import fla, triton, torch; print(\"VERSIONS fla\", fla.__version__, \"triton\", triton.__version__, \"torch\", torch.__version__)' 2>&1 | tee /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-fla-config-cache/versions.log; (CUDA_VISIBLE_DEVICES=0 TRITON_PRINT_AUTOTUNING=1 python /weka/oe-adapt-default/jacobm/olmicro/tools/bench_shape_churn.py /weka/oe-adapt-default/jacobm/olmicro/models/olmicro-2.7b-base/olmo-core/stage3-step0023842/config.json /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-shape-churn-20261118/rollout_flow.snapshot.jsonl --backend flash_4 --seed 0 --out /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-fla-config-cache/baseline.json > /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-fla-config-cache/baseline.log 2>&1) & (CUDA_VISIBLE_DEVICES=1 FLA_CACHE_MODE=default FLA_CONFIG_DIR=/weka/oe-adapt-default/jacobm/olmicro/fla-configs/b300-fla0.5.2-v1 TRITON_PRINT_AUTOTUNING=1 python /weka/oe-adapt-default/jacobm/olmicro/tools/bench_shape_churn.py /weka/oe-adapt-default/jacobm/olmicro/models/olmicro-2.7b-base/olmo-core/stage3-step0023842/config.json /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-shape-churn-20261118/rollout_flow.snapshot.jsonl --backend flash_4 --seed 0 --out /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-fla-config-cache/fla-cache.json > /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-fla-config-cache/fla-cache.log 2>&1) & wait; grep -h -E 'CHURN|VERSIONS' /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-fla-config-cache/*.log | tee /output/results.txt; grep -c 'Triton autotuning for function' /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-fla-config-cache/baseline.log /weka/oe-adapt-default/jacobm/olmicro/monitor/bench-fla-config-cache/fla-cache.log | tee -a /output/results.txt"
+   ],
+   "envVars": [
+    {
+     "name": "OMP_NUM_THREADS",
+     "value": "4"
+    }
+   ],
+   "datasets": [
+    {
+     "mountPath": "/weka/oe-adapt-default",
+     "source": {
+      "weka": "oe-adapt-default"
+     }
+    }
+   ],
+   "result": {
+    "path": "/output"
+   },
+   "resources": {
+    "gpuCount": 2,
+    "memory": "128 GiB",
+    "sharedMemory": "16 GiB"
+   },
+   "context": {
+    "priority": "urgent",
+    "minRuntime": "1h0m0s"
+   },
+   "constraints": {
+    "hostname": [
+     "holmes-cs-aus-485.reviz.ai2.in",
+     "holmes-cs-aus-486.reviz.ai2.in",
+     "holmes-cs-aus-487.reviz.ai2.in",
+     "holmes-cs-aus-488.reviz.ai2.in",
+     "holmes-cs-aus-489.reviz.ai2.in",
+     "holmes-cs-aus-490.reviz.ai2.in",
+     "holmes-cs-aus-491.reviz.ai2.in",
+     "holmes-cs-aus-492.reviz.ai2.in",
+     "holmes-cs-aus-493.reviz.ai2.in",
+     "holmes-cs-aus-494.reviz.ai2.in",
+     "holmes-cs-aus-495.reviz.ai2.in",
+     "holmes-cs-aus-496.reviz.ai2.in",
+     "holmes-cs-aus-497.reviz.ai2.in",
+     "holmes-cs-aus-498.reviz.ai2.in",
+     "holmes-cs-aus-499.reviz.ai2.in",
+     "holmes-cs-aus-500.reviz.ai2.in",
+     "holmes-cs-aus-501.reviz.ai2.in",
+     "holmes-cs-aus-502.reviz.ai2.in",
+     "holmes-cs-aus-503.reviz.ai2.in",
+     "holmes-cs-aus-504.reviz.ai2.in",
+     "holmes-cs-aus-505.reviz.ai2.in",
+     "holmes-cs-aus-506.reviz.ai2.in",
+     "holmes-cs-aus-507.reviz.ai2.in",
+     "holmes-cs-aus-508.reviz.ai2.in",
+     "holmes-cs-aus-509.reviz.ai2.in",
+     "holmes-cs-aus-510.reviz.ai2.in",
+     "holmes-cs-aus-512.reviz.ai2.in",
+     "holmes-cs-aus-513.reviz.ai2.in",
+     "holmes-cs-aus-514.reviz.ai2.in",
+     "holmes-cs-aus-515.reviz.ai2.in",
+     "holmes-cs-aus-516.reviz.ai2.in",
+     "holmes-cs-aus-517.reviz.ai2.in",
+     "holmes-cs-aus-518.reviz.ai2.in",
+     "holmes-cs-aus-519.reviz.ai2.in",
+     "holmes-cs-aus-520.reviz.ai2.in",
+     "holmes-cs-aus-521.reviz.ai2.in",
+     "holmes-cs-aus-522.reviz.ai2.in",
+     "holmes-cs-aus-523.reviz.ai2.in",
+     "holmes-cs-aus-524.reviz.ai2.in",
+     "holmes-cs-aus-525.reviz.ai2.in",
+     "holmes-cs-aus-526.reviz.ai2.in",
+     "holmes-cs-aus-527.reviz.ai2.in",
+     "holmes-cs-aus-528.reviz.ai2.in",
+     "holmes-cs-aus-529.reviz.ai2.in",
+     "holmes-cs-aus-530.reviz.ai2.in",
+     "holmes-cs-aus-531.reviz.ai2.in",
+     "holmes-cs-aus-532.reviz.ai2.in",
+     "holmes-cs-aus-533.reviz.ai2.in",
+     "holmes-cs-aus-534.reviz.ai2.in",
+     "holmes-cs-aus-535.reviz.ai2.in",
+     "holmes-cs-aus-536.reviz.ai2.in",
+     "holmes-cs-aus-537.reviz.ai2.in",
+     "holmes-cs-aus-538.reviz.ai2.in",
+     "holmes-cs-aus-540.reviz.ai2.in",
+     "holmes-cs-aus-541.reviz.ai2.in",
+     "holmes-cs-aus-542.reviz.ai2.in",
+     "holmes-cs-aus-543.reviz.ai2.in",
+     "holmes-cs-aus-544.reviz.ai2.in",
+     "holmes-cs-aus-545.reviz.ai2.in",
+     "holmes-cs-aus-546.reviz.ai2.in",
+     "holmes-cs-aus-547.reviz.ai2.in",
+     "holmes-cs-aus-548.reviz.ai2.in",
+     "holmes-cs-aus-549.reviz.ai2.in",
+     "holmes-cs-aus-550.reviz.ai2.in",
+     "holmes-cs-aus-551.reviz.ai2.in",
+     "holmes-cs-aus-552.reviz.ai2.in",
+     "holmes-cs-aus-553.reviz.ai2.in",
+     "holmes-cs-aus-554.reviz.ai2.in",
+     "holmes-cs-aus-555.reviz.ai2.in",
+     "holmes-cs-aus-556.reviz.ai2.in"
+    ]
+   },
+   "timeout": "1h30m0s"
+  }
+ ]
+}

@@ -1,0 +1,141 @@
+{
+ "version": "v2",
+ "budget": "ai2/oe-other",
+ "description": "Olmicro 2.7B 32k-u250: full Minerva MATH (5,000 x 1) + AIME 2026 (30 x 32), R1 template, T=1.0, top-p 0.95, 32k tokens",
+ "tasks": [
+  {
+   "name": "olmicro-2.7b-extra-evals-32k-u250",
+   "image": {
+    "beaker": "01M6HMYBFW8D9ZK4SKGJ1XD6HW"
+   },
+   "command": [
+    "bash",
+    "-c"
+   ],
+   "arguments": [
+    "set -uo pipefail; cd /opt/core-rl; OUT=/weka/oe-adapt-default/jacobm/olmicro/monitor/extra-evals-32k-u250-20261118; mkdir -p $OUT /output; for gpu in 0 1 2 3 4 5 6 7; do ( CUDA_VISIBLE_DEVICES=$gpu python /weka/oe-adapt-default/jacobm/olmicro/tools/format_probe.py --model /weka/oe-adapt-default/jacobm/olmicro/runs/olmicro-2.7b-lc-math-rl-v2-refresh-32k-u250-export-20261118/export-hf --data /weka/oe-adapt-default/jacobm/olmicro/data/olmicro-extra-evals-r1-v1 --out $OUT --templates r1 --from-input --eval-files minerva_math=/weka/oe-adapt-default/jacobm/olmicro/data/olmicro-extra-evals-r1-v1/eval-minerva_math.jsonl aime2026=/weka/oe-adapt-default/jacobm/olmicro/data/olmicro-extra-evals-r1-v1/eval-aime2026.jsonl --samples 1 --max-new 32768 --context-length 34304 --top-p 0.95 --concurrency 128 --shard $gpu --num-shards 8 >> $OUT/gpu$gpu.log 2>&1; echo \"gpu$gpu exit=$?\" | tee -a $OUT/exit-status ) & done; wait; grep -h FORMAT_PROBE_GENERATED $OUT/gpu*.log | tee /output/results.txt; cp $OUT/exit-status /output/ || true"
+   ],
+   "envVars": [
+    {
+     "name": "TOKENIZERS_PARALLELISM",
+     "value": "false"
+    },
+    {
+     "name": "OMP_NUM_THREADS",
+     "value": "2"
+    },
+    {
+     "name": "HF_HOME",
+     "value": "/tmp/hf-cache"
+    },
+    {
+     "name": "SGLANG_EXTERNAL_MODEL_PACKAGE",
+     "value": ""
+    },
+    {
+     "name": "MILES_HYBRID_REFERENCE_BACKBONE",
+     "value": "0"
+    }
+   ],
+   "datasets": [
+    {
+     "mountPath": "/weka/oe-adapt-default",
+     "source": {
+      "weka": "oe-adapt-default"
+     }
+    }
+   ],
+   "result": {
+    "path": "/output"
+   },
+   "resources": {
+    "gpuCount": 8,
+    "memory": "256 GiB",
+    "sharedMemory": "64 GiB"
+   },
+   "context": {
+    "priority": "urgent",
+    "minRuntime": "2h0m0s",
+    "autoResume": true
+   },
+   "constraints": {
+    "hostname": [
+     "holmes-cs-aus-485.reviz.ai2.in",
+     "holmes-cs-aus-486.reviz.ai2.in",
+     "holmes-cs-aus-487.reviz.ai2.in",
+     "holmes-cs-aus-488.reviz.ai2.in",
+     "holmes-cs-aus-489.reviz.ai2.in",
+     "holmes-cs-aus-490.reviz.ai2.in",
+     "holmes-cs-aus-491.reviz.ai2.in",
+     "holmes-cs-aus-492.reviz.ai2.in",
+     "holmes-cs-aus-493.reviz.ai2.in",
+     "holmes-cs-aus-494.reviz.ai2.in",
+     "holmes-cs-aus-495.reviz.ai2.in",
+     "holmes-cs-aus-496.reviz.ai2.in",
+     "holmes-cs-aus-497.reviz.ai2.in",
+     "holmes-cs-aus-498.reviz.ai2.in",
+     "holmes-cs-aus-499.reviz.ai2.in",
+     "holmes-cs-aus-500.reviz.ai2.in",
+     "holmes-cs-aus-501.reviz.ai2.in",
+     "holmes-cs-aus-502.reviz.ai2.in",
+     "holmes-cs-aus-503.reviz.ai2.in",
+     "holmes-cs-aus-504.reviz.ai2.in",
+     "holmes-cs-aus-505.reviz.ai2.in",
+     "holmes-cs-aus-506.reviz.ai2.in",
+     "holmes-cs-aus-507.reviz.ai2.in",
+     "holmes-cs-aus-508.reviz.ai2.in",
+     "holmes-cs-aus-509.reviz.ai2.in",
+     "holmes-cs-aus-510.reviz.ai2.in",
+     "holmes-cs-aus-512.reviz.ai2.in",
+     "holmes-cs-aus-513.reviz.ai2.in",
+     "holmes-cs-aus-514.reviz.ai2.in",
+     "holmes-cs-aus-515.reviz.ai2.in",
+     "holmes-cs-aus-516.reviz.ai2.in",
+     "holmes-cs-aus-517.reviz.ai2.in",
+     "holmes-cs-aus-518.reviz.ai2.in",
+     "holmes-cs-aus-519.reviz.ai2.in",
+     "holmes-cs-aus-520.reviz.ai2.in",
+     "holmes-cs-aus-521.reviz.ai2.in",
+     "holmes-cs-aus-522.reviz.ai2.in",
+     "holmes-cs-aus-523.reviz.ai2.in",
+     "holmes-cs-aus-524.reviz.ai2.in",
+     "holmes-cs-aus-525.reviz.ai2.in",
+     "holmes-cs-aus-526.reviz.ai2.in",
+     "holmes-cs-aus-527.reviz.ai2.in",
+     "holmes-cs-aus-528.reviz.ai2.in",
+     "holmes-cs-aus-529.reviz.ai2.in",
+     "holmes-cs-aus-530.reviz.ai2.in",
+     "holmes-cs-aus-531.reviz.ai2.in",
+     "holmes-cs-aus-532.reviz.ai2.in",
+     "holmes-cs-aus-533.reviz.ai2.in",
+     "holmes-cs-aus-534.reviz.ai2.in",
+     "holmes-cs-aus-535.reviz.ai2.in",
+     "holmes-cs-aus-536.reviz.ai2.in",
+     "holmes-cs-aus-537.reviz.ai2.in",
+     "holmes-cs-aus-538.reviz.ai2.in",
+     "holmes-cs-aus-540.reviz.ai2.in",
+     "holmes-cs-aus-541.reviz.ai2.in",
+     "holmes-cs-aus-542.reviz.ai2.in",
+     "holmes-cs-aus-543.reviz.ai2.in",
+     "holmes-cs-aus-544.reviz.ai2.in",
+     "holmes-cs-aus-545.reviz.ai2.in",
+     "holmes-cs-aus-546.reviz.ai2.in",
+     "holmes-cs-aus-547.reviz.ai2.in",
+     "holmes-cs-aus-548.reviz.ai2.in",
+     "holmes-cs-aus-549.reviz.ai2.in",
+     "holmes-cs-aus-550.reviz.ai2.in",
+     "holmes-cs-aus-551.reviz.ai2.in",
+     "holmes-cs-aus-552.reviz.ai2.in",
+     "holmes-cs-aus-553.reviz.ai2.in",
+     "holmes-cs-aus-554.reviz.ai2.in",
+     "holmes-cs-aus-555.reviz.ai2.in",
+     "holmes-cs-aus-556.reviz.ai2.in"
+    ]
+   },
+   "timeout": "4h0m0s"
+  }
+ ],
+ "retry": {
+  "allowedTaskRetries": 3
+ }
+}

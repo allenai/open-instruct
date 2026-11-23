@@ -1,0 +1,8 @@
+{
+  "selection": "union of dolci-math-base-r1-v1-passband-lc1.4b-32k (1.4B band over the 5,701-prompt pool only; its rest-of-pool was not swept) and dolci-math-base-r1-v1-passband-lc2.7b-32k",
+  "rows": 4969,
+  "own": 2281,
+  "lc2.7b": 4900,
+  "both": 2212,
+  "train_sha256": "cd6946e7c170c846b98caa1900412b3430435f2880c483a3d591e8b0cad9af93"
+}
