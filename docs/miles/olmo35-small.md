@@ -74,8 +74,10 @@ used the default head precision.
   224 × engines, `sglang_mem_fraction_static` 0.92, no `sglang_max_total_tokens` key (RunSpec's
   default cap, R × context = 7,798,784 tokens, is above the 3,919,232-token memory-sized pool), and
   `core.refresh_request_timeout = 3600.0` (see [the timeout fix](#request-timeout-at-high-admission)).
-  The eight-node example stays at R=96 (128 slots, concurrency 192, graph bs 96,
-  3,342,336 KV tokens) with the same 3600 s timeout; R>96 is untested on 8 nodes.
+  The eight-node example uses the same R=224 serving settings and 3600 s timeout, plus completed-buffer
+  factor 1.5, `shared_memory = "400 GiB"` and `RAY_DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES=360000000000`:
+  at factor 4 and Ray's 200 GB default, routing-replay payloads in the full completed queue filled the
+  producer node's object store and delivery stalled past `refresh_request_timeout` (run failed at update 7).
 - Judge: `timeout = 600` and `chat_template = "qwen3-no-thinking"`. The judge bindings use the
   hashed verifier ids in the H196 `verifiers.json`.
 - `two-node-mech` enables the initial serving-weight comparison and repeats the
@@ -83,8 +85,8 @@ used the default head precision.
   overhead relative to the original mechanics run and remain off in timing recipes
   (which retain the default startup scoring check).
 - The four/eight-node recipes request 4h/3h of protected runtime, respectively,
-  based on historical startup and update times plus headroom. They set a 24h job
-  timeout with a 22h `core.max_run_seconds` stop; see [Long runs](#long-runs).
+  based on historical startup and update times plus headroom. They set a 72h/120h job
+  timeout, respectively, so a multi-day run is one job; see [Long runs](#long-runs).
 
 ## Results
 
@@ -166,15 +168,15 @@ from [PR #2271](https://github.com/allenai/open-instruct/pull/2271):
 | Group-standard-deviation normalization | Off | Off |
 
 This is the starting baseline for Small; the historical throughput results do not
-measure this combination. The serving geometry is the submitted timing4n-r224-t3600 (four-node) and timing8
+measure this combination. The serving geometry is the submitted timing4n-r224-t3600 (four-node) and real-8node-b (eight-node)
 geometry. Paths, credentials, runtime budgets and mechanics qualification controls
 also have the documented changes above.
 
-The completed-buffer factor stays four: 1,024 prompt groups / 8,192 responses.
-Unfinished producer budgets are 672, 5,152 and 4,512 for the two/four/eight-node
-layouts, respectively (0.328, 2.516 and 2.203 optimizer batches). The nominal sum
-of unfinished budget plus completed-buffer capacity is therefore 4.328, 6.516 and
-6.203 batches. Finished siblings can live outside that accounting; these figures
+The completed-buffer factor is four (1,024 prompt groups / 8,192 responses) except on eight
+nodes (1.5: 384 groups / 3,072 responses). Unfinished producer budgets are 672, 5,152 and 10,528
+for the two/four/eight-node layouts, respectively (0.328, 2.516 and 5.141 optimizer batches). The
+nominal sum of unfinished budget plus completed-buffer capacity is therefore 4.328, 6.516 and
+6.641 batches. Finished siblings can live outside that accounting; these figures
 are not policy-age guarantees. Inspect measured age and useful throughput when
 tuning the new baseline.
 Do not copy Tiny's 12.5B inference preset, evaluator profile or cache geometry into
@@ -224,8 +226,8 @@ cleanup cancels unused generation instead of draining (above), while evaluation 
 export retain generation-drain boundaries. The four- and eight-node examples set
 `engine_drain_timeout = 3600.0` to match `refresh_request_timeout` so those drain boundaries
 cover long responses when enabled (untested in a run).
-One run per arm; no seed repeat. The eight-node example keeps R=96 but also sets 3600 s,
-which only removes a failure mode.
+One run per arm; no seed repeat. The eight-node R=224 settings come from one 30-update run
+(kf-hero-miles-real-8node-b, H258 start).
 
 ## What did not work or was not tested
 
@@ -306,8 +308,9 @@ See [the shared checkpoint policy](../../configs/miles/examples/README.md#recove
 
 ## Long runs
 
-The four- and eight-node starters are set up so that raising `training.num_rollouts`
-is the only change a multi-day run needs. Check each item below before launch.
+The four- and eight-node starters are set up so that raising `training.num_rollouts`,
+and `launch.timeout` when the run is expected to exceed 72h, are the only changes a
+multi-day run needs. Check each item below before launch.
 
 ### Mounts
 
@@ -334,39 +337,51 @@ again before launch with a CPU job that mounts the bucket and runs
 `df -h /weka/olmo-3p5-post-checkpoints`. Do not write to `olmo-3p5-checkpoints`
 (95% used on the same date).
 
-### Job timeout, wall-clock stop and resubmission
+### Job timeout and preemption
+
+Run a multi-day job as one Beaker job with a `launch.timeout` longer than the expected
+run. `four-node.toml` sets `timeout = "72h"` and `eight-node.toml` sets `timeout = "120h"`. On 8 nodes (eight-node.toml) updates took
+~264 s vs ~402 s on 4 nodes (updates 11-30 means at batch 2,048), so a 660-update run
+is about 2.3 days on 8 nodes and 3.4 days on 4 nodes with startup (about 35-40
+minutes to the end of the first update) and saves. The eight-node run uses 120h, about
+2x its expected length; for 660 updates on 4 nodes raise it to about 96h. `ai2/holmes` has no maximum job
+duration (`beaker cluster get ai2/holmes`), so the spec timeout is the only limit.
 
 Beaker cancels a job when its `timeout` expires. A canceled job is not preempted:
 `autoResume` requeues only preempted jobs, and Beaker's task retries apply only to
 failed tasks (the launcher does not set them). A timeout therefore ends the run
-without a final save. `launch.auto_resume` covers preemption only.
+without a final save, so leave headroom. Preemptions are handled by
+`launch.auto_resume`: Beaker restarts the job and the run loads the newest complete
+checkpoint under the same `output.root`; the updates since that save are redone.
+Every start appends to `attempts.json`; if you set `launch.max_retries`, allow for
+preemptions (default -1, no cap).
 
-For a run longer than one job, the starters set `core.max_run_seconds = 79200`
-(22 h of driver wall clock, counted from driver start) under a 24h `launch.timeout`.
-At the first completed collection after 22 h, the run forces a native save and exits
-with `workflow.json` status `stopped`. The final HF export and final evaluation are
-skipped. The remaining 2 h cover the last collection (~6-8 min at batch 2,048), the
-forced save (~10-20 min) and teardown. To continue:
+If a job does hit its timeout, resubmit the unchanged TOML with the same image:
+`MILES_EXISTING_IMAGE=<image id from the launch receipt> python -m open_instruct.miles run <toml>`.
+The run resumes from the last periodic save. `beaker experiment resume` applies only
+to preempted experiments, so it does not restart a timed-out run.
 
-1. Confirm the stop: the job exited 0, `OUTPUT/workflow.json` says `stopped`, and the
-   newest checkpoint has its completion marker.
-2. Resubmit the unchanged TOML with the same image:
-   `MILES_EXISTING_IMAGE=<image id from the launch receipt> python -m open_instruct.miles run <toml>`.
-   The run loads the newest complete checkpoint under the same `output.root`. The
-   updates since the last save are redone; with a forced save at the stop, that is none.
-   `beaker experiment resume` applies only to preempted experiments, so it does not
-   restart a stopped or timed-out run.
-3. Every start, including resubmissions, appends to `attempts.json`. If you set
-   `launch.max_retries`, count planned resubmissions in it (default -1, no cap).
+`core.max_run_seconds` is optional, for clusters or budgets that cap job length. It
+counts driver wall clock from driver start; at the first completed collection after
+it, the run forces a native save and exits with `workflow.json` status `stopped`
+(final HF export and final evaluation skipped), and the resubmission above continues
+it with no updates redone. Set it below the job timeout with room for the last
+collection (~6-8 min at batch 2,048), the forced save (~10-20 min) and teardown, e.g.
+`79200` (22 h) under a 24h cap. Each resubmission pays startup again.
 
-Each resubmission pays startup again (about 35-40 minutes to the end of the first
-update, plus checkpoint load). A 660-update run at ~370 s/update is about 3 days of
-training, so plan on three or four jobs. To keep one W&B run across jobs, set
-`tracking.wandb_run_name` and `wandb_random_suffix = false` (the real100 runs did
-this; continuity across separate jobs is not yet verified).
+All attempts on one `output.root` log to one W&B run. On first start the workflow
+writes a random id to `OUTPUT/wandb_run_id` (with `OUTPUT/wandb_run_id.json`
+recording when it was created and a hash of the model source, data section and W&B
+project, entity and group). Every later start, whether a preemption auto-resume or a
+resubmission, reads that file and passes the id to `wandb.init(id=..., resume="allow")`.
+An explicit `miles.wandb_run_id` takes precedence, and no file is written. If the
+stored hash differs from the current configuration, the log shows a
+`W&B RUN CONFIG MISMATCH` warning and the stored run is still continued. A new run
+needs a new `output.root`.
 
-If a job does hit its timeout, the run resumes from the last periodic save when you
-resubmit as above; the updates since that save are redone.
+MILES logs without an explicit W&B step, so updates redone after a resume (those
+since the last save) appear again as extra points for those steps; the later points
+are the ones the resumed run trained from.
 
 ### Evaluation snapshots
 
@@ -379,7 +394,9 @@ export is a synchronous trainer collective, and a failed export fails training. 
 requires an image built from main at or after #2293, which brought the writer-only
 HF-export memory fix (miles 9eff46a4); with older images the snapshot export can run
 out of memory. Snapshot export is not yet qualified on Small. The in-run evaluator
-image is the Tiny one and is best effort: its job failures do not affect training.
+must disable the prefill CUDA graph for Small, because KDA prefill-graph padding
+crashes it; the example sets `cuda_graph_backend_prefill = "disabled"` in
+`provider_kwargs`. Evaluator job failures do not affect training.
 
 ### Changing the start checkpoint
 
