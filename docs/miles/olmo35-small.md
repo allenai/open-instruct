@@ -229,7 +229,8 @@ One run per arm; no seed repeat. The eight-node R=224 settings come from one 30-
 
 - `fa4` attention: crashes on head_dim 256 (above).
 - R=224 at the default 1800 s request timeout and R=256: slower than R=160 and failing on request
-  timeouts (above); R=256 also fills the KV pool. R>96 on 8 nodes: untested.
+  timeouts (above); R=256 also fills the KV pool. R>96 on 8 nodes was untested when this list was
+  written; `eight-node.toml` now uses R=224 with the 3600 s timeout (see its header).
 - R=64: slower (396 vs 302 s/update); engines gain throughput up to R=96. In single-engine
   forced decodes, R=144 matched R=96 and R=192 gave +19% total tok/s with each request ~40%
   slower.
