@@ -61,16 +61,21 @@ def test_builds_balanced_variants_with_actual_default_system(prepared, tmp_path)
     output = tmp_path / "identity"
     manifest = build_identity(prepared, REVISION, output)
     rows = [json.loads(line) for line in (output / "identity.jsonl").read_text().splitlines()]
-    assert len(rows) == len({row["id"] for row in rows}) == 116
+    audited = {row["id"]: row for row in json.loads(identity.SEEDS.read_text())}
+    supplement = {row["id"]: row for row in json.loads(identity.SUPPLEMENT.read_text())}
+    seeds = audited | supplement
+    assert len(rows) == len({row["id"] for row in rows}) == 2 * (58 + len(supplement))
     assert set(Counter(row["parent_id"] for row in rows).values()) == {2}
-    seeds = {row["id"]: row for row in json.loads(identity.SEEDS.read_text())}
+    assert manifest["audited_rows"] == 116
+    assert manifest["supplement_rows"] == 2 * len(supplement)
     tokenizer = identity.release_tokenizer.tokenizer_utils.load_tokenizer(prepared)
     for implicit, explicit in zip(rows[::2], rows[1::2]):
         assert implicit["parent_id"] == explicit["parent_id"]
         assert implicit["messages"][0] == {"role": "user", "content": seeds[implicit["parent_id"]]["user"]}
         assert explicit["messages"][1:] == implicit["messages"]
         assert [message["role"] for message in implicit["messages"]] == ["user", "assistant"]
-        assert implicit["source"] == explicit["source"] == identity.SOURCE
+        expected_source = identity.SOURCE if implicit["parent_id"] in audited else identity.SUPPLEMENT_SOURCE
+        assert implicit["source"] == explicit["source"] == expected_source
         prompt = tokenizer.apply_chat_template(implicit["messages"][:1], tokenize=False)
         system = explicit["messages"][0]["content"]
         assert prompt.startswith(f"<|im_start|>system\n{system}<|im_end|>\n")
@@ -127,3 +132,20 @@ def test_changed_audited_prompt_is_rejected(prepared, tmp_path, monkeypatch):
     monkeypatch.setattr(identity, "SEEDS", seed_path)
     with pytest.raises(ValueError, match="differ from the 58 audited rows"):
         build_identity(prepared, REVISION, tmp_path / "identity")
+
+
+@pytest.mark.parametrize(
+    ("supplement", "message"),
+    [
+        ([{"id": "hard_coded_44", "user": "When?", "assistant": "Now."}], "reuse audited IDs"),
+        ([{"id": "extra", "user": "A", "assistant": "B"}] * 2, "distinct IDs"),
+    ],
+)
+def test_bad_supplement_is_rejected(prepared, tmp_path, monkeypatch, supplement, message):
+    supplement_path = tmp_path / "supplement.json"
+    supplement_path.write_text(json.dumps(supplement))
+    monkeypatch.setattr(identity, "SUPPLEMENT", supplement_path)
+    output = tmp_path / "identity"
+    with pytest.raises(ValueError, match=message):
+        build_identity(prepared, REVISION, output)
+    assert not output.exists()
