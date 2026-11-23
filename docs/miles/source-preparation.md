@@ -567,7 +567,7 @@ The tool renders each row's `metadata.messages` with the checkpoint's chat templ
 `metadata.rendering_template_sha256` and, when present, `metadata.prompt_tokens` and
 `metadata.prompt_token_ids`. All other fields are kept. It writes a new file atomically, never
 rewrites its input, and stops if the output or its report already exists. Publishing uses a hard link, so
-the output directory must be on a filesystem that supports them (local disk, WEKA). Beside the output it writes `OUTPUT.jsonl.gz.report.json`, with the
+the output directory must be on a filesystem that supports them. Beside the output it writes `OUTPUT.jsonl.gz.report.json`, with the
 source and output SHA-256, the new template hash, the previous hashes, and how many
 inputs changed (with a few examples). Point `data.prompt_data` at the output in a new
 run root. Rows without `metadata.messages`, and rows whose targets carry tool
