@@ -78,6 +78,10 @@ def recovery_configuration_matches(root, previous, document):
     for key in ("auto_resume", "max_retries"):
         if key in document["launch"]:
             recorded.setdefault("launch", {})[key] = document["launch"][key]
+    # Workspaces control where jobs are submitted, not the saved training state.
+    # Authenticate the original specification before allowing either destination
+    # to move; keep resource, recipe, and evaluation-protocol checks strict.
+    adopt_keys(recorded["launch"], document["launch"], ("workspace",))
     # Liveness patience is operational; authenticate the saved spec first and
     # retain strict checks on startup coordination and all training settings.
     old_coordination = recorded.get("launch", {}).get("coordination")
@@ -94,7 +98,7 @@ def recovery_configuration_matches(root, previous, document):
     if isinstance(recorded.get("training"), dict) and isinstance(document.get("training"), dict):
         adopt_keys(recorded["training"], document["training"], ("save_interval",))
     if isinstance(recorded.get("evaluation"), dict) and isinstance(document.get("evaluation"), dict):
-        adopt_keys(recorded["evaluation"], document["evaluation"], ("interval",))
+        adopt_keys(recorded["evaluation"], document["evaluation"], ("interval", "workspace"))
         old_tasks = recorded["evaluation"].get("tasks", [])
         new_tasks = document["evaluation"].get("tasks", [])
         if len(old_tasks) == len(new_tasks):

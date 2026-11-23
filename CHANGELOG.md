@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Revise the Olmo 3.5 identity answers and add new identity prompts in `olmo35_identity_supplement.json`, which the identity builder adds as separately counted rows outside the 58-prompt audit check (https://github.com/allenai/open-instruct/pull/2313).
+- Allow authenticated MILES resumes to change the training and background-evaluation workspaces while preserving recipe and saved-spec integrity checks (https://github.com/allenai/open-instruct/pull/2314).
 - SFT and DPO tokenization decode JSON-string `tool_calls[].function.arguments` into mappings before rendering, so templates that iterate them (Olmo 3.5) accept tool data; the dataset cache version goes to v10 (https://github.com/allenai/open-instruct/pull/2300).
 - Raise the MILES `core.refresh_request_timeout` default from 1,800 s to 3,600 s so 32K-token responses at high SGLang concurrency are not timed out and their groups discarded (https://github.com/allenai/open-instruct/pull/2297).
 - Add a CUDA 13 MoE image (`build_image_and_launch.sh --cuda-version 13 --moe`) with transformer-engine 2.16.1, which MoE v2 (`OLMoDDPModel`) SFT needs. The default images are unchanged (https://github.com/allenai/open-instruct/pull/2298).

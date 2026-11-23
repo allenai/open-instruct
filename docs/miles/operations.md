@@ -206,6 +206,12 @@ is outside that publication wait, so it is not an absolute shutdown deadline.
 
 ## Checkpoints while inference continues
 
+On resume, `launch.workspace` and `evaluation.workspace` may change to move the
+trainer and future background evaluations to another Beaker workspace. Set both
+when moving an entire study. The saved specification is authenticated before
+these operational changes are accepted; existing jobs and artifacts stay in
+their original locations, and all other configuration checks still apply.
+
 On resume, `training.save_interval`, `evaluation.interval`, and individual
 `evaluation.tasks[].interval` may change to reduce future artifact production.
 The saved specification is authenticated first; training horizon, recipe,
