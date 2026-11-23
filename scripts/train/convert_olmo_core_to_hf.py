@@ -12,7 +12,7 @@ import argparse
 import transformers
 from olmo_core.distributed import checkpoint as olmo_core_checkpoint
 
-from open_instruct import logger_utils, olmo_core_utils
+from open_instruct import logger_utils, olmo_core_utils, tokenizer_utils
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -42,7 +42,10 @@ def main():
     olmo_core_checkpoint.load_model_and_optim_state(args.checkpoint_dir, model)
     state_dict = {"model": model.state_dict()}
 
-    tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_name)
+    # AutoTokenizer under transformers 5 rebuilds GPT-2 tokenizers with a bare ByteLevel
+    # pre-tokenizer, dropping Dolma 2's Split regex; the export would then serve a
+    # tokenization the model never trained on.
+    tokenizer = tokenizer_utils.load_tokenizer(tokenizer_name)
     olmo_core_utils.save_state_dict_as_hf(state_dict["model"], args.output_dir, args.model_name, tokenizer)
     logger.info(f"Saved HuggingFace checkpoint to {args.output_dir}")
 

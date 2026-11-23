@@ -18,12 +18,14 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import Callable
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 import numpy as np
 import requests
 
 from open_instruct import context_window_checker, logger_utils
+from open_instruct.answer_utils import extract_final_answer
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
 from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_MILLION_TOKENS, build_messages
@@ -37,7 +39,6 @@ from open_instruct.math_utils import (
 )
 from open_instruct.rubrics.prompts import RUBRIC_SCORING_PROMPT
 from open_instruct.rubrics.run_utils import extract_json_from_response, run_litellm_async, run_litellm_async_raw
-from open_instruct.utils import extract_final_answer
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -98,6 +99,7 @@ class VerificationResult:
     score: float
     cost: float = 0.0
     reasoning: str | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 @dataclasses.dataclass
@@ -158,6 +160,8 @@ class VerifierFunction(ABC):
         label: Any,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         """
         Asynchronous version of __call__. By default, it runs the synchronous __call__ in a thread pool.
@@ -175,8 +179,9 @@ class VerifierFunction(ABC):
         """
         # Run the synchronous __call__ in a thread pool to avoid blocking
         loop = asyncio.get_event_loop()
+        selected = {"selected_input": True} if selected_input else {}
         return await loop.run_in_executor(
-            None, lambda: self.__call__(tokenized_prediction, prediction, label, query, rollout_state)
+            None, lambda: self.__call__(tokenized_prediction, prediction, label, query, rollout_state, **selected)
         )
 
     def __repr__(self) -> str:
@@ -187,19 +192,32 @@ class VerifierFunction(ABC):
 # assumes a certain format, so might not always be useful.
 # we don't always need this -- for example, math evaluations just extract a final
 # number, so we don't need to remove the thinking section.
-def remove_thinking_section(prediction: str) -> str:
+def remove_thinking_section(prediction: str, *, selected_input: bool = False) -> str:
+    # MILES selected views bypass reasoning discovery while retaining this
+    # consumer's historical answer-wrapper and whitespace normalization.
     prediction = prediction.replace("<|assistant|>", "").strip()
     # remove thinking section from the prediction
-    prediction = prediction.split("</think>")[-1]
+    if not selected_input:
+        prediction = prediction.split("</think>")[-1]
     # remove answer tags from the prediction
     prediction = prediction.replace("<answer>", "").replace("</answer>", "")
     return prediction.strip()
 
 
+def _exact_number(text: str) -> Decimal | None:
+    """Parse a plain number exactly, ignoring thousands separators; None if it is not one."""
+    try:
+        value = Decimal(re.sub(r"(\d),(\d)", r"\1\2", str(text).strip()))
+    except InvalidOperation:
+        return None
+    return value if value.is_finite() else None
+
+
 class GSM8KVerifier(VerifierFunction):
     """
     Verifier for GSM8K tasks that extracts the last number from the prediction
-    and compares it (case-insensitively) to the ground truth.
+    and compares it to the ground truth as an exact number, so ``96.00`` matches
+    ``96``. Labels that are not numbers fall back to case-insensitive string equality.
     """
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
@@ -217,6 +235,9 @@ class GSM8KVerifier(VerifierFunction):
         # Preserve explicit signs on both decimals and integers when extracting the final answer.
         numbers = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", response)
         extracted = numbers[-1] if numbers else response
+        found, expected = (_exact_number(extracted) if numbers else None), _exact_number(label)
+        if found is not None and expected is not None:
+            return VerificationResult(score=float(found == expected))
         score = float(str(extracted).lower() == str(label).lower())
         return VerificationResult(score=score)
 
@@ -272,10 +293,11 @@ class MathVerifier(VerifierFunction):
             all_answers.append(prediction)
 
         # Compare each candidate answer to the ground truth.
+        diagnostics = {"symbolic_timeouts": 0}
         for answer in all_answers:
-            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
-                return VerificationResult(score=1.0)
-        return VerificationResult(score=0.0)
+            if is_equiv(answer, label, diagnostics=diagnostics) or hendrycks_is_equiv(answer, label):
+                return VerificationResult(score=1.0, diagnostics=diagnostics)
+        return VerificationResult(score=0.0, diagnostics=diagnostics)
 
 
 class StrictMathVerifier(VerifierFunction):
@@ -301,10 +323,11 @@ class StrictMathVerifier(VerifierFunction):
             all_answers.append(minerva_answer)
         if not all_answers:
             all_answers.append(normalize_final_answer(prediction))
+        diagnostics = {"symbolic_timeouts": 0}
         for answer in all_answers:
-            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
-                return VerificationResult(score=1.0)
-        return VerificationResult(score=0.0)
+            if is_equiv(answer, label, diagnostics=diagnostics) or hendrycks_is_equiv(answer, label):
+                return VerificationResult(score=1.0, diagnostics=diagnostics)
+        return VerificationResult(score=0.0, diagnostics=diagnostics)
 
 
 class IFEvalVerifier(VerifierFunction):
@@ -317,6 +340,8 @@ class IFEvalVerifier(VerifierFunction):
 
     """
 
+    grading_accepts_selected_input = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("ifeval", weight=1.0)
 
@@ -327,13 +352,15 @@ class IFEvalVerifier(VerifierFunction):
         label: str | dict,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         constraint_dict = ast.literal_eval(label)
         constraint_dict = constraint_dict[0]
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
-        answer = remove_thinking_section(prediction)
+        answer = remove_thinking_section(prediction, selected_input=selected_input)
         instruction_keys = constraint_dict["instruction_id"]
         args_list = constraint_dict["kwargs"]
         rewards = []
@@ -363,6 +390,8 @@ class IFEvalVerifierOld(VerifierFunction):
     'func_name' used to lookup the evaluation function.
     """
 
+    grading_accepts_selected_input = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("ifeval_old", verifier_config=verifier_config, weight=1.0)
 
@@ -373,9 +402,11 @@ class IFEvalVerifierOld(VerifierFunction):
         label: str | dict,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         constraint = label
-        answer = remove_thinking_section(prediction)
+        answer = remove_thinking_section(prediction, selected_input=selected_input)
         if isinstance(constraint, str):
             constraint = json.loads(constraint)
         if "func_name" not in constraint:
@@ -480,6 +511,8 @@ class F1Verifier(VerifierFunction):
     the maximum F1 score across all labels is returned.
     """
 
+    grading_accepts_selected_input = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
@@ -490,8 +523,10 @@ class F1Verifier(VerifierFunction):
         label: str | list[str],
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
-        prediction = remove_thinking_section(prediction)
+        prediction = remove_thinking_section(prediction, selected_input=selected_input)
         labels: list[str] = label if isinstance(label, list) else [label]
         score = max(f1_score(prediction, str(lab))["f1"] for lab in labels)
         return VerificationResult(score=score)
@@ -504,6 +539,8 @@ class PuzzleMatcherVerifier(VerifierFunction):
     It checks if the model output matches the ground truth answer.
     """
 
+    grading_accepts_selected_input = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("puzzle", verifier_config=verifier_config, weight=1.0)
 
@@ -514,9 +551,11 @@ class PuzzleMatcherVerifier(VerifierFunction):
         label: str,
         query: str | None = None,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         # remove answer tags from the prediction
-        prediction = remove_thinking_section(prediction)
+        prediction = remove_thinking_section(prediction, selected_input=selected_input)
         score = float(normalize_answer(prediction) == normalize_answer(label))
         return VerificationResult(score=score)
 
@@ -628,6 +667,10 @@ class MaxLenVerifier(VerifierFunction):
     The ground truth (label) is interpreted as the maximum length.
     """
 
+    grading_objective = "process"
+    grading_scope = "full"
+    grading_uses_tokens = True
+
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("max_length", verifier_config=verifier_config, weight=1.0)
 
@@ -662,6 +705,10 @@ class UpToMaxLenVerifier(VerifierFunction):
 
     The ground truth (label) is interpreted as the maximum length.
     """
+
+    grading_objective = "process"
+    grading_scope = "full"
+    grading_uses_tokens = True
 
     def __init__(self, verifier_config: VerifierConfig | None = None) -> None:
         super().__init__("up_to_max_length", verifier_config=verifier_config, weight=1.0)
@@ -698,6 +745,8 @@ class LMJudgeVerifier(VerifierFunction):
     """
     Verifier that uses a language model's judgement to score a response.
     """
+
+    grading_accepts_selected_input = True
 
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
@@ -754,11 +803,13 @@ class LMJudgeVerifier(VerifierFunction):
         label: str,
         query: str,
         rollout_state: dict | None = None,
+        *,
+        selected_input: bool = False,
     ) -> VerificationResult:
         """
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
-        final_answer = extract_final_answer(prediction)
+        final_answer = extract_final_answer(prediction, selected_input=selected_input)
         prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
 
         max_retries = 3  # for rate limits
@@ -1353,9 +1404,13 @@ class RewardConfig:
             scores = [0.0] * len(decoded_responses)
             metrics: dict[str, Any] = {}
             format_scores: list[float] = []
+            format_valid: list[bool] = []
 
             if self.apply_r1_style_format_reward:
                 format_scores = soft_format_reward_func(decoded_responses, self.r1_style_format_reward)
+                # Validity is kept apart from the reward magnitude, so the non-additive gate still
+                # checks the format when r1_style_format_reward is 0.0 (or any other value).
+                format_valid = [score > 0 for score in soft_format_reward_func(decoded_responses, 1.0)]
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):
@@ -1391,7 +1446,7 @@ class RewardConfig:
                         if self.apply_r1_style_format_reward and self.additive_format_reward:
                             scores[i] = raw_score + scores[i]
                         elif self.apply_r1_style_format_reward and not self.additive_format_reward:
-                            scores[i] = raw_score if format_scores[i] == 1 else 0
+                            scores[i] = raw_score if format_valid[i] else 0
                         else:
                             scores[i] = raw_score
 

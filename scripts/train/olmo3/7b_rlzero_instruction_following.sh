@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# The recorded original IF run used olmo_thinker at d928a7c.
+# This script selects a later template and recipe.
+# See "RL Zero chat templates" in scripts/train/olmo3/README.md.
+
 MODEL_NAME_OR_PATH="allenai/Olmo-3-1025-7B"
 DATASETS="allenai/Dolci-RLZero-IF-7B 1.0"
 

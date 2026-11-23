@@ -48,7 +48,7 @@ do
         --weight_decay 0.0 \
         --logging_steps 1 \
         --gradient_checkpointing \
-        --chat_template_name olmo123 \
+        --chat_template_name tokenizer_default \
         --with_tracking \
         --eval_workspace ai2/olmo-instruct \
         --eval_priority urgent \

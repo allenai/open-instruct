@@ -174,9 +174,10 @@ class timeout:
         signal.alarm(0)
 
 
-def is_equiv(x1: str, x2: str) -> bool:
+def is_equiv(x1: str, x2: str, *, diagnostics: dict[str, int] | None = None) -> bool:
     """
-    x1 and x2 are normalized latex string
+    x1 and x2 are normalized latex strings. Optionally count symbolic timeouts
+    without changing the comparison result or preventing callers' fallbacks.
     """
     try:
         with timeout(seconds=5):
@@ -199,7 +200,9 @@ def is_equiv(x1: str, x2: str) -> bool:
                 eval_logger.debug(f"Had some trouble simplifying when comparing {x1} and {x2}")
                 return False
     except TimeoutError:
-        eval_logger.debug(f"Timed out comparing {x1} and {x2}")
+        if diagnostics is not None:
+            diagnostics["symbolic_timeouts"] = diagnostics.get("symbolic_timeouts", 0) + 1
+        eval_logger.warning("Symbolic math comparison exceeded 5 seconds")
         return False
     except ImportError as e:
         eval_logger.error(e)

@@ -1,0 +1,364 @@
+# MILES starting points by model family
+
+These templates provide reviewable starting points for MILES training and policy
+evaluation. Choose a model-family directory, then adapt its paths and topology
+before launching. The `small` family holds measured OLMo 3.5 Small
+(A4B) B300 layouts; see [OLMo 3.5 Small on MILES](../../../docs/miles/olmo35-small.md).
+
+| Config | Purpose |
+|---|---|
+| [tiny/dev.toml](tiny/dev.toml) | One GPU, colocated trainer/inference; short GSM8K mechanics check |
+| [tiny/node.toml](tiny/node.toml) | One eight-GPU node: 2 trainer GPUs (EP2) and 6 inference engines; no judge |
+| [tiny/three-node.toml](tiny/three-node.toml) | Three-node learning: 8 trainer GPUs (EP8, one full node), 15 inference engines and 1 judge; 24 GPUs allocated, plus background evaluation |
+| [small/two-node-mech.toml](small/two-node-mech.toml) | OLMo 3.5 Small mechanics check: 8 trainer GPUs (EP8), 7 engines, 1 judge; 4 updates |
+| [small/four-node.toml](small/four-node.toml) | Olmo 3.5 Small timing layout: 8 trainer GPUs (EP8), 23 engines (R=96), 1 judge; audited timing4n median ~302 s/update |
+| [small/eight-node.toml](small/eight-node.toml) | Olmo 3.5 Small timing layout: 16 trainer GPUs (2 × EP8), 47 engines (R=96), 1 judge; audited late-window median ~185 s/update |
+
+Use `tiny/dev.toml` for a single-GPU Tiny mechanics check and
+`small/two-node-mech.toml` for Small mechanics. Small has no single-GPU training
+recipe; the two-node layout is its smallest tested configuration.
+
+All three Small recipes use the Tiny learning baseline from
+[PR #2271](https://github.com/allenai/open-instruct/pull/2271): 256 prompts × 8
+responses, batch 2,048, constant LR 6e-6 with no warmup, and token-mean loss.
+The reported Small timings used batch 1,024, LR 1e-6 and response-mean loss;
+see the [Small audit](../../../docs/miles/olmo35-small.md#recipe-alignment).
+
+The [generated recipe tables](../../../docs/miles/configuration.md#example-recipes)
+show current GPU allocations, batch sizes and publication settings directly from
+these TOMLs. Run `plan` on your copy to inspect the resolved settings and unused GPUs.
+
+**The demo configs are the baseline for configuration options unless otherwise
+stated.** Start a validation run from the applicable demo and record intentional
+differences. In particular, keep token-mean loss weighting
+(`miles.calculate_per_token_loss=true`) and zero reward for truncated responses
+(`core.reward_zero_truncated=true`) and presented-response grading
+(`core.reward_final_answer_only=true`). The examples declare
+`core.reward_reasoning_mode="required"`; use `"none"` explicitly for a non-thinking
+policy/template. Process and boundary-format rewards require declared exceptions;
+see [grading contracts](../../../docs/miles/grading.md). A throughput experiment must not silently
+change either learning-policy setting. The one-node and three-node demos share
+training hyperparameters, including batch size and policy lag; their datasets,
+judges, evaluation panels and topology-specific performance budgets differ.
+
+The examples keep inputs, topology, resource limits and recipe-specific overrides.
+Launch settings, mounts and input/output paths remain explicit. The examples
+rely on the structured loader's defaults for optimizer settings, seeds,
+microbatching, recomputation and dynamic rows. Single-node trainer
+counts, TP1 inference, one-GPU judges and rubric defaults (2,048 output tokens,
+temperature 1.0) are omitted where they match the run. Non-default topology and
+qualification settings remain explicit. See the
+[complete configuration reference](https://allenai.github.io/open-instruct/miles/configuration/)
+for options, defaults and interactions, including the linked native-option tables.
+Use `uv run mkdocs serve` to read the reference for your checkout.
+
+## Prepare and launch
+
+Copy a starter before editing it:
+
+```bash
+mkdir -p runs
+cp configs/miles/examples/tiny/dev.toml runs/my-run.toml
+# Replace model/output paths and YOUR_USERNAME; select an appropriate tiny model.
+python -m open_instruct.miles plan runs/my-run.toml
+python -m open_instruct.miles validate runs/my-run.toml
+# Load the pinned binary base into Docker as described in the launch guide.
+# Build an application image from this clean, committed checkout.
+unset MILES_EXISTING_IMAGE
+export MILES_BASE_IMAGE=LOCAL_LOADED_BASE_IMAGE
+python -m open_instruct.miles run runs/my-run.toml
+```
+
+Do not launch a template unchanged: model, data, output and judge paths are
+placeholders. Give each run a fresh output directory and keep personal variants
+in ignored `runs/`.
+
+The examples select Holmes for their B300 profiles, high priority and the
+`ai2/open-instruct-dev` development workspace. These defaults do not imply an
+available allocation: select a workspace and cluster with capacity before
+submitting. Keep personal allocation and priority overrides in ignored run files.
+Review mounts, GPU allocation, minimum runtime and timeout before submission. W&B defaults to offline; set online mode and an API-key secret when
+needed. See the [launch guide](../../../docs/miles/launching.md).
+
+Trainer images are built separately from the TOMLs. Follow the
+[image build instructions](../../../docs/miles/launching.md#laptop-choose-or-build-an-image)
+to build the intended application revision and runtime lock. `MILES_EXISTING_IMAGE`
+can reuse a compatible immutable image; local changes are not overlaid onto it.
+The launcher checks the image ID, not whether its installed sources match
+`runtime/miles/runtime.lock.json`. In particular, the cached B300 preset requires
+the lock's FP32 tracked-state snapshot support; planning cannot detect an older
+image missing that support. Verify the image's build records against the current
+lock, or rebuild before submitting.
+`node` and `three-node` separately pin their evaluator images.
+
+## Inputs and expected outputs
+
+All three examples explicitly set `data.over_length = "exclude"`, so preparation
+skips training prompts above the run's effective prompt limit and records
+original/excluded/retained counts per source in its manifest and logs. Source
+weights remain unchanged; an emptied configured source or previously populated
+pool fails preparation, as does an empty overall training input. Reporting-only
+source groups (`source_dataset`, or `source_name` when absent) may disappear at a
+smaller budget. Held-out prompts still fail on excess length. The library default
+remains `"fail"`; remove this example override or set it to `"fail"` to reject
+over-limit training prompts too.
+
+`dev` retains its compatible tiny-checkpoint placeholder and short GSM8K workload.
+It exercises preparation,
+generation, training, shared-engine evaluation, native checkpoint saving and final
+HF export. It is a mechanics check, not an accuracy baseline. A completed run does
+not test interrupted-run recovery. Filtering is disabled in this example
+because a tiny model may produce only constant rewards; see
+[online filtering](../../../docs/miles/data-and-evaluation.md#online-group-filtering)
+before changing this for a learning run.
+
+`node` adapts the previous two-node `medium` learning recipe to one B300 node,
+using two EP2 trainer ranks and six TP1 inference engines, with no judge.
+Its prepared workload contains math, instruction-following and code tasks only;
+exclude general-quality and other judge-dependent verifiers from training files. The paths use a separate `math-ifeval-code` preparation.
+Its background GSM8K, GSM8K-Platinum and IFBench panel runs initially, every
+50 optimizer updates, and finally, using a separate one-GPU allocation. Set
+`launch.secrets.BEAKER_TOKEN` to enable submission. These starter benchmarks do
+not cover code quality.
+This topology passes CPU planning checks; sustained throughput and memory fit
+still need GPU validation. Supply an HF policy, immutable prepared training
+JSONL files, and a verifier registry with a code-execution endpoint;
+the template does not provision a code service.
+See [datasets and verifiers](../../../docs/miles/data-and-evaluation.md) and
+[managed judges](../../../docs/miles/managed-judges.md).
+
+The former topology tier named `small` is retired. For Tiny, use `tiny/dev.toml`
+for mechanics and `tiny/node.toml` for disaggregated learning. These are distinct
+from the Olmo 3.5 Small model recipes above. Single-GPU inference alone does not
+establish that a policy's combined trainer/inference memory footprint fits.
+
+`three-node` uses a three-node, 24-GPU footprint. The nodes contain 8 training
+GPUs, 8 inference GPUs, and 7 inference + 1 judge GPU, respectively; no GPUs
+are unused.
+Its starting input is the full published `allenai/Dolci-Think-RL-7B` mixture,
+including general-quality tasks, prepared according to the
+[source and preparation contract](../../../docs/miles/data-and-evaluation.md#three-node-training-mixture).
+The example's explicit `over_length = "exclude"` keeps the subset that fits the
+run's prompt budget. This single-file input has no configured source fractions,
+so exclusions can change source-group proportions. Review the preparation manifest
+and logs for the retained population; set `over_length = "fail"` when every input
+row must fit. It requires
+a prepared Qwen3-32B judge with named verifier bindings. It also requires an
+accessible `launch.secrets.BEAKER_TOKEN` for background evaluation.
+Evaluator jobs allocate GPUs beyond the training plan;
+overlapping jobs can increase that total. Its 25-entry post-training development
+and text-safety panel runs on the initial/final checkpoints only. With `interval = 0`,
+periodic evaluation remains disabled even when the run is extended. It preserves pinned task sampling
+and full evaluation sizes. olmo-eval launches WildGuard/StrongREJECT judges on an extra GPU
+per safety group. Native SGLang handles policy generation except for SciCode,
+whose upstream adapter requires the HTTP client. Configure its reference-data path. Code tasks need the sandbox-enabled
+evaluator image. The full panel still requires GPU/sandbox qualification and
+measured resource bounds; the starter three-hour evaluator timeout is not a
+measured full-panel budget.
+With offline W&B, sync training and manually publish the retained evaluation results.
+Snapshot cleanup is manual after all referencing jobs stop. See
+[background evaluation](../../../docs/miles/background-evaluation.md) for the
+protocol, outputs and limits.
+
+For either learning template, check model memory and service capacity before
+scaling. The [throughput guide](../../../docs/miles/throughput-profiles.md) explains
+how to size memory budgets and engine admission for a model. Follow the
+[completion checks](../../../docs/miles/operations.md) to verify training,
+checkpoint and export outputs.
+
+## Capacity and qualification settings
+
+The three-node throughput candidate uses 256 prompts × 8 samples per collection
+and one 2,048-sample optimizer batch at constant LR 6e-6 with policy lag 12. It admits
+3,840 unfinished samples and keeps up to 1,024 completed prompt groups (8,192 samples), and runs 16 HTTP actors per node
+with one Ray CPU each. The rollout executor reserves two Ray CPUs and each node
+advertises 64 logical Ray CPUs through `launch.env.OI_MILES_RAY_CPUS` (default
+32 when omitted). The node example uses the same worker counts and reservations.
+Both learning examples set `expandable_segments:True` only on trainer ranks.
+These reservations permit actor placement; they
+do not make the Python producer event loop parallel. Distributed HTTP actors
+parse JSON before producer receipt. The single managed Qwen3-32B judge uses CUDA
+graphs and a maximum of 32 concurrent calls.
+
+These are a bundled candidate, not a measured optimum. Increasing the buffer
+retains more host memory and older work; keep policy lag bounded and watch stale
+group discards. The one-node validation has a different layout (2 trainers,
+5 engines and 1 judge) from the judge-free `node.toml` example. It does not
+qualify three-node throughput. Keep cold compilation, periodic scoring,
+evaluation and checkpoint cost separate from steady-state measurements.
+
+Background evaluation independently sets `evaluation.provider_kwargs.profile` to
+`"olmo3.5-12.5b"`. It resolves the optimized settings on the assigned evaluator GPU
+(including H100 80GB and B300), enables full decode graphs, and sizes native
+harness batches by engine sequence capacity, counting pass@k expansion. SciCode's
+HTTP server uses the same profile. See the
+[evaluation guide](../../../docs/miles/background-evaluation.md) for compatibility,
+batch-boundary limits and full-panel qualification still required.
+
+The learning examples pin `inference.profile = "olmo35-b300-12.5@0.8"` on Holmes.
+This is the current recommended B300 starting point, based on the experiments
+below. The suffix is **total@active parameters in billions**: approximately
+12.5B total and 0.8B active per token for the measured model, including embeddings
+and the output head. The planner recommends one current preset per GPU. The old
+B300 v1 preset remains only for reproducing older cached configurations.
+The preset sets **512 running requests, 512 HTTP permits and decode graphs through
+batch 512 per engine**, 17,825,792 KV tokens, 3,072 recurrent slots, memory fraction
+0.7 and prefill chunks of 8,192. It disables cross-request radix caching.
+Both learning examples set `miles.pause_generation_mode = "in_place"`: active
+requests keep their attention KV and hybrid recurrent state across weight updates,
+avoiding re-prefill of their generated prefixes. The original `olmo35-b300-v1`
+preset still enables radix caching with `extra_buffer` and requires retract mode.
+Runs started from the old examples must resume with their recorded settings;
+switching profile or pause/cache mode under the same `output.root` fails the
+recovery configuration check. Use a new root for the updated recipe.
+The one-GPU colocated `dev.toml` explicitly keeps retract mode; retained state
+requires dedicated inference GPUs. See the [retained-state qualification](../../../docs/miles/throughput-profiles.md#retained-state-weight-publication).
+Cached hybrid serving requires FP32 tracked-state snapshots in the pinned
+[runtime](../../../runtime/miles/runtime.lock.json); rebuild the image when its
+pins change. See [model limits](../../../docs/miles/moe-model-support.md#current-limits).
+
+To move an example to Jupiter, change both the cluster and profile to
+`olmo35-h100-12.5@0.8`. This preset also uses admission/HTTP/graph batch 512 and prefill
+chunks of 8,192, but disables caching and uses 6,684,672 KV tokens, 512 recurrent
+slots and memory fraction 0.9. Both presets require the studied BF16 Olmo 3.5
+geometry, dedicated TP1 engines and 34,816 context / 32,768 response caps.
+The old `olmo35-h100-v1` name remains a compatibility alias for the H100 preset.
+These settings are starting points, not universal memory-fit or throughput guarantees.
+
+Named presets apply whole. Any explicit preset-owned key conflicts, even an equal
+value; errors show the offending keys, an editable TOML block, and two exits:
+remove the keys to keep the preset, or select `generic` and manage the settings.
+Known hardware/topology mismatches fail during planning. Model geometry is checked
+when actual checkpoint metadata is readable and must pass after preparation before
+training. Preset settings remain identical before and after preparation.
+
+Omitted or `generic` profiles preserve generic defaults and explicit settings.
+The default recurrent pool is 128 slots. A separately measured **cache-off B300
+alternative uses 1,024 recurrent slots**; it predates the retained-state learning
+qualification and is an explicit generic-mode experiment, not the current default.
+Use the named B300 preset for the qualified learning baseline: its 3,072-slot pool
+was deliberately kept fixed from the prior profile for those runs. SGLang still
+allocates all explicitly requested slots with radix off; the inherited
+`extra_buffer` strategy has no effect while radix is disabled. Reducing the pool
+could save memory but needs separate retained-state qualification before changing
+the recommendation. A cached-320 H100 alternative uses 4,456,448 KV tokens and 1,920
+recurrent slots and likewise requires explicit generic settings. Neither alternative
+is selected automatically. `dev` retains its explicit small colocated configuration.
+
+The planner offers read-only tips when a preset matches or explicit pools resemble
+a preset for different hardware. Tips appear in a stderr box and
+`plan.runtime.inference_profile.tips`; routine warnings remain plain lines.
+A cache-off recommendation for retract mode explicitly notes that it disables
+prefix reuse; compatibility is not a claim of higher throughput for that mode.
+There is no `auto` selector. Topology, metrics, producer budget and trainer controls
+remain separate. To experiment, follow
+[departing from a preset](../../../docs/miles/throughput-profiles.md#deliberately-departing-from-a-preset).
+Generic mode does not resize pools, estimate memory fit or retain a hardware pin.
+
+The node example explicitly limits unfinished samples to **1,024**, independently
+of the six engines' 3,072 reserved running slots. Filling every reserved slot is
+useful only when the trainer can consume the resulting work. Compare trainer wait,
+useful throughput and stale-work discards before increasing the budget.
+
+The unfinished-sample budget, when omitted, is
+`max(collection samples, 2 × engines × min(HTTP permits, running admission))`,
+rounded to complete prompt groups. The three-node example explicitly uses
+**3,840** unfinished samples (256 per engine) as a candidate throughput budget. Removing the
+explicit limits would give 6,144 for node and 15,360 for three-node. Generic
+64-admission configurations with omitted budgets give
+1,024 and 1,920 for those topologies. Explicit
+`async.async_max_concurrent_samples` wins. Completed siblings can remain outside
+the unfinished budget, so this is not a limit on all retained responses.
+
+Both Tiny learning examples use 256 prompts × 8 responses, batch 2,048,
+constant LR 6e-6 and lag 12.
+Node buffers one completed batch; three-node buffers four. The three-node
+unfinished-sample budget represents 1.875 batches;
+adding the completed buffer gives 5.875 nominal batches. Sample backfill can retain
+additional finished siblings, so this arithmetic is not an age guarantee. It is headroom, not
+a measured optimum or a guarantee of steady throughput. Full-recipe
+collection and judging can limit throughput even with spare engine capacity.
+Batch-equivalents do not predict actual policy age or drain duration.
+Measure trainer wait, useful throughput, oldest-token age and stale-work discards;
+reduce the producer budget or fleet when production outruns useful consumption.
+Per-engine settings do not qualify a whole fleet's routing, refresh latency or
+learning behavior. See [qualification limits](../../../docs/miles/throughput-profiles.md#qualification-limits).
+
+The three-node candidate also enables CUDA graphs for its single Qwen3-32B judge
+and raises judge concurrency from the default 16 to 32. Bounded B300 training
+runs and H100 TP2 serving checks passed; see the
+[judge qualification](../../../docs/miles/managed-judges.md#lifecycle-and-audit-artifacts).
+Continue measuring judge errors and grading latency alongside useful training
+throughput and the template's policy age. These checks do not establish
+production-mixture calibration or long-run learning behavior.
+
+These templates inherit the disabled optional startup weight snapshot/reset audit
+(`check_weight_update_equal = false`) and explicitly disable periodic score-reuse
+audits (`scoring_check_interval = 0`). The first score check at startup/resume, required
+scoring passes, TIS, and publication acknowledgments remain. `dev`
+retains weight qualification. Re-enable audits when changing the publication or
+scoring implementation. See the checkpoint policy below before launching a learning run.
+
+The examples explicitly retain two native checkpoints and disable router
+auxiliary losses; these differ from the defaults. The learning recipes also keep
+their model-specific context, packing, cache and memory settings. Review these
+choices when changing models. `three-node` keeps its background evaluator configuration
+explicit because evaluation changes independently of training topology.
+
+`plan` reports copied configurations with no request headroom, forced rescoring,
+weight qualification, periodic scoring audits, or other diagnostic overhead.
+Review those warnings instead of inheriting settings from an old experiment.
+
+## Candidate evaluation sampling
+
+Policy evaluation uses temperature 1.0 and top-p 0.95. Background tasks explicitly
+request 32,768 response tokens, independent of the serving context size; the math
+tasks retain 32 draws. Shared in-loop evaluation defaults to the same sampling
+and caps its inherited response budget at 32K; short smoke tests keep their
+smaller budgets. Explicit run overrides still win. Judge sampling and training
+rollout sampling are independent. This candidate protocol awaits the paired
+control evaluation results.
+
+SciCode explicitly sets temperature 1.0 and 32K responses, but the pinned
+evaluator does not expose top-p for that external task. Full nucleus-sampling
+alignment requires an evaluator update. Keep benchmark-specific protocols such
+as greedy RULER and BFCL explicit when adding them; do not override every task
+in a suite globally.
+
+## Recovery checkpoints and preserved milestones
+
+The Tiny learning and Small four-/eight-node templates enable native recovery
+saves every **10 updates**, retain the latest **two** saves, and preserve the
+following milestones plus the final checkpoint. Automatic resume is enabled.
+The short mechanics examples keep their separate checkpoint settings.
+
+| Template | Recovery interval | Preserved interval | Reason |
+|---|---:|---:|---|
+| Tiny `node` |10 updates|50 updates|Align native milestones with the existing 50-update development panel.|
+| Tiny `three-node` |10 updates|100 updates|Retain longer learning milestones; its evaluation remains initial/final.|
+| Small `four-node`, `eight-node` |10 updates|50 updates|Retain milestones for expensive runs when extending the 30-update budget.|
+
+Choose the recovery interval from measured **wall-clock update time**, aiming for
+roughly **1–2 hours** between saves. Ten updates is a starting point, not a timer:
+Tiny seed17 data runs at batch 2,048 recently took about 5–7 minutes/update
+(roughly 50–70 minutes per10 updates). This is workload-specific evidence, not a
+throughput claim for every template. The Small timing measurements above used an
+older batch/objective; remeasure the current recipe rather than treating those
+numbers as its checkpoint forecast. Native saves also add I/O time, which the
+historical checkpoint-disabled Small timing runs did not include.
+
+Before launch, budget startup/compilation, generation wait, training, evaluation
+and save time separately. Ensure the **first complete recovery save** should
+finish comfortably inside the protected minimum runtime; if it will not, shorten
+the interval or revise the run budget before submission. Review output storage
+for the latest saves, preserved milestones and evaluator snapshots. For a
+checkpoint-free timing experiment, explicitly disable saving and automatic
+resume and remove `save_interval`; do not carry that override into a learning run.
+
+Verify the first real save's completion manifest, latest pointer and data-cursor
+hash. On interruption, restore the latest complete save and check the first
+post-resume optimizer counter and cursor identity. Check that ordinary saves
+actually roll off while preserved milestones and pending evaluation inputs remain.
+Automatic job restart alone does not establish model/optimizer recovery. See
+[checkpoint retention](../../../docs/miles/models-and-checkpoints.md#save-resume-and-export)
+for native retention semantics.

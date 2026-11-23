@@ -2,6 +2,7 @@
 
 import types
 import unittest
+from unittest import mock
 
 import torch
 
@@ -106,12 +107,54 @@ class TestHybridStateConversion(unittest.TestCase):
             set(converted), {"model.layers.0.linear_attn.A_log", "model.layers.1.self_attn.q_proj.weight"}
         )
 
+    def test_hf_export_sets_dual_eos_for_hybrid_models(self) -> None:
+        model = types.SimpleNamespace(
+            config=types.SimpleNamespace(model_type=olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE), generation_config=None
+        )
+        tokenizer = mock.MagicMock()
+        tokenizer.chat_template = None
+        tokenizer.convert_tokens_to_ids.side_effect = [100, 101]
+
+        olmo_core_utils._set_hf_export_generation_config(model, tokenizer)
+
+        self.assertEqual(model.generation_config.eos_token_id, [100, 101])
+
     def test_unmapped_key_raises(self) -> None:
         """A silently dropped weight would leave randomly initialised parameters behind."""
         with self.assertRaises(KeyError):
             olmo_core_hybrid.convert_hybrid_state_from_hf(
                 {"model.layers.0.mystery.weight": torch.empty(0)}, ["linear_attention"]
             )
+
+    def test_hybrid_weight_loading_uses_model_type_dispatch(self) -> None:
+        """The dispatcher must route Olmo Hybrid around olmo-core's generic converter."""
+        state = {"blocks.0.attention.A_log": torch.zeros(1)}
+        hf_config = types.SimpleNamespace(model_type=olmo_core_hybrid.OLMO_HYBRID_MODEL_TYPE)
+
+        with (
+            mock.patch.object(olmo_core_utils.transformers.AutoConfig, "from_pretrained", return_value=hf_config),
+            mock.patch.object(olmo_core_hybrid, "load_hf_hybrid_model") as load_hybrid,
+            mock.patch.object(olmo_core_utils, "load_hf_model") as load_generic,
+        ):
+            olmo_core_utils.load_hf_weights_into_olmo_core(state, "allenai/Olmo-Hybrid-7B", work_dir="out")
+
+        load_hybrid.assert_called_once_with("allenai/Olmo-Hybrid-7B", state)
+        load_generic.assert_not_called()
+
+    def test_model_loader_applies_replaced_state_dict_values(self) -> None:
+        """Hybrid conversion replaces state-dict entries, so the model must load them back."""
+        model = torch.nn.Linear(2, 1, bias=False)
+        replacement = torch.full_like(model.weight, 3.0)
+
+        def replace_state(model_state_dict, model_name_or_path, work_dir=None):
+            self.assertEqual(model_name_or_path, "allenai/Olmo-Hybrid-7B")
+            self.assertEqual(work_dir, "out")
+            model_state_dict["weight"] = replacement
+
+        with mock.patch.object(olmo_core_utils, "load_hf_weights_into_olmo_core", side_effect=replace_state):
+            olmo_core_utils.load_hf_weights_into_model(model, "allenai/Olmo-Hybrid-7B", work_dir="out")
+
+        torch.testing.assert_close(model.weight, replacement)
 
 
 if __name__ == "__main__":

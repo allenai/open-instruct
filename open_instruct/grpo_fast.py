@@ -105,6 +105,7 @@ from open_instruct.model_utils import (
     load_ref_policy,
     print_rich_single_line_metrics,
     push_folder_to_hub,
+    uses_olmo3_generation_config,
 )
 from open_instruct.rl_utils import Timer, masked_mean
 from open_instruct.utils import (
@@ -372,7 +373,7 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        self.optimizer = grpo_utils.create_optimizer(optim_params, args)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warmup_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
@@ -841,12 +842,7 @@ class PolicyTrainerRayProcess(RayProcess):
             model_to_save = model_to_save.module
 
         # Set generation config after unwrapping to ensure it's on the actual model being saved
-        # Check both chat_template_name and model name for OLMo 3 detection
-        model_name = getattr(model_to_save.config, "_name_or_path", "") or ""
-        is_olmo3 = (
-            chat_template_name is not None and "olmo" in chat_template_name.lower()
-        ) or "olmo-3" in model_name.lower()
-        if is_olmo3:
+        if uses_olmo3_generation_config(chat_template_name, tokenizer, model_to_save):
             model_to_save.generation_config = get_olmo3_generation_config(tokenizer)
 
         # gather parameters

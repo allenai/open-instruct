@@ -45,36 +45,6 @@ class TestTensorCacheGPU(unittest.TestCase):
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-class TestDataCollatorDatasetIndex(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.model_name = "HuggingFaceTB/SmolLM2-135M-Instruct"
-        cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
-        cls.tokenizer.pad_token = cls.tokenizer.eos_token
-        cls.model = AutoModelForCausalLM.from_pretrained(cls.model_name, torch_dtype=torch.bfloat16).cuda()
-
-    def test_collator_preserves_index(self):
-        samples = [
-            {
-                "chosen_input_ids": torch.tensor([1, 2, 3, 4, 5]),
-                "chosen_labels": [-100, -100, 3, 4, 5],
-                "chosen_attention_mask": torch.tensor([1, 1, 1, 1, 1]),
-                "rejected_input_ids": torch.tensor([1, 2, 6, 7, 8]),
-                "rejected_labels": [-100, -100, 6, 7, 8],
-                "rejected_attention_mask": torch.tensor([1, 1, 1, 1, 1]),
-                "index": i,
-            }
-            for i in range(4)
-        ]
-
-        collator = dpo_utils.DataCollatorForSeq2SeqDPO(tokenizer=self.tokenizer, model=self.model, padding="longest")
-        batch = collator(samples)
-
-        self.assertIn("index", batch)
-        self.assertTrue(torch.equal(batch["index"], torch.tensor([0, 1, 2, 3])))
-
-
-@unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
 class TestForwardFunctionsOlmo(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -64,7 +64,7 @@ do
             --beta 5 \
             --packing \
             --activation_memory_budget 0.5 \
-            --chat_template_name olmo123 \
+            --chat_template_name tokenizer_default \
             --with_tracking \
             --send_slack_alerts
     done

@@ -1,5 +1,5 @@
 #!/bin/bash
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+source "$(dirname "${BASH_SOURCE[0]}")/require_beaker_image.sh"
 
 uv run python mason.py \
     --cluster ai2/neptune \

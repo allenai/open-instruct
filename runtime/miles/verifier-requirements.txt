@@ -1,0 +1,13 @@
+# Missing registry imports in the pinned compiled runtime; match open-instruct pins.
+langdetect==1.0.9
+immutabledict==1.2.0
+nltk==3.9.2
+# Installed with --no-deps; keep the parser dependency explicit. SymPy/mpmath
+# and the worker-only ANTLR 4.11 runtime are supplied by the locked base.
+math-verify==0.9.0
+latex2sympy2-extended==1.11.0
+# Match the qualified structured-grader image. The pinned binary base supplies
+# jsonschema/jsonschema-specifications and six; --no-deps needs RFC3339 explicitly.
+xmltodict==0.14.2
+openapi-schema-validator==0.6.3
+rfc3339-validator==0.1.4

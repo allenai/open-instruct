@@ -1,4 +1,4 @@
-"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, Crawl4AIBrowseTool, and GenericMCPTool from tools.py)."""
+"""Tests for tools (PythonCodeTool, JinaBrowseTool, S2SearchTool, SerperSearchTool, YouSearchTool, Crawl4AIBrowseTool, and GenericMCPTool from tools.py)."""
 
 import asyncio
 import dataclasses
@@ -25,6 +25,8 @@ from open_instruct.environments.tools.tools import (
     S2SearchToolConfig,
     SerperSearchTool,
     SerperSearchToolConfig,
+    YouSearchTool,
+    YouSearchToolConfig,
 )
 from open_instruct.environments.tools.utils import (
     APIResponse,
@@ -905,6 +907,100 @@ class TestSerperSearchToolConfig(unittest.TestCase):
     def test_tool_class_attribute(self):
         """Test tool_class is set to SerperSearchTool."""
         self.assertEqual(SerperSearchToolConfig.tool_class, SerperSearchTool)
+
+
+class TestYouSearchTool(unittest.TestCase):
+    """Tests for YouSearchTool (keyed You.com Search API)."""
+
+    def setUp(self):
+        patcher = patch.dict("os.environ", {"YDC_API_KEY": "test_key"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.tool = YouSearchTool(call_name="search", num_results=5)
+
+    def _run(self, api_response, mock_api_request):
+        async def mock_response(*args, **kwargs):
+            return api_response
+
+        mock_api_request.side_effect = mock_response
+        return asyncio.run(self.tool.step(EnvCall(id="", name="search", args={"query": "test query"})))
+
+    def test_registry_and_config(self):
+        self.assertIs(TOOL_REGISTRY["you_search"], YouSearchToolConfig)
+        self.assertEqual(YouSearchToolConfig.tool_class, YouSearchTool)
+        self.assertEqual(YouSearchToolConfig().num_results, 5)
+        self.assertEqual(self.tool.parameters["required"], ["query"])
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_key_raises_error_on_init(self):
+        with self.assertRaisesRegex(ValueError, "Missing YDC_API_KEY environment variable"):
+            YouSearchTool(call_name="search")
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_successful_search(self, mock_api_request):
+        data = {
+            "results": {
+                "web": [
+                    {
+                        "url": "https://example.com/1",
+                        "title": "Result 1",
+                        "description": "Description 1",
+                        "snippets": ["Snippet 1a", "Snippet 1b"],
+                    },
+                    {"url": "https://example.com/2", "title": "Result 2", "description": "Description 2"},
+                    {"url": "https://example.com/3", "title": "Result 3"},
+                ]
+            }
+        }
+        result = self._run(APIResponse(data=data), mock_api_request)
+
+        self.assertEqual(
+            result.result,
+            "**Result 1**\nSnippet 1a Snippet 1b\nSource: https://example.com/1\n\n"
+            "**Result 2**\nDescription 2\nSource: https://example.com/2",
+        )
+        self.assertEqual(result.metadata["error"], "")
+        kwargs = mock_api_request.call_args.kwargs
+        self.assertEqual(kwargs["url"], "https://ydc-index.io/v1/search")
+        self.assertEqual(kwargs["json_payload"], {"query": "test query", "count": 5})
+        self.assertEqual(kwargs["headers"]["X-API-Key"], "test_key")
+        self.assertEqual(kwargs["headers"]["User-Agent"], "youdotcom-integration/allenai-open-instruct")
+
+    @parameterized.expand(
+        [
+            ("unauthorized", "HTTP error: 401 Unauthorized", "YDC_API_KEY is valid"),
+            ("forbidden", "HTTP error: 403 Forbidden", "lacks access"),
+            ("payment_required", "HTTP error: 402 Payment Required", "out of credits"),
+            ("rate_limited", "HTTP error: 429 Too Many Requests", "rate limited"),
+        ]
+    )
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_http_errors(self, name, api_error, expected_hint, mock_api_request):
+        result = self._run(APIResponse(error=api_error), mock_api_request)
+
+        self.assertIn(api_error, result.result)
+        self.assertIn(expected_hint, result.metadata["error"])
+        self.assertFalse(result.metadata["timeout"])
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_timeout(self, mock_api_request):
+        result = self._run(APIResponse(error="Timeout after 10 seconds", timed_out=True), mock_api_request)
+
+        self.assertTrue(result.metadata["timeout"])
+        self.assertIn("Timeout after 10 seconds", result.result)
+
+    @parameterized.expand([("not_a_dict", ["unexpected"]), ("web_not_a_list", {"results": {"web": "oops"}})])
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_malformed_response(self, name, data, mock_api_request):
+        result = self._run(APIResponse(data=data), mock_api_request)
+
+        self.assertEqual(result.metadata["error"], "Malformed response from the You.com Search API.")
+
+    @patch("open_instruct.environments.tools.tools.make_api_request")
+    def test_no_results_returns_error(self, mock_api_request):
+        result = self._run(APIResponse(data={"results": {"web": []}}), mock_api_request)
+
+        self.assertEqual(result.result, "Query returned no results.")
 
 
 class TestCrawl4AIBrowseToolInit(unittest.TestCase):

@@ -13,7 +13,7 @@ model_name_or_path="/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-instr
 # cluster
 cluster=ai2/jupiter
 #template
-chat_template=olmo123 #olmo
+chat_template=tokenizer_default
 
 NUM_GPUS=${NUM_GPUS:-8}
 hosted_vllm=""

@@ -1,5 +1,5 @@
 #!/bin/bash
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+source "$(dirname "${BASH_SOURCE[0]}")/../require_beaker_image.sh"
 MODEL_NAME=/weka/oe-adapt-default/scottg/olmo/merging/ckpts/olmo3-7b-instruct-sft-1115
 LR=1e-6
 EXP_NAME=olmo3-7b-DPO-olmo-core-8k-${LR}-$(date +%s)
@@ -28,7 +28,7 @@ uv run python mason.py \
     --exp_name "$EXP_NAME" \
     --model_name_or_path "$MODEL_NAME" \
     --config_name olmo3_7B \
-    --chat_template_name olmo123 \
+    --chat_template_name tokenizer_default \
     --max_seq_length 8192 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 4 \

@@ -1,0 +1,137 @@
+{# Olmo 3.5 template fixture: generation annotations wrap each complete assistant turn.
+   Based on allenai/dolma2-tokenizer-olmo35 at a398a9fa03c4af79868b215e32a56b78e5af8782.
+   Publishing these annotations to the Hub tokenizer is a separate change. #}
+{#- Tool-calling instructions appended to the system prompt whenever tools
+    are available. Tool signatures are listed Qwen-style: one JSON object
+    per line inside <tools> tags. -#}
+{%- macro tool_instructions(tools) -%}
+    {{- '# Tools\n\nYou have access to the following functions:\n\n' }}
+    {{- '<tools>' }}
+    {%- for tool in tools -%}
+        {{- '\n' }}{{- tool | tojson }}
+    {%- endfor -%}
+    {{- '\n</tools>\n\n' }}
+    {{- 'If you choose to call a function ONLY reply in the following format with NO suffix:\n\n' }}
+    {{- '<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n' }}
+    {{- '<IMPORTANT>\nReminder:\n' }}
+    {{- '- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n' }}
+    {{- '- Required parameters MUST be specified\n' }}
+    {{- '- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n' }}
+    {{- '- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n' }}
+    {{- '</IMPORTANT>' }}
+{%- endmacro -%}
+
+
+{#- Render one structured tool call as a Qwen 3.5-style XML block. String
+    argument values are emitted unchanged; all other values use JSON. -#}
+{%- macro render_tool_call(tool_call) -%}
+    {{- '<tool_call>\n<function=' + tool_call['name'] + '>\n' }}
+    {%- if tool_call.get('arguments', none) is not none -%}
+        {%- for args_name, args_value in tool_call['arguments'] | items -%}
+            {{- '<parameter=' + args_name + '>\n' }}
+            {%- if args_value is string -%}
+                {{- args_value }}
+            {%- else -%}
+                {{- args_value | tojson }}
+            {%- endif -%}
+            {{- '\n</parameter>\n' }}
+        {%- endfor -%}
+    {%- endif -%}
+    {{- '</function>\n</tool_call>' }}
+{%- endmacro -%}
+
+
+{#- User and tool content may be a string or a list of text parts.
+    Join text parts in order without adding or trimming whitespace. -#}
+{%- macro render_text_content(content) -%}
+    {%- if content is string -%}
+        {{- content }}
+    {%- elif content is sequence and content is not mapping -%}
+        {%- for part in content -%}
+            {%- if part is mapping and part.get('type') == 'text' and part.get('text') is string -%}
+                {{- part['text'] }}
+            {%- else -%}
+                {{- raise_exception('Only text content parts with string text are supported.') }}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- else -%}
+        {{- raise_exception('Content must be a string or a list of text parts.') }}
+    {%- endif -%}
+{%- endmacro -%}
+
+
+{%- set has_system = messages | selectattr('role', 'equalto', 'system') | list | length > 0 -%}
+
+
+{#- Default system prompt when the conversation does not provide one. -#}
+{%- if not has_system -%}
+    {{- '<|im_start|>system\n' }}
+    {{- 'You are Olmo, a helpful AI assistant built by Ai2. Your knowledge cutoff is [CUTOFF_DATE], and your model weights are available at https://huggingface.co/allenai.' }}
+    {%- if tools -%}
+        {{- '\n\n' }}{{- tool_instructions(tools) }}
+    {%- endif -%}
+    {{- '<|im_end|>\n' }}
+{%- endif -%}
+
+
+{%- for message in messages -%}
+    {%- if message['role'] == 'system' -%}
+        {{- '<|im_start|>system\n' + message['content'] }}
+        {%- if tools -%}
+            {{- '\n\n' }}{{- tool_instructions(tools) }}
+        {%- endif -%}
+        {{- '<|im_end|>\n' }}
+    {%- elif message['role'] == 'user' -%}
+        {{- '<|im_start|>user\n' + render_text_content(message['content']) + '<|im_end|>\n' }}
+    {%- elif message['role'] == 'assistant' -%}
+        {{- '<|im_start|>assistant\n' }}
+        {%- generation -%}
+        {%- set reasoning_content = message.get('reasoning_content', none) -%}
+        {%- set content = message.get('content', none) or '' -%}
+        {#- Reasoning can be provided either inline in the content as a
+            <think> block or in a separate `reasoning_content` field.
+            Preserve the supplied reasoning whitespace in either form.
+            Unlike Qwen 3.5, reasoning is kept in every
+            assistant turn, not just in the turns after the last user
+            query. If neither form supplies reasoning, emit an empty block. -#}
+        {%- if reasoning_content is not none -%}
+            {{- '<think>' + reasoning_content + '</think>' }}
+        {%- elif not (content | trim).startswith('<think>') -%}
+            {{- '<think></think>' }}
+        {%- endif -%}
+        {{- content }}
+        {%- if message.get('tool_calls', none) is not none -%}
+            {%- for tool_call in message['tool_calls'] -%}
+                {%- if loop.first -%}
+                    {{- '\n\n' }}
+                {%- else -%}
+                    {{- '\n' }}
+                {%- endif -%}
+                {%- if tool_call is mapping -%}
+                    {%- if tool_call.get('function', none) is not none -%}
+                        {%- set tool_call = tool_call['function'] -%}
+                    {%- endif -%}
+                    {{- render_tool_call(tool_call) }}
+                {%- else -%}
+                    {{- tool_call }}
+                {%- endif -%}
+            {%- endfor -%}
+        {%- endif -%}
+        {#- Tool calls hand off control; other assistant turns end with eos.
+            The terminator must not change when more messages are appended. -#}
+        {%- if message.get('tool_calls', none) -%}
+            {{- '<|im_end|>' }}
+        {%- else -%}
+            {{- eos_token }}
+        {%- endif -%}
+        {%- endgeneration -%}
+        {%- if message.get('tool_calls', none) -%}{{- '\n' }}{%- endif -%}
+    {%- elif message['role'] == 'environment' or message['role'] == 'tool' -%}
+        {{- '<|im_start|>environment\n' }}
+        {{- '<tool_response>\n' + render_text_content(message['content']) + '\n</tool_response>' }}
+        {{- '<|im_end|>\n' }}
+    {%- endif -%}
+    {%- if loop.last and add_generation_prompt -%}
+        {{- '<|im_start|>assistant\n<think>' }}
+    {%- endif -%}
+{%- endfor -%}

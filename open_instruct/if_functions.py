@@ -136,6 +136,8 @@ def validate_response_language(text, language):
         result = validate_response_language(text, language)
     """
     # Detect the language of the text
+    # Seeded so one text always gets one verdict; langdetect samples otherwise.
+    langdetect.DetectorFactory.seed = 0
     detected_language = langdetect.detect(text)
     # Check if the detected language matches the expected language
     return detected_language == language
@@ -386,7 +388,7 @@ def validate_sections(text: str, N: int, section_splitter: str) -> bool:
 def validate_json_format(text: str) -> bool:
     try:
         json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         return False
     return True
 

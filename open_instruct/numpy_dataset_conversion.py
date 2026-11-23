@@ -9,6 +9,7 @@ The output layout for each `output_dir` is:
 """
 
 import gzip
+import io
 import json
 import os
 import pathlib
@@ -30,6 +31,8 @@ _BOUNDARIES_DTYPE = np.int64
 TOKEN_IDS_NPY_GLOB = "token_ids_part_*.npy"
 LABELS_MASK_NPY_GLOB = "labels_mask_part_*.npy"
 TOKEN_IDS_METADATA_GLOB = "token_ids_part_*.csv.gz"
+# Set in dataset_statistics.json's configuration when the parts were cut only between rows.
+ROW_ALIGNED_PARTS_KEY = "row_aligned_parts"
 
 
 def _select_token_dtype(vocab_size: int):
@@ -45,9 +48,36 @@ def _flush_partial_files(tokens_fh, labels_fh, boundaries_fh) -> None:
         os.fsync(fh.fileno())
 
 
+def _row_aligned_chunk_ends(document_ends: np.ndarray, total_items: int, chunk_size: int) -> list[int]:
+    """End offsets of chunks of at most `chunk_size` items that only end where a row ends.
+
+    A row longer than `chunk_size` gets a chunk of its own, over the size limit, rather than being cut.
+    """
+    ends: list[int] = []
+    start = 0
+    while start < total_items:
+        # The last row end within the size limit, or failing that the first row end after it.
+        idx = int(np.searchsorted(document_ends, start + chunk_size, side="right")) - 1
+        if idx < 0 or document_ends[idx] <= start:
+            idx = int(np.searchsorted(document_ends, start, side="right"))
+        ends.append(int(document_ends[idx]))
+        start = ends[-1]
+    return ends
+
+
 def _write_memmap_chunked_from_file(
-    base_filename: pathlib.Path, source_path: pathlib.Path, total_items: int, dtype, max_size_gb: int = 1
+    base_filename: pathlib.Path,
+    source_path: pathlib.Path,
+    total_items: int,
+    dtype,
+    max_size_gb: int = 1,
+    document_ends: np.ndarray | None = None,
 ) -> list[tuple[int, int]]:
+    """Copy `source_path` into `_part_XXXX.npy` files of at most `max_size_gb` each.
+
+    Without `document_ends`, files are cut every `max_size_gb`, mid-row. With the sorted row end
+    offsets, files are cut only where a row ends, so no row spans two files.
+    """
     item_size = np.dtype(dtype).itemsize
     chunk_size = int((max_size_gb * 1024**3) // item_size)
     chunk_boundaries: list[tuple[int, int]] = []
@@ -55,15 +85,23 @@ def _write_memmap_chunked_from_file(
     if total_items == 0:
         return chunk_boundaries
 
+    if document_ends is None:
+        chunk_ends = [min(i + chunk_size, total_items) for i in range(0, total_items, chunk_size)]
+    else:
+        if len(document_ends) == 0 or int(document_ends[-1]) != total_items:
+            raise ValueError(f"Row ends must finish at the last token ({total_items:,}).")
+        chunk_ends = _row_aligned_chunk_ends(document_ends, total_items, chunk_size)
+
     src = np.memmap(source_path, mode="r", dtype=dtype, shape=(total_items,))
-    for chunk_idx, i in enumerate(range(0, total_items, chunk_size)):
-        end = min(i + chunk_size, total_items)
+    i = 0
+    for chunk_idx, end in enumerate(chunk_ends):
         filename = base_filename.with_name(f"{base_filename.name}_part_{chunk_idx:04d}.npy")
         dst = np.memmap(filename, mode="w+", dtype=dtype, shape=(end - i,))
         dst[:] = src[i:end]
         dst.flush()
         chunk_boundaries.append((i, end))
         logger.info(f"Written {filename} ({(end - i) * item_size / 1024**3:.2f} GB)")
+        i = end
 
     return chunk_boundaries
 
@@ -73,7 +111,9 @@ def _write_metadata_for_chunks(
 ) -> None:
     for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_boundaries):
         metadata_filename = base_filename.with_name(f"{base_filename.name}_part_{chunk_idx:04d}.csv.gz")
-        with gzip.open(metadata_filename, "wt", encoding="utf-8") as f:
+        # mtime=0 keeps the file byte-identical across rewrites of the same rows. OLMo-core
+        # fingerprints metadata-backed datasets by these files.
+        with gzip.GzipFile(metadata_filename, mode="wb", mtime=0) as gz, io.TextIOWrapper(gz, encoding="utf-8") as f:
             for doc_start, doc_end in document_boundaries:
                 if doc_end > chunk_start and doc_start < chunk_end:
                     adjusted_start = max(0, int(doc_start) - chunk_start)
@@ -103,7 +143,11 @@ def _save_tokenizer(tc: dataset_transformation.TokenizerConfig, output_dir: path
 
 
 def _recover_partial_state(
-    tokens_path: pathlib.Path, labels_path: pathlib.Path, boundaries_path: pathlib.Path, token_item_size: int
+    tokens_path: pathlib.Path,
+    labels_path: pathlib.Path,
+    boundaries_path: pathlib.Path,
+    token_item_size: int,
+    reject_empty_rows: bool = False,
 ) -> tuple[int, int]:
     # Boundaries file is the commit log: its last complete (start,end) pair determines how many
     # bytes of tokens/labels are valid; trailing bytes from an incomplete write get truncated.
@@ -126,6 +170,11 @@ def _recover_partial_state(
         return 0, 0
 
     boundaries = np.memmap(boundaries_path, mode="r", dtype=_BOUNDARIES_DTYPE, shape=(num_samples, 2))
+    if reject_empty_rows and np.any(boundaries[:, 0] == boundaries[:, 1]):
+        raise ValueError(
+            "Cannot resume --row_aligned_parts: the partial cache contains an empty row. "
+            "Remove empty rows from the input and restart without --resume."
+        )
     current_position = int(boundaries[-1, 1])
     del boundaries
 
@@ -224,7 +273,14 @@ def convert_hf_to_numpy_sft(
     tokenizer_config_only: bool = False,
     num_examples: int = 0,
     batch_size: int = 1000,
+    row_aligned_parts: bool = False,
 ) -> None:
+    """Tokenize the mix and write it to `output_dir` in OLMo-core's numpy layout.
+
+    With `row_aligned_parts`, the token and label files are cut only at row boundaries, so every
+    row is one `(start,end)` line of one metadata file. Otherwise they are cut every 1 GiB, mid-row,
+    and the row at each cut appears as two lines, one in each file.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Verify these values match the tokenizer config used in Olmo-core:")
@@ -276,7 +332,7 @@ def convert_hf_to_numpy_sft(
 
     if resume:
         start_idx, current_position = _recover_partial_state(
-            tokens_path, labels_path, boundaries_path, token_item_size
+            tokens_path, labels_path, boundaries_path, token_item_size, reject_empty_rows=row_aligned_parts
         )
         if start_idx > 0:
             logger.info(f"=== RESUMING from partial files: {start_idx:,} samples / {current_position:,} tokens ===")
@@ -328,6 +384,11 @@ def convert_hf_to_numpy_sft(
             for sample_tokens, sample_labels, sample_attention in zip(batch_input_ids, batch_labels, batch_attention):
                 idx += 1
                 sample_length = len(sample_tokens)
+                if row_aligned_parts and sample_length == 0:
+                    raise ValueError(
+                        f"--row_aligned_parts cannot write empty row {idx}: "
+                        "each row must contain at least one token to have a metadata boundary."
+                    )
 
                 tokens_arr = np.asarray(sample_tokens, dtype=token_dtype)
                 labels_arr = np.asarray(sample_labels)
@@ -385,12 +446,17 @@ def convert_hf_to_numpy_sft(
 
     logger.info(f"Writing converted data to {output_dir}")
     token_ids_base = output_dir / "token_ids"
-    token_chunk_boundaries = _write_memmap_chunked_from_file(token_ids_base, tokens_path, total_tokens, token_dtype)
-
     document_boundaries = (
         np.memmap(boundaries_path, mode="r", dtype=_BOUNDARIES_DTYPE, shape=(total_samples, 2))
         if total_samples > 0
         else np.zeros((0, 2), dtype=_BOUNDARIES_DTYPE)
+    )
+    token_chunk_boundaries = _write_memmap_chunked_from_file(
+        token_ids_base,
+        tokens_path,
+        total_tokens,
+        token_dtype,
+        document_ends=document_boundaries[:, 1] if row_aligned_parts else None,
     )
     _write_metadata_for_chunks(token_ids_base, document_boundaries, token_chunk_boundaries)
     del document_boundaries
@@ -418,11 +484,14 @@ def convert_hf_to_numpy_sft(
         num_samples_skipped=stats["num_samples_skipped"],
         tokenizer_name=tc.tokenizer_name_or_path,
         max_seq_length=max_seq_length,
-        chat_template_name=tc.chat_template_name,
+        chat_template_name=dataset_statistics.get("chat_template_name"),
+        chat_template_source=dataset_statistics.get("chat_template_source"),
+        chat_template_hash=dataset_statistics.get("chat_template_hash"),
         per_dataset_counts=stats["per_dataset_counts"],
         per_dataset_tokens=stats["per_dataset_tokens"],
         per_dataset_trainable_tokens=stats["per_dataset_trainable_tokens"],
         per_dataset_filtered=stats["per_dataset_filtered"],
+        row_aligned_parts=row_aligned_parts,
     )
 
 
@@ -440,6 +509,9 @@ def write_dataset_statistics(
     per_dataset_tokens: dict[str, int],
     per_dataset_trainable_tokens: dict[str, int],
     per_dataset_filtered: dict[str, int],
+    chat_template_source: str | None = None,
+    chat_template_hash: str | None = None,
+    row_aligned_parts: bool = False,
 ) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -481,6 +553,10 @@ def write_dataset_statistics(
             "tokenizer": tokenizer_name,
             "max_sequence_length": max_seq_length,
             "chat_template": chat_template_name,
+            "chat_template_source": chat_template_source,
+            "chat_template_hash": chat_template_hash,
+            # Only when set, so default caches keep their existing statistics layout.
+            **({ROW_ALIGNED_PARTS_KEY: True} if row_aligned_parts else {}),
         },
         "per_dataset_statistics": merged_stats,
         "overall_statistics": {
@@ -510,7 +586,9 @@ def write_dataset_statistics(
         f.write("-" * 40 + "\n")
         f.write(f"- Tokenizer: {tokenizer_name}\n")
         f.write(f"- Max Sequence Length: {max_seq_length}\n")
-        f.write(f"- Chat Template: {chat_template_name}\n\n")
+        f.write(f"- Chat Template: {chat_template_name}\n")
+        f.write(f"- Chat Template Source: {chat_template_source}\n")
+        f.write(f"- Chat Template Hash: {chat_template_hash}\n\n")
 
         f.write("Per-Dataset Statistics:\n")
         f.write("=" * 80 + "\n")

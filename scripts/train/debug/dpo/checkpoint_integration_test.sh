@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-BEAKER_IMAGE="${1:-nathanl/open_instruct_auto}"
+source "$(dirname "${BASH_SOURCE[0]}")/../require_beaker_image.sh"
 
 MODEL_NAME=Qwen/Qwen3-0.6B
 TIMESTAMP=$(date +%s)

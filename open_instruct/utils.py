@@ -73,6 +73,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, AutoConfig, HfArgumentPars
 from transformers.integrations import HfDeepSpeedConfig
 
 from open_instruct import data_types, logger_utils
+from open_instruct.answer_utils import extract_final_answer as extract_final_answer
 from open_instruct.launch_utils import gs_folder_exists, live_subprocess_output
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -1669,34 +1670,6 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
     return user_query
 
 
-def extract_final_answer(prediction: str) -> str:
-    """
-    Extract the substring between <answer> and </answer>.
-    If no match is found, extract the substring after </think>.
-    If neither condition matches, clean the prediction by removing the <|assistant|> tag.
-    If none of the above applies, return the original string.
-
-    Args:
-        prediction (str): The input string.
-
-    Returns:
-        str: The extracted substring or the cleaned/original string.
-    """
-    answer_match = re.search(r"<answer>(.*?)</answer>", prediction, re.DOTALL)
-    if answer_match:
-        return answer_match.group(1).strip()
-
-    think_match = re.search(r"</think>(.*)", prediction, re.DOTALL)
-    if think_match:
-        return think_match.group(1).strip()
-
-    cleaned = re.sub(r"<\|assistant\|>", "", prediction)
-    if cleaned != prediction:
-        return cleaned.strip()
-
-    return prediction
-
-
 # ---- Runtime leak detection -----------------------------------------------------------------
 
 DEFAULT_THREAD_ALLOWLIST = {
@@ -1815,6 +1788,9 @@ GPU_SPECS = {
     "6000": {"flops": 728.5e12, "memory_size": 48e9, "memory_bandwidth": 960e9},  # 960 GB/s GDDR6
     # Specs from https://www.techpowerup.com/gpu-specs/geforce-rtx-4090-mobile.c3949.
     "4090 laptop": {"flops": 32.98e12, "memory_size": 24e9, "memory_bandwidth": 576e9},
+    # Desktop RTX 4090. Specs from Table 2 of NVIDIA's Ada whitepaper (dense BF16 tensor, FP32 accumulate).
+    # Must stay after "4090 laptop": get_device_name returns the first key found in the device name.
+    "4090": {"flops": 165.2e12, "memory_size": 24e9, "memory_bandwidth": 1008e9},
     # DGX Spark GB10 (Blackwell) - unified LPDDR5X memory with CPU
     # Specs from https://www.nvidia.com/en-us/products/workstations/dgx-spark/
     "gb10": {"flops": 104e12, "memory_size": 128e9, "memory_bandwidth": 273e9},  # 273 GB/s LPDDR5X unified

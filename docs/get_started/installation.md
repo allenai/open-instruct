@@ -48,4 +48,4 @@ beaker image delete $beaker_user/open_instruct_dev_uv
 beaker image create open_instruct_dev_uv -n open_instruct_dev_uv -w ai2/$beaker_user
 ```
 
-If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
+Ai2 users can build and launch an image from their intended revision with `./scripts/train/build_image_and_launch.sh <script>`. CI no longer publishes `open_instruct_auto*` images, so existing tags such as `nathanl/open_instruct_auto` may be stale.
