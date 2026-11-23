@@ -194,7 +194,7 @@ class CoreConfig:
         validation.boolean(self.prepared_batch_overlap, "core.prepared_batch_overlap")
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
-        validation.integer(self.max_group_retries, "core.max_group_retries", minimum=0)
+        validation.integer(self.max_group_retries, "core.max_group_retries", minimum=1)
         for name in ("engine_drain_timeout", "engine_update_timeout", "refresh_request_timeout"):
             validation.number(getattr(self, name), f"core.{name}")
             if getattr(self, name) <= 0:
