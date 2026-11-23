@@ -1,0 +1,66 @@
+name: Beaker Experiment Launch
+
+# TEMPORARY (branch kevinfarhat/router-shim-image, never merged): build the MILES application image from
+# kevinfarhat/router-tcp-user-timeout-shim (79c101b21) on the pinned binary base and run the real sgl-router
+# against a fake engine to check the TCP_USER_TIMEOUT shim is preloaded into the router only.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_BUILDKIT: "1"
+  PR_COMMIT: 79c101b21f5458961d78fea2f32935df1af892bf
+
+jobs:
+  launch-experiment:
+    name: Build MILES image and check router shim
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use the PR commit's source
+        run: |
+          cp .github/router_shim_e2e.sh "$RUNNER_TEMP/router_shim_e2e.sh"
+          git checkout --detach "$PR_COMMIT"
+          test -z "$(git status --porcelain)"
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          docker system prune -af || true
+          df -h /
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup Beaker
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ secrets.BEAKER_TOKEN }}
+          workspace: ai2/open-instruct-dev
+
+      - name: Pull pinned MILES binary base
+        run: |
+          BASE_BEAKER=$(jq -r .base_image.beaker runtime/miles/runtime.lock.json)
+          BASE_DOCKER=$(jq -r .base_image.docker_id runtime/miles/runtime.lock.json)
+          beaker image pull "$BASE_BEAKER" miles-binary-base:locked
+          test "$(docker image inspect miles-binary-base:locked --format '{{.Id}}')" = "$BASE_DOCKER"
+
+      - name: Build application image
+        run: python scripts/miles/build_image.py --base-image miles-binary-base:locked --tag oi-miles-router-shim
+
+      - name: Real sgl-router with the shim
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/router_shim_e2e.sh:/e2e.sh:ro" --entrypoint bash oi-miles-router-shim /e2e.sh
