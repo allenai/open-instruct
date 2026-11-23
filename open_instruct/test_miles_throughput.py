@@ -308,8 +308,8 @@ def test_group_retry_limit_defaults_to_three_and_reaches_core_arguments():
     assert '"max_group_retries": 5' in raised.arguments()[-1]
 
 
-@pytest.mark.parametrize("value", [-1, True, 2.0, "3", None])
-def test_group_retry_limit_is_a_nonnegative_integer(value):
+@pytest.mark.parametrize("value", [-1, 0, True, 2.0, "3", None])
+def test_group_retry_limit_is_a_positive_integer(value):
     with pytest.raises(ValueError, match="max_group_retries"):
         CoreConfig(max_group_retries=value)
 
