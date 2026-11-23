@@ -208,7 +208,8 @@ def test_watchdog_forces_exit_with_the_recorded_code(monkeypatch):
         codes.append(code)
         exited.set()
 
-    monkeypatch.setattr(shutdown, "exit_process", fake_exit)
+    monkeypatch.setattr(shutdown.os, "_exit", fake_exit)
+    monkeypatch.setattr(shutdown.os, "write", lambda fd, data: len(data))
     monkeypatch.setattr(shutdown.faulthandler, "dump_traceback", lambda **kw: None)
     timer = shutdown.arm_exit_watchdog(3, timeout=0.05)
     assert timer.daemon
@@ -228,4 +229,41 @@ shutdown.finish_process(4)
     started = time.monotonic()
     result = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).parent.parent, timeout=60)
     assert result.returncode == 4
+    assert time.monotonic() - started < 30
+
+
+HELD_LOG_LOCK = """
+import logging, sys, threading
+from open_instruct.miles.execution import shutdown
+handler = logging.StreamHandler(sys.stderr)
+logging.root.addHandler(handler)
+shutdown.logger.addHandler(handler)
+shutdown.LOCKED_IO_TIMEOUT = 0.2
+held = threading.Event()
+
+def hold():
+    handler.acquire()  # A stuck writer keeps the handler lock forever.
+    held.set()
+    threading.Event().wait()
+
+threading.Thread(target=hold, daemon=False).start()
+held.wait()
+"""
+
+
+@pytest.mark.parametrize(
+    ("scenario", "code"),
+    [
+        # The watchdog fires while interpreter shutdown waits for the stuck thread.
+        ("shutdown.EXIT_WATCHDOG_SECONDS = 0.3\nshutdown.enable_exit_watchdog()\nshutdown.finish_process(7)", 7),
+        # An abandoned tracking close forces the exit at once.
+        ("shutdown._abandoned.append('tracking close')\nshutdown.finish_process(5)", 5),
+    ],
+)
+def test_forced_exit_survives_a_held_logging_lock(scenario, code):
+    started = time.monotonic()
+    result = subprocess.run(
+        [sys.executable, "-c", HELD_LOG_LOCK + scenario], cwd=Path(__file__).parent.parent, timeout=60
+    )
+    assert result.returncode == code
     assert time.monotonic() - started < 30

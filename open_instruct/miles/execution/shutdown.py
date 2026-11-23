@@ -23,6 +23,10 @@ TRACKING_CLOSE_TIMEOUT = 120
 RAY_SHUTDOWN_TIMEOUT = 60
 # Upper bound on normal interpreter shutdown after the result is recorded.
 EXIT_WATCHDOG_SECONDS = 300
+# Logging and flushing take handler and stream locks that an abandoned or stuck
+# thread may hold, so on the forced-exit paths they run in a daemon thread for at
+# most this long.
+LOCKED_IO_TIMEOUT = 5
 
 # Names of bounded operations whose threads were abandoned in this process.
 _abandoned = []
@@ -34,9 +38,11 @@ _exit_watchdog_enabled = False
 def run_bounded(operation, name, timeout=TRACKING_CLOSE_TIMEOUT):
     """Run ``operation`` in a daemon thread for at most ``timeout`` seconds.
 
-    Returns True when it finished. Its exceptions are logged, not raised; on timeout
-    the thread is abandoned with a warning and a stack dump of every thread, and
-    ``abandoned()`` reports it so the CLI can force the process exit.
+    Returns True when it returned or raised, False on timeout. Its exceptions are
+    logged, not raised: a tracking backend that fails to close must not turn a
+    training run whose result is recorded into a failure. On timeout the thread is
+    abandoned with a warning and a stack dump of every thread, and ``abandoned()``
+    reports it so the CLI can force the process exit.
     """
 
     def target():
@@ -50,10 +56,17 @@ def run_bounded(operation, name, timeout=TRACKING_CLOSE_TIMEOUT):
     thread.join(timeout)
     if thread.is_alive():
         _abandoned.append(name)
-        logger.warning("%s did not finish within %ss; continuing shutdown without it", name, timeout)
         faulthandler.dump_traceback(all_threads=True)
+        _bounded(lambda: logger.warning("%s did not finish within %ss; continuing shutdown without it", name, timeout))
         return False
     return True
+
+
+def _bounded(call, timeout=None):
+    """Run ``call`` in a daemon thread and wait at most ``timeout`` seconds for it."""
+    thread = threading.Thread(target=call, name="bounded-io", daemon=True)
+    thread.start()
+    thread.join(LOCKED_IO_TIMEOUT if timeout is None else timeout)
 
 
 def abandoned():
@@ -69,7 +82,8 @@ def finish_process(code):
     enabled it, arm a watchdog that exits with the same code if that shutdown hangs.
     """
     if _abandoned:
-        logger.warning("Forcing exit %s; still running: %s", code, ", ".join(_abandoned))
+        names = ", ".join(_abandoned)
+        _bounded(lambda: logger.warning("Forcing exit %s; still running: %s", code, names))
         shutdown_ray()
         exit_process(code)
     if _exit_watchdog_enabled:
@@ -100,9 +114,13 @@ def arm_exit_watchdog(code, timeout=None):
     timeout = EXIT_WATCHDOG_SECONDS if timeout is None else timeout
 
     def expire():
-        logger.warning("Process still alive %ss after its result was recorded; forcing exit %s", timeout, code)
-        faulthandler.dump_traceback(all_threads=True)
-        exit_process(code)
+        # Only lock-free writes here: a thread stuck in shutdown may hold logging or
+        # stream locks.
+        with contextlib.suppress(Exception):
+            message = f"Process still alive {timeout}s after its result was recorded; forcing exit {code}\n"
+            os.write(2, message.encode())
+            faulthandler.dump_traceback(all_threads=True)
+        os._exit(code)
 
     timer = threading.Timer(timeout, expire)
     timer.daemon = True
@@ -114,8 +132,14 @@ def exit_process(code=0):
     """Flush output and end the process now, skipping interpreter shutdown.
 
     Only for a run whose result is already recorded: atexit handlers and
-    non-daemon threads do not run or get joined.
+    non-daemon threads do not run or get joined. Flushing is bounded, because an
+    abandoned thread may hold a handler or stream lock.
     """
+    _bounded(_flush_output)
+    os._exit(code)
+
+
+def _flush_output():
     loggers = [logging.root, *logging.root.manager.loggerDict.values()]
     for handler in [h for each in loggers for h in getattr(each, "handlers", ())]:
         with contextlib.suppress(Exception):
@@ -123,4 +147,3 @@ def exit_process(code=0):
     for stream in (sys.stdout, sys.stderr):
         with contextlib.suppress(Exception):
             stream.flush()
-    os._exit(code)
