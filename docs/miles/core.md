@@ -384,6 +384,44 @@ study used FP32 heads but did not compare BF16 against FP32, so it does not
 establish that trainer FP32 output is necessary. We retain the validation guard
 until other trainer precision configurations are qualified.
 
+### Candidate recording cost
+
+Candidates travel from SGLang as two base64 `[response, k]` arrays
+(`return_flat_raw_output_top_logprobs` with `return_flat_raw_top_logprobs_b64`),
+not as k nested records per token. Uniform
+decode batches copy them to the host as one matrix per step. The table shows
+throughput on one B300 with Robert's H196 Dolci-control Olmo 3.5 checkpoint:
+205 concurrent requests × 8,192 forced tokens, two repetitions, requests and
+sample conversion through MILES.
+
+| Serving | Candidates | vs same-server top-0 | tok/s |
+|---|---|---:|---:|
+| Previous pin (b84bec5), BF16 head | 0 | 1.00× | 18,887 |
+| Previous pin (b84bec5), BF16 head | 20, nested | 0.51× | 9,699 |
+| Current pin, BF16 head | 0 | 1.00× | 17,161 |
+| Current pin, BF16 head | 20 | 0.97× | 16,570 |
+| Current pin, BF16 head | 10 | 0.98× | 16,812 |
+| Current pin, BF16 head | 5 | 0.99× | 16,940 |
+| Current pin, FP32 head | 0 | 1.00× | 17,399 |
+| Current pin, FP32 head | 20 | 1.00× | 17,386 |
+
+Within one server, candidate count and FP32 serving head now cost at most 3%.
+Top-0 itself ran 5–9% slower on the current-pin servers than on the previous
+pin in both benchmark runs. Top-0 does not exercise the changed code paths, and
+the arms ran on separately launched servers, so this comparison is unresolved.
+Greedy 20-candidate outputs were identical before and after the change. See
+[the measurement](measurements/score-centering-candidate-transport-20261123.json)
+and [Beaker experiment](https://beaker.org/ex/01M84MNGPZ3C8JY2YBVK29P57G).
+These are serving benchmarks; training throughput also depends on weight
+refresh, judging and the trainer.
+
+The pinned changes mirror upstream fixes: the flat output API is cherry-picked
+from [sgl-project/sglang#42838](https://github.com/sgl-project/sglang/pull/42838).
+The dense decode transfer is equivalent to
+[sgl-project/sglang#50124](https://github.com/sgl-project/sglang/pull/50124), plus
+numpy row transport. The MILES request and decoding match
+[radixark/miles#4815](https://github.com/radixark/miles/pull/4815).
+
 Whenever candidate probabilities are collected, preflight requires
 `rollout_top_logprobs_num >= rollout_top_k`, regardless of the selected loss.
 Unfiltered sampling (`rollout_top_k=-1`, `rollout_top_p=1`) can record a partial
