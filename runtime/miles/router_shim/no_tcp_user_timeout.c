@@ -8,12 +8,18 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <sys/socket.h>
 
+static int (*real)(int, int, int, const void *, socklen_t);
+static pthread_once_t real_once = PTHREAD_ONCE_INIT;
+
+static void resolve_real(void) {
+    real = (int (*)(int, int, int, const void *, socklen_t))dlsym(RTLD_NEXT, "setsockopt");
+}
+
 int setsockopt(int fd, int level, int optname, const void *optval, socklen_t optlen) {
-    static int (*real)(int, int, int, const void *, socklen_t) = 0;
-    if (!real) real = (int (*)(int, int, int, const void *, socklen_t))dlsym(RTLD_NEXT, "setsockopt");
     if (level == IPPROTO_TCP && optname == TCP_USER_TIMEOUT) {
         static int logged = 0;
         if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED) && optval && optlen >= sizeof(unsigned)) {
@@ -21,6 +27,7 @@ int setsockopt(int fd, int level, int optname, const void *optval, socklen_t opt
         }
         return 0;
     }
+    pthread_once(&real_once, resolve_real);
     if (!real) {
         errno = ENOSYS;
         return -1;

@@ -35,13 +35,14 @@ COPY runtime/miles/Dockerfile /opt/core-rl/runtime/miles/Dockerfile
 COPY runtime/miles/router_shim /opt/core-rl/runtime/miles/router_shim
 # sgl-router sets TCP_USER_TIMEOUT=30s upstream, which aborts healthy long /generate calls after one lost
 # keepalive probe. The .pth hook re-execs only `python -m sglang_router.launch_router` with this shim
-# preloaded (docs/miles/operations.md). The check below proves the shim drops the option.
+# preloaded (docs/miles/operations.md). The checks below prove the shim drops the option and the hook loads.
 RUN mkdir -p /opt/core-rl/lib \
     && cc -shared -fPIC -O2 -Wall -Werror -o /opt/core-rl/lib/no_tcp_user_timeout.so \
-       /opt/core-rl/runtime/miles/router_shim/no_tcp_user_timeout.c -ldl \
+       /opt/core-rl/runtime/miles/router_shim/no_tcp_user_timeout.c -ldl -pthread \
     && SITE="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')" \
     && cp /opt/core-rl/runtime/miles/router_shim/oi_router_preload.py /opt/core-rl/runtime/miles/router_shim/oi_router_preload.pth "$SITE/" \
-    && LD_PRELOAD=/opt/core-rl/lib/no_tcp_user_timeout.so python -c "import socket; s = socket.socket(); s.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, 30000); assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 0"
+    && LD_PRELOAD=/opt/core-rl/lib/no_tcp_user_timeout.so python -c "import socket; s = socket.socket(); s.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, 30000); assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 0" \
+    && python -c "import sys; assert 'oi_router_preload' in sys.modules, 'router shim .pth hook not loaded'"
 COPY configs/miles /opt/core-rl/configs/miles
 COPY docs/miles /opt/core-rl/docs/miles
 COPY README.md /opt/core-rl/README.md

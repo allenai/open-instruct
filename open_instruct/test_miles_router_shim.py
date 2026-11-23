@@ -55,6 +55,7 @@ def test_router_reexecs_with_shim_first(shim, argv):
         ["python", "-m", "miles.router.router"],
         ["python", "script.py", "-m", "sglang_router.launch_router"],
         ["python", "-c", "pass", "-m", "sglang_router.launch_router"],
+        ["python", "-", "-m", "sglang_router.launch_router"],
         ["python", "-c", "pass"],
         [],
     ],
@@ -88,6 +89,7 @@ def test_shim_drops_only_tcp_user_timeout(tmp_path):
             library,
             SHIM_DIR / "no_tcp_user_timeout.c",
             "-ldl",
+            "-pthread",
         ],
         check=True,
     )

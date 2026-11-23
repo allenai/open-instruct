@@ -25,7 +25,7 @@ def _is_router(argv: list[str]) -> bool:
             return token[2:] == ROUTER_MODULE
         if token in ("-X", "-W"):
             next(tokens, None)
-        elif not token.startswith("-") or token.startswith("-c") or token == "--":
+        elif not token.startswith("-") or token.startswith("-c") or token in ("-", "--"):
             return False
     return False
 
