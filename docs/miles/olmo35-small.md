@@ -81,8 +81,8 @@ checkpoints and do not establish learning quality.
   overhead relative to the original mechanics run and remain off in timing recipes
   (which retain the default startup scoring check).
 - The four/eight-node recipes request 4h/3h of protected runtime, respectively,
-  based on historical startup and update times plus headroom. They set a 72h job
-  timeout so a multi-day run is one job; see [Long runs](#long-runs).
+  based on historical startup and update times plus headroom. They set a 72h/120h job
+  timeout, respectively, so a multi-day run is one job; see [Long runs](#long-runs).
 
 ## Results
 
@@ -336,11 +336,11 @@ again before launch with a CPU job that mounts the bucket and runs
 ### Job timeout and preemption
 
 Run a multi-day job as one Beaker job with a `launch.timeout` longer than the expected
-run. The starters set `timeout = "72h"`. On 8 nodes (eight-node.toml) updates took
+run. `four-node.toml` sets `timeout = "72h"` and `eight-node.toml` sets `timeout = "120h"`. On 8 nodes (eight-node.toml) updates took
 ~264 s vs ~402 s on 4 nodes (updates 11-30 means at batch 2,048), so a 660-update run
 is about 2.3 days on 8 nodes and 3.4 days on 4 nodes with startup (about 35-40
-minutes to the end of the first update) and saves. 72h covers the eight-node run; for
-660 updates on 4 nodes raise it to about 96h. `ai2/holmes` has no maximum job
+minutes to the end of the first update) and saves. The eight-node run uses 120h, about
+2x its expected length; for 660 updates on 4 nodes raise it to about 96h. `ai2/holmes` has no maximum job
 duration (`beaker cluster get ai2/holmes`), so the spec timeout is the only limit.
 
 Beaker cancels a job when its `timeout` expires. A canceled job is not preempted:
