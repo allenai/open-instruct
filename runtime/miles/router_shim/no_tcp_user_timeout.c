@@ -5,6 +5,7 @@
 // Preloaded into the router process only, by oi_router_preload.py; see docs/miles/operations.md.
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <stdio.h>
@@ -15,10 +16,14 @@ int setsockopt(int fd, int level, int optname, const void *optval, socklen_t opt
     if (!real) real = (int (*)(int, int, int, const void *, socklen_t))dlsym(RTLD_NEXT, "setsockopt");
     if (level == IPPROTO_TCP && optname == TCP_USER_TIMEOUT) {
         static int logged = 0;
-        if (!logged++ && optval && optlen >= sizeof(unsigned)) {
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED) && optval && optlen >= sizeof(unsigned)) {
             fprintf(stderr, "[no_tcp_user_timeout] dropped TCP_USER_TIMEOUT=%u ms\n", *(const unsigned *)optval);
         }
         return 0;
+    }
+    if (!real) {
+        errno = ENOSYS;
+        return -1;
     }
     return real(fd, level, optname, optval, optlen);
 }

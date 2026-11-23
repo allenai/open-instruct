@@ -1,6 +1,7 @@
 """The router TCP_USER_TIMEOUT shim is preloaded into sgl-router only and drops just that option."""
 
 import importlib.util
+import os
 import pathlib
 import shutil
 import subprocess
@@ -98,7 +99,11 @@ def test_shim_drops_only_tcp_user_timeout(tmp_path):
     plain = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
     assert plain.stdout.split() == ["30000", "45"]
     shimmed = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, check=True, env={"LD_PRELOAD": str(library)}
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "LD_PRELOAD": str(library)},
     )
     assert shimmed.stdout.split() == ["0", "45"]
     assert "dropped TCP_USER_TIMEOUT=30000 ms" in shimmed.stderr

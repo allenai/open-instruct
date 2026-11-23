@@ -3,7 +3,8 @@
 Imported at interpreter startup by oi_router_preload.pth in the MILES image. It does
 nothing unless this process is `python -m sglang_router.launch_router`, which is how the
 pinned MILES launches the Rust router. Set OI_MILES_ROUTER_SHIM=0 to turn it off.
-See docs/miles/operations.md.
+Every Python process in the image imports this module at startup, so keep it import-safe
+and free of dependencies beyond the standard library. See docs/miles/operations.md.
 """
 
 import os
