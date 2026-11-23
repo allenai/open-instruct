@@ -565,8 +565,8 @@ python -m scripts.miles.rerender_prompts INPUT.jsonl.gz NEW_CHECKPOINT OUTPUT.js
 The tool renders each row's `metadata.messages` with the checkpoint's chat template
 (`add_generation_prompt=True`, as source preparation does). It replaces `input`,
 `metadata.rendering_template_sha256` and, when present, `metadata.prompt_tokens` and
-`metadata.prompt_token_ids`. All other fields are kept. It writes a new file atomically and never
-rewrites its input. Beside the output it writes `OUTPUT.jsonl.gz.report.json`, with the
+`metadata.prompt_token_ids`. All other fields are kept. It writes a new file atomically, never
+rewrites its input, and stops if the output or its report already exists. Beside the output it writes `OUTPUT.jsonl.gz.report.json`, with the
 source and output SHA-256, the new template hash, the previous hashes, and how many
 inputs changed (with a few examples). Point `data.prompt_data` at the output in a new
 run root. Rows without `metadata.messages`, and rows whose targets carry tool

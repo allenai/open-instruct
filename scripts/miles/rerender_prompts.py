@@ -21,10 +21,12 @@ atomically to a new path, with a JSON report beside it.
 
 import argparse
 import collections
+import errno
 import gzip
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 
 from open_instruct import tokenizer_utils
@@ -48,6 +50,21 @@ def _sha256(path):
         for block in iter(lambda: stream.read(1 << 20), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _publish(staged, output):
+    """Move `staged` to `output` without replacing an existing file."""
+    try:
+        os.link(staged, output)
+    except FileExistsError:
+        raise RerenderError(f"{output} already exists; write to a new path") from None
+    except OSError as error:
+        if error.errno not in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV):
+            raise
+        # Filesystems without hard links: best-effort no-clobber check before the rename.
+        if os.path.lexists(output):
+            raise RerenderError(f"{output} already exists; write to a new path") from None
+        os.replace(staged, output)
 
 
 def template_sha256(tokenizer):
@@ -89,21 +106,32 @@ def rerender_row(row, tokenizer, new_hash):
 
 def rerender(source, output, tokenizer, *, examples=3):
     source, output = Path(source), Path(output)
+    report_path = output.with_name(output.name + ".report.json")
     if source.resolve() == output.resolve():
         raise RerenderError("Write to a new path; prepared inputs are never rewritten in place")
+    for path in (output, report_path):
+        if os.path.lexists(path):
+            raise RerenderError(f"{path} already exists; write to a new path")
     new_hash = template_sha256(tokenizer)
     counts = collections.Counter()
     old_hashes = collections.Counter()
     changed_examples = []
     output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(f".{output.name}.tmp{'.gz' if output.name.endswith('.gz') else ''}")
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{output.name}.", suffix=".tmp.gz" if output.name.endswith(".gz") else ".tmp", dir=output.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary)
     try:
         with _open(source, "r") as reader, _open(temporary, "w") as writer:
             for index, line in enumerate(reader, 1):
                 if not line.strip():
                     continue
                 row = json.loads(line)
-                old_hashes[str(row.get("metadata", {}).get("rendering_template_sha256"))] += 1
+                metadata = row.get("metadata") if isinstance(row, dict) else None
+                if not isinstance(metadata, dict):
+                    raise RerenderError(f"{source}: row {index}: row has no metadata object")
+                old_hashes[str(metadata.get("rendering_template_sha256"))] += 1
                 old_input = row.get("input")
                 try:
                     row, changed = rerender_row(row, tokenizer, new_hash)
@@ -115,7 +143,7 @@ def rerender(source, output, tokenizer, *, examples=3):
                         {"row": index, "old_tail": str(old_input)[-300:], "new_tail": row["input"][-300:]}
                     )
                 writer.write(json.dumps(row, ensure_ascii=False) + "\n")
-        os.replace(temporary, output)
+        _publish(temporary, output)
     finally:
         temporary.unlink(missing_ok=True)
     report = {
@@ -130,7 +158,8 @@ def rerender(source, output, tokenizer, *, examples=3):
         "previous_template_hashes": dict(old_hashes),
         "changed_examples": changed_examples,
     }
-    output.with_name(output.name + ".report.json").write_text(json.dumps(report, indent=2) + "\n")
+    with open(report_path, "x", encoding="utf-8") as stream:
+        stream.write(json.dumps(report, indent=2) + "\n")
     return report
 
 

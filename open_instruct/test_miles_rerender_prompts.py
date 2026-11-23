@@ -109,4 +109,35 @@ def test_rejects_rows_it_cannot_rerender_and_in_place_writes(tmp_path):
         output = tmp_path / "bad.jsonl.gz"
         with pytest.raises(rerender_prompts.RerenderError, match=match):
             rerender_prompts.rerender(source, output, new)
-        assert not output.exists() and not list(tmp_path.glob(".bad.jsonl.gz.tmp*"))
+        assert not output.exists() and not list(tmp_path.glob(".bad.jsonl.gz.*"))
+
+
+def test_never_overwrites_existing_output_or_report(tmp_path):
+    old = run_data._tokenizer(str(checkpoint(tmp_path, OLD_TEMPLATE)))
+    new = run_data._tokenizer(str(checkpoint(tmp_path, NEW_TEMPLATE)))
+    source = tmp_path / "in.jsonl.gz"
+    write(source, rows(old))
+    source_bytes = source.read_bytes()
+
+    existing = tmp_path / "other.jsonl.gz"
+    existing.write_bytes(b"another prepared dataset")
+    with pytest.raises(rerender_prompts.RerenderError, match="already exists"):
+        rerender_prompts.rerender(source, existing, new)
+    assert existing.read_bytes() == b"another prepared dataset"
+
+    # A report path that is a symlink to the source must not be followed.
+    output = tmp_path / "out.jsonl.gz"
+    report = tmp_path / "out.jsonl.gz.report.json"
+    report.symlink_to(source)
+    with pytest.raises(rerender_prompts.RerenderError, match="already exists"):
+        rerender_prompts.rerender(source, output, new)
+    assert source.read_bytes() == source_bytes and not output.exists()
+    assert not list(tmp_path.glob(".out.jsonl.gz.*")) and not list(tmp_path.glob(".other.jsonl.gz.*"))
+
+
+def test_null_metadata_reports_source_and_row(tmp_path):
+    new = run_data._tokenizer(str(checkpoint(tmp_path, NEW_TEMPLATE)))
+    source = tmp_path / "in.jsonl.gz"
+    write(source, [{"input": "x", "metadata": None}])
+    with pytest.raises(rerender_prompts.RerenderError, match="row 1: row has no metadata object"):
+        rerender_prompts.rerender(source, tmp_path / "out.jsonl.gz", new)
