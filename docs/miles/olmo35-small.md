@@ -375,6 +375,11 @@ stored hash differs from the current configuration, the log shows a
 `W&B RUN CONFIG MISMATCH` warning and the stored run is still continued. A new run
 needs a new `output.root`.
 
+This continuity needs `miles.wandb_mode = "online"`. The starters log offline, and
+W&B offline mode ignores `resume`: each attempt writes its own local run directory
+under `OUTPUT/wandb/` with the same id, so syncing them later does not append one
+attempt's history to the previous one automatically.
+
 MILES logs without an explicit W&B step, so updates redone after a resume (those
 since the last save) appear again as extra points for those steps; the later points
 are the ones the resumed run trained from.
@@ -403,8 +408,8 @@ inputs". Re-render the prompts with the new checkpoint's tokenizer before launch
 
 ### Engine drain timeout
 
-These starters keep `core.engine_drain_timeout = 900`. With `export_hf = false` and
-background evaluation, no stage that drains generation runs before shutdown, and
-terminal refresh cleanup cancels unused generation. PR #2290 raises the four-node
-example to R=224 and both drain timeouts to 3600 s. Merge it before using
-`output.export_hf = true` or shared-engine evaluation.
+The four- and eight-node starters set `core.engine_drain_timeout = 3600`, matching
+`core.refresh_request_timeout`, so a final drain or a shared-engine evaluation drain
+is not cut off at 900 s (the `two-node-mech.toml` mechanics check keeps 900 s). With
+`export_hf = false` and background evaluation, no stage that drains generation runs
+before shutdown, and terminal refresh cleanup cancels unused generation.
