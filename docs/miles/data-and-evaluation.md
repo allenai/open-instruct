@@ -413,13 +413,16 @@ sources therefore take longer to become eligible. Shortening is a heuristic for
 when to retry, not evidence that the answer is now within reach.
 
 Complete all-zero groups are counted separately as no truncations, some
-truncations, or all truncations. A capped response deliberately assigned zero by
-`reward_zero_truncated` is valid evidence under that reward policy. Verifier
-errors, unknown outcomes, incomplete groups and aborted generations do not count
-as task failures. Historical IF diagnostics with the successful `ifeval: scored`
-status are recognized despite older recorder validity bookkeeping. Truncation
-membership does not establish that truncation caused an otherwise correct answer
-to fail.
+truncations, or all truncations. Deliberate zero rewards from the truncation and
+final-answer gates count as evidence of low success under the configured reward
+policy. A group with only uncapped final-answer failures can qualify when
+`prompt_replay_truncation = "none"` and the other replay criteria are met.
+`reward_zero_truncated = false` disables the cap-specific gate. The final-answer
+gate still applies when enabled, and capped responses retain their truncated
+status. Verifier errors, unknown outcomes, incomplete groups and aborted
+generations are excluded. Historical truncation-gated zeroes with unknown
+validity and successful `ifeval: scored` diagnostics retain their compatibility
+handling.
 
 Eligible prompts are visited in first-observation order, without concurrent
 replays of the same prompt. A valid group outside the selected criteria retires the

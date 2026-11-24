@@ -26,21 +26,20 @@ _FEEDBACK_SOURCES = weakref.WeakValueDictionary()
 
 
 def grading_policy(args):
-    """Shared record/selection identity; unversioned legacy inputs keep their keys."""
+    """Identify the reward evidence contract in both grading modes."""
     core = args.olmo_core
-    if not getattr(core, "reward_final_answer_only", False):
-        return None
-    return {
+    final_answer_only = getattr(core, "reward_final_answer_only", False)
+    policy: dict[str, int | bool | str] = {
         "schema_version": grading.SCHEMA_VERSION,
-        "reward_final_answer_only": True,
-        "reward_reasoning_mode": getattr(core, "reward_reasoning_mode", "required"),
+        "reward_final_answer_only": final_answer_only,
         "reward_zero_truncated": core.reward_zero_truncated,
     }
+    if final_answer_only:
+        policy["reward_reasoning_mode"] = getattr(core, "reward_reasoning_mode", "required")
+    return policy
 
 
 def grading_input_key(input_key, policy):
-    if policy is None:
-        return input_key
     return inference_records.sha256({"input_key": input_key, "grading_policy": policy})
 
 
@@ -66,22 +65,23 @@ class GradingRecorder(inference_records.Recorder):
     def record_group(self, samples, *, decision, reason=None):
         # The pinned recorder constructs and enqueues the row synchronously.
         # Capture per-response metadata before its whitelist drops these fields.
-        self._grading_inputs = [(sample.metadata or {}).get("grading") for sample in samples]
+        if self._grading_policy["reward_final_answer_only"]:
+            self._grading_inputs = [(sample.metadata or {}).get("grading") for sample in samples]
         try:
             super().record_group(samples, decision=decision, reason=reason)
         finally:
             self._grading_inputs = []
 
     def _annotate_grading(self, row):
-        if row.get("kind") == "group" and self._grading_policy is not None and "grading_policy" not in row:
+        if row.get("kind") == "group" and "grading_policy" not in row:
             row["grading_policy"] = dict(self._grading_policy)
             # The pinned base protocol hashes the registry but not global grading
-            # flags. Keep new-contract evidence separate without changing the
-            # legacy recorder's manifest or default-off pooling identity.
+            # flags. Keep each grading contract separate within the base protocol.
             row["input_key"] = grading_input_key(row["input_key"], self._grading_policy)
-            for response, selection in zip(row["responses"], self._grading_inputs, strict=True):
-                if selection is not None:
-                    response["grading"] = copy.deepcopy(selection)
+            if self._grading_inputs:
+                for response, selection in zip(row["responses"], self._grading_inputs, strict=True):
+                    if selection is not None:
+                        response["grading"] = copy.deepcopy(selection)
 
     def _enqueue(self, row):
         self._annotate_grading(row)

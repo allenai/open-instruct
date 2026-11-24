@@ -11,6 +11,7 @@ from open_instruct.miles.configuration.config import CoreConfig
 from open_instruct.miles.configuration.run_spec import RunSpec
 from open_instruct.miles.datasets import record_selection, recording
 from open_instruct.miles.errors import InputError
+from open_instruct.miles.rewards import grading
 from open_instruct.test_miles_inference_records import document
 
 
@@ -258,8 +259,6 @@ def test_selection_round_trip_uses_the_recorders_grading_key(tmp_path, final):
 @pytest.mark.parametrize("table_final,run_final", [(True, False), (False, True)])
 def test_selection_refuses_cross_grading_tables(tmp_path, table_final, run_final):
     table = record_selection.build(grading_store(tmp_path, final=table_final), skip=["all_zero"], readmit_fraction=0.0)
-    if not table_final:
-        table.pop("grading_policy")  # Historical unversioned table.
     path = tmp_path / "table.json"
     digest = record_selection.write_table(table, path)
     args = selection_args(tmp_path, path, digest)
@@ -285,29 +284,46 @@ def test_selection_refuses_a_different_final_grading_convention(tmp_path, reason
         record_selection.Selection(args)
 
 
-def test_selection_builder_requires_a_choice_for_mixed_grading_evidence(tmp_path):
-    store = grading_store(tmp_path, final=False, run_prefix="legacy")
-    grading_store(tmp_path, final=True, run_prefix="final")
+@pytest.mark.parametrize(
+    "previous_final,previous_zero_truncated,previous_schema,current_final",
+    [(False, True, 4, True), (False, False, 4, False), (True, True, 3, True)],
+)
+def test_selection_builder_requires_a_choice_for_mixed_grading_evidence(
+    tmp_path, monkeypatch, previous_final, previous_zero_truncated, previous_schema, current_final
+):
+    with monkeypatch.context() as patch:
+        patch.setattr(grading, "SCHEMA_VERSION", previous_schema)
+        store = grading_store(
+            tmp_path, final=previous_final, zero_truncated=previous_zero_truncated, run_prefix="previous"
+        )
+        previous_args = make_args(tmp_path)
+        previous_args.olmo_core = CoreConfig(
+            reward_final_answer_only=previous_final, reward_zero_truncated=previous_zero_truncated
+        )
+        previous_policy = recording.grading_policy(previous_args)
+    grading_store(tmp_path, final=current_final, run_prefix="current")
     with pytest.raises(InputError, match="choose one with --grading-policy"):
         record_selection.build(store, skip=["all_zero"], readmit_fraction=0.0)
     args = make_args(tmp_path)
-    args.olmo_core = CoreConfig(reward_final_answer_only=True)
+    args.olmo_core = CoreConfig(reward_final_answer_only=current_final)
     policy = recording.grading_policy(args)
-    final = record_selection.build(
+    current = record_selection.build(
         store, skip=["all_zero"], grading_policy=inference_records.sha256(policy), readmit_fraction=0.0
     )
-    legacy = record_selection.build(store, skip=["all_zero"], grading_policy="legacy", readmit_fraction=0.0)
-    assert final["grading_policy"] == policy and legacy["grading_policy"] is None
-    assert final["excluded"][0]["input_key"] != legacy["excluded"][0]["input_key"]
-    assert final["excluded"][0]["observations"] == legacy["excluded"][0]["observations"] == 16
+    previous = record_selection.build(
+        store, skip=["all_zero"], grading_policy=inference_records.sha256(previous_policy), readmit_fraction=0.0
+    )
+    assert current["grading_policy"] == policy and previous["grading_policy"] == previous_policy
+    assert current["excluded"][0]["input_key"] != previous["excluded"][0]["input_key"]
+    assert current["excluded"][0]["observations"] == previous["excluded"][0]["observations"] == 16
 
 
-def test_legacy_schema_one_tables_still_work_in_legacy_mode(tmp_path):
+def test_unversioned_tables_require_matching_evidence_to_rebuild(tmp_path):
     table = record_selection.build(grading_store(tmp_path, final=False), skip=["all_zero"], readmit_fraction=0.0)
     table["schema_version"] = 1
     table.pop("grading_policy")
     table.pop("grading_policy_id")
     path = tmp_path / "legacy-table.json"
     digest = record_selection.write_table(table, path)
-    selector = record_selection.Selection(selection_args(tmp_path, path, digest))
-    assert not selector.keep([sample(0, 0.0, prompt=prompt("hard"))])
+    with pytest.raises(RuntimeError, match="different grading contract"):
+        record_selection.Selection(selection_args(tmp_path, path, digest))

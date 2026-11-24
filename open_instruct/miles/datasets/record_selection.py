@@ -259,13 +259,13 @@ class Selection:
         if table.get("grading_policy") != self.grading_policy:
             raise RuntimeError(
                 "Selection table evidence used a different grading contract than this run; "
-                "rebuild the table from matching records. Unversioned tables are usable only in legacy mode."
+                "rebuild the table from matching records."
             )
         self.sha256 = digest
         logger.warning(
             "Using prompt-exclusion table %s: compatibility checks do not cover verifier code changes "
-            "or the judge registry/model. Historical unversioned records cannot certify grading flags. Confirm that evidence was collected "
-            "with the intended reward semantics before reusing it.",
+            "or the judge registry/model. Confirm that evidence was collected with the intended reward semantics "
+            "before reusing it.",
             path,
         )
         self.excluded = {item["input_key"]: item["domain"] for item in table["excluded"]}

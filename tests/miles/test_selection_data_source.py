@@ -57,6 +57,7 @@ def make_source(root, table=None, digest=None, *, load=None):
 def write_table(root, excluded):
     args = make_source(root)
     protocol = inference_records.sha256(inference_records.protocol_identity(args))
+    grading_policy = recording.grading_policy(args)
     keys = [
         inference_records.sha256(
             {
@@ -71,7 +72,10 @@ def write_table(root, excluded):
         "schema_version": record_selection.TABLE_SCHEMA_VERSION,
         "lineage": recording.lineage_identity(args.hf_checkpoint)["inventory_sha256"],
         "protocol_sha256": protocol,
-        "excluded": [{"input_key": key, "domain": "math"} for key in keys],
+        "grading_policy": grading_policy,
+        "excluded": [
+            {"input_key": recording.grading_input_key(key, grading_policy), "domain": "math"} for key in keys
+        ],
     }
     path = root / "table.json"
     return path, record_selection.write_table(table, path)

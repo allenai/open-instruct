@@ -231,7 +231,9 @@ afterwards.
 | `--confidence`, `--max-deviation-rate` | 0.95, 0.2 | Exclude only if the one-sided upper confidence bound on the rate of any other reward is below the rate. With zero deviations in n draws the bound is `1 - 0.05^(1/n)`: 0.17 at n = 16, 0.09 at n = 32 |
 | `--readmit-fraction`, `--seed` | 0.05, 0 | Deterministic share of otherwise excluded prompts kept anyway, so the evidence can be refreshed |
 
-Only responses with `validity.valid = true` count. At a true success rate of
+Only responses with `validity.valid = true` count. Under grading contract 4,
+that includes floor rewards deliberately assigned by a truncation or final-answer gate.
+At a true success rate of
 10%, 16 draws show no success 19% of the time, so the default bound still
 excludes some solvable prompts. Raise `--min-observations` when that matters.
 
@@ -264,16 +266,12 @@ At startup the data source checks four things and fails the run on any mismatch:
   convention, truncation policy and selector version.
 
 These checks reject changes to the recorded sampling settings, template files
-and reward-config file. New tables use schema 2 and carry a grading contract;
-versioned final-mode records cannot be mixed with legacy evidence or another
-grading convention. Schema-1 tables without a contract remain usable in legacy
-mode only. Rebuild old final-mode tables from matching versioned records. If the
-records themselves lack a grading contract, collect fresh matching evidence;
-their historical grading flags cannot be reconstructed. These checks do not
-cover verifier implementation changes or the judge registry/model; historical
-unversioned records also cannot certify grading flags. Loading a table warns
-about these limits. Reuse is intentional: confirm that the evidence still reflects
-the reward semantics you want, or collect fresh records and build a new table.
+and reward-config file. New tables use schema 2 and carry a grading contract.
+Both grading modes require a matching contract. To use a table with the current
+runtime, rebuild older tables from matching version 4 records. Historical
+unversioned records cannot certify grading flags. The compatibility checks also
+leave verifier implementation changes and the judge registry/model to the
+experimenter to verify.
 
 **How skipping works:**
 

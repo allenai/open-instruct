@@ -87,6 +87,11 @@ def test_verifier_failures_and_unknowns_are_not_difficulty():
     assert replay_evidence.classify(record(valid=False))["category"] == "invalid"
     assert replay_evidence.classify(record(valid=None))["category"] == "invalid"
     assert replay_evidence.classify(record(valid=None, caps=4))["category"] == "zero_all_truncated"
+    assert replay_evidence.classify(record(valid=False, caps=4))["category"] == "invalid"
+    assert (
+        replay_evidence.classify(record(valid=None, caps=4, grading_policy={"schema_version": 4}))["category"]
+        == "invalid"
+    )
     assert replay_evidence.classify(record(valid=None, caps=3))["category"] == "invalid"
     assert replay_evidence.classify(record(expected_group_size=8))["category"] == "invalid"
     assert replay_evidence.classify(record(rewards=(float("nan"), 0)))["category"] == "invalid"

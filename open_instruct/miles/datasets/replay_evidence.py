@@ -25,9 +25,15 @@ def classify(record):
         cap = response.get("truncated") is True and response.get("status") == "truncated"
         truncated += cap
         validity = response.get("validity") or {}
-        # The truncation gate deliberately skips verification. Other unverified
-        # zeroes must not be promoted into evidence of task difficulty.
-        gated = cap and record.get("reward_zero_truncated") is True and reward == 0
+        # Before grading contract 4, the recorder lacked diagnostics for gate floors.
+        # Keep the historical truncation exception for unknown outcomes from those rows.
+        legacy_truncation = (
+            cap
+            and (record.get("grading_policy") or {}).get("schema_version", 0) < 4
+            and validity.get("valid") is None
+            and record.get("reward_zero_truncated") is True
+            and reward == 0
+        )
         components = validity.get("components") or {}
         # Historical MILES allowlisted ok/completed but not IF's successful
         # "scored" status. Reconcile this exact known adapter mismatch only.
@@ -39,8 +45,8 @@ def classify(record):
                 for name, status in components.items()
             )
         )
-        reconciled += legacy_if and validity.get("valid") is not True and not gated
-        valid = validity.get("valid") is True or gated or legacy_if
+        reconciled += legacy_if and validity.get("valid") is not True and not legacy_truncation
+        valid = validity.get("valid") is True or legacy_truncation or legacy_if
         unknown += not valid and validity.get("valid") is None
         errors += not valid and validity.get("valid") is False
         complete = complete and finite and response.get("status") in ("completed", "truncated") and valid
