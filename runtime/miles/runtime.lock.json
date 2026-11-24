@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Score-centering candidate transport and complete-support correction CPU-tested. Paired Olmo 3.5 Tiny GSM8K GPU training completed at application a2e5f39ce005c17c2746f2d07059a516fefde189 and backend aa53c1c00e5b88ce01cf37f458650a1bc47daf77 using unfiltered Core refresh sampling; the study exercises the existing partial-head estimator, not the new complete-support correction. Later application preflight changes are CPU-tested. GPU pytest remains separate. Other source and binary-base pins unchanged.",
+  "status": "TEMPORARY rc integration 2 (kevinfarhat/rc-integration-2, not for merge): open-instruct = main (incl. #2311 router shim) + #2301 + #2310 + #2299 + #2303; miles = main (incl. #54) + #48 + #55 + #56 + test-only fault injection (off unless MILES_TEST_FAULT_TRANSPORT_RATE is set) and loop watchdog (miles rc-integration-2 cddee942); olmo-sglang = #35 (d0f3aa4b). No miles-side router LD_PRELOAD hook: the router shim is open-instruct #2311's .pth re-exec only. Score-centering candidate transport and complete-support correction CPU-tested. Paired Olmo 3.5 Tiny GSM8K GPU training completed at application a2e5f39ce005c17c2746f2d07059a516fefde189 and backend aa53c1c00e5b88ce01cf37f458650a1bc47daf77 using unfiltered Core refresh sampling; the study exercises the existing partial-head estimator, not the new complete-support correction. Later application preflight changes are CPU-tested. GPU pytest remains separate. Other source and binary-base pins unchanged.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,11 +12,11 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "33de643a7f86a0e86ba759b648894ccbd52ae487"
+      "revision": "cddee942fce978d3590030fe758e71e0f7f1d28f"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
-      "revision": "069dc0a3cf0e28bd9f03d035aa98fc2bd5e8896a"
+      "revision": "d0f3aa4b521e5894c1550c24794734b7dc7f4adf"
     },
     "sglang": {
       "repository": "https://github.com/sgl-project/sglang.git",
