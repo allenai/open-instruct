@@ -216,7 +216,17 @@ def _scan_fenced_blocks(text: str) -> tuple[list[tuple[str, str]], str, list[str
 
 
 def parse_judge_response(content: str) -> tuple[str, float]:
-    """Parse and normalize Open-Instruct's JSON-or-SCORE judge response."""
+    """Parse and normalize Open-Instruct's JSON-or-SCORE judge response.
+
+    Tuned for the default ``Qwen/Qwen3-32B`` judge under the ``general_quality`` /
+    ``general_quality_ref`` JSON templates: strips ``<think>``/``<answer>`` wrappers,
+    accepts pretty-printed or fenced JSON (with or without a preamble), tolerates
+    unescaped newlines and stray backslashes inside JSON strings, and falls back to a
+    standalone Markdown ``SCORE:`` line only outside fenced code blocks. Malformed or
+    unfenced preamble+JSON, duplicate ``SCORE`` keys, conflicting scores, and ratio
+    strings like ``"8/10"`` are rejected so ``general_judge_score`` can retry or exclude
+    the sample. Re-check these assumptions when changing the judge model or rubric prompt.
+    """
     content = re.sub(r"<think>\s*.*?\s*</think>\s*", "", content, flags=re.DOTALL)
     content = content.replace("<answer>", "").replace("</answer>", "")
     cleaned = content.replace("\r\n", "\n").strip()
