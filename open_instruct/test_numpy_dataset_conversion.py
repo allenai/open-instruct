@@ -833,6 +833,51 @@ class TestResumeEquivalence(_NumpySftTestBase):
                 with (golden / name).open("rb") as f1, (interrupted / name).open("rb") as f2:
                     self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
 
+    def test_resume_when_collect_loop_already_finished(self):
+        """Issue #2245: resume should not crash with IndexError when partial files already contain
+        all total_samples (e.g. if a previous run was killed during stats aggregation or final write)."""
+        golden = pathlib.Path(self.temp_dir.name) / "golden_collect_finished"
+        self._run(golden, resume=False)
+
+        resumed = pathlib.Path(self.temp_dir.name) / "resumed_collect_finished"
+        # Simulate a crash right after the collect loop finishes (before stats aggregation / final write).
+        # We hook _aggregate_stats to abort the first run once all partial files are complete.
+        with (
+            unittest.mock.patch.object(
+                numpy_dataset_conversion, "_aggregate_stats", side_effect=RuntimeError("simulated OOM in stats")
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            self._run(resumed, resume=False)
+
+        tokens_p = resumed / "_tokens.partial.bin"
+        labels_p = resumed / "_labels.partial.bin"
+        boundaries_p = resumed / "_boundaries.partial.bin"
+        self.assertTrue(tokens_p.exists() and labels_p.exists() and boundaries_p.exists())
+
+        # Verify that all 50 samples were written before the crash
+        start_idx, current_position = numpy_dataset_conversion._recover_partial_state(
+            tokens_p, labels_p, boundaries_p, token_item_size=2
+        )
+        self.assertEqual(start_idx, 50)
+
+        # Resume should skip the collect loop cleanly and match the golden output
+        self._run(resumed, resume=True)
+
+        artifacts = sorted(
+            p.name
+            for p in golden.iterdir()
+            if p.name.startswith("token_ids_part_") or p.name.startswith("labels_mask_part_")
+        )
+        self.assertGreater(len(artifacts), 0, "golden run produced no artifacts")
+        for name in artifacts:
+            if name.endswith(".gz"):
+                with gzip.open(golden / name, "rb") as f1, gzip.open(resumed / name, "rb") as f2:
+                    self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
+            else:
+                with (golden / name).open("rb") as f1, (resumed / name).open("rb") as f2:
+                    self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
+
 
 if __name__ == "__main__":
     unittest.main()
