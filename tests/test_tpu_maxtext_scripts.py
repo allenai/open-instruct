@@ -523,6 +523,7 @@ def test_mm_gate_overlay_is_the_run_plus_the_gate_flags():
         "emo_max_document_expert_pool=512",
         "olmo_mm_batch_hash_steps=20",
         "log_moe_dropped_tokens=true",
+        "ragged_buffer_factor=5.0",
     }
     assert "save_checkpoint_on_completion=false" in gate["EXTRA_ARGS"].split()
     assert int(gate["STEPS"]) == 20 < int(gate["CHECKPOINT_PERIOD"])
