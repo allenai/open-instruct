@@ -22,6 +22,9 @@ configMapGenerator:
   behavior: merge
   literals:
   - RUN_NAME=CHANGE_ME
+  # data1 x FSDP16 x EP8 has one replica, so Orbax's single-replica restore (broadcast from the primary replica) fails
+  # with "All devices are in the primary replica" (2026-11-24 gate). Restore on every replica instead.
+  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=false
   - STEPS=8076
   - SHARD_ARGS=ici_data_parallelism=1 ici_fsdp_parallelism=16 ici_expert_parallelism=8 per_device_batch_size=0.125 ragged_buffer_factor=4.5
   # The 8,076-step schedule: int(8076 * 0.02996...) = 242 warmup, int(8076 * 0.97003...) = 7,834 decay.

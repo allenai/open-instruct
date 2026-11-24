@@ -17,7 +17,7 @@ configMapGenerator:
   - STEPS=20
   - CHECKPOINT_PERIOD=1000000
   - TRAIN_ARGS=learning_rate_schedule_steps=8076 warmup_steps_fraction=0.02996532937097573 wsd_decay_steps_fraction=0.9700346706290243 emo_document_expert_pool_choices=[256] emo_document_expert_pool_probs=[1.0]
-  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=true save_checkpoint_on_completion=false
+  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=false save_checkpoint_on_completion=false
 patches:
 - target:
     kind: JobSet
