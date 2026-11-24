@@ -223,8 +223,16 @@ def test_small_sft_3k_slice_mesh_and_batch_agree():
     assert pod["volumes"][0]["configMap"]["name"] == names["launcher"]
 
 
-@pytest.mark.parametrize("case", ["template", "pinned", "bad pin"])
-def test_small_sft_3k_launcher_fetches_the_pinned_commit(tmp_path, case):
+@pytest.mark.parametrize(
+    "case,code,stderr",
+    [
+        ("template", 2, "Set RUN_NAME"),
+        ("pinned", 7, ""),
+        ("bad pin", 2, "maxtext_source must hold"),
+        ("empty base", 1, "LOAD_PARAMETERS_PATH"),
+    ],
+)
+def test_small_sft_3k_launcher_fetches_the_pinned_commit(tmp_path, case, code, stderr):
     launcher = tmp_path / "launcher"
     launcher.mkdir()
     shutil.copy(SMALL_3K / "train_sft_perf.sh", launcher)
@@ -251,6 +259,8 @@ echo "$TMP_PATH"
             STEPS="10",
             LR_SCHEDULE_STEPS="10",
         )
+    if case == "empty base":
+        env["LOAD_PARAMETERS_PATH"] = ""  # would train from random init
     capture = tmp_path / "download.py"
     env = {
         **os.environ,
@@ -263,13 +273,12 @@ echo "$TMP_PATH"
     result = subprocess.run(
         ["bash", str(launcher / "train_sft_perf.sh")], env=env, capture_output=True, text=True, timeout=15
     )
+    assert result.returncode == code, result.stdout + result.stderr
+    assert stderr in result.stderr
     if case == "pinned":
-        assert result.returncode == 7, result.stdout + result.stderr
         _, sha = (SMALL_3K / "maxtext_source").read_text().split()
         assert f'"https://codeload.github.com/abhishekraok/maxtext/tar.gz/{sha}"' in capture.read_text()
     else:
-        assert result.returncode == 2, result.stdout + result.stderr
-        assert ("Set RUN_NAME" if case == "template" else "maxtext_source must hold") in result.stderr
         assert not capture.exists()
 
 

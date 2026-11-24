@@ -2,11 +2,11 @@
 # Olmo 3.5 Small text SFT in MaxText on a gke-tpu-v4 slice. Runs on every TPU host from the launcher ConfigMap
 # (this script, perf_wrapper.py, maxtext_source); settings come from the env ConfigMap. The olmo-post-training-ledger's
 # experiments/h269/h262-3k/train_sft_perf.sh, except that MaxText is the fork commit maxtext_source pins, with no
-# patch step, and that template placeholders are refused.
+# patch step, and that template placeholders and an empty LOAD_PARAMETERS_PATH (random init) are refused.
 set -euo pipefail
 set -f # EXTRA_ARGS is split on spaces below; keep values like logical_axis_rules=[[...]] from being globbed.
 
-: "${RUN_NAME:?}" "${OUTPUT_DIR:?}" "${LOAD_PARAMETERS_PATH?}" "${TOKENIZER_PATH:?}" "${TRAIN_FILES:?}"
+: "${RUN_NAME:?}" "${OUTPUT_DIR:?}" "${LOAD_PARAMETERS_PATH:?}" "${TOKENIZER_PATH:?}" "${TRAIN_FILES:?}"
 : "${TOTAL_DEVICES:?}" "${GLOBAL_BATCH:?}" "${STEPS:?}"
 for v in RUN_NAME LOAD_PARAMETERS_PATH TRAIN_FILES STEPS LR_SCHEDULE_STEPS; do
   if [[ "${!v-}" == *CHANGE_ME* ]]; then
@@ -68,7 +68,13 @@ data = urllib.request.urlopen("https://codeload.github.com/$SLUG/tar.gz/$SHA", t
 tarfile.open(fileobj=io.BytesIO(data)).extractall("/tmp")
 PY
 MT=/tmp/${SLUG#*/}-$SHA
-python3 -m pip install --quiet --no-deps --target /tmp/tunix-new "https://github.com/google/tunix/archive/c2ee3bd8892fa7ceb29c5c2fd95416597e1582e2.zip"
+TUNIX=https://github.com/google/tunix/archive/c2ee3bd8892fa7ceb29c5c2fd95416597e1582e2.zip
+# A MaxText bump that moves its own Tunix pin must move this one too.
+if ! grep -qF "$TUNIX" "$MT/src/dependencies/extra_deps/post_train_github_deps.txt"; then
+  echo "MaxText $SHA pins another Tunix than $TUNIX; update the launcher's pin" >&2
+  exit 2
+fi
+python3 -m pip install --quiet --no-deps --target /tmp/tunix-new "$TUNIX"
 export PYTHONPATH=/tmp/tunix-new:$MT/src
 python3 -c "import maxtext, tunix; print('maxtext from', maxtext.__file__, '| tunix from', tunix.__file__)"
 cd $MT

@@ -12,7 +12,9 @@
 # EMO off is render.py --emo off: in EXTRA_ARGS, emo_enabled=false moe_topk_pallas=true and drop the other emo_* flags.
 #   kubectl kustomize . | less     # check the render
 #   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 create -k .
-# The JobSet is immutable and created suspended (Kueue admits it): delete it before creating it again.
+# The JobSet is immutable and created suspended (Kueue admits it). To resume or relaunch, delete all three objects first
+# (kubectl delete -k .): create does not update an existing ConfigMap, so a JobSet created beside one would read stale
+# settings. Not apply -k: re-applying suspend: true to an admitted JobSet could suspend it.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: olmo
@@ -47,6 +49,7 @@ configMapGenerator:
   - PER_DEVICE_BATCH=0.03125
   - SEQ_LEN=65536
   - LR=1.8e-4
+  # EXTRA_ARGS' wsd_decay_steps_fraction=0.97 overrides the launcher's 1 - WARMUP_FRAC: change the two together.
   - WARMUP_FRAC=0.03
   - LR_SCHEDULE_STEPS=CHANGE_ME
   - STEPS=CHANGE_ME
