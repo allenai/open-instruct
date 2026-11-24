@@ -232,6 +232,8 @@ NATIVE_VALIDATION_OPTIONS = (
             "load_debug_rollout_data",
             "loss_type",
             "rollout_top_logprobs_num",
+            # core.sample_dump_fraction > 0 requires miles.save (the dump is written there).
+            "save",
             "score_centering_is",
             "score_centering_tis_clip",
             "score_centering_mis_low",

@@ -163,6 +163,71 @@ The adapter owns `train_backend`, `olmo_core_config`, `data_source_path` and
 generation and logging extension paths remain available through MILES. These are
 trusted Python objects; the `grpo.py` and `grpo_fast.py` CLI flags are separate.
 
+## Pre-filter reward metrics and sampled responses
+
+MILES reward metrics (`rollout/raw_reward`, the verifier counters) describe the
+consumed batch, after the group filter has dropped every all-equal group. For a
+binary reward the surviving groups average near 0.5 whatever the policy does, so
+per-domain learning is invisible there. `rollout/raw_reward_unfiltered` is
+pre-filter but pools every domain.
+
+The runtime installs `open_instruct.miles.rollout.prefilter.observed_filter` as
+`dynamic_sampling_filter_path`. It calls the configured filter (the one `plan`
+shows) unchanged and records each group it judged. Groups MILES rejects before
+the filter (aborted, missing reward, or returned by the barrier homogeneity check
+for regeneration) are not counted. Each update logs, per domain and as `all`:
+
+| Metric `rollout/prefilter/<domain>/…` | Meaning |
+| --- | --- |
+| `groups`, `samples` | Groups and responses judged since the previous update. |
+| `reward_mean` | Mean reward over graded responses; ungraded placeholders are left out. |
+| `all_zero_fraction`, `all_one_fraction`, `constant_fraction`, `mixed_fraction`, `unscored_fraction` | Group outcome from its graded rewards: all 0, all 1, all equal to another value, not all equal, or no graded response. |
+| `all_equal_fraction` | The sum of the three all-equal fractions: what a zero-variance filter drops. |
+| `kept_fraction` | Fraction the configured filter kept. |
+| `truncated_fraction`, `response_tokens_mean` | Length-truncated responses, and the mean response length. |
+
+A domain is the group's verifier names joined by `+` (the dataset source when it
+has none): the names in the run's reward registry, which `verifiers` in inference
+records also shows. Source-prepared runs use generated names such as `wb_a23f`. The window is the groups judged between two updates: in a fully async
+run these were generated then, not necessarily trained on by that update. The
+metrics are always on and cost a few scalars per group.
+
+### Sampled responses
+
+Neither these metrics nor inference records without `responses` keep response text,
+and `output.rollout_sample_rate` captures only groups that passed the filter. To
+read failing groups, for example all-0 code groups, dump a random slice before the
+filter:
+
+```toml
+[core]
+sample_dump_fraction = 0.01            # default 0: off
+sample_dump_domains = ["wb_a23f"]      # verifier names; omit for every domain
+sample_dump_max_groups = 4             # per update
+```
+
+Each selected group, with every member, is appended as one JSON line to
+`<miles.save>/prefilter_samples.jsonl` (structured runs: `output.root/checkpoints/`)
+when the next update logs. A row holds:
+
+- `logged_rollout_id` (the update that wrote it), `attempt` (one ID per process
+  start), `recorded_unix`, `group_index`, `prompt_id` (`prepared_sample_id`),
+  `source_dataset`, `source_row`, `domain`, `verifiers`;
+- `group_outcome`, `filter_kept`, `filter_reason`, the rendered `prompt`, and
+  the verifier `targets` (for code, the tests) unless their JSON exceeds 64 KB,
+  when `targets_omitted_chars` gives the size;
+- `responses[]`: `index`, `rollout_id`, `reward`, `graded`, `finish` (`completed`,
+  `truncated`, …), `response_tokens`, `policy_versions`, `reward_components`,
+  `verifier_diagnostics`, `reward_omission` and the decoded `response`.
+
+The file is opened in append mode, so a resumed run adds rows after the earlier
+attempt's; use `attempt` and `logged_rollout_id` to tell them apart. Groups chosen
+after an update's cap is reached are dropped. The complete-code verifier records each
+test's result in `verifier_diagnostics.<name>.partitions[].outcomes`, one letter per test
+in order: `p` passed, `f` failed, `t` timeout, `e` error, `c` crashed. Budget the
+size: a 32K-token response is roughly 100 KB of text, so 4 groups of 8 per update
+is up to a few MB per update.
+
 ## Maintaining the parser contract
 
 `open_instruct/miles/configuration/options.json` records the pinned native argparse actions,

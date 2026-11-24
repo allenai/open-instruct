@@ -112,7 +112,22 @@ def test_registry_adapter_uses_complete_authenticated_execution(monkeypatch):
     adapter = verifier.CodeVerifier(verifier.ServiceConfig(api_url="http://local/test_program"))
     result = asyncio.run(adapter.async_call([], "```python\nx=1\n```\n```text\n1\n```", ["assert x==1"]))
     assert result.score == 1
+    assert result.diagnostics["outcomes"] == "p"
     assert captured == {"token": "test", "url": "http://local", "program": "x=1", "tests": ["assert x==1"]}
+
+
+def test_diagnostics_keep_each_test_outcome_in_order(monkeypatch):
+    monkeypatch.setenv("CODE_EXECUTION_TOKEN", "test")
+
+    def execute(self, mode, program, tests, **kwargs):
+        statuses = ("passed", "failed", "timeout", "error", "crashed")
+        return ExecuteResult([Outcome(s, 0.01 if s == "passed" else None, None) for s in statuses], 0.1, "ok", "id", 1)
+
+    monkeypatch.setattr(verifier.CodeExecutionClient, "execute", execute)
+    adapter = verifier.CodeVerifier(verifier.ServiceConfig(api_url="http://local"))
+    result = asyncio.run(adapter.async_call([], "```python\nx=1\n```", ["assert x==1"] * 5))
+    assert result.score == 0
+    assert result.diagnostics["outcomes"] == "pftec"
 
 
 def test_registry_adapter_grades_code_followed_by_decoded_end_token(monkeypatch):

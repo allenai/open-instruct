@@ -129,6 +129,13 @@ class CoreConfig:
     records_root: str | None = None
     records_responses: str = "off"
     records_response_sample_rate: float | None = None
+    # Opt-in dump of sampled whole groups, before the group filter, with response
+    # text, to <save>/prefilter_samples.jsonl (see rollout/prefilter.py).
+    sample_dump_fraction: float = 0.0
+    # Verifier names (domains) eligible for the dump; None or empty selects every domain.
+    sample_dump_domains: list[str] | None = None
+    # Most groups appended per update; later selections in that update are dropped.
+    sample_dump_max_groups: int = 4
     # Prompt selection; ReMind uses scored outcomes from inference records.
     prompt_provider: str = "shuffle"
     prompt_mixture: str | None = None
@@ -219,6 +226,13 @@ class CoreConfig:
             validation.number(
                 self.records_response_sample_rate, "core.records_response_sample_rate", maximum=1, exclusive_min=True
             )
+        validation.number(self.sample_dump_fraction, "core.sample_dump_fraction", maximum=1)
+        validation.integer(self.sample_dump_max_groups, "core.sample_dump_max_groups", minimum=1)
+        if self.sample_dump_domains is not None:
+            if not isinstance(self.sample_dump_domains, list | tuple):
+                raise constraints.error("core.sample_dump_domains must be a list of verifier names")
+            for name in self.sample_dump_domains:
+                validation.text(name, "core.sample_dump_domains")
         validation.choice(
             self.attention_backend, "core.attention_backend", ("torch", "flash_2", "flash_3", "flash_4", "te")
         )
@@ -480,6 +494,8 @@ class RunConfig:
             raise constraints.error(
                 'core.records_response_sample_rate is required with, and only with, records_responses="sample"'
             )
+        if self.core.sample_dump_fraction > 0 and not cli_options.normalize_options(self.miles).get("save"):
+            raise constraints.error("core.sample_dump_fraction requires miles.save, where the dump is written")
         if self.core.sequence_packing and self.core.attention_backend == "torch":
             raise constraints.error(
                 'core.sequence_packing=true is incompatible with core.attention_backend="torch": '
