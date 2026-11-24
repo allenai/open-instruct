@@ -15,6 +15,7 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 | `k8s/instruct-sft-4x4x8/` | Overlay: the Olmo 3 7B Instruct SFT recipe on one reserved `4x4x8` slice (128 chips) at 32,768 tokens. |
 | `k8s/olmo35-sft-4x4x8/` | Overlay: the Olmo 3.5 tiny SFT recipe (16 rows of 65,536 tokens, 11,768 steps) on one `4x4x8` slice. Start here: it is the cheapest per chip-hour. |
 | `k8s/olmo35-sft-8x8x8/` | Overlay: the same budget at 64 rows and 2,942 steps on one `8x8x8` (512 chips), for when no `4x4x8` is free. ~1.09x the chip-hours, ~3.6x sooner (projected); its data order differs, so compare it only with a same-slice control. |
+| `k8s/olmo35-small-sft-8x8x48/` | Overlay: Olmo 3.5 Small text SFT on the 3K (`8x8x48`, 3,072 chips), 96 rows of 65,536 tokens on data24 x FSDP4 x EP32: the ledger's H269 render of H262's causal r1. Its own launcher (`train_sft_perf.sh`, `perf_wrapper.py`) fetches MaxText at launch from the fork commit in `maxtext_source`, with no patch step: a MaxText change is a fork commit plus a bump of that file. |
 | `k8s/watch_jobset.sh` | Waits for a JobSet and saves every pod's log. |
 | `data/` | `build_full_dolci.py` writes Dolci-Instruct-SFT as globally shuffled parquet shards. `count_tokens.py` sizes a run. |
 | `export_hf.sh` | MaxText checkpoint to HF, with the base model's `config.json` and the training tokenizer. |
