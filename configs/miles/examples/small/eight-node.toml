@@ -10,8 +10,9 @@
 # Timing results above used batch 1,024, LR 1e-6 and response-mean loss; see the docs audit.
 # Start checkpoint: H203 SFT export hf_step18410 (emo_* fields null; HF vocab 100278, Core pads to 100352).
 # Same serving/judge settings as four-node.toml (trtllm_mha, tuned MoE tiles, rounding mode,
-# R=96 with 128 KDA slots, server concurrency 192, CUDA graph bs 96, judge timeout 600 +
-# qwen3-no-thinking); producer budget 96 x 47 engines = 4,512. Do not set training.eval_interval.
+# judge timeout 600 + qwen3-no-thinking) except admission: R=96 with 128 KDA slots, server
+# concurrency 192, CUDA graph bs 96; producer budget 96 x 47 engines = 4,512.
+# four-node.toml uses R=224; R>96 is untested on 8 nodes. Do not set training.eval_interval.
 # See docs/miles/olmo35-small.md.
 # Before setting up a run, review configuration options and defaults:
 # https://allenai.github.io/open-instruct/miles/configuration/
@@ -37,16 +38,16 @@ workspace = "ai2/olmo-instruct"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "high"
-# About 2h including measured startup and 30 updates; retain scheduling headroom.
+# Historical budget used the older batch without saves; remeasure current wall time and save cost.
 min_runtime = "3h"
 timeout = "8h"
-auto_resume = false
+auto_resume = true
 gpus_per_replica = 8
 memory = "1500 GiB"
 shared_memory = "200 GiB"
 
 [launch.coordination]
-heartbeat_timeout = 120
+heartbeat_timeout = 480
 startup_timeout = 3600
 
 [[launch.weka_mounts]]
@@ -92,12 +93,14 @@ shuffle = true
 [training]
 learning_rate = 6e-6
 # Zero-std group filtering stays on (default), as in the measured runs.
-# Timing run length; raise num_rollouts and enable checkpoints for a learning run.
+# Short starting budget; extend only after measuring runtime, save cost and recovery.
 num_rollouts = 30
-save_checkpoints = false
+# Recovery target: roughly 1–2h; current-batch wall time still needs qualification.
+save_interval = 10
 skip_eval_before_train = true
 
 [trainer]
+fp32_lm_head = true
 gpus = 8
 expert_parallel_size = 8
 sequence_packing = true
@@ -115,6 +118,7 @@ max_context_length = 34816
 profile = "generic"
 sglang_disable_radix_cache = true
 # Admission R=96: engines gain throughput up to R=96 (R=64: 1.9K vs 2.5K tok/s/engine).
+# R=224 was faster on 4 nodes (see four-node.toml) but R>96 is untested on 8 nodes.
 sglang_max_running_requests = 96
 sglang_server_concurrency = 192
 sglang_cuda_graph_backend_decode = "full"
@@ -142,10 +146,16 @@ reward_reasoning_mode = "required"
 max_policy_lag = 12
 # A response cut off at max_response_length scores 0 (capped = wrong).
 reward_zero_truncated = true
+# Keep the latest two native saves plus permanent milestones and the final save.
 checkpoint_keep_last = 2
+checkpoint_keep_every = 50
+save_final_checkpoint = true
 publication_mode = "refresh"
-engine_drain_timeout = 900.0
+# Matches refresh_request_timeout for evaluation and final HF export drains (terminal refresh cleanup cancels unused generation).
+engine_drain_timeout = 3600.0
 engine_update_timeout = 1800.0
+# Headroom for 32K responses; R=96 has not hit 1800 s (R>=224 did). A timeout discards the whole group.
+refresh_request_timeout = 3600.0
 pipeline_observation_interval = 2.0
 router_aux_loss_weight = 0.0
 router_z_loss_weight = 0.0

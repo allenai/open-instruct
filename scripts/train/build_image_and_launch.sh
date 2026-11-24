@@ -33,8 +33,19 @@ if [[ "$cuda_version" != "12" && "$cuda_version" != "13" ]]; then
   exit 1
 fi
 
+# --moe: the CUDA 13 image plus transformer-engine, which MoE v2 (OLMoDDPModel) models need (see Dockerfile).
+image_variant=""
+if [[ "${1:-}" == "--moe" ]]; then
+  if [[ "$cuda_version" != "13" ]]; then
+    echo "Error: --moe needs --cuda-version 13 (only the CUDA 13 image has a transformer-engine variant)." >&2
+    exit 1
+  fi
+  image_variant="-moe"
+  shift
+fi
+
 if [[ $# -eq 0 ]]; then
-  echo "Usage: $0 [--cuda-version 12|13] SCRIPT [SCRIPT_ARGS...]"
+  echo "Usage: $0 [--cuda-version 12|13 [--moe]] SCRIPT [SCRIPT_ARGS...]"
   echo "       $0 --miles CONFIG [--set KEY=VALUE ...]"
   exit 1
 fi
@@ -59,7 +70,7 @@ git_branch=$(git rev-parse --abbrev-ref HEAD)
 # Sanitize the branch name to remove invalid characters for Beaker names
 # Beaker names can only contain letters, numbers, -_. and may not start with -
 sanitized_branch=$(echo "$git_branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | tr '[:upper:]' '[:lower:]' | sed 's/^-//')
-image_name=open-instruct-integration-test-${sanitized_branch}-cuda${cuda_version}
+image_name=open-instruct-integration-test-${sanitized_branch}-cuda${cuda_version}${image_variant}
 
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
@@ -68,7 +79,7 @@ existing_image_desc=$(beaker image get "$beaker_user/$image_name" --format json 
 if [[ -n "$existing_image_desc" ]] && [[ "$existing_image_desc" == *"$git_hash"* ]]; then
   echo "Beaker image already exists for commit $git_hash, skipping Docker build and upload."
 else
-  echo "Creating CUDA $cuda_version beaker image for commit $git_hash..."
+  echo "Creating CUDA $cuda_version${image_variant} beaker image for commit $git_hash..."
   CACHE_REPO="${DOCKER_CACHE_REPO:-ghcr.io/allenai/open-instruct:buildcache}"
 
   # Try to build with cache push first, fall back to cache-from only if push fails
@@ -76,6 +87,7 @@ else
     --build-arg GIT_COMMIT="$git_hash" \
     --build-arg GIT_BRANCH="$git_branch" \
     --build-arg CUDA_VERSION="$cuda_version" \
+    --build-arg IMAGE_VARIANT="$image_variant" \
     --cache-from "type=registry,ref=$CACHE_REPO" \
     --cache-to "type=registry,ref=$CACHE_REPO,mode=max" \
     --load \
@@ -87,6 +99,7 @@ else
       --build-arg GIT_COMMIT="$git_hash" \
       --build-arg GIT_BRANCH="$git_branch" \
       --build-arg CUDA_VERSION="$cuda_version" \
+      --build-arg IMAGE_VARIANT="$image_variant" \
       --cache-from "type=registry,ref=$CACHE_REPO" \
       --load \
       . -t "$image_name"
@@ -95,7 +108,7 @@ else
   beaker image rename "$beaker_user/$image_name" "" || echo "Image not found, skipping rename."
 
   beaker image create "$image_name" -n "$image_name" -w "ai2/$beaker_user" \
-    --description "Git commit: $git_hash; CUDA: $cuda_version"
+    --description "Git commit: $git_hash; CUDA: $cuda_version${image_variant:+; variant: moe}"
 fi
 
 # Ensure uv is installed and sync dependencies before running the script

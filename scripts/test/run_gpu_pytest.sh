@@ -12,7 +12,7 @@ if [[ ${#PYTEST_ARGS[@]} -gt 0 ]]; then
 fi
 
 case "$BEAKER_IMAGE" in
-    *-cuda13)
+    *-cuda13|*-cuda13-moe)
         CUDA_VERSION=13
         CLUSTERS=(ai2/holmes)
         ;;

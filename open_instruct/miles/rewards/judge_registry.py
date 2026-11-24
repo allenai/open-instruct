@@ -71,7 +71,6 @@ def resolve_request(args, name, query, prediction, target, *, extract_answer=Tru
 def validate_data(prepared, value):
     paths = [*prepared.get("train_sources", [prepared["prompt_data"]]), *prepared.get("eval_prompt_data", [])[1::2]]
     verifiers = json.loads(Path(prepared["reward_config"]).read_text()) if prepared.get("reward_config") else {}
-    seen = set()
     for path in paths:
         with Path(path).open() as stream:
             for line in stream:
@@ -82,7 +81,6 @@ def validate_data(prepared, value):
                     judging.require_binding(name, value["bindings"], verifiers.get(name))
                     if name not in value["bindings"]:
                         continue
-                    seen.add(name)
                     if not isinstance(metadata.get("judge_query"), str) or not metadata["judge_query"]:
                         raise InputError("Judged data requires the preserved full metadata.judge_query")
                     profile = value["rubrics"][value["bindings"][name]["rubric"]]["profile"]
@@ -94,8 +92,6 @@ def validate_data(prepared, value):
                         abstention.validate_target(target)
                     if profile != "open-instruct/general-quality" and verifier.get("target") in (None, ""):
                         raise InputError(f"{name} requires reference targets")
-    if unused := set(value["bindings"]) - seen:
-        raise InputError(f"Judge bindings absent from train/eval data: {sorted(unused)}")
 
 
 async def probe(output):

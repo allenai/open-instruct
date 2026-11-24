@@ -508,18 +508,32 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
 
     async def train_step(rollout_id, batch):
         for update in range(rollout_id * 4 + 1, (rollout_id + 1) * 4 + 1):
-            target = evaluation.training_snapshot(args, update)
+            target = evaluation.mid_rollout_snapshot(args, update)
             if target:
+                assert update % 4 != 0
                 Path(target).mkdir(parents=True)
                 (Path(target) / ".complete").touch()
 
+    async def export_snapshot(rollout_id, path):
+        if path == export_hf:
+            return
+        update = (rollout_id + 1) * 4
+        assert path == str(evaluation.snapshot(run.output["root"], update))
+        if deadline_stop or update == 8:
+            assert learner.finalize_checkpoint.await_args.args == (rollout_id,)
+        target = Path(path)
+        target.mkdir(parents=True)
+        (target / ".complete").touch()
+
     learner.train.side_effect = train_step
+    learner.export_hf.side_effect = export_snapshot
     args = SimpleNamespace(
         olmo_core=SimpleNamespace(
             publication_mode="barrier",
             diagnostic_interval=0,
             max_run_seconds=1 if deadline_stop else None,
             max_run_final=deadline_stop,
+            save_final_checkpoint=True,
         ),
         background_evaluation=evaluation.runtime(run, run.compile().miles),
         fully_async=False,
@@ -564,12 +578,10 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
             manager.save.assert_awaited_once_with(0)
             learner.save_model.assert_awaited_once_with(0, force_sync=True)
             learner.finalize_checkpoint.assert_awaited_once_with(0)
-        if stop_mode in ("deadline_off_cadence", "deadline_endpoints") and export_hf is None:
-            learner.export_hf.assert_awaited_once_with(0, str(evaluation.snapshot(run.output["root"], 4)))
-        elif debug or export_hf is None:
-            learner.export_hf.assert_not_awaited()
-        else:
-            learner.export_hf.assert_awaited_once_with(expected[-1], "final-hf")
+        if complete:
+            learner.finalize_checkpoint.assert_awaited_once_with(1)
+        final_exports = [call.args for call in learner.export_hf.await_args_list if call.args[1] == export_hf]
+        assert final_exports == ([(expected[-1], export_hf)] if not debug and export_hf else [])
         receipts = [json.loads(p.read_text()) for p in (Path(run.output["root"]) / "evaluation").glob("*.json")]
         if endpoints:
             expected_updates = ({0} if initial else set()) | ({8} if complete else {4} if deadline_stop else set())
@@ -577,9 +589,11 @@ def test_driver_never_uses_shared_evaluation_or_joins_worker(run, monkeypatch, s
             for receipt in receipts:
                 assert receipt["status"] == ("skipped_busy" if initial and receipt["update"] else "pending")
                 assert {task["task"] for task in receipt["tasks"]} == {"gsm8k", "arc_easy"}
-            # No intermediate backend exports; the deadline export is requested from the actor above.
             markers = list((Path(run.output["root"]) / "eval-snapshots").glob("*/hf/.complete"))
-            assert markers == ([evaluation.snapshot(run.output["root"], 8) / ".complete"] if complete else [])
+            snapshot_update = 8 if complete else 4 if deadline_stop and export_hf is None else None
+            assert markers == (
+                [evaluation.snapshot(run.output["root"], snapshot_update) / ".complete"] if snapshot_update else []
+            )
         periodic = () if endpoints else (3, 4) if stop_mode == "deadline_off_cadence" else (2, 3, 4)
         for update in periodic:
             milestone = [r for r in receipts if r["update"] == update]

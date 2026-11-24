@@ -1,9 +1,15 @@
 ARG CUDA_VERSION=12
+# "" or "-moe" (CUDA 13 only): the -moe image adds transformer-engine for MoE v2 models; see below.
+ARG IMAGE_VARIANT=""
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS cuda12
 FROM nvidia/cuda:13.0.3-devel-ubuntu22.04 AS cuda13
-FROM cuda${CUDA_VERSION}
+FROM nvidia/cuda:13.3.1-cudnn-devel-ubuntu22.04 AS cuda13-moe
+# torch is built with CUDA 13.0; without this DeepSpeed refuses to JIT-build its ops (CPU Adam) against 13.3.
+ENV DS_SKIP_CUDA_CHECK=1
+FROM cuda${CUDA_VERSION}${IMAGE_VARIANT}
 
 ARG CUDA_VERSION
+ARG IMAGE_VARIANT
 
 ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles" \
@@ -78,6 +84,32 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv run --frozen --no-default-groups --group dev --group cuda${CUDA_VERSION} \
         python -m nltk.downloader punkt punkt_tab words
+
+# MoE v2 models (OLMoDDPModel, e.g. Olmo 3.5 Small) need transformer-engine's token-permutation kernels
+# (olmo_core/nn/moe/utils.py). Only the -moe image gets it, so the default images are unchanged:
+# - TE 2.16.1's prebuilt cu13 library calls cublasLtGroupedMatrixLayoutInit_internal, which torch's
+#   bundled cuBLAS (nvidia-cublas 13.1.0.3) does not export. torch's bundled libcublas/libcublasLt are
+#   pointed at the base image's newer system copies; LD_LIBRARY_PATH cannot do it, because torch loads
+#   the bundled path. That changes cuBLAS for everything in the image, hence a separate variant.
+# - The torch bindings compile against the venv's torch (--no-build-isolation, build tools first) and
+#   the venv's cuDNN headers. TE_MAX_JOBS=2 fits Docker Desktop's 8 GiB VM; raise it on a Linux host.
+ARG TE_MAX_JOBS=2
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    if [ "$IMAGE_VARIANT" = "-moe" ]; then \
+        uv pip install cmake ninja pybind11 setuptools wheel && \
+        CUDNN_DIR=$(/stage/.venv/bin/python -c "import nvidia.cudnn; print(list(nvidia.cudnn.__path__)[0])") && \
+        CUDNN_PATH="$CUDNN_DIR" \
+        CPLUS_INCLUDE_PATH="$CUDNN_DIR/include" \
+        C_INCLUDE_PATH="$CUDNN_DIR/include" \
+        LIBRARY_PATH="$CUDNN_DIR/lib" \
+        MAX_JOBS="$TE_MAX_JOBS" uv pip install --no-build-isolation "transformer-engine[pytorch]==2.16.1" && \
+        for lib in libcublasLt libcublas; do \
+            target=$(ls /usr/local/cuda/lib64/${lib}.so.13.* | head -1) && [ -n "$target" ] && \
+            ln -sf "$target" /stage/.venv/lib/python3.12/site-packages/nvidia/cu13/lib/${lib}.so.13 || exit 1; \
+        done && \
+        nm -D --defined-only /stage/.venv/lib/python3.12/site-packages/nvidia/cu13/lib/libcublasLt.so.13 \
+            | grep -q cublasLtGroupedMatrixLayoutInit_internal; \
+    fi
 
 # Separate COPY commands required: Docker copies directory *contents*, not the directory itself
 COPY configs configs

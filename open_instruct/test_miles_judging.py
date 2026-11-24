@@ -357,11 +357,40 @@ def test_supervisor_reaps_child_on_failure(document, tmp_path):
     assert process.poll() is not None
 
 
-def test_missing_reference_and_unused_bindings_are_rejected(document, tmp_path):
+def test_unused_bindings_are_allowed_for_deterministic_subset(document, tmp_path):
     value = judging.registry(judging.parse(document))
     path = tmp_path / "rows.jsonl"
-    path.write_text(json.dumps({"metadata": {"verifiers": []}}) + "\n")
-    with pytest.raises(ValueError, match="absent"):
+    path.write_text(json.dumps({"metadata": {"verifiers": [{"name": "gsm8k", "target": "42"}]}}) + "\n")
+    judge_registry.validate_data({"prompt_data": str(path)}, value)
+
+
+def test_unused_c033_binding_is_allowed_for_dolci_subset(document, tmp_path):
+    document["rubrics"]["abstention"] = {"profile": "nvidia/qa-abstention-v1", "max_response_tokens": 64}
+    document["judging"]["bindings"]["abstention"] = {"judge": "general", "rubric": "abstention"}
+    value = judging.registry(judging.parse(document))
+    path = tmp_path / "rows.jsonl"
+    path.write_text(
+        json.dumps(
+            {"metadata": {"judge_query": "Question", "verifiers": [{"name": "general-quality", "target": None}]}}
+        )
+        + "\n"
+    )
+    judge_registry.validate_data({"prompt_data": str(path)}, value)
+    assert set(value["bindings"]) == {"general-quality", "abstention"}
+
+
+@pytest.mark.parametrize("missing", ["query", "reference"])
+def test_active_judge_still_requires_query_and_reference(document, tmp_path, missing):
+    document["rubrics"]["quality"]["profile"] = "open-instruct/general-quality_ref"
+    value = judging.registry(judging.parse(document))
+    row = {"metadata": {"judge_query": "Question", "verifiers": [{"name": "general-quality", "target": "Answer"}]}}
+    if missing == "query":
+        row["metadata"].pop("judge_query")
+    else:
+        row["metadata"]["verifiers"][0]["target"] = None
+    path = tmp_path / "rows.jsonl"
+    path.write_text(json.dumps(row) + "\n")
+    with pytest.raises(InputError, match="judge_query|requires reference targets"):
         judge_registry.validate_data({"prompt_data": str(path)}, value)
 
 

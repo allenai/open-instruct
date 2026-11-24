@@ -39,7 +39,7 @@ memory = "1500 GiB"
 shared_memory = "200 GiB"
 
 [launch.coordination]
-heartbeat_timeout = 120
+heartbeat_timeout = 480
 startup_timeout = 3600
 
 [[launch.weka_mounts]]
@@ -88,6 +88,7 @@ save_checkpoints = false
 skip_eval_before_train = true
 
 [trainer]
+fp32_lm_head = true
 gpus = 8
 expert_parallel_size = 8
 sequence_packing = true

@@ -21,8 +21,26 @@ experiment (H-numbers here are its internal tracking IDs).
   requeues the job after a preemption on its own.
 - **Other flags:** `--seed` (data order), `--steps`, `--workspace`, `--priority`, and
   `--dry_run`, which prints the mason command without launching it.
-- **Nothing to build:** each recipe pins the Beaker image that trained it, so the
+- **Nothing to build:** each recipe pins the Beaker image it runs with, so the
   training code comes from that image, not from your checkout.
+
+### Olmo 3.5 Small (A4B)
+
+```bash
+uv run python scripts/train/sft.py --recipe a4b
+```
+
+`a4b` is `c12r` (same data, replay, seeds and 18,410 steps) on the Olmo 3.5 Small
+hero (the A4B MoE) at its 4T decay endpoint (`olmo35-4b-active-4t-decay159k-causal`
+step 162974), peak LR 7.3e-5, with experts sharded 8 ways inside each node and the
+fused linear+CE loss. It runs on 2×8 B300 on `ai2/holmes`; about 7.4 s/step and 38 h are
+estimates from a 300-step run of the same flags (with the nested checkpoints off, per #2291)
+on the earlier image `01M6XV36`. The pinned image passed a 40-step smoke test (8.20 s/step
+over steps 10–40, matching CE); no full training run has used this recipe yet. It pins its
+own image because main's image has no transformer-engine, which the A4B MoE needs; that
+image also holds the model config (`scripts/c12/a4b_sft_config.json`), with whole-block
+recompute and the nested attention/MoE checkpoints off. All CLI flags documented above for
+`c12r` apply.
 
 Exporting these checkpoints to HF for evaluation is not yet one command; it follows
 ledger hypothesis H167's G4 step.

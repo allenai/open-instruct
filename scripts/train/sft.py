@@ -3,7 +3,7 @@
     uv run python scripts/train/sft.py --recipe c12r
     uv run python scripts/train/sft.py --recipe c12r --checkpoint <olmo-core DCP dir> --name my-run
 
-Each recipe pins the Beaker image that trained it, so its training code comes from that image, not from this
+Each recipe pins the Beaker image it runs with, so its training code comes from that image, not from this
 checkout: nothing needs building or committing first. Running the same command again resumes from the latest
 checkpoint in the run's output directory, which has no timestamp.
 """
@@ -105,7 +105,105 @@ RECIPES = {
         "timeout": "14h",
         # The first ephemeral checkpoint (step 1000) lands after about 41 minutes.
         "min_runtime": "45m",
-    }
+    },
+    # Olmo 3.5 Small hero (A4B MoE). c12r's data, cache, seeds and length (half an epoch of C12 plus the 10%
+    # long-context replay) on the hero's 4T decay endpoint, peak LR 7.3e-5 (c12r's 2e-4 scaled by the bases'
+    # pretraining LRs, 2e-4 x 4.04e-4 / 1.1e-3): the a4b arm of scripts/c12/h161_gpu_launch.sh on branch
+    # a4b-bigbatch (ledger H203). 2 x 8 B300 on holmes with experts sharded 8 ways inside each node; estimated ~38 h
+    # of training (~7.4 s/step from the #2291 300-step benchmark with nested checkpoints off).
+    "a4b": {
+        # Built from the a4b-bigbatch line with #2291 (open-instruct e436f7647). main's image cannot run A4B: its
+        # MoE needs transformer-engine, which only that line's CUDA 13 Dockerfile installs. The image also holds
+        # scripts/c12/a4b_sft_config.json, which main does not: EMO off, sync_1d EP, flash_2 attention (the
+        # image's FA4 rejects head_dim 256 on SM100), whole-block recompute (recompute_each_block) with the
+        # nested checkpoint_attn / checkpoint_permute_moe_unpermute / checkpoint_second_unpermute off (#2291:
+        # -16% s/step at the same CE; turning off block recompute instead OOMs).
+        "image": "01M7VCQM65SD251KYS4Z1AD8FG",
+        "checkpoint": "/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-4t-decay159k-causal/step162974/model_and_optim",
+        # c12r's half epoch: same cache, replay and loader seed, so the same step. EP shards experts over
+        # the same 16 ranks, so the data-parallel batch stays 16 sequences per step.
+        "steps": 18410,
+        "seed": 34521,
+        "cache": "bf82a8fab8-6068a350-rowaligned",
+        "train_args": [
+            "--config_name",
+            "scripts/c12/a4b_sft_config.json",
+            "--tokenizer_name_or_path",
+            "allenai/dolma2-tokenizer-olmo35",
+            "--tokenizer_revision",
+            "8b9717061fae09d5be814373d189919a62a9a00d",
+            "--chat_template_name",
+            "olmo35",
+            "--reserved_slot_tokens",
+            "<think>",
+            "</think>",
+            "--row_aligned_parts",
+            "--document_boundaries_from_metadata",
+            "--max_seq_length",
+            "65536",
+            "--per_device_train_batch_size",
+            "1",
+            "--gradient_accumulation_steps",
+            "1",
+            "--learning_rate",
+            "7.3e-5",
+            "--warmup_ratio",
+            "0.03",
+            "--weight_decay",
+            "0.0",
+            "--max_grad_norm",
+            "1.0",
+            "--num_epochs",
+            "1",
+            "--attn_implementation",
+            "flash_2",
+            # With the inner checkpoints off, torch.compile OOMs in the first backward.
+            "--no_compile_model",
+            "--activation_checkpointing_mode",
+            "budget",
+            "--activation_memory_budget",
+            "1",
+            "--keep_last_n_checkpoints",
+            "2",
+            "--dist_timeout_hours",
+            "2",
+            "--no_save_async",
+            "--with_tracking",
+            "--logging_steps",
+            "1",
+            "--mixer_list",
+            f"{C12_PARQUETS}/dolci-think-clean-v1-en-dbv-5bd68837-c12a3-9707a865.parquet",
+            "1.0",
+            f"{C12_PARQUETS}/nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet",
+            "0.862426",
+            f"{C12_PARQUETS}/nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet",
+            "3.03277",
+            "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/if/"
+            "nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet",
+            "4.937456",
+            # As in c12r: the job's cache dir holds a symlink to the frozen cache.
+            "--local_cache_dir",
+            "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache",
+            # As in c12r: --seed names the cache; the data order is --data_loader_seed.
+            "--seed",
+            "33333",
+            "--extra_numpy_dirs",
+            "/weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r",
+            # Experts sharded across the 8 GPUs of a node.
+            "--expert_parallel_degree",
+            "8",
+            # The default CE materialises 24.5 GiB of logits and OOMs.
+            "--loss_implementation",
+            "fused_linear",
+        ],
+        # The A4B pretraining recipe's allocator setting; without it the first backward OOMs on fragmentation.
+        "env": ["PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"],
+        "cluster": "ai2/holmes",
+        "nodes": 2,
+        "timeout": "72h",
+        # The first ephemeral checkpoint (step 1000) is estimated to land after about 2 h.
+        "min_runtime": "2h15m",
+    },
 }
 
 
@@ -172,6 +270,7 @@ def main():
         "--timeout", recipe["timeout"],
         "--extra_weka_buckets", "olmo-3p5-checkpoints", "olmo-3p5-post-checkpoints",
         "--env", "OLMO_SHARED_FS=1", "--env", f"EXPECTED_NUMPY_CACHE={recipe['cache']}",
+        *[arg for env in recipe.get("env", []) for arg in ("--env", env)],
         "--task_name", name,
         "--description", f"SFT recipe {args.recipe}: {name}, {steps} steps, seed {seed}",
         "--",

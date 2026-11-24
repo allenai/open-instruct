@@ -92,6 +92,49 @@ def test_recovery_does_not_restart_completed_runs(tmp_path):
         pytest.fail("Completed run was entered")
 
 
+@pytest.mark.parametrize("sections", [("launch",), ("evaluation",), ("launch", "evaluation")])
+def test_workspace_migration_persists_authenticated_resume(tmp_path, sections):
+    document, previous = saved_run(tmp_path)
+    document["launch"]["workspace"] = "ai2/old"
+    document["evaluation"] = {"mode": "background", "workspace": "ai2/old", "tasks": [{"task": "ifeval"}]}
+    previous["spec_sha256"] = workflow.fingerprint(document)
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    workflow.write_json(tmp_path / "workflow.json", previous)
+    for section in sections:
+        document[section]["workspace"] = "ai2/new"
+    document["launch"]["auto_resume"] = True
+    spec = SimpleNamespace(
+        output=document["output"], launch=document["launch"], to_dict=lambda: document, plan=lambda: {}
+    )
+    for attempt in (0, 1):
+        with workflow.run_directory(spec) as (_, state):
+            assert state["attempt"] == attempt
+            assert json.loads((tmp_path / "run-spec.json").read_text()) == document
+            assert state["spec_sha256"] == workflow.fingerprint(document)
+
+
+@pytest.mark.parametrize("invalid_change", ["recipe", "resources", "task", "scoring", "saved_spec"])
+def test_workspace_migration_preserves_recipe_and_saved_spec_checks(tmp_path, invalid_change):
+    document, previous = saved_run(tmp_path)
+    document["launch"]["workspace"] = "ai2/old"
+    document["evaluation"] = {"workspace": "ai2/old", "tasks": [{"task": "ifeval", "scoring": {}}]}
+    previous["spec_sha256"] = workflow.fingerprint(document)
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    document["launch"].update(workspace="ai2/new", auto_resume=True)
+    document["evaluation"]["workspace"] = "ai2/new"
+    if invalid_change == "recipe":
+        document["optimizer"]["learning_rate"] = 2e-6
+    elif invalid_change == "resources":
+        document["trainer"]["gpus"] = 4
+    elif invalid_change == "task":
+        document["evaluation"]["tasks"][0]["task"] = "aime"
+    elif invalid_change == "scoring":
+        document["evaluation"]["tasks"][0]["scoring"] = {"limit": 1}
+    else:
+        workflow.write_json(tmp_path / "run-spec.json", document)
+    assert not workflow.recovery_configuration_matches(tmp_path, previous, document)
+
+
 def saved_cached_run(tmp_path):
     document, previous = saved_run(tmp_path)
     document["compiler_cache"] = {"enabled": True, "shared_root": "/shared/cache"}
@@ -229,3 +272,19 @@ def test_cadence_resume_persists_normalized_spec_and_preserves_artifacts(tmp_pat
                 resumed.to_dict()
             )
             assert all(artifact.read_bytes() == b"existing artifact" for artifact in artifacts)
+
+
+@pytest.mark.parametrize("invalid_change", [None, "recipe", "startup", "saved_spec"])
+def test_recovery_allows_heartbeat_patience_only(tmp_path, invalid_change):
+    document, previous = saved_run(tmp_path)
+    document["launch"]["coordination"] = {"heartbeat_timeout": 120, "startup_timeout": 3600}
+    previous["spec_sha256"] = workflow.fingerprint(document)
+    workflow.write_json(tmp_path / "run-spec.json", document)
+    document["launch"]["coordination"]["heartbeat_timeout"] = 480
+    if invalid_change == "recipe":
+        document["optimizer"]["learning_rate"] = 6e-6
+    elif invalid_change == "startup":
+        document["launch"]["coordination"]["startup_timeout"] = 7200
+    elif invalid_change == "saved_spec":
+        workflow.write_json(tmp_path / "run-spec.json", document)
+    assert workflow.recovery_configuration_matches(tmp_path, previous, document) is (invalid_change is None)

@@ -107,7 +107,10 @@ def test_learning_examples_keep_named_preset_settings_after_preparation(tmp_path
     assert plan["scoring_pass"]["standalone"] is False
     assert plan["scoring_pass"]["check_interval"] == 0
     assert not config.core.replay_diagnostics and config.core.diagnostic_interval == 0
-    assert config.miles["save_interval"] == 25
+    assert config.miles["save_interval"] == 10
+    assert config.core.checkpoint_keep_last == 2
+    assert config.core.checkpoint_keep_every == (50 if profile == "node" else 100)
+    assert config.core.save_final_checkpoint is True
 
 
 def test_dev_retains_weight_qualification():
@@ -284,6 +287,10 @@ def test_analyzer_does_not_infer_missing_collection_time_from_driver_wait(tmp_pa
     assert result["per_update"][0]["collection_seconds"] is None
     assert result["per_update"][0]["other_collection_seconds"] is None
     assert result["warm_cycle_seconds"] == 9
+
+
+def test_refresh_request_deadline_default():
+    assert CoreConfig().refresh_request_timeout == 3600.0
 
 
 @pytest.mark.parametrize("value", [0, -1, True, float("inf"), float("nan")])
