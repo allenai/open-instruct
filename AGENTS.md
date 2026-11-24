@@ -32,8 +32,8 @@ Read and follow [CODE_REVIEW.md](CODE_REVIEW.md) when reviewing code.
 - When a PR changes anything under `open_instruct/`, add a summary to `CHANGELOG.md` with a link to the PR (e.g., `- Description of change (https://github.com/allenai/open-instruct/pull/123).`). This is what CI enforces; PRs touching only `scripts/`, docs, or config are exempt, though an entry is still welcome for anything user-visible.
   - The entry must contain the PR's own URL, which does not exist until the PR is opened. Add the entry, open the PR, then amend the entry with the URL and push again.
   - To skip the check deliberately, put `CHANGELOG=<reason>` in the PR body.
-- `main` merges only through its merge queue, which squashes and reruns the required checks against the newest `main`. `gh pr merge` fails ("The merge strategy for main is set by the merge queue", then "Auto merge is not allowed") and `--admin` is refused, so enqueue the PR instead:
-  `gh api graphql -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{position state}}}' -f id=$(gh pr view <n> --json id --jq .id)`
+- `main` merges only through its merge queue, which reruns the required checks against the newest `main`. `gh pr merge` fails ("The merge strategy for main is set by the merge queue", then "Auto merge is not allowed") and `--admin` is refused, so enqueue the PR instead (set `PR` to its number):
+  `gh api graphql -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{position state}}}' -f id="$(gh pr view "$PR" --json id --jq .id)"`
 - Always run the linter and make sure the tests pass before finishing a task.
 - Prefer running single tests, not the whole suite, when developing.
 - Launch Beaker experiment and test scripts with `./scripts/train/build_image_and_launch.sh [--cuda-version 12|13 [--moe]] SCRIPT` after committing all changes. CUDA 13 images are for compatible clusters such as `ai2/holmes`. MoE v2 (`OLMoDDPModel`) models, such as Olmo 3.5 Small, need `--cuda-version 13 --moe`: that image adds transformer-engine. MILES uses `--miles CONFIG` and its pinned runtime.
