@@ -152,8 +152,11 @@ a difference is about 2–3 points.
 
 - **The first step can drop MoE tokens.** The reference run's first step logged `REQUIRED_RBF step=0 max=4.42`
   against `ragged_buffer_factor=3.0`, so it dropped routed tokens. Every later step stayed ≤ 2.46. `REQUIRED_RBF` and
-  `MOE-DROPPED` count steps from 0, and `LOSS-PARTS` counts from 1. The gate logs `MOE-DROPPED`. If step 1 drops, raise
-  the gate's buffer and check that it still fits in HBM.
+  `MOE-DROPPED` count steps from 0, and `LOSS-PARTS` counts from 1. Measured on 2026-11-24 with the pool fixed at
+  512: at 3.0, step 1 needs 4.49 and drops 0.45% of routed tokens; at 5.0 it drops none and fits in HBM. Step-1 CE is
+  1.085089 either way, so the drop does not change the first step's loss (most likely it falls on the untrained,
+  zero-filled rows of the batch; not verified). The gate runs at 5.0 so its first step is dropless; production stays
+  at 3.0, which costs ~7% less step time.
 - `base.yml` defaults to `freeze_vision_encoder_params: true`. The mm-SFT config overrides it.
 - B2e needs `emo_enabled=true emo_causal_pool=true` with the pool uniform in [16, 512]
   (`emo_document_expert_pool_choices=[]`). The 256K midtrain config's [32, 64, 256] choices are different.

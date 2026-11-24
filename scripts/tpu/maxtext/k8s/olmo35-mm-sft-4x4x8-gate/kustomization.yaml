@@ -30,10 +30,13 @@ configMapGenerator:
   # - emo_min/max_document_expert_pool=512: every document routes over all 512 experts, as OLMo-core's eval mode.
   # - olmo_mm_batch_hash_steps=20: every OLMo-core loader rank logs MM-BATCH-HASH {step, rank, hashes, index} for
   #   batches 1-20 (needs the gates image below).
-  # - log_moe_dropped_tokens=true: MOE-DROPPED lines next to REQUIRED_RBF. If step 1 drops routed tokens, its CE is
-  #   not comparable with a dropless reference and check_gates.py says so (the reference run's first-step probe read
-  #   4.42 against its 3.0 buffer).
-  - TRAIN_ARGS=olmo_seed_token_rows=[] ragged_buffer_factor=3.0 olmo_vit_balance_crops=true olmo_mm_prefetch_batches=1 emo_min_document_expert_pool=512 emo_max_document_expert_pool=512 olmo_mm_batch_hash_steps=20 log_moe_dropped_tokens=true
+  # - log_moe_dropped_tokens=true: MOE-DROPPED lines next to REQUIRED_RBF; check_gates.py fails the CE gate if step 1
+  #   drops routed tokens.
+  # - ragged_buffer_factor=5.0 (the run uses 3.0): B2e's first step needs 4.49, so at 3.0 step 1 drops 0.45% of routed
+  #   tokens (2026-11-24, gate run at 3.0). At 5.0 nothing drops, it fits in HBM, and step-1 CE is the same to 6
+  #   decimals (1.085089 both), as are the 20 steps' batch hashes; steps 2-20 move by <= 4e-4. 5.0 costs ~7% step time,
+  #   so production keeps 3.0 (every later step needs <= 2.46).
+  - TRAIN_ARGS=olmo_seed_token_rows=[] ragged_buffer_factor=5.0 olmo_vit_balance_crops=true olmo_mm_prefetch_batches=1 emo_min_document_expert_pool=512 emo_max_document_expert_pool=512 olmo_mm_batch_hash_steps=20 log_moe_dropped_tokens=true
   - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache save_checkpoint_on_completion=false
 patches:
 - target:
