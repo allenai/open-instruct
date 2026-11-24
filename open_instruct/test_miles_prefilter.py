@@ -1,11 +1,16 @@
 """Pre-filter observation reports every judged group by domain and dumps sampled groups."""
 
+import argparse
+import importlib
 import json
 import random
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
 
+from open_instruct.miles.configuration import options as cli_options
 from open_instruct.miles.configuration.config import CoreConfig, RunConfig
 from open_instruct.miles.rollout import prefilter
 
@@ -174,3 +179,58 @@ def test_dump_requires_a_save_directory():
     with pytest.raises(Exception, match="requires miles.save"):
         RunConfig(CoreConfig(sample_dump_fraction=0.01), options).validate()
     RunConfig(CoreConfig(sample_dump_fraction=0.01), options | {"save": "/fixture/save"}).validate()
+
+
+def _snapshot_parser():
+    """Rebuild the pinned MILES parser from the committed options.json snapshot (no MILES import)."""
+    value_types = {"int": int, "float": float}
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    for record in cli_options.load_schema()["options"]:
+        if record["dest"] == "olmo_core_config" or not record["flags"]:
+            continue
+        kind, kwargs = record["kind"], {"dest": record["dest"]}
+        if kind == "boolean":
+            kwargs.update(action=argparse.BooleanOptionalAction, default=record.get("default"))
+        elif kind == "switch":
+            kwargs.update(action="store_const", const=record.get("const", True), default=record.get("default"))
+        elif kind == "append":
+            kwargs.update(action="append", type=value_types.get(record["type"], str))
+        elif kind == "value":
+            kwargs.update(type=value_types.get(record["type"], str), nargs=record["nargs"])
+        else:
+            continue
+        parser.add_argument(*record["flags"], **kwargs)
+    return parser
+
+
+def test_runtime_bridge_revalidation_accepts_the_dump(monkeypatch):
+    # The runtime bridge (configuration/arguments.py load_core_args) re-validates RunConfig from the
+    # parsed native arguments, not from the compiled config. CPU validate/plan only check the latter,
+    # so a value the bridge drops (miles.save) passed planning and failed on the cluster (rc01, 2026-11-24).
+    config = RunConfig(
+        CoreConfig(sample_dump_fraction=0.01),
+        dict(
+            hf_checkpoint="/fixture/hf",
+            global_batch_size=4,
+            rollout_batch_size=2,
+            n_samples_per_prompt=2,
+            save="/fixture/save",
+        ),
+    )
+    argv = config.arguments()
+
+    def load_fsdp_args(extra_args_provider):
+        return extra_args_provider(_snapshot_parser()).parse_args(argv)
+
+    stub = types.ModuleType("miles.backends.fsdp_utils.arguments")
+    stub.load_fsdp_args = load_fsdp_args
+    for name in ("miles", "miles.backends", "miles.backends.fsdp_utils"):
+        monkeypatch.setitem(sys.modules, name, sys.modules.get(name) or types.ModuleType(name))
+    monkeypatch.setitem(sys.modules, "miles.backends.fsdp_utils.arguments", stub)
+    monkeypatch.delitem(sys.modules, "open_instruct.miles.configuration.arguments", raising=False)
+    monkeypatch.setattr(sys, "argv", ["train", *argv])
+    bridge = importlib.import_module("open_instruct.miles.configuration.arguments")
+
+    args = bridge.load_core_args(lambda parser: parser)
+    assert args.save == "/fixture/save"
+    assert args.olmo_core.sample_dump_fraction == 0.01
