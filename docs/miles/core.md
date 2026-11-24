@@ -83,10 +83,10 @@ and successful shutdown retain their separate generation-drain boundaries.
 
 Refresh supports TP1 and TP2 resident serving. For TP2, set
 `inference.rollout_tensor_parallel_size = 2`, allocate an even `inference.gpus`,
-and pass `OLMO_SGLANG_CORE_COMPAT = "rounding"` in `launch.env` for compatible
-Olmo MoE execution. The trainer's expert parallelism is independent. The shared
-transport broadcasts each full HF weight bucket to every engine TP rank; each
-rank's loader selects its shard. Independent `engine_drain` publication remains
+and use a compatible Olmo MoE checkpoint. MILES selects Core-compatible rounding
+by default for the supported hybrid configuration. The trainer's expert
+parallelism is independent. The shared transport broadcasts each full HF weight
+bucket to every engine TP rank, and each rank's loader selects its shard. Independent `engine_drain` publication remains
 TP1. A short mechanics recipe is `tests/miles/configs/tp2-refresh.toml`; it uses
 four GPUs to check Tiny publication with full decode graphs and eager prefill.
 

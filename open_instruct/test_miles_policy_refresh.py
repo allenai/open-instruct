@@ -1,8 +1,11 @@
 """Validate the explicit scope of the first policy-refresh qualification."""
 
 import dataclasses
+import importlib.util
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -45,6 +48,69 @@ def test_tp2_refresh_smoke_compiles_one_engine_and_two_trainer_ranks():
     assert config.miles["sglang_cuda_graph_max_bs_decode"] == config.miles["sglang_max_running_requests"] == 8
     assert config.miles["sglang_cuda_graph_backend_prefill"] == "disabled"
     assert topology.plan(spec, config)["replicas"] == 1
+
+
+@pytest.mark.parametrize(
+    "tp, publication, arg_overrides, model_overrides, launch_env, worker_env, expected",
+    [
+        (2, "refresh", {}, {}, None, {}, "rounding"),
+        (2, "refresh", {}, {}, None, {"OLMO_SGLANG_CORE_COMPAT": "off"}, "off"),
+        (2, "refresh", {}, {}, "off", {}, None),
+        (2, "refresh", {}, {}, "auto", {}, None),
+        (1, "refresh", {}, {}, None, {}, None),
+        (2, "barrier", {}, {}, None, {}, None),
+        (2, "refresh", {}, {"model_type": "olmo3"}, None, {}, None),
+        (2, "refresh", {}, {"torch_dtype": "float16"}, None, {}, None),
+        (2, "refresh", {}, {"layer_types": ["linear_attention", "sliding_attention"]}, None, {}, None),
+        (2, "refresh", {"sglang_attn_cp_size": 2}, {}, None, {}, None),
+        (2, "refresh", {"sglang_moe_dp_size": 2}, {}, None, {}, None),
+    ],
+)
+def test_managed_serving_defaults_rounding_for_compatible_tp2_refresh(
+    tmp_path, monkeypatch, tp, publication, arg_overrides, model_overrides, launch_env, worker_env, expected
+):
+    cache = SimpleNamespace(configure_specs=lambda args, specs: list(specs))
+    monkeypatch.setitem(sys.modules, "miles.utils.compiler_cache", SimpleNamespace(startup_cache=cache))
+    module = importlib.util.spec_from_file_location(
+        "test_tp2_serving_defaults", Path(__file__).parent / "miles/execution/serving.py"
+    )
+    serving = importlib.util.module_from_spec(module)
+    module.loader.exec_module(serving)
+    if launch_env is None:
+        monkeypatch.delenv(serving.CORE_COMPAT_ENV, raising=False)
+    else:
+        monkeypatch.setenv(serving.CORE_COMPAT_ENV, launch_env)
+
+    config = {
+        "model_type": "olmo3moe",
+        "torch_dtype": "bfloat16",
+        "use_rope": False,
+        "layer_types": ["linear_attention", "full_attention"],
+    } | model_overrides
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    args = SimpleNamespace(
+        hf_checkpoint=tmp_path,
+        olmo_core=CoreConfig(publication_mode=publication),
+        rollout_num_gpus_per_engine=tp,
+        **arg_overrides,
+    )
+
+    @dataclasses.dataclass
+    class Worker:
+        name: str
+        env_var: object = lambda _: {"HF_MODULES_CACHE": "/worker-hf", **worker_env}
+        launch_command: object = lambda _: "python -m miles.utils.compiler_cache.serving --tp-size 2"
+
+        def model_copy(self, update):
+            return dataclasses.replace(self, **update)
+
+    trainer = Worker("trainer-0")
+    engine = Worker("inference-engine-0")
+    configured_trainer, configured_engine = serving.configure_specs(args, [trainer, engine])
+    assert configured_trainer is trainer
+    assert configured_engine.env_var(None).get(serving.CORE_COMPAT_ENV) == expected
+    assert configured_engine.env_var(None)["HF_MODULES_CACHE"] == "/worker-hf"
+    assert configured_engine.launch_command(None) == "python -m open_instruct.miles.execution.serving --tp-size 2"
 
 
 @pytest.mark.parametrize(

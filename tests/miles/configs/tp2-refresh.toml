@@ -14,7 +14,7 @@ export_hf = false
 rollout_sample_rate = 1.0
 
 [launch]
-workspace = "ai2/olmo-instruct"
+workspace = "ai2/olmo-rl"
 budget = "ai2/oe-other"
 cluster = "ai2/holmes"
 priority = "high"
@@ -35,7 +35,6 @@ mount_path = "/weka/olmo-3p5-post-checkpoints"
 
 [launch.env]
 OI_MILES_RAY_CPUS = "32"
-OLMO_SGLANG_CORE_COMPAT = "rounding"
 SGLANG_TIMEOUT_KEEP_ALIVE = "600"
 
 [data]

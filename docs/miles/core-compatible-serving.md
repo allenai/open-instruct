@@ -52,14 +52,18 @@ For an explicit opt-out, add:
 OLMO_SGLANG_CORE_COMPAT = "0"
 ```
 
-TP2 requires explicit `OLMO_SGLANG_CORE_COMPAT = "rounding"` in `launch.env`
-and `rollout_tensor_parallel_size = 2` in `inference`, with an even inference GPU
-count. Use EP1 serving with matching attention/MoE TP groups. The sharded expert
-down projection sums FP32 partials before BF16 rounding and routing weights;
-collective communication and changed GEMM shapes can affect throughput and
-numerical agreement. Automatic selection and the full eager reference remain
-TP1. Refresh supports TP2; independent engine-drain publication remains TP1.
-See the [mechanics recipe](core.md#checkpoints-and-publication) for qualification.
+For MILES live refresh, set `inference.rollout_tensor_parallel_size = 2` and
+allocate an even inference GPU count. MILES defaults compatible unquantized BF16
+Olmo Hybrid engines to rounding. An explicit `OLMO_SGLANG_CORE_COMPAT` in
+`launch.env` takes precedence. For standalone SGLang TP2, set
+`OLMO_SGLANG_CORE_COMPAT = "rounding"` explicitly.
+
+Use EP1 serving with matching attention and MoE TP groups. The sharded expert
+down projection sums FP32 partials before BF16 rounding and routing weights.
+Collective communication and changed GEMM shapes can affect throughput and
+numerical agreement. The full eager reference and independent engine-drain
+publication remain TP1. See the [mechanics recipe](core.md#checkpoints-and-publication)
+for qualification.
 
 ## Optimized serving versus a strict parity check
 
