@@ -54,8 +54,9 @@ All under `scripts/tpu/maxtext/`:
 
 ## Run it
 
-1. **Image.** `image-olmo35-mm/build.sh` builds `run` by default (`217c8458…-olmocore-fd9bba1ba`, already
-   published, so the script only prints it). Use `e4` for the faster flags and `gates` for the gate.
+1. **Image.** Runs and the gate both use `gates` (`image-olmo35-mm/build.sh gates`, `e3543ef2…-olmocore-fd9bba1ba`,
+   already published, so the script only prints it): one image, so a run trains on exactly what passed the gates.
+   `run` rebuilds the reference run's image (`217c8458`) and `e4` the faster flags' (`ed83783e`).
 2. **Start checkpoint.** The reference run's start checkpoint is
    `gs://ai2-olmo-dev/post-training/checkpoints/olmo35-mm-b2e-emocausal-step22240-thinkseed/0/items`; reuse it for
    this base. For another OLMo-core base, convert it on a CPU box with a few hundred GB of RAM: the conversion holds several fp32
@@ -179,7 +180,7 @@ a difference is about 2–3 points.
     adapter fixes.
   - `-perf` 217c8458: the reference run.
   - `-perf2` ed83783e: E4.
-  - `-gates` e3543ef2: batch hashes. This branch is not pushed yet.
+  - `-gates` e3543ef2: `-perf2` (its new options off by default) plus batch hashes; the image runs and gates use.
 - OLMo-core: allenai/OLMo-core@fd9bba1ba3f12721ae1ff3493f0b266366debec6 (#942).
 - Original overlays and image build: allenai/olmo-gcp-infra#74.
 - The ledger record and eval pipeline: allenai/olmo-post-training-ledger#1586 (H271,

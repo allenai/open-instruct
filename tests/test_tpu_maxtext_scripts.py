@@ -516,12 +516,12 @@ def test_mm_gate_overlay_is_the_run_plus_the_gate_flags():
     assert run["RUN_NAME"] == gate["RUN_NAME"] == "CHANGE_ME"
     # The gate runs the production args with a larger MoE buffer (a dropless first step), plus the gate flags.
     assert "ragged_buffer_factor=3.0" in run["TRAIN_ARGS"]
-    assert gate["TRAIN_ARGS"].startswith(run["TRAIN_ARGS"].replace("ragged_buffer_factor=3.0", "ragged_buffer_factor=5.0") + " ")
-    extra = set(gate["TRAIN_ARGS"].split()) - set(run["TRAIN_ARGS"].split())
+    run_args = set(run["TRAIN_ARGS"].split()) - {"ragged_buffer_factor=3.0"}
+    assert run_args <= set(gate["TRAIN_ARGS"].split())
+    extra = set(gate["TRAIN_ARGS"].split()) - run_args
     assert extra == {
         "emo_min_document_expert_pool=512",
         "emo_max_document_expert_pool=512",
-        "olmo_mm_batch_hash_steps=20",
         "log_moe_dropped_tokens=true",
         "ragged_buffer_factor=5.0",
     }

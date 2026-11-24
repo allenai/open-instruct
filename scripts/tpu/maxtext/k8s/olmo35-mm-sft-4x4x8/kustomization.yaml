@@ -46,7 +46,7 @@ configMapGenerator:
   - CHECKPOINT_PERIOD=500
   # Empty = the config's own mesh.
   - SHARD_ARGS=
-  # The reference run's flags (image 217c8458):
+  # The reference run's flags (it ran image 217c8458; this overlay uses e3543ef2, below):
   # - olmo_seed_token_rows=[]: the checkpoint is already seeded; never seed twice.
   # - ragged_buffer_factor=3.0: MoE buffers hold 3x the mean load per expert shard. REQUIRED_RBF (logged per step and
   #   MoE layer: the factor that would have dropped nothing) stayed <= 2.46 after the first step; the first step's
@@ -61,7 +61,9 @@ configMapGenerator:
   #   TRAIN_ARGS=olmo_seed_token_rows=[] ragged_buffer_factor=3.0 olmo_vit_balance_crops=true olmo_mm_prefetch_batches=1 olmo_vit_outer_remat=false olmo_connector_gather_once=true olmo_connector_skip_empty_chunks=true remat_policy=custom context=device kda_wy=device moe_routing=device moe_routing_maps=device moe_x_sorted=device cp_all_gather_in_shard_map=true vocab_tiling_ag_once=true
   # For bitwise continuity with steps 1-40 of an existing run use E2 instead (9.85 s/step): the four flags
   #   olmo_vit_outer_remat=false olmo_vit_chunk_remat=false olmo_connector_gather_once=true olmo_connector_skip_empty_chunks=true
-  - TRAIN_ARGS=olmo_seed_token_rows=[] ragged_buffer_factor=3.0 olmo_vit_balance_crops=true olmo_mm_prefetch_batches=1
+  # - olmo_mm_batch_hash_steps=20: log OLMo-core-comparable batch hashes for steps 1-20, the receipt of the batch-order
+  #   gate for this run (the gate overlay logs the same ones).
+  - TRAIN_ARGS=olmo_seed_token_rows=[] ragged_buffer_factor=3.0 olmo_vit_balance_crops=true olmo_mm_prefetch_batches=1 olmo_mm_batch_hash_steps=20
   # Empty = the config's olmo_mm_config_path. Set a /weka/... config.json (on a mounted folder) or gs:// path to
   # train another OLMo-core multimodal data config.
   - OLMO_MM_CONFIG=
@@ -95,8 +97,10 @@ configMapGenerator:
   # As the 64K text SFT overlay. Never add --xla_tpu_enable_async_ragged_all_to_all (the launcher refuses it).
   - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true --xla_tpu_scoped_vmem_limit_kib=16384
 
-# ../../image-olmo35-mm (./build.sh run): jason718/maxtext@217c84582d2f985c9b2e9d3a7067e8423035c19e (branch
-# jasonr-olmo35-mmsft-perf) + allenai/OLMo-core@fd9bba1ba3f12721ae1ff3493f0b266366debec6 (#942) for the loader.
+# ../../image-olmo35-mm (./build.sh gates): jason718/maxtext@e3543ef27552d042a54c74ea89cf4d6b06ca4520 (branch
+# jasonr-olmo35-mmsft-gates: the perf2 code with its new options off, plus batch hashing) + allenai/OLMo-core@fd9bba1ba
+# (#942) for the loader. It is the image the gate overlay checks, so a run trains on exactly what passed the gates.
+# The reference run (ledger H271) used 217c84582d2f985c9b2e9d3a7067e8423035c19e (./build.sh run).
 images:
 - name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext
-  newTag: 217c84582d2f985c9b2e9d3a7067e8423035c19e-olmocore-fd9bba1ba
+  newTag: e3543ef27552d042a54c74ea89cf4d6b06ca4520-olmocore-fd9bba1ba
