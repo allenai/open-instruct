@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Score-centering candidate transport and complete-support correction CPU-tested. Paired Olmo 3.5 Tiny GSM8K GPU training completed at application a2e5f39ce005c17c2746f2d07059a516fefde189 and backend aa53c1c00e5b88ce01cf37f458650a1bc47daf77 using unfiltered Core refresh sampling; the study exercises the existing partial-head estimator, not the new complete-support correction. Later application preflight changes are CPU-tested. GPU pytest remains separate. TP2 expert rounding and eager live refresh ran on the prior stack with Tiny. Full decode graphs and Small serving need GPU validation on this stack.",
+  "status": "Merged Olmo-SGLang TP2 rounding and early abort, MILES refresh abort and configurable group retries, and upstream OLMo-core SwiGLU fixes. Prior Tiny TP2 graph refresh and Small graph parity ran on the earlier source bundle recorded in PR 2282. GPU validation of this combined source bundle is pending.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -8,15 +8,15 @@
   "sources": {
     "olmo-core": {
       "repository": "https://github.com/allenai/Olmo-core.git",
-      "revision": "903e57d46cc2c62cb5611e49c4d0e2052eb798d2"
+      "revision": "29ab5b92b94322dbd6e28e7d39af5068b89a23dc"
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "33de643a7f86a0e86ba759b648894ccbd52ae487"
+      "revision": "686cf9b46023d048eac31a9a9bb2c5bc30305f34"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
-      "revision": "9829d3c64a47410c91838c658ca1025240779aa8"
+      "revision": "cabf2a041e27c9e043324356f1e115662015277f"
     },
     "sglang": {
       "repository": "https://github.com/sgl-project/sglang.git",
