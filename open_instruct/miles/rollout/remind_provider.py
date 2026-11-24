@@ -88,9 +88,6 @@ class ReMindPromptProvider:
                 if isinstance(reward, dict):
                     reward = reward.get(record.get("reward_key"))
                 valid = (response.get("validity") or {}).get("valid") is True
-                # Deliberate truncation-to-zero is a failure; service errors are not.
-                if response.get("truncated") and record.get("reward_zero_truncated") and reward == 0:
-                    valid = True
                 if response.get("status") not in ("completed", "truncated") or not valid or reward not in (0, 1):
                     break
                 rewards.append(reward)

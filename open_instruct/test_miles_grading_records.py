@@ -9,6 +9,7 @@ import pytest
 
 from open_instruct import test_miles_grading as shared
 from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.datasets import replay_evidence
 from open_instruct.miles.rewards import grading
 
 
@@ -18,7 +19,7 @@ def native():
     return importlib.import_module("open_instruct.miles.datasets.recording")
 
 
-def arguments(tmp_path, *, final=True, reasoning="required", responses="all"):
+def arguments(tmp_path, *, final=True, reasoning="required", responses="all", zero_truncated=True):
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir(exist_ok=True)
     (checkpoint / "workflow-model.json").write_text(json.dumps({"identity": {"source": {"path": str(checkpoint)}}}))
@@ -32,6 +33,7 @@ def arguments(tmp_path, *, final=True, reasoning="required", responses="all"):
             reward_config=str(registry),
             reward_final_answer_only=final,
             reward_reasoning_mode=reasoning,
+            reward_zero_truncated=zero_truncated,
         ),
     )
 
@@ -47,9 +49,9 @@ def sample():
     return value
 
 
-def read_record(recorder, value):
+def read_record(recorder, *values):
     try:
-        recorder.record_group([value], decision="kept")
+        recorder.record_group(list(values), decision="kept")
     finally:
         recorder.close()
     assert recorder.counts["failed"] == 0
@@ -74,39 +76,54 @@ def test_real_recorder_persists_selection_only_in_final_mode(native, tmp_path, f
     base_key = native.inference_records.sha256(
         {"task": row["task_key"], "tokens": None, "protocol": recorder.protocol_sha256}
     )
+    assert row["input_key"] == native.inference_records.sha256(
+        {"input_key": base_key, "grading_policy": row["grading_policy"]}
+    )
+    assert row["grading_policy"]["reward_final_answer_only"] is final
+    assert row["grading_policy"]["reward_zero_truncated"] is True
     if final:
         assert row["responses"][0]["grading"] == selection
-        assert row["input_key"] == native.inference_records.sha256(
-            {"input_key": base_key, "grading_policy": row["grading_policy"]}
-        )
         assert row["grading_policy"]["reward_reasoning_mode"] == "required"
     else:
-        assert "grading_policy" not in row and "grading" not in row["responses"][0]
-        assert row["input_key"] == base_key
+        assert "reward_reasoning_mode" not in row["grading_policy"]
+        assert "grading" not in row["responses"][0]
 
 
 @pytest.mark.parametrize(
-    "final,status,response,gate",
+    "final,zero_truncated,status,response,gate,floor",
     [
-        (False, "truncated", "work", "truncated"),
-        (True, "truncated", "work", "truncated"),
-        (True, "completed", "work</think><think>more", "unfinished_reasoning"),
-        (True, "completed", "work</think> ", "missing_final_answer"),
+        (False, True, "truncated", "work", "truncated", -0.5),
+        (True, True, "truncated", "work", "truncated", -0.5),
+        (True, True, "completed", "work</think><think>more", "unfinished_reasoning", 0.0),
+        (True, True, "completed", "work</think> ", "missing_final_answer", 0.0),
+        (True, False, "truncated", "work", "missing_final_answer", 0.0),
     ],
 )
-def test_gated_floor_is_valid_reward_evidence(native, tmp_path, monkeypatch, final, status, response, gate):
+def test_gated_floor_is_valid_reward_evidence(
+    native, tmp_path, monkeypatch, final, zero_truncated, status, response, gate, floor
+):
     value = sample()
     value.status = status
     value.response = response
-    verifier = SimpleNamespace(score_floor=lambda target: -0.5)
-    value.reward = shared.score(monkeypatch, value, verifier, final=final)
-    assert value.reward == -0.5
+    verifier = SimpleNamespace(score_floor=lambda target: floor)
+    value.reward = shared.score(monkeypatch, value, verifier, final=final, zero_truncated=zero_truncated)
+    assert value.reward == floor
 
-    recorder = native.create_recorder(arguments(tmp_path, final=final))
-    saved = read_record(recorder, value)["responses"][0]
-    assert saved["reward"] == -0.5
+    recorder = native.create_recorder(arguments(tmp_path, final=final, zero_truncated=zero_truncated))
+    siblings = [copy.deepcopy(value) for _ in range(7)]
+    for index, sibling in enumerate(siblings, start=1):
+        sibling.index = index
+    row = read_record(recorder, value, *siblings)
+    saved = row["responses"][0]
+    assert saved["reward"] == floor
     assert saved["validity"] == {"components": {"test": "completed"}, "valid": True}
     assert value.metadata["verifier_diagnostics"]["test"]["reward_gate"] == gate
+    assert saved["truncated"] is (status == "truncated")
+    if floor == 0:
+        outcome = replay_evidence.classify(row)
+        assert outcome["category"] == ("zero_all_truncated" if status == "truncated" else "zero_completed")
+        assert replay_evidence.eligible(outcome, truncation="none")
+        assert replay_evidence.eligible(outcome, truncation="any") is (status == "truncated")
 
 
 def test_different_reasoning_contracts_have_different_evidence_keys(native, tmp_path):

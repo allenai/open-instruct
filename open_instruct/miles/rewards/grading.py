@@ -17,9 +17,8 @@ Objective = Literal["answer", "process", "format", "composite"]
 SCOPES = ("response", "thinking", "full")
 REASONING_MODES = ("required", "none")
 OBJECTIVES = ("answer", "process", "format", "composite")
-# Also identifies the effective grading contract in persisted evidence. Version
-# 3 declares objective types and prevents consumers from reselecting thinking.
-SCHEMA_VERSION = 3
+# Version 4 records deliberately assigned gate floors as valid reward evidence.
+SCHEMA_VERSION = 4
 
 
 def validate_spec(spec):
@@ -169,6 +168,7 @@ class GradingPolicy:
     def gate(self, parts: ResponseParts, *, zero_truncated: bool) -> str | None:
         if zero_truncated and parts.completion_status == "truncated":
             return "truncated"
+        # Disabling the truncation gate leaves response eligibility in effect.
         return parts.gate if self.require_response else None
 
 
