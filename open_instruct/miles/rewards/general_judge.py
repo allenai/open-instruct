@@ -121,6 +121,9 @@ def general_judge_config(args: Any) -> GeneralJudgeConfig:
     )
 
 
+_MARKDOWN_SCORE_PATTERN = r"^\s*\*{0,2}SCORE\*{0,2}\s*:\*{0,2}\s*([0-9]+(?:\.[0-9]+)?)\s*$"
+
+
 def _decode_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     """Decode a JSON object while rejecting duplicate SCORE keys."""
     if sum(1 for key, _ in pairs if key == "SCORE") > 1:
@@ -141,47 +144,122 @@ def _loads_judge_json(text: str) -> Any:
         return json.loads(escaped, strict=False, object_pairs_hook=_decode_json_object)
 
 
+def _extract_json_score(data: Any) -> tuple[str, float]:
+    """Validate and normalize a decoded judge JSON object."""
+    if not isinstance(data, dict) or "SCORE" not in data:
+        raise JudgeResponseError("general judge JSON response must be an object with SCORE")
+    score_value = data["SCORE"]
+    if isinstance(score_value, bool):
+        raise JudgeResponseError("general judge returned a boolean score")
+    try:
+        score = float(score_value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise JudgeResponseError(f"general judge returned non-numeric SCORE {score_value!r}") from error
+    if not math.isfinite(score) or not 0 <= score <= 10:
+        raise JudgeResponseError(f"general judge returned out-of-range SCORE {score!r}")
+    return str(data.get("REASONING", "")), score / 10.0
+
+
+def _strip_outer_fence(text: str) -> str | None:
+    """If the entire text is wrapped in a single code fence, return its inner body."""
+    match = re.match(r"^(`{3,})(?:json(?=\s|\{|$))?", text, flags=re.IGNORECASE)
+    if match is None:
+        return None
+    ticks = match.group(1)
+    if not text.endswith(ticks) or len(text) < match.end() + len(ticks):
+        return None
+    return text[match.end() : -len(ticks)].strip()
+
+
+def _scan_fenced_blocks(text: str) -> tuple[list[tuple[str, str]], str, list[str]]:
+    """Split text into closed (lang, body) fenced blocks, non-fenced text, and unclosed fence langs."""
+    blocks: list[tuple[str, str]] = []
+    outside_lines: list[str] = []
+    unclosed_langs: list[str] = []
+    in_fence = False
+    fence_len = 0
+    fence_lang = ""
+    fence_lines: list[str] = []
+
+    for line in text.split("\n"):
+        if not in_fence:
+            opening = re.match(r"^\s*(`{3,})(.*)$", line)
+            if opening is not None:
+                ticks, rest = opening.group(1), opening.group(2).strip()
+                if rest.endswith(ticks) and len(rest) >= len(ticks):
+                    body = rest[: -len(ticks)]
+                    if body[:4].lower() == "json" and (len(body) == 4 or body[4].isspace() or body[4] == "{"):
+                        blocks.append(("json", body[4:].strip()))
+                    else:
+                        blocks.append(("", body.strip()))
+                    continue
+                in_fence = True
+                fence_len = len(ticks)
+                fence_lang = rest.split(None, 1)[0].lower() if rest else ""
+                fence_lines = []
+                continue
+            outside_lines.append(line)
+        else:
+            if re.match(rf"^\s*`{{{fence_len},}}\s*$", line) is not None:
+                blocks.append((fence_lang, "\n".join(fence_lines).strip()))
+                in_fence = False
+                fence_len = 0
+                fence_lang = ""
+                fence_lines = []
+            else:
+                fence_lines.append(line)
+
+    if in_fence:
+        body = "\n".join(fence_lines).strip()
+        unclosed_langs.append("json" if fence_lang == "json" or body.startswith("{") else fence_lang)
+    return blocks, "\n".join(outside_lines), unclosed_langs
+
+
 def parse_judge_response(content: str) -> tuple[str, float]:
     """Parse and normalize Open-Instruct's JSON-or-SCORE judge response."""
     content = re.sub(r"<think>\s*.*?\s*</think>\s*", "", content, flags=re.DOTALL)
     content = content.replace("<answer>", "").replace("</answer>", "")
-    cleaned = content.strip()
-    if cleaned[:7].lower() == "```json":
-        cleaned = cleaned[7:]
-    elif cleaned.startswith("```"):
-        cleaned = cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-    cleaned = cleaned.replace("\r\n", "\n").strip()
+    cleaned = content.replace("\r\n", "\n").strip()
+
+    outer_body = _strip_outer_fence(cleaned)
+    direct_candidate = outer_body if outer_body is not None else cleaned
     try:
-        data = _loads_judge_json(cleaned)
+        data = _loads_judge_json(direct_candidate)
     except json.JSONDecodeError:
-        if cleaned.startswith("{"):
-            raise JudgeResponseError("general judge returned malformed JSON") from None
-        # Accept a single explicit Markdown score line for non-JSON replies, not numbers in prose.
-        scores = re.findall(
-            r"^\s*\*{0,2}SCORE\*{0,2}\s*:\*{0,2}\s*([0-9]+(?:\.[0-9]+)?)\s*$", content, flags=re.MULTILINE
-        )
-        if len(scores) != 1:
-            raise JudgeResponseError("general judge response has no unambiguous parseable SCORE") from None
-        score = float(scores[0])
-        reasoning = cleaned
+        pass
     except ValueError as error:
         raise JudgeResponseError(f"general judge returned invalid JSON value: {error}") from error
     else:
-        if not isinstance(data, dict) or "SCORE" not in data:
-            raise JudgeResponseError("general judge JSON response must be an object with SCORE")
-        score_value = data["SCORE"]
-        if isinstance(score_value, bool):
-            raise JudgeResponseError("general judge returned a boolean score")
+        return _extract_json_score(data)
+
+    blocks, outside_text, unclosed_langs = _scan_fenced_blocks(cleaned)
+    if "json" in unclosed_langs:
+        raise JudgeResponseError("general judge returned unclosed JSON fence")
+    json_blocks = [body for lang, body in blocks if lang == "json" or body.startswith("{")]
+    if len(json_blocks) == 1:
         try:
-            score = float(score_value)
-        except (TypeError, ValueError, OverflowError) as error:
-            raise JudgeResponseError(f"general judge returned non-numeric SCORE {score_value!r}") from error
-        reasoning = str(data.get("REASONING", ""))
+            data = _loads_judge_json(json_blocks[0])
+        except (json.JSONDecodeError, ValueError) as error:
+            raise JudgeResponseError("general judge returned malformed JSON") from error
+        reasoning, normalized_score = _extract_json_score(data)
+        outside_scores = re.findall(_MARKDOWN_SCORE_PATTERN, outside_text, flags=re.MULTILINE)
+        if any(not math.isfinite(float(s)) or float(s) / 10.0 != normalized_score for s in outside_scores):
+            raise JudgeResponseError("general judge response contains conflicting JSON and Markdown scores")
+        return reasoning, normalized_score
+    if len(json_blocks) > 1:
+        raise JudgeResponseError("general judge returned multiple JSON blocks")
+
+    if direct_candidate.startswith("{") or re.search(r'\{[\s\S]*?"(?:SCORE|REASONING)"\s*:', outside_text):
+        raise JudgeResponseError("general judge returned malformed JSON")
+
+    # Accept a single explicit Markdown score line for non-JSON replies, strictly outside code fences.
+    scores = re.findall(_MARKDOWN_SCORE_PATTERN, outside_text, flags=re.MULTILINE)
+    if len(scores) != 1:
+        raise JudgeResponseError("general judge response has no unambiguous parseable SCORE")
+    score = float(scores[0])
     if not math.isfinite(score) or not 0 <= score <= 10:
         raise JudgeResponseError(f"general judge returned out-of-range SCORE {score!r}")
-    return reasoning, score / 10.0
+    return cleaned, score / 10.0
 
 
 def parse_web_instruct_judge_response(content: str) -> tuple[str, float]:

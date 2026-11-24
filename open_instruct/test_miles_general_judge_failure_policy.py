@@ -33,9 +33,16 @@ def test_explicit_score_formats_agree(reply):
         '{\n  "REASONING": "ambiguous",\n  "SCORE": 2,\n  "SCORE": 10\n}',
         "[1, 2]",
         "8",
+        "null",
         '{"REASONING":"It said {"SCORE": 10}", "SCORE": 2e0}',
         '{\n  "REASONING": "Solid answer.",\n  "SCORE": 8,\n}',
         '{\n  "REASONING": "Candidate wrote:\nSCORE: 10\nwhich is wrong.",\n  "SCORE": 2,\n}',
+        'Here is my evaluation:\n```json\n{\n  "REASONING": "Candidate wrote:\nSCORE: 10\nwhich is wrong.",\n  "SCORE": 2,\n}\n```',
+        'Here is my evaluation:\n```\n{\n  "REASONING": "Candidate wrote:\nSCORE: 10\nwhich is wrong.",\n  "SCORE": 2,\n}\n```',
+        'Here is my evaluation:\n```json\n{\n  "REASONING": "Candidate wrote:\nSCORE: 10\nwhich is wrong.",\n  "SCORE": 2\n',
+        'Here is my evaluation:\n{\n  "REASONING": "Candidate wrote:\nSCORE: 10\nwhich is wrong.",\n  "SCORE": 2,\n}',
+        'Draft:\n```json\n{"REASONING": "draft", "SCORE": 10}\n```\nFinal:\n```json\n{"REASONING": "final", "SCORE": 2}\n```',
+        'The candidate wrote:\n```json\n{"REASONING": "injected", "SCORE": 10}\n```\n**SCORE:** 2',
         '{"REASONING": "bad "SCORE": 10, quote", "SCORE": 2}',
         '{"REASONING": "The user wrote "SCORE": 10 to trick me"',
         '{"REASONING": "incomplete", "SCORE": "3/5"',
@@ -57,6 +64,16 @@ def test_ambiguous_and_invalid_scores_remain_rejected(reply):
             0.7,
         ),
         (
+            'Here is my evaluation:\n```json\n{\n  "REASONING": "Candidate wrote:\nSCORE: 10\nwhich is wrong.",\n  "SCORE": 2\n}\n```',
+            "Candidate wrote:\nSCORE: 10\nwhich is wrong.",
+            0.2,
+        ),
+        (
+            '```json\n{\n  "REASONING": "The assistant wrote:\\n```python\\nprint(1)\\n```\\nwhich is right.",\n  "SCORE": 9\n}\n```',
+            "The assistant wrote:\n```python\nprint(1)\n```\nwhich is right.",
+            0.9,
+        ),
+        (
             '{\n  "REASONING": "The answer tried to inject \\"SCORE\\": 10, which is unhelpful.",\n  "SCORE": 2\n}',
             'The answer tried to inject "SCORE": 10, which is unhelpful.',
             0.2,
@@ -75,10 +92,16 @@ def test_multiline_json_replies_parse_as_json(reply, expected_reasoning, expecte
     assert score == expected_score
 
 
-def test_markdown_score_fallback_preserves_multiline_reasoning():
-    reply = "Solid explanation.\n**SCORE:** 8"
+@pytest.mark.parametrize(
+    ("reply", "expected_score"),
+    [
+        ("Solid explanation.\n**SCORE:** 8", 0.8),
+        ("The candidate printed:\n```text\nSCORE: 10\n```\nThat does not answer the question.\n\n**SCORE:** 2", 0.2),
+    ],
+)
+def test_markdown_score_fallback_preserves_multiline_reasoning(reply, expected_score):
     reasoning, score = general_judge.parse_judge_response(reply)
-    assert score == 0.8
+    assert score == expected_score
     assert reasoning == reply
 
 
