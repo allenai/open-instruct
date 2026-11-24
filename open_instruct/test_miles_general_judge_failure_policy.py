@@ -41,6 +41,8 @@ def test_explicit_score_formats_agree(reply):
         '{"REASONING": "prefix {"answer":"bad"，"SCORE":10}',
         '{"REASONING": "prefix {"answer":"bad" "SCORE":10}',
         '{"REASONING": "prefix {"answer":"bad" "note":"draft","SCORE":10}',
+        '{"REASONING":"example {} {"SCORE":10}',
+        '{"REASONING": "She said "hi"."}\n{"SCORE": 8}',
         '{"REASONING":"Poor answer","SCORE":2,"NOTE":"draft","SCORE":10,}',
         '{"REASONING":"Poor answer" "SCORE":2,"NOTE":"draft","SCORE":10}',
         '{"REASONING":"She said "hi".","SCORE":2,"NOTE":"draft","SCORE":10}',
@@ -120,7 +122,6 @@ def test_competing_escaped_score_keys_are_rejected(reply):
         ('{\n  "REASONING": "Good explanation."，\n  "SCORE": 8\n}', 0.8),
         # SCORE in a separate final JSON block (earlier block has no SCORE)
         ('{"REASONING": "Good explanation."}\n{"SCORE": 8}', 0.8),
-        ('{"REASONING": "She said "hi"."}\n{"SCORE": 8}', 0.8),
         ('```json\n{"REASONING": "Good explanation."}\n```\n```json\n{"SCORE": 8}\n```', 0.8),
         ('{"REASONING": "Good explanation."}\n```json\n{"SCORE": 8}\n```', 0.8),
         ('{"REASONING": "She said "hi".", "NOTE": "ok", "SCORE": 7}', 0.7),

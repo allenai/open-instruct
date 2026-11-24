@@ -222,15 +222,7 @@ def _recover_final_json_score(text: str) -> float | None:
             candidate
         )
     except (json.JSONDecodeError, ValueError):
-        separate = re.search(r"\}\s*(\{[\s\S]*\})\s*$", candidate)
-        if separate is not None and not re.search(_JSON_SCORE_FIELD, candidate[: separate.start()]):
-            final_candidate = re.sub(r",\s*\}\s*$", "}", separate.group(1))
-            try:
-                final_obj = _loads_judge_json(final_candidate)
-            except (json.JSONDecodeError, ValueError):
-                pass
-            else:
-                return _extract_json_score(final_obj)[1]
+        pass
     else:
         trailing = candidate[end_idx:].strip()
         if isinstance(first_obj, dict) and trailing:
