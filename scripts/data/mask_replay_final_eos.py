@@ -1,13 +1,16 @@
-"""Write a copy of a numpy SFT dir with no loss on each replay document's final <|endoftext|> (ledger H270).
+"""Write a copy of a replay dir with no loss on each replay document's final <|endoftext|> (ledger H270).
 
     uv run python scripts/data/mask_replay_final_eos.py SRC_DIR OUT_DIR
 
 A long-context replay dir (pretraining-style documents, each ending in <|endoftext|>, passed to
 olmo_core_finetune.py with --extra_numpy_dirs) trains that final token as a target, which teaches the
-model to stop after a long context. OUT_DIR gets new label masks, False on the final <|endoftext|> of
-every document that does not start with <|im_start|>, and symlinks to everything else in SRC_DIR.
-Train with --extra_numpy_dirs OUT_DIR instead of SRC_DIR: tokens, document boundaries, packing and
-data order are unchanged, and runs that keep SRC_DIR are unaffected. Check the result with
+model to stop after a long context. SRC_DIR must be written by the ledger's replay build
+(experiments/c11/c11_replay.py build): its manifest.jsonl gives the document boundaries, which must
+equal the .csv.gz rows and keep every document inside one part. OUT_DIR gets new label masks, False
+on the final <|endoftext|> of every document that does not start with <|im_start|>, a new
+dataset_statistics.json (loss tokens from the new masks, row-aligned marker) and symlinks to SRC_DIR's
+token parts, .csv.gz parts and manifest. Train with --extra_numpy_dirs OUT_DIR instead of SRC_DIR:
+tokens, boundaries, packing and data order are unchanged. Check it with
 scripts/data/check_replay_eos_mask.py.
 """
 

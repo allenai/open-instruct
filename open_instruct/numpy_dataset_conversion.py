@@ -643,7 +643,9 @@ def write_dataset_statistics(
 # allenai/dolma2-tokenizer-olmo35: `<|endoftext|>` (EOS, which also ends every assistant turn) and `<|im_start|>`.
 OLMO35_EOS_TOKEN_ID = 100257
 OLMO35_IM_START_TOKEN_ID = 100264
-REPLAY_EOS_MASK_RECEIPT = "replay_eos_mask.json"
+# The replay build's record (the ledger's experiments/c11/c11_replay.py build): one JSON line per document with its
+# `part`, `start`, `end` and `length_with_eos`.
+REPLAY_MANIFEST = "manifest.jsonl"
 _PART_RE = {
     kind: re.compile(re.escape(glob).replace(r"\*", r"(\d+)") + "$")
     for kind, glob in (
@@ -666,7 +668,8 @@ def replay_final_eos_positions(
     clearing it there drops exactly the target that predicts that EOS from the token before it, in
     the same document: the rule of ledger H270's TPU patch (`replay_eos_keep`). Chat rows, documents
     that end in another token, interior EOS tokens and one-token documents (whose only target is
-    predicted from the previous document) are never selected.
+    predicted from the previous document) are never selected. `document_bounds` must be whole
+    documents: an EOS-scan or a part cut would make an interior EOS look final.
     """
     starts, ends = document_bounds[:, 0], document_bounds[:, 1]
     long_enough = ends - starts >= 2
@@ -686,16 +689,32 @@ def _numpy_dir_parts(numpy_dir: str) -> dict[str, dict[str, str]]:
     return parts
 
 
-def _read_document_bounds(metadata_path: str, num_tokens: int) -> np.ndarray:
-    """The `start,end` rows of a part's `.csv.gz`, checked to tile its `num_tokens` tokens."""
+def _read_document_bounds(metadata_path: str) -> np.ndarray:
     with gzip.open(metadata_path, "rt") as f:
-        bounds = np.array([line.split(",")[:2] for line in f if line.strip()], dtype=np.int64).reshape(-1, 2)
-    expected_starts = np.concatenate([[0], bounds[:-1, 1]])
-    if len(bounds) == 0 or (bounds[:, 0] != expected_starts).any() or (bounds[:, 1] < bounds[:, 0]).any():
-        raise ValueError(f"{metadata_path}: rows do not tile the part's {num_tokens:,} tokens.")
-    if int(bounds[-1, 1]) != num_tokens:
-        raise ValueError(f"{metadata_path}: the last row ends at {int(bounds[-1, 1]):,}, not {num_tokens:,}.")
-    return bounds
+        return np.array([line.split(",")[:2] for line in f if line.strip()], dtype=np.int64).reshape(-1, 2)
+
+
+def _replay_manifest_bounds(src_dir: str) -> dict[str, np.ndarray]:
+    """{part index string: (start, end) rows in manifest order} from the replay build's manifest."""
+    path = os.path.join(src_dir, REPLAY_MANIFEST)
+    if not os.path.exists(path):
+        raise ValueError(
+            f"{src_dir} has no {REPLAY_MANIFEST}, the replay build's per-document record; without it the "
+            "document boundaries cannot be tied to the build."
+        )
+    rows: dict[str, list[tuple[int, int]]] = {}
+    with open(path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            start, end = int(record["start"]), int(record["end"])
+            if "length_with_eos" in record and end - start != int(record["length_with_eos"]):
+                raise ValueError(
+                    f"{path}: a row spans {end - start:,} tokens but records {record['length_with_eos']:,}."
+                )
+            rows.setdefault(f"{int(record['part']):04d}", []).append((start, end))
+    return {index: np.array(r, dtype=np.int64).reshape(-1, 2) for index, r in rows.items()}
 
 
 def write_replay_eos_masked_dir(
@@ -704,58 +723,59 @@ def write_replay_eos_masked_dir(
     eos_token_id: int = OLMO35_EOS_TOKEN_ID,
     im_start_token_id: int = OLMO35_IM_START_TOKEN_ID,
 ) -> dict[str, Any]:
-    """Write `out_dir`: the numpy dir `src_dir` with the final-EOS label of each replay document cleared.
+    """Write `out_dir`: the replay dir `src_dir` with the final-EOS label of each replay document cleared.
 
-    Ledger H270's fix as data, for a dir in this module's layout such as a long-context replay dir
-    passed to olmo_core_finetune.py's `--extra_numpy_dirs`. `out_dir` gets new label masks, False at
-    `replay_final_eos_positions` and equal to the source's everywhere else. Every other entry (token
-    parts, `.csv.gz` boundaries, statistics, manifests) is a symlink to the source's, so tokens,
-    document boundaries, OLMo-core's packing and the data order are unchanged; the statistics files
-    keep the source's loss-token counts, and the receipt (`replay_eos_mask.json`) gives the change.
-    `src_dir` is not modified.
+    Ledger H270's fix as data, for a long-context replay dir passed to olmo_core_finetune.py's
+    `--extra_numpy_dirs` and written by the ledger's replay build, whose `manifest.jsonl` records every
+    document. The documents are the manifest's rows. In each part they must tile the part and equal its
+    `.csv.gz` rows, the boundaries training reads, so no document is cut between parts and an interior
+    EOS is never taken for a final one; any other dir is refused.
 
-    Documents are the `.csv.gz` rows, the boundaries training reads by default. OLMo-core packs whole
-    documents and truncates one longer than the sequence length, so a truncated document loses its
-    final EOS together with the cleared label, and nothing is dropped for it.
+    `out_dir` gets new label masks, False at `replay_final_eos_positions` and equal to the source's
+    elsewhere, and symlinks to the source's token parts, `.csv.gz` parts and manifest, so tokens,
+    boundaries, OLMo-core's packing and the data order are unchanged. Its `dataset_statistics.json` is
+    new: loss-token counts from the new masks, the row-alignment marker (true: each document is one
+    row inside one part, checked above) and the change made; the source's statistics are not carried
+    over. `src_dir` is not modified. OLMo-core packs whole documents and truncates one longer than the
+    sequence length, so a truncated document loses its final EOS with the cleared label, and nothing is
+    dropped for it. Returns the statistics written.
     """
     src_dir = os.path.realpath(src_dir)
     parts = _numpy_dir_parts(src_dir)
-    if not parts["tokens"] or not (set(parts["tokens"]) == set(parts["mask"]) == set(parts["metadata"])):
+    manifest = _replay_manifest_bounds(src_dir)
+    if not parts["tokens"] or not (
+        set(parts["tokens"]) == set(parts["mask"]) == set(parts["metadata"]) == set(manifest)
+    ):
         raise ValueError(
-            f"{src_dir}: needs token, label-mask and .csv.gz parts with the same indices; found "
-            f"{ {kind: sorted(found) for kind, found in parts.items()} }."
+            f"{src_dir}: needs token, label-mask, .csv.gz and manifest parts with one shared index set; found "
+            f"{ {kind: sorted(found) for kind, found in [*parts.items(), ('manifest', manifest)]} }."
         )
-    # The positions first, so nothing is written for a dir that is refused.
-    plan, chat_documents, totals = [], 0, {"documents": 0, "replay_documents": 0}
+    # Positions first, so nothing is written for a dir that is refused.
+    plan, counts = [], {"documents": 0, "tokens": 0, "starting_im_start": 0, "not_ending_eos": 0}
     for index in sorted(parts["tokens"]):
         num_tokens = os.path.getsize(parts["mask"][index])
         itemsize, rest = divmod(os.path.getsize(parts["tokens"][index]), max(num_tokens, 1))
         if num_tokens == 0 or rest or itemsize not in (1, 2, 4, 8):
             raise ValueError(f"{parts['tokens'][index]}: not one uint8/16/32/64 token per one-byte label.")
+        bounds = manifest[index]
+        expected_starts = np.concatenate([[0], bounds[:-1, 1]])
+        if (
+            (bounds[:, 0] != expected_starts).any()
+            or (bounds[:, 1] <= bounds[:, 0]).any()
+            or bounds[-1, 1] != num_tokens
+        ):
+            raise ValueError(f"{src_dir}: the manifest's rows for part {index} do not tile its {num_tokens:,} tokens.")
+        if not np.array_equal(_read_document_bounds(parts["metadata"][index]), bounds):
+            raise ValueError(f"{parts['metadata'][index]}: rows differ from the manifest's for part {index}.")
         tokens = np.memmap(parts["tokens"][index], mode="r", dtype=np.dtype(f"uint{8 * itemsize}"))
-        bounds = _read_document_bounds(parts["metadata"][index], num_tokens)
-        nonempty = bounds[bounds[:, 1] > bounds[:, 0]]
-        is_chat = tokens[nonempty[:, 0]] == im_start_token_id
-        chat_documents += int(is_chat.sum())
-        totals["documents"] += len(bounds)
-        totals["replay_documents"] += int((~is_chat).sum())
+        counts["documents"] += len(bounds)
+        counts["tokens"] += num_tokens
+        counts["starting_im_start"] += int((tokens[bounds[:, 0]] == im_start_token_id).sum())
+        counts["not_ending_eos"] += int((tokens[bounds[:, 1] - 1] != eos_token_id).sum())
         plan.append((index, replay_final_eos_positions(tokens, bounds, eos_token_id, im_start_token_id)))
-    if len(plan) > 1 and chat_documents:
-        # A legacy mid-row-cut dir splits a chat row into two rows; the second does not start with
-        # <|im_start|>, so its final EOS, the row's real stop, would be taken for a replay document's.
-        stats_path = os.path.join(src_dir, "dataset_statistics.json")
-        configuration = {}
-        if os.path.exists(stats_path):
-            with open(stats_path) as f:
-                configuration = json.load(f).get("configuration", {})
-        if not configuration.get(ROW_ALIGNED_PARTS_KEY, False):
-            raise ValueError(
-                f"{src_dir} holds chat rows in several parts but was not written with --row_aligned_parts, "
-                "so a row cut between parts would be taken for a replay document."
-            )
 
     os.makedirs(out_dir)
-    receipt_parts, dropped, already_untrained = [], 0, 0
+    receipt_parts, dropped, already_untrained, trainable = [], 0, 0, 0
     for index, positions in plan:
         out_mask = os.path.join(out_dir, os.path.basename(parts["mask"][index]))
         shutil.copyfile(parts["mask"][index], out_mask)
@@ -763,29 +783,41 @@ def write_replay_eos_masked_dir(
         was_trained = mask[positions] != 0
         mask[positions] = 0
         mask.flush()
+        trainable += int(np.count_nonzero(mask))
         del mask
         receipt_parts.append({"part": index, "selected": len(positions), "dropped": int(was_trained.sum())})
         dropped += int(was_trained.sum())
         already_untrained += int((~was_trained).sum())
-    for name in sorted(os.listdir(src_dir)):
-        if _PART_RE["mask"].match(name) is None and name != REPLAY_EOS_MASK_RECEIPT:
-            os.symlink(os.path.join(src_dir, name), os.path.join(out_dir, name))
-    receipt = {
-        "source": src_dir,
-        "rule": "label cleared on the final token of each document of >= 2 tokens that does not start with "
-        "im_start_token_id and ends with eos_token_id (ledger H270)",
-        "eos_token_id": eos_token_id,
-        "im_start_token_id": im_start_token_id,
-        **totals,
-        "chat_documents": chat_documents,
-        "dropped": dropped,
-        "already_untrained": already_untrained,
-        "parts": receipt_parts,
+        for kind in ("tokens", "metadata"):
+            os.symlink(parts[kind][index], os.path.join(out_dir, os.path.basename(parts[kind][index])))
+    os.symlink(os.path.join(src_dir, REPLAY_MANIFEST), os.path.join(out_dir, REPLAY_MANIFEST))
+    stats = {
+        "output_directory": out_dir,
+        "configuration": {
+            ROW_ALIGNED_PARTS_KEY: True,
+            "replay_eos_mask": {
+                "source": src_dir,
+                "rule": "label cleared on the final token of each manifest document of >= 2 tokens that does not "
+                "start with im_start_token_id and ends with eos_token_id (ledger H270)",
+                "eos_token_id": eos_token_id,
+                "im_start_token_id": im_start_token_id,
+                **{k: v for k, v in counts.items() if k != "tokens"},
+                "dropped": dropped,
+                "already_untrained": already_untrained,
+                "parts": receipt_parts,
+            },
+        },
+        "overall_statistics": {
+            "total_instances": counts["documents"],
+            "total_tokens": counts["tokens"],
+            "trainable_tokens": trainable,
+            "trainable_percentage": trainable / counts["tokens"] * 100,
+        },
     }
-    with open(os.path.join(out_dir, REPLAY_EOS_MASK_RECEIPT), "w") as f:
-        json.dump(receipt, f, indent=1)
+    with open(os.path.join(out_dir, "dataset_statistics.json"), "w") as f:
+        json.dump(stats, f, indent=1)
     logger.info(
-        f"Wrote {out_dir}: {dropped:,} replay final-EOS labels cleared over {totals['documents']:,} documents "
-        f"({totals['replay_documents']:,} replay, {chat_documents:,} chat); {already_untrained:,} were already untrained."
+        f"Wrote {out_dir}: {dropped:,} replay final-EOS labels cleared over {counts['documents']:,} documents; "
+        f"{already_untrained:,} were already untrained; {trainable:,} of {counts['tokens']:,} tokens trained."
     )
-    return receipt
+    return stats
