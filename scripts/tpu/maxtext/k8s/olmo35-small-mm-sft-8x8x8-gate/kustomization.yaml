@@ -29,7 +29,7 @@ configMapGenerator:
   # The run's config, plus every document routing over all 256 experts (one pool choice, 256), as the reference's
   # eval mode. The config already logs MOE-DROPPED / REQUIRED_RBF every step and MM-BATCH-HASH for steps 1-20;
   # SMALLMM-ROWS lines cover every step (OLMO_MM_ROW_HASH_STEPS, -1 = every step).
-  - TRAIN_ARGS=emo_document_expert_pool_choices=[256] emo_document_expert_pool_probs=[1.0]
+  - TRAIN_ARGS=olmo_vit_balance_crops=false emo_document_expert_pool_choices=[256] emo_document_expert_pool_probs=[1.0]
   - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=true save_checkpoint_on_completion=false
 patches:
 - target:

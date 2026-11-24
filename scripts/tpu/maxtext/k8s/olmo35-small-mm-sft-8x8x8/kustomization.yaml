@@ -54,8 +54,11 @@ configMapGenerator:
   - CHECKPOINT_PERIOD=1000
   # Empty = the config's own mesh (data 4 x fsdp 4 x expert 32, per_device_batch_size 0.03125 = 16 rows).
   - SHARD_ARGS=
-  # Recipe overrides; empty = the config as it is (think rows seeded at step 0 by the config).
-  - TRAIN_ARGS=
+  # Recipe overrides (think rows are seeded at step 0 by the config).
+  # - olmo_vit_balance_crops=false: on this mesh the balanced-crop path gave a NaN loss at step 1 (2026-11-24 gate: every
+  #   MoE layer at REQUIRED_RBF 32, ~10% of routed tokens dropped); off, the same gate trains (CE 0.967, 0 dropped).
+  #   Midtraining never used it either.
+  - TRAIN_ARGS=olmo_vit_balance_crops=false
   # The image-only OLMo-core mixture (stage-2 v1 without text_sft, 1.55B image tokens), shipped in the image.
   - OLMO_MM_CONFIG=/deps/src/maxtext/configs/olmo/olmo_mm/olmo35_small_mmsft_images_s2v1_1p55b.json
   # Prepacked text (16 rows a file, step00001..16152.npz, read over gs://); this run trains files 1-8,076 in order.
