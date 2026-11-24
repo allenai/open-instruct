@@ -1,0 +1,23 @@
+# Copied from allenai/scaling-ladders@59534d7bda695c8dcbd7eb8e873472cba05c4993 ladders/olmoe3/vllm_plugin/pyproject.toml
+[project]
+name = "olmoe3-vllm-plugin"
+version = "0.0.0"
+description = "vLLM plugin for the OLMoE3 KDA + EMo ladder"
+readme = "README.md"
+requires-python = ">=3.10"
+# vLLM itself is deliberately not a dependency (same as the mainline plugin):
+# the eval job installs it via olmo-eval, and pinning it here would drag its
+# torch pin into the root project and conflict with OLMo-core's.
+dependencies = [
+    "flash-linear-attention==0.5.2; sys_platform == 'linux'",
+]
+
+[project.entry-points."vllm.general_plugins"]
+olmoe3_vllm_plugin = "olmoe3_vllm_plugin:register"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/olmoe3_vllm_plugin"]
