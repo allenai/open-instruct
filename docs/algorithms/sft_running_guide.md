@@ -1,12 +1,19 @@
 # Running SFT: a known-good starting point
 
+All Olmo 3.5 SFT launches from open-instruct: text and multimodal, GPU and TPU.
+
+| | GPU (Beaker) | TPU (GKE) |
+|---|---|---|
+| Text | `scripts/train/sft.py` (this page) | [TPU SFT guide](tpu_sft_guide.md) |
+| Multimodal | `scripts/train/sft_mm.py` ([Olmo 3.5 multimodal SFT](olmo35_mm_sft.md)) | [Olmo 3.5 multimodal SFT](olmo35_mm_sft.md#tpu-launch-gke) |
+
 ## Olmo 3.5: one command
 
 ```bash
 uv run python scripts/train/sft.py --recipe c12r
 ```
 
-`c12r` is the current Olmo 3.5 small recipe: C12 SFT on base B1
+`c12r` is the current Olmo 3.5 tiny recipe (`olmo35-tiny`, called "small" before 2026-11): C12 SFT on base B1
 (`olmo35-small-mm-ckpt1-64k` step 20000) plus 10% long-context replay, peak LR 2e-4,
 half an epoch (18,410 steps). It runs on 2×8 B300 on `ai2/holmes` at `high` and
 takes about 9 h. It is the `b1-c12r-gpu` arm of H182, an internal Ai2 post-training
