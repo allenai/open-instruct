@@ -142,6 +142,29 @@ client window removes this race without the extra connection churn of a shorter
 client expiry. Preserve error reporting and whole-group recovery; do not silently
 retry ambiguous generation requests at the HTTP layer.
 
+### Router TCP_USER_TIMEOUT shim
+
+The pinned Rust sgl-router (0.3.2, reqwest 0.12.28) sets `TCP_USER_TIMEOUT=30s`
+on its upstream engine connections. With TCP keepalive on, one lost keepalive
+probe then resets a healthy in-flight non-streaming `/generate` about 15 seconds
+later; the router returns 500 `call_upstream_request_error` and the whole group
+fails as a transport error. Failure ages cluster at 45 + 30.2·k seconds
+(k = 0, 1, ...): the keepalive idle time plus whole user-timeout periods.
+
+The application image preloads `/opt/core-rl/lib/no_tcp_user_timeout.so` into the
+router process only. The shim ignores `setsockopt(TCP_USER_TIMEOUT)`, leaving the
+kernel default (off), which is what `.tcp_user_timeout(None)` in the router's
+client builder would do. A `.pth` startup hook re-executes
+`python -m sglang_router.launch_router` with `LD_PRELOAD` set. Processes outside
+the router's process tree do not load the shim, and no MILES change is needed.
+
+The router log shows `[no_tcp_user_timeout] dropped TCP_USER_TIMEOUT=30000 ms`
+once it connects to an engine; if that line is missing, the shim is not active.
+Without the user timeout, an engine host that vanishes without a reset is caught
+by kernel keepalive/retransmission limits and the router and refresh request
+timeouts, not after 30 seconds. Set `OI_MILES_ROUTER_SHIM=0` in `launch.env` to
+turn the shim off. Remove it when the router pin no longer sets this option.
+
 ## Failure triage
 
 Trainer workers and serving engines use private `HF_MODULES_CACHE` directories
@@ -205,6 +228,12 @@ training into failure. See [cache guide](compiler-cache.md). Report metadata I/O
 is outside that publication wait, so it is not an absolute shutdown deadline.
 
 ## Checkpoints while inference continues
+
+On resume, `launch.workspace` and `evaluation.workspace` may change to move the
+trainer and future background evaluations to another Beaker workspace. Set both
+when moving an entire study. The saved specification is authenticated before
+these operational changes are accepted; existing jobs and artifacts stay in
+their original locations, and all other configuration checks still apply.
 
 On resume, `training.save_interval`, `evaluation.interval`, and individual
 `evaluation.tasks[].interval` may change to reduce future artifact production.

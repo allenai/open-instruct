@@ -3,6 +3,8 @@
 
 The output directory contains identity.jsonl and manifest.json. Each seed gets
 an implicit-system and an explicit-default-system variant with identical renders.
+The 58 audited seeds are checked against the audit; supplement seeds are new
+prompts outside the audit, counted and labelled separately.
 """
 
 import argparse
@@ -15,6 +17,9 @@ from pathlib import Path
 
 SEEDS = Path(__file__).with_name("olmo35_identity_seed.json")
 SOURCE = "olmo35-identity-hand-coded"
+# New identity prompts that are not part of the 58-row audit.
+SUPPLEMENT = Path(__file__).with_name("olmo35_identity_supplement.json")
+SUPPLEMENT_SOURCE = "olmo35-identity-supplement"
 # Canonical sorted {id, user} records from the 58 audited identity rows, not
 # from the new responses. Changing a prompt must be reconciled with that audit.
 # Source: k3-audit/verify-ho2/u05-identity-stale--mass-and-recall/03_identity_rows.parquet
@@ -53,8 +58,14 @@ def build_identity(
     prompts = sorted(({"id": seed["id"], "user": seed["user"]} for seed in seeds), key=lambda row: row["id"])
     if _sha256(json.dumps(prompts, sort_keys=True, ensure_ascii=False).encode()) != AUDITED_PROMPTS_SHA256:
         raise ValueError("Identity IDs or prompts differ from the 58 audited rows")
+    supplement = json.loads(SUPPLEMENT.read_text())
+    supplement_ids = [seed["id"] for seed in supplement]
+    if len(set(supplement_ids)) != len(supplement_ids):
+        raise ValueError("Supplement identity seeds must have distinct IDs")
+    if set(supplement_ids) & {seed["id"] for seed in seeds}:
+        raise ValueError("Supplement identity seeds must not reuse audited IDs")
     rows = []
-    for seed in seeds:
+    for source, seed in [(SOURCE, seed) for seed in seeds] + [(SUPPLEMENT_SOURCE, seed) for seed in supplement]:
         answer = (
             seed["assistant"]
             .replace("{cutoff_date}", receipt["cutoff_date"])
@@ -76,14 +87,18 @@ def build_identity(
                 {
                     "id": f"olmo35-identity-{seed['id']}-{variant}",
                     "parent_id": seed["id"],
-                    "source": SOURCE,
+                    "source": source,
                     "messages": messages,
                 }
             )
     manifest = {
         "source": SOURCE,
         "rows": len(rows),
+        "audited_rows": 2 * len(seeds),
+        "supplement_source": SUPPLEMENT_SOURCE,
+        "supplement_rows": 2 * len(supplement),
         "seed_sha256": _sha256(SEEDS.read_bytes()),
+        "supplement_sha256": _sha256(SUPPLEMENT.read_bytes()),
         "audited_prompts_sha256": AUDITED_PROMPTS_SHA256,
         "context_length": context_length,
         "context_source": context_source,
