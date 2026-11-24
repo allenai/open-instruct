@@ -1,0 +1,67 @@
+# DRAFT - NOT FOR LAUNCH. The Olmo 3.5 Small joint text + vision hero SFT on the 3,072-chip v4 8x8x48 (768 hosts),
+# for registration (ledger issue #1608 section 2, due Wed Nov 25 noon PT). It is the ablation's image arm
+# (../olmo35-small-mm-sft-8x8x8) at the 3K text hero's batch and mesh (ledger experiments/h269 render.py +
+# h262-3k/env.json): 96 x 65,536 tokens a step, data24 x FSDP4 x EP32 on olmo35-ep-as-cp (per_device_batch_size
+# 0.03125; 96 trained rows on 24 data hosts x 4, 96 image loader ranks), peak LR 1.8e-4 (connector 2x, ViT 0.1x), 3%
+# warmup then linear to 0, EMo causal with run9's pools, buffer 14, think rows seeded at step 0.
+# Text-matched as the ablation (owner, option A): the full prepacked C16 stream at 96 rows = 2,692 text steps
+# (258,432 rows) plus 49,824 image rows (3.1B image tokens, ~1.46% of the loss, Tiny's image:text ratio) = 3,211
+# updates; warmup int(3211 * 0.0299...) = 96, decay 3,115.
+#
+# OPEN ITEMS (each must be closed before this is applied):
+#   1. Base: the FINAL mid-training checkpoint (LOAD_PARAMETERS_PATH <step>, run ends ~Wed Nov 25 11:45 PM PT).
+#   2. Text: the hero's text stream (the 3K streams under gs://ai2-olmo-dev/post-training/data/hero-3k/streams/ are
+#      parquet for 24 hosts / 96 rows; the mix may still change) as a prepacked NPZ dir (the reader indexes text rows
+#      globally, row t = file t//16+1 row t%16, so the 16-row C16 files serve 96-row steps in their own order), its
+#      row count (OLMO_MM_TEXT_ROWS) and from it STEPS. The values below are plain C16 control's.
+#   3. Images: the dose and mixture from the ablation's read (CE at matched text rows, evals); the 3.1B-token
+#      image-only config (Tiny ratio) is not generated yet (make_small_mm_image_config.py).
+#   4. Gates on this mesh: step-1 CE within 1e-3 of the HF multimodal forward; SMALLMM-ROWS / MM-BATCH-HASH of steps
+#      1-20 on all 24 data hosts against a CPU replay; REQUIRED_RBF / MOE-DROPPED with images.
+#   5. Memory and speed: scan_layers=true + vision at 96 rows on this mesh has not been compiled (remat_policy=full
+#      is the fallback); 96 image ranks on 24 hosts; resume rebuilds each rank's past image rows (~10 s each).
+#   6. Slice policy (re-check at handover): queue / priority class (H269: post-training + post-training-borrowed-v4),
+#      maxRestarts (mid-training hero: 20, Recreate), JobSet deadline (H269: 24 h), host memory limit (mid-training:
+#      372Gi), checkpoint period and retention (~0.8 TB a save), restore lock / start time with tpu-worker.
+#   7. Image: built from jason718/maxtext jasonr-small-mm-sft at the commit the ablation ran.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../olmo35-small-mm-sft-8x8x8
+nameSuffix: -hero
+configMapGenerator:
+- name: olmo35-small-mm-sft-env
+  behavior: merge
+  literals:
+  - RUN_NAME=CHANGE_ME
+  - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/olmo-3p5-maxtext/runs/olmo35-small-mt256k-run9-v4-8x8x48-hero/checkpoints/CHANGE_ME/items
+  - STEPS=3211
+  - CHECKPOINT_PERIOD=500
+  - SHARD_ARGS=ici_data_parallelism=24 ici_fsdp_parallelism=4 ici_expert_parallelism=32 per_device_batch_size=0.03125
+  - TRAIN_ARGS=learning_rate=1.8e-4 learning_rate_schedule_steps=3211 warmup_steps_fraction=0.02989722827779508 wsd_decay_steps_fraction=0.9701027717222049
+  # CHANGE_ME: the image-only config at the hero's dose (3.1B image tokens).
+  - OLMO_MM_CONFIG=CHANGE_ME
+  - OLMO_MM_TEXT_NPZ_DIR=gs://ai2-olmo-dev/post-training/data/c16-small-tpu-1501/prepacked/control/steps
+  - OLMO_MM_TEXT_ROWS=258432
+  - OLMO_MM_IMAGE_ROWS=49824
+  - OLMO_MM_SCHEDULE_STEPS=3211
+patches:
+- target:
+    kind: JobSet
+    name: olmo35-small-mm-sft
+  patch: |
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/parallelism
+      value: 768
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/completions
+      value: 768
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/nodeSelector/cloud.google.com~1gke-tpu-topology
+      value: 8x8x48
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/containers/0/envFrom/0/configMapRef/name
+      value: olmo35-small-mm-sft-env-hero
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/volumes/0/configMap/name
+      value: olmo35-small-mm-sft-launcher-hero

@@ -1,0 +1,106 @@
+# Olmo 3.5 tiny multimodal SFT on TPU: OLMo-core's recipe olmo35_mm_sft (allenai/OLMo-core#942 at fd9bba1ba, GPU arm
+# H231 emo256k) repeated in MaxText with configs/olmo/olmo35_tiny_mm_sft_64k.yml: base B2e step 22240 (256K causal-EMo
+# multimodal midtrain) with <think>/</think> rows seeded, 32 x 65,536 tokens a step, 10,962 steps, data seed 34521,
+# LR LM 2e-4 / connector 4e-4 / ViT 2e-5, 3% warmup then linear to 0, wd 0, clip 1.0 per scheduler group, nothing
+# frozen, EMo causal pools uniform in [16, 512]. One 4x4x8 v4 slice (128 chips, 32 hosts), post-training queue.
+# These are the settings of the reference run (ledger H271, RUN_NAME jasonr-mmsft-b2e-emo256k-v4-4x4x8-perf: all
+# 10,962 steps at ~10.3 s/step, ~31.7 h; CE within +-0.002 of the GPU run in every 200-step window), from
+# allenai/olmo-gcp-infra@3575547e82325258583ff7f83e3e7e123d1e7826 examples/olmo35-maxtext/k8s/mm-sft-4x4x8.
+# Guide: docs/algorithms/olmo35_mm_sft_tpu.md. Run ../olmo35-mm-sft-4x4x8-gate first.
+#   kubectl kustomize . | less     # check the render
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+# The JobSet is immutable: delete it (kubectl -n olmo delete jobset olmo35-mm-sft) before applying again; the same
+# RUN_NAME then resumes from its last checkpoint. Stop a run by deactivating its Kueue workload (spec.active=false).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: olmo
+
+resources:
+- jobset.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- name: olmo35-mm-sft-launcher
+  files:
+  - train_mm_sft.sh
+- name: olmo35-mm-sft-env
+  literals:
+  # Set a unique name before launching; do not resume or overwrite the reference run. Checkpoints and host logs go
+  # under OUTPUT_DIR/RUN_NAME, and W&B uses it as the run id.
+  - RUN_NAME=CHANGE_ME
+  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs
+  # B2e step 22240 converted with ../../olmo35-mm/convert_b2e_to_maxtext.sh: weights only (fp32), scan_layers=true,
+  # plain Orbax (no OCDBT, zarr v2), <think> 100256 / </think> 100266 seeded at conversion from the means of
+  # [14023, 771, 29] / [524, 27963, 29] in the embedding and the untied LM head (seed_receipt.json next to it).
+  - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/post-training/checkpoints/olmo35-mm-b2e-emocausal-step22240-thinkseed/0/items
+  # The recipe (model, optimizer, schedule, EMo), the data config (olmo_mm_config_path: H231's own OLMo-core
+  # config.json, shipped in the image under maxtext/configs/olmo/olmo_mm) and the layout (olmo35-ep-as-cp, fsdp 16 x
+  # expert 8, per_device_batch_size 0.125, gradient accumulation 2) all live in this config, in the image.
+  - CONFIG=/deps/src/maxtext/configs/olmo/olmo35_tiny_mm_sft_64k.yml
+  # STEPS is also the LR schedule's length (the config sets learning_rate_schedule_steps=10962 separately).
+  - STEPS=10962
+  # Each save is ~145 GB with optimizer state; the config keeps the last 2. MaxText's checkpoint S holds the state
+  # after S+1 updates (dir 5500 = OLMo-core step 5501); the final save is dir 10961 (= step 10962).
+  - CHECKPOINT_PERIOD=500
+  # Empty = the config's own mesh.
+  - SHARD_ARGS=
+  # The reference run's flags (it ran image 217c8458; this overlay uses e3543ef2, below):
+  # - olmo_seed_token_rows=[]: the checkpoint is already seeded; never seed twice.
+  # - ragged_buffer_factor=3.0: MoE buffers hold 3x the mean load per expert shard. REQUIRED_RBF (logged per step and
+  #   MoE layer: the factor that would have dropped nothing) stayed <= 2.46 after the first step; the first step's
+  #   probe read 4.42 (see the guide).
+  # - olmo_vit_balance_crops=true: spread each row's image crops over the batch x context devices and encode only
+  #   chunks that hold used crops (same per-crop math). olmo_mm_prefetch_batches=1: build the next batch on a
+  #   background thread (same batches, same order). Together 16.9 -> ~10.3 s/step.
+  # Faster option, E4 (image ed83783e, jason718/maxtext jasonr-olmo35-mmsft-perf2; olmo-gcp-infra#74): 9.35 s/step
+  # median on image steps (9.17 over steps 2-129) against 10.73 (10.41), est. 20.8 of 31.75 GB HBM, ~28.5 h for the
+  # run. It changes the reduction order (K/V all-gather and LM-head gather): CE steps 1-40 differ by up to 3.3e-3
+  # (mean -8.6e-4), steps 41-129 by up to 3.8e-4. Swap the image tag below to ed83783e...-olmocore-fd9bba1ba and use
+  #   TRAIN_ARGS=olmo_seed_token_rows=[] ragged_buffer_factor=3.0 olmo_vit_balance_crops=true olmo_mm_prefetch_batches=1 olmo_vit_outer_remat=false olmo_connector_gather_once=true olmo_connector_skip_empty_chunks=true remat_policy=custom context=device kda_wy=device moe_routing=device moe_routing_maps=device moe_x_sorted=device cp_all_gather_in_shard_map=true vocab_tiling_ag_once=true
+  # For bitwise continuity with steps 1-40 of an existing run use E2 instead (9.85 s/step): the four flags
+  #   olmo_vit_outer_remat=false olmo_vit_chunk_remat=false olmo_connector_gather_once=true olmo_connector_skip_empty_chunks=true
+  # - olmo_mm_batch_hash_steps=20: log OLMo-core-comparable batch hashes for steps 1-20, the receipt of the batch-order
+  #   gate for this run (the gate overlay logs the same ones).
+  - TRAIN_ARGS=olmo_seed_token_rows=[] ragged_buffer_factor=3.0 olmo_vit_balance_crops=true olmo_mm_prefetch_batches=1 olmo_mm_batch_hash_steps=20
+  # Empty = the config's olmo_mm_config_path. Set a /weka/... config.json (on a mounted folder) or gs:// path to
+  # train another OLMo-core multimodal data config.
+  - OLMO_MM_CONFIG=
+  # One OLMo-core loader rank per trained row, as the 32-GPU run, so every step trains the GPU run's rows in its order
+  # (OLMo-core's loader order is a function of its seed, rank and world size).
+  - OLMO_MM_LOADER_WORLD=32
+  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache
+  # Orbax's multi-host barrier timeout (fixed 300 s) raised to 1 h: hosts that build the olmo_mm loader (~2.5 min of
+  # packing index per host) reach the checkpoint-load barrier minutes after the others.
+  - OLMO_ORBAX_BARRIER_TIMEOUT=3600
+  # W&B through Secret Manager (read with the node service account); empty turns W&B off.
+  - WANDB_SECRET=projects/ai2-olmo/secrets/wandb-api-key/versions/latest
+  - WANDB_ENTITY=ai2-llm
+  - WANDB_PROJECT=olmo35-maxtext
+  # The recipe's data env, as OLMo-core's olmo35_mm_sft_beaker.py sets it, with the writable caches on local disk.
+  - MOLMO_DATA_DIR=/weka/oe-training-default/mm-olmo
+  - HF_HUB_CACHE=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/hub
+  - HF_HUB_OFFLINE=1
+  - HF_HOME=/tmp/hf-home
+  - HF_DATASETS_CACHE=/tmp/hf-datasets
+  # As MaxText's Olmo 3.5 mid-training README requires (host-loop fast paths, no two-stage reduce-scatter).
+  - OLMOE3_ENABLE_2STAGE_RS=0
+  - OLMOE3_FAST_HOST_LOOP=1
+  - OLMOE3_FAST_SC_DEVICE_PUT=1
+  # An environment variable, not a libtpu flag: v4 megacore frees ~1 GiB of HBM.
+  - TPU_MEGACORE=MEGACORE_DENSE
+  - JAX_PLATFORMS=tpu,cpu
+  - ENABLE_PJRT_COMPATIBILITY=true
+  - XCLOUD_ENVIRONMENT=GCP
+  - DECOUPLE_GCLOUD=TRUE
+  # As the 64K text SFT overlay. Never add --xla_tpu_enable_async_ragged_all_to_all (the launcher refuses it).
+  - LIBTPU_INIT_ARGS=--xla_enable_async_all_gather=true --xla_tpu_scoped_vmem_limit_kib=16384
+
+# ../../image-olmo35-mm (./build.sh gates): jason718/maxtext@e3543ef27552d042a54c74ea89cf4d6b06ca4520 (branch
+# jasonr-olmo35-mmsft-gates: the perf2 code with its new options off, plus batch hashing) + allenai/OLMo-core@fd9bba1ba
+# (#942) for the loader. It is the image the gate overlay checks, so a run trains on exactly what passed the gates.
+# The reference run (ledger H271) used 217c84582d2f985c9b2e9d3a7067e8423035c19e (./build.sh run).
+images:
+- name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext
+  newTag: e3543ef27552d042a54c74ea89cf4d6b06ca4520-olmocore-fd9bba1ba

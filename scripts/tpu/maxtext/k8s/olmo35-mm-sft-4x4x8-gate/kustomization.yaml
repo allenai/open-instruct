@@ -1,0 +1,57 @@
+# Pre-run gate for ../olmo35-mm-sft-4x4x8 (owner-agreed for every new TPU multimodal SFT run; ledger H271 brief):
+#   (1) step-1 CE within 1e-3 of an OLMo-core forward of the same batch, with the EMo document pool fixed at 512 on
+#       both sides (a sampled pool draws from each trainer's own RNG, which is why the reference run's step 1 read
+#       1.0915 against the GPU's 1.073);
+#   (2) per-rank batch hashes for steps 1-20 equal to the GPU run's (OLMo-core BatchHashCallback definition).
+# Same image recipe, data, layout and LR schedule as the full run, under its own names (JobSet olmo35-mm-sft-gate), 20
+# steps, no checkpoint ever written. Steps 2-20 train with the pool fixed, so nothing here is a training run to keep.
+#   kubectl kustomize . | less
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+#   ../watch_jobset.sh olmo35-mm-sft-gate <RUN_NAME> 2    # saves every pod's log
+#   python ../../olmo35-mm/check_gates.py --tpu-logs <log dir> --gpu-hashes <GPU batch_hash_dir> \
+#     --gpu-step1 <GPU batch_hash_dir>/step1_eval.json
+# The GPU side is one OLMo-core run of the same recipe and world size (32 ranks) with
+# --recipe.batch_hash_dir=<dir> --recipe.step1_reference=true, stopped after step 20: it writes rank{R}.jsonl and
+# step1_eval.json (eval-mode CE of step 1's batch; eval mode routes with the eval pool, 512 = every expert).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../olmo35-mm-sft-4x4x8
+nameSuffix: -gate
+configMapGenerator:
+- name: olmo35-mm-sft-env
+  behavior: merge
+  literals:
+  - RUN_NAME=CHANGE_ME
+  # 20 steps; the config keeps learning_rate_schedule_steps=10962, so the schedule is the full run's.
+  - STEPS=20
+  - CHECKPOINT_PERIOD=1000000
+  # The full run's flags, plus:
+  # - emo_min/max_document_expert_pool=512: every document routes over all 512 experts, as OLMo-core's eval mode.
+  # - olmo_mm_batch_hash_steps=20: every OLMo-core loader rank logs MM-BATCH-HASH {step, rank, hashes, index} for
+  #   batches 1-20 (needs the gates image below).
+  # - log_moe_dropped_tokens=true: MOE-DROPPED lines next to REQUIRED_RBF; check_gates.py fails the CE gate if step 1
+  #   drops routed tokens.
+  # - ragged_buffer_factor=5.0 (the run uses 3.0): B2e's first step needs 4.49, so at 3.0 step 1 drops 0.45% of routed
+  #   tokens (2026-11-24, gate run at 3.0). At 5.0 nothing drops, it fits in HBM, and step-1 CE is the same to 6
+  #   decimals (1.085089 both), as are the 20 steps' batch hashes; steps 2-20 move by <= 4e-4. 5.0 costs ~7% step time,
+  #   so production keeps 3.0 (every later step needs <= 2.46).
+  - TRAIN_ARGS=olmo_seed_token_rows=[] ragged_buffer_factor=5.0 olmo_vit_balance_crops=true olmo_mm_prefetch_batches=1 emo_min_document_expert_pool=512 emo_max_document_expert_pool=512 olmo_mm_batch_hash_steps=20 log_moe_dropped_tokens=true
+  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache save_checkpoint_on_completion=false
+patches:
+- target:
+    kind: JobSet
+    name: olmo35-mm-sft
+  patch: |
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/containers/0/envFrom/0/configMapRef/name
+      value: olmo35-mm-sft-env-gate
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/volumes/0/configMap/name
+      value: olmo35-mm-sft-launcher-gate
+# ../../image-olmo35-mm (./build.sh gates): jason718/maxtext@e3543ef27552d042a54c74ea89cf4d6b06ca4520 (branch
+# jasonr-olmo35-mmsft-gates = jasonr-olmo35-mmsft-perf2 + olmo_mm_batch_hash_steps) + OLMo-core fd9bba1ba. Not built
+# yet: push the branch, build, then apply. It also runs the full run's flags (the perf2 flags default off).
+images:
+- name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext
+  newTag: e3543ef27552d042a54c74ea89cf4d6b06ca4520-olmocore-fd9bba1ba

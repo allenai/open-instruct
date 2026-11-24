@@ -5,7 +5,9 @@ description: Run or debug post-training (SFT) on Ai2's TPU v4 cluster gke-tpu-v4
 
 # TPU post-training
 
-The runbook is `docs/algorithms/tpu_sft_guide.md`; read it before acting. Scripts, overlays and images are in
+The runbook is `docs/algorithms/tpu_sft_guide.md`; read it before acting. Multimodal SFT has its own page,
+`docs/algorithms/olmo35_mm_sft_tpu.md`: run its gate overlay (step-1 CE with the EMo pool fixed at 512, batch hashes
+for steps 1-20) before every new multimodal run. Scripts, overlays and images are in
 `scripts/tpu/maxtext/`, and the cluster's own rules are in allenai/olmo-gcp-infra's README.
 
 Rules an agent follows:

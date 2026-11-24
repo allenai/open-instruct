@@ -1,0 +1,44 @@
+# Pre-run gate for ../olmo35-small-mm-sft-8x8x8 (the image arm), the H271 gates at Small:
+#   (1) step-1 CE within 1e-3 of a reference forward of the same batch (for Small: an HF multimodal forward of the
+#       base, think rows seeded, on step 1's 16 rows, images included), with the EMo pool fixed at 256 = every expert,
+#       as the eval-mode reference routes (a sampled pool draws from the trainer's own RNG);
+#   (2) the batches of steps 1-20: SMALLMM-ROWS lines (every row: text file#row, or the image row's hash over every
+#       key) against an independent CPU replay of the same schedule and image ranks, and MM-BATCH-HASH of the 16
+#       image ranks' first batches;
+#   plus, for the ablation's read 3: step time, input wait, REQUIRED_RBF and MOE-DROPPED with images, HBM.
+# Same image, base, data, layout and LR schedule as the run, under its own names (JobSet olmo35-small-mm-sft-gate),
+# 20 steps, no checkpoint written. Steps 2-20 train with the pool fixed, so nothing here is a run to keep.
+# The text-only arm has its own gate: ../olmo35-small-mm-sft-4x4x8-noimg-gate.
+#   kubectl kustomize . | less
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+#   ../watch_jobset.sh olmo35-small-mm-sft-gate <RUN_NAME> 2    # saves every pod's log
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../olmo35-small-mm-sft-8x8x8
+nameSuffix: -gate
+configMapGenerator:
+- name: olmo35-small-mm-sft-env
+  behavior: merge
+  literals:
+  - RUN_NAME=CHANGE_ME
+  # 20 steps; the config keeps learning_rate_schedule_steps=9632 (and OLMO_MM_SCHEDULE_STEPS=9632 the image slots),
+  # so the schedule is the run's.
+  - STEPS=20
+  - CHECKPOINT_PERIOD=1000000
+  # The run's config, plus every document routing over all 256 experts (one pool choice, 256), as the reference's
+  # eval mode. The config already logs MOE-DROPPED / REQUIRED_RBF every step and MM-BATCH-HASH for steps 1-20;
+  # SMALLMM-ROWS lines cover every step (OLMO_MM_ROW_HASH_STEPS, -1 = every step).
+  - TRAIN_ARGS=olmo_vit_balance_crops=false emo_document_expert_pool_choices=[256] emo_document_expert_pool_probs=[1.0]
+  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=false save_checkpoint_on_completion=false
+patches:
+- target:
+    kind: JobSet
+    name: olmo35-small-mm-sft
+  patch: |
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/containers/0/envFrom/0/configMapRef/name
+      value: olmo35-small-mm-sft-env-gate
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/volumes/0/configMap/name
+      value: olmo35-small-mm-sft-launcher-gate
