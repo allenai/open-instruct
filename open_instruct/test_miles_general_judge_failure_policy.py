@@ -42,6 +42,8 @@ def test_explicit_score_formats_agree(reply):
         '{"REASONING": "prefix {"answer":"bad" "SCORE":10}',
         '{"REASONING": "prefix {"answer":"bad" "note":"draft","SCORE":10}',
         '{"REASONING":"example {} {"SCORE":10}',
+        '{"REASONING":"bad "quote", "nested":[{"foo":"}","SCORE":10}',
+        '{"REASONING":"bad "quote", "nested":{"foo":"}","SCORE":10}',
         '{"REASONING": "She said "hi"."}\n{"SCORE": 8}',
         '{"REASONING":"Poor answer","SCORE":2,"NOTE":"draft","SCORE":10,}',
         '{"REASONING":"Poor answer" "SCORE":2,"NOTE":"draft","SCORE":10}',
@@ -115,6 +117,7 @@ def test_competing_escaped_score_keys_are_rejected(reply):
             'Here is my evaluation:\n{\n  "REASONING": "Candidate wrote:\nSCORE: 10\nwhich is wrong.",\n  "SCORE": 2,\n}',
             0.2,
         ),
+        ('{"REASONING": "The extra characters {"+加} are irrelevant.", "SCORE": 1}', 0.1),
         # Missing comma before final SCORE
         ('{\n  "REASONING": "Good explanation."\n  "SCORE": 8\n}', 0.8),
         ('{"REASONING": "Good explanation." "SCORE": 8}', 0.8),

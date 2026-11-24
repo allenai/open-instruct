@@ -188,15 +188,30 @@ def _repair_json_separators(text: str) -> str:
     return re.sub(r",\s*\}\s*$", "}", text)
 
 
-def _has_unclosed_inner_object(text: str) -> bool:
-    """Detect an opening brace whose object might contain the proposed score."""
-    depth = 0
+def _has_unclosed_inner_container(text: str) -> bool:
+    """Detect JSON containers that could contain the proposed score."""
+    raw_brace_depth = 0
     for brace in re.findall(r"[{}]", text):
         if brace == "{":
-            depth += 1
-        elif depth:
-            depth -= 1
-    return depth > 0
+            raw_brace_depth += 1
+        elif raw_brace_depth:
+            raw_brace_depth -= 1
+    if raw_brace_depth:
+        return True
+
+    # A brace in prose can precede an unmatched quote without opening a JSON object.
+    object_start = re.compile(r'\{\s*(?:"(?:[^"\\]|\\.)*"\s*:|\})', flags=re.DOTALL)
+    closing_delimiters = {"{": "}", "[": "]"}
+    expected_closers = []
+    for match in re.finditer(r'"(?:[^"\\]|\\.)*"|[{}\[\]]', text, flags=re.DOTALL):
+        token = match.group()
+        if token == "{" and object_start.match(text, match.start()) is None:
+            continue
+        if token in closing_delimiters:
+            expected_closers.append(closing_delimiters[token])
+        elif expected_closers and token == expected_closers[-1]:
+            expected_closers.pop()
+    return bool(expected_closers)
 
 
 def _recover_final_json_score(text: str) -> float | None:
@@ -266,7 +281,9 @@ def _recover_final_json_score(text: str) -> float | None:
 
     for sep_start, key_start in split_candidates:
         before_split = tail[:sep_start]
-        if _has_unclosed_inner_object(before_split):
+        # Some separators include the reasoning's closing quote; keep it when scanning strings.
+        prefix_end = sep_start + (tail[sep_start] == '"')
+        if _has_unclosed_inner_container(tail[:prefix_end]):
             continue
         if re.search(r'(?:"\s*[,，]\s*|[,，]\s*\n\s*|"\s+)' + _JSON_SCORE_FIELD, before_split):
             raise JudgeResponseError("general judge returned duplicate SCORE keys")
