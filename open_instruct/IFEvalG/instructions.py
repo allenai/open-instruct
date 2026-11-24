@@ -348,9 +348,11 @@ class BulletListChecker(Instruction):
           True if the actual number of bullet lists in the response meets the
           requirement.
         """
-        bullet_lists = re.findall(r"^\s*\*[^\*].*$", value, flags=re.MULTILINE)
-        bullet_lists_2 = re.findall(r"^\s*-.*$", value, flags=re.MULTILINE)
-        num_bullet_lists = len(bullet_lists) + len(bullet_lists_2)
+        # A bullet is a line that starts with '*' or '-', a space, and item text; '---' rules, empty markers and
+        # '*italic*' lines are not bullets.
+        num_bullet_lists = sum(
+            1 for line in value.split("\n") if re.match(r"^\s*[*-]\s+\S", line) and not re.fullmatch(r"[\s*_-]+", line)
+        )
         return num_bullet_lists == self._num_bullets
 
 
@@ -992,6 +994,8 @@ class ParagraphFirstWordCheck(Instruction):
         else:
             return False
 
+        # Keep the historical rule (cut the first word at the first of . , ? ! ' ") and also accept the word
+        # when only punctuation or markup surrounds it.
         first_word = ""
         punctuation = {".", ",", "?", "!", "'", '"'}
 
@@ -1006,7 +1010,10 @@ class ParagraphFirstWordCheck(Instruction):
                 break
             first_word += letter.lower()
 
-        return num_paragraphs == self._num_paragraphs and first_word == self._first_word
+        first_word_ok = first_word == self._first_word or instructions_util.first_word_matches(
+            paragraph, self._first_word, keep_exact_match=False
+        )
+        return num_paragraphs == self._num_paragraphs and first_word_ok
 
 
 # TODO(jeffrey) add relation - at least/at most?
@@ -2005,8 +2012,7 @@ class FirstWordSentChecker(Instruction):
         for sentence in sentences:
             if not sentence.strip():
                 return False
-            first_word = sentence.split()[0].strip()
-            if first_word.lower() != self._first_word.lower():
+            if not instructions_util.first_word_matches(sentence, self._first_word):
                 return False
         return True
 
@@ -2052,8 +2058,7 @@ class FirstWordAnswerChecker(Instruction):
         """
         if not value.strip() or len(value.split()) == 0:
             return False
-        first_word = value.split()[0].strip()
-        return first_word.lower() == self._first_word.lower()
+        return instructions_util.first_word_matches(value, self._first_word)
 
 
 class LastWordSentChecker(Instruction):
@@ -2543,8 +2548,31 @@ class PalindromeBasicChecker(Instruction):
         Returns:
           True if the response contains a palindrome; otherwise, False.
         """
-        palindromes = [word for word in value.split() if word == word[::-1]]
-        return len(palindromes) > 0
+        # A palindrome needs at least 3 letters or digits (ignoring case and punctuation). Whole words (as written,
+        # or cut at every non-alphanumeric character) and phrases (a sentence, line, clause, quoted span or run of
+        # words, 5+ letters/digits with at least one letter) count.
+        for word in value.split():
+            if instructions_util.is_palindrome_core(word, 3):
+                return True
+        for piece in re.findall(r"[^\W_]+(?:-[^\W_]+)*", value):
+            if instructions_util.is_palindrome_core(piece, 3, need_letter=True):
+                return True
+        # a phrase can run over several clauses ("A man, a plan, a canal: Panama"): up to 8 in a row
+        cores = [re.sub(r"[\W_]", "", c).casefold() for c in re.split(instructions_util.CLAUSE_SEPARATORS, value)]
+        if instructions_util.phrase_palindrome([c for c in cores if c], 8):
+            return True
+        # a phrase inside a longer sentence ("... A man a plan a canal Panama embodies ..."): up to 10 words in a
+        # row (an apostrophe stays inside its word)
+        words = [w.casefold() for w in re.findall(r"[^\W_]+(?:['\u2019-][^\W_]+)*", value)]
+        if instructions_util.phrase_palindrome([re.sub(r"[\W_]", "", w) for w in words], 10):
+            return True
+        for part in re.split(r"[.!?\n]", value):
+            if instructions_util.is_palindrome_core(part, 5):
+                return True
+        return any(
+            instructions_util.is_palindrome_core("".join(span), 5, need_letter=True)
+            for span in instructions_util.QUOTED_SPAN.findall(value)
+        )
 
 
 class KeywordSpecificPositionChecker(Instruction):

@@ -81,7 +81,10 @@ relations; and total-letter `less than` limits with `N <= 3`. Such tiny total-le
 limits encourage answers with almost no letters. It also rejects missing or
 invalid paragraph counts/indices and first words, including indices beyond the
 declared paragraph count and first words containing whitespace or punctuation
-that the checker truncates (`. , ? ! ' "`). These rules apply only to training admission and do
+that the paragraph checker truncates (`. , ? ! ' "`); that checker now also
+accepts a response whose first word is only surrounded by punctuation or
+Markdown, such as `**Hello,**`, and the first-word answer and sentence checkers
+ignore the same edge characters, but the screen itself is unchanged. These rules apply only to training admission and do
 not change checkers, held-out data or scoring. They are not a complete quality or
 relevance check; admitting a row does not certify it. Explicit response-language
 constraints remain supported.
