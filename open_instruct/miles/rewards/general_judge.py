@@ -183,14 +183,21 @@ def _extract_json_score(data: Any) -> tuple[str, float]:
     return str(data.get("REASONING", "")), _normalize_score_value(data["SCORE"])
 
 
-def _has_nested_complete_object_to_end(tail: str, split_start: int) -> bool:
-    """Return True if a '{' inside tail[:split_start] opens a complete JSON object reaching the end of tail."""
+def _repair_json_separators(text: str) -> str:
+    text = re.sub(r'，(?=\s*")', ",", text)
+    return re.sub(r",\s*\}\s*$", "}", text)
+
+
+def _has_nested_complete_object_to_end(tail: str, split_start: int, key_start: int) -> bool:
+    """Check whether the score could finish a nested object after repairing the separator."""
+    separator = '",' if tail[split_start] == '"' else ","
+    suffix = tail[key_start:]
     search_from = 0
     while True:
         brace = tail.find("{", search_from, split_start)
         if brace == -1:
             return False
-        snippet = re.sub(r",\s*\}\s*$", "}", tail[brace:])
+        snippet = _repair_json_separators(tail[brace:split_start] + separator + suffix)
         try:
             _loads_judge_json(snippet)
         except (json.JSONDecodeError, ValueError):
@@ -274,12 +281,11 @@ def _recover_final_json_score(text: str) -> float | None:
 
     for sep_start, key_start in split_candidates:
         before_split = tail[:sep_start]
-        if _has_nested_complete_object_to_end(tail, sep_start):
+        if _has_nested_complete_object_to_end(tail, sep_start, key_start):
             continue
         if re.search(r'(?:"\s*[,，]\s*|[,，]\s*\n\s*|"\s+)' + _JSON_SCORE_FIELD, before_split):
             raise JudgeResponseError("general judge returned duplicate SCORE keys")
-        suffix = re.sub(r'，(?=\s*")', ",", tail[key_start:])
-        suffix = re.sub(r",\s*\}\s*$", "}", suffix)
+        suffix = _repair_json_separators(tail[key_start:])
         repaired = '{"REASONING": "", ' + suffix
         try:
             data = _loads_judge_json(repaired)
