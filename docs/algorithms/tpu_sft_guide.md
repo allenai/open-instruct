@@ -12,6 +12,9 @@ The recipe is `scripts/tpu/maxtext/k8s/olmo35-sft-4x4x8/`.
 Its `kustomization.yaml` header records why each setting is what it is; read it before editing. Olmo 3 7B has its
 own overlay, `k8s/instruct-sft-4x4x8/`; its base `k8s/olmo3-sft/` targets a `2x2x4` slice, which no longer exists. `scripts/tpu/maxtext/README.md` lists the MaxText patches.
 
+Multimodal SFT (Olmo 3.5 tiny with images, MaxText's `pre_train` trainer and OLMo-core's data loader) has its own
+page: [Olmo 3.5 multimodal SFT on TPU](olmo35_mm_sft_tpu.md).
+
 ## Example runs
 
 | Run | What it is |
