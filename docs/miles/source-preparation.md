@@ -562,19 +562,20 @@ checkpoint's tokenizer before launching:
 python -m scripts.miles.rerender_prompts INPUT.jsonl.gz NEW_CHECKPOINT OUTPUT.jsonl.gz
 ```
 
-The tool renders each row's `metadata.messages` with the checkpoint's chat template
-(`add_generation_prompt=True`, as source preparation does). It replaces `input`,
-`metadata.rendering_template_sha256` and, when present, `metadata.prompt_tokens` and
-`metadata.prompt_token_ids`. All other fields are kept. It writes a new file atomically, never
-rewrites its input, and stops if the output or its report already exists. Publishing uses a hard link, so
-the output directory must be on a filesystem that supports them. Beside the output it writes `OUTPUT.jsonl.gz.report.json`, with the
-source and output SHA-256, the new template hash, the previous hashes, and how many
-inputs changed (with a few examples). Point `data.prompt_data` at the output in a new
-run root. Rows without `metadata.messages`, and rows whose targets carry tool
-definitions, are rejected: those need source preparation rerun with the new
-checkpoint. Read the report: if inputs changed, the run trains on different prompt text, so treat it as a
-data change, not a relabel. Qualification receipts bound to the old file's hash do
-not carry over.
+The tool renders `metadata.messages` with the checkpoint's chat template and
+recomputes the template hash and saved prompt token fields. MILES rebuilds its
+run-specific token cache for the new export. Tool rows also use
+their saved function declarations and must be compatible with the new template's
+tool-call protocol. ToolRL's `think_prefix_in_prompt` is recomputed in the label
+and verifier target. An older structured tool export without saved declarations
+needs to be exported again before it can be re-rendered.
+
+The command writes a new file atomically using a hard link. It stops on an
+unsupported row or if the output or report already exists. The report records
+file hashes, template hashes, and how many prompts changed. Point
+`data.prompt_data` at the output in a new run root. Qualification receipts bound
+to the old file hash do not carry over. For a new Workbench release with
+updated qualification evidence, render and export from the canonical collection.
 
 Prepared files and checkpoints are usually on WEKA, so run the tool as a small CPU
 Beaker job. Use an image built from open-instruct at or after this tool was added

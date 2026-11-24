@@ -11,10 +11,9 @@ each row's `metadata.messages` with the checkpoint tokenizer's chat template
 - `metadata.rendering_template_sha256`,
 - `metadata.prompt_tokens` and `metadata.prompt_token_ids`, when present.
 
-Labels, verifiers and all other metadata are kept. Rows whose targets carry tool
-definitions are rejected: source preparation renders those with extra template
-arguments, so re-run source preparation for them instead. The output is written
-atomically to a new path, with a JSON report beside it.
+Tool rows also use their saved declarations and validate the target protocol.
+ToolRL labels and verifier targets are updated if the prompt reasoning prefix changes.
+The output is written atomically to a new path, with a JSON report beside it.
 
     python -m scripts.miles.rerender_prompts INPUT.jsonl[.gz] CHECKPOINT OUTPUT.jsonl[.gz]
 """
@@ -28,7 +27,10 @@ import os
 import tempfile
 from pathlib import Path
 
+from jinja2 import TemplateError
+
 from open_instruct import tokenizer_utils
+from open_instruct.miles.datasets import prompt_rendering
 
 
 class RerenderError(ValueError):
@@ -79,13 +81,40 @@ def template_sha256(tokenizer):
     return hashlib.sha256(template.encode()).hexdigest()
 
 
-def _uses_tools(row):
-    metadata = row.get("metadata", {})
-    targets = [row.get("label")] + [v.get("target") for v in metadata.get("verifiers", []) if isinstance(v, dict)]
-    return any(
+def _render_prompt(row, metadata, tokenizer):
+    label = row.get("label")
+    bindings = metadata.get("verifiers", [])
+    targets = [label, *(binding.get("target") for binding in bindings if isinstance(binding, dict))]
+    tools = metadata.get("tools")
+    env = metadata.get("env_config") or {}
+    has_tool_target = any(
         isinstance(target, dict) and ("tools" in target or target.get("response_mode") == "tool_call")
         for target in targets
     )
+    if not (tools or env or has_tool_target):
+        return tokenizer.apply_chat_template(metadata["messages"], tokenize=False, add_generation_prompt=True)
+
+    if (
+        not isinstance(label, dict)
+        or len(bindings) != 1
+        or not isinstance(bindings[0], dict)
+        or bindings[0].get("target") != label
+    ):
+        raise RerenderError("row has tool definitions without a matching verifier target")
+    structured = label.get("response_mode") == "tool_call"
+    if env and env != {"kind": "non_executing_function_answer", "format": label.get("tool_call_format")}:
+        raise RerenderError("unsupported tool environment")
+    if not structured:
+        if "tool_format" not in label or ("calls" in label) == ("expected_action" in label):
+            raise RerenderError("unsupported offline tool verifier target")
+        if tools is None:
+            tools = label.get("tools")
+    text = prompt_rendering.render_tool_prompt(metadata["messages"], tools, label, tokenizer)
+    if not structured and "calls" in label:
+        prefix = prompt_rendering.reasoning_prefix(text)
+        row["label"] = {**label, "think_prefix_in_prompt": prefix}
+        bindings[0]["target"] = {**bindings[0]["target"], "think_prefix_in_prompt": prefix}
+    return text
 
 
 def rerender_row(row, tokenizer, new_hash):
@@ -93,12 +122,15 @@ def rerender_row(row, tokenizer, new_hash):
     metadata = row.get("metadata")
     if not isinstance(metadata, dict) or not metadata.get("messages"):
         raise RerenderError("row has no metadata.messages to render")
-    if _uses_tools(row):
-        raise RerenderError("row has tool definitions; re-run source preparation for tool rows")
-    text = tokenizer.apply_chat_template(metadata["messages"], tokenize=False, add_generation_prompt=True)
+    text = _render_prompt(row, metadata, tokenizer)
+    if not isinstance(text, str) or not text:
+        raise RerenderError("renderer produced an empty or non-text prompt")
     changed = text != row.get("input")
     row["input"] = text
     metadata["rendering_template_sha256"] = new_hash
+    # MILES recomputes these when it builds a run-specific cache.
+    metadata.pop("run_prompt_tokens", None)
+    metadata.pop("run_prompt_token_ids_sha256", None)
     if "prompt_tokens" in metadata or metadata.get("prompt_token_ids") is not None:
         ids = tokenizer.encode(text, add_special_tokens=False)
         if "prompt_tokens" in metadata:
@@ -136,7 +168,7 @@ def rerender(source, output, tokenizer, *, examples=3):
                 old_input = row.get("input")
                 try:
                     row, changed = rerender_row(row, tokenizer, new_hash)
-                except RerenderError as error:
+                except (ValueError, TypeError, KeyError, TemplateError) as error:
                     raise RerenderError(f"{source}: row {index}: {error}") from error
                 counts["changed" if changed else "identical"] += 1
                 if changed and len(changed_examples) < examples:

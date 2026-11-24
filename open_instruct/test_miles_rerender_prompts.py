@@ -10,6 +10,7 @@ from tokenizers import Tokenizer as FastTokenizer
 from tokenizers import models, pre_tokenizers
 from transformers import PreTrainedTokenizerFast
 
+from open_instruct import toolrl_utils
 from open_instruct.miles.datasets import run_data
 from open_instruct.miles.errors import InputError
 
@@ -92,6 +93,60 @@ def test_rerendered_rows_pass_the_checkpoint_template_check(tmp_path):
         before.pop("input")
         after.pop("input")
         assert after == before
+
+
+@pytest.mark.parametrize("kind", ["structured", "toolrl"])
+def test_rerenders_tool_rows_with_their_native_schemas(tmp_path, kind):
+    template = (
+        "{% for tool in tools %}{{ tool.function.name }}{% endfor %}"
+        "{% for m in messages %}{{ m.content }}{% if m.tool_calls %}"
+        "<tool_call><function=lookup><parameter=n>3</parameter></function></tool_call>"
+        "{% endif %}{% endfor %}{% if add_generation_prompt %}<think>{% endif %}"
+    )
+    tokenizer = run_data._tokenizer(str(checkpoint(tmp_path, template)))
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "lookup", "parameters": {"type": "object", "properties": {"n": {"type": "integer"}}}},
+        }
+    ]
+    if kind == "structured":
+        label = {"response_mode": "tool_call", "tool_call_format": "olmo_xml_v1", "tool_name": "lookup"}
+    else:
+        label = {
+            "format": "olmo-toolrl-v1",
+            "tools": tools,
+            "calls": [{"name": "lookup", "parameters": {"n": 3}}],
+            "tool_format": "olmo_xml_v1",
+            "think_prefix_in_prompt": False,
+        }
+    row = {
+        "input": "old",
+        "label": label,
+        "metadata": {
+            "messages": [{"role": "user", "content": "Find number 3."}],
+            "tools": tools,
+            "verifiers": [{"target": label, "name": kind}],
+        },
+    }
+    result, changed = rerender_prompts.rerender_row(row, tokenizer, rerender_prompts.template_sha256(tokenizer))
+    assert changed and result["input"] == "lookupFind number 3.<think>"
+    assert result["metadata"]["tools"] == tools
+    if kind == "toolrl":
+        expected = {**label, "think_prefix_in_prompt": True}
+        action = "</think><tool_call><function=lookup><parameter=n>3</parameter></function></tool_call>"
+        assert toolrl_utils.score_response(action, result["label"], think_prefix_in_prompt=True).score == 4
+    else:
+        expected = label
+    assert result["label"] == result["metadata"]["verifiers"][0]["target"] == expected
+
+    tokenizer.chat_template = NEW_TEMPLATE
+    source = tmp_path / "in.jsonl.gz"
+    write(source, [row])
+    output = tmp_path / "incompatible.jsonl.gz"
+    with pytest.raises(rerender_prompts.RerenderError, match="format does not match"):
+        rerender_prompts.rerender(source, output, tokenizer)
+    assert not output.exists()
 
 
 def test_rejects_rows_it_cannot_rerender_and_in_place_writes(tmp_path):
