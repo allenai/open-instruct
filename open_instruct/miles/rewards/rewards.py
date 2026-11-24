@@ -514,6 +514,11 @@ async def _score(args, sample, *, omit_failures=False, failure_policy="raise"):
                 score = _finite(floor(copy.deepcopy(spec["target"])), "verifier score floor") if floor else 0.0
                 total = _finite(total + weight * score, "combined reward")
                 components.append({"name": name, "score": score, "weight": weight, "cost": 0.0})
+                metadata.setdefault("verifier_diagnostics", {})[name] = {
+                    "kind": "adapter",
+                    "status": "completed",
+                    "reward_gate": reason,
+                }
                 continue
             # response_length includes tool observations. Their tokens remain in the
             # trajectory, while the policy loss uses the separate MILES loss mask.

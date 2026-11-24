@@ -140,6 +140,7 @@ All notable changes to this project will be documented in this file.
 - Add `--use_cpu_adam` to GRPO to use DeepSpeed's `DeepSpeedCPUAdam` instead of `torch.optim.AdamW`. It requires a DeepSpeed stage and `--deepspeed_offload_optimizer` (the config is rejected otherwise, since `DeepSpeedCPUAdam` only steps CPU parameters), and `--deepspeed_offload_param` now requires `--deepspeed_stage 3` (https://github.com/allenai/open-instruct/pull/1654).
 
 ### Fixed
+- Record deliberate MILES reward gate floors as valid evidence for prompt selection and replay (https://github.com/allenai/open-instruct/pull/2329).
 - Preload a shim into the MILES sgl-router process that ignores its 30 s `TCP_USER_TIMEOUT`, which reset healthy in-flight `/generate` calls after a lost keepalive probe and failed whole groups with router 500s (https://github.com/allenai/open-instruct/pull/2311).
 - Default MILES SciCode reference data to the SCICODE_H5PY_HOST_PATH Beaker secret, resolve and check the file before inference, and reject unresolved explicit path overrides before launch (https://github.com/allenai/open-instruct/pull/2260).
 - `--extra_numpy_dirs` no longer requires each part file to end with EOS under `--document_boundaries_from_metadata`, where row boundaries come from metadata and nothing is dropped; there, the metadata rows must now tile every part, and a multi-part dir must be written with `--row_aligned_parts`, which `scripts/data/convert_sft_data_for_olmocore.py` now takes (https://github.com/allenai/open-instruct/pull/2211).

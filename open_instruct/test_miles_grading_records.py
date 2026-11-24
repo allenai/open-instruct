@@ -85,6 +85,30 @@ def test_real_recorder_persists_selection_only_in_final_mode(native, tmp_path, f
         assert row["input_key"] == base_key
 
 
+@pytest.mark.parametrize(
+    "final,status,response,gate",
+    [
+        (False, "truncated", "work", "truncated"),
+        (True, "truncated", "work", "truncated"),
+        (True, "completed", "work</think><think>more", "unfinished_reasoning"),
+        (True, "completed", "work</think> ", "missing_final_answer"),
+    ],
+)
+def test_gated_floor_is_valid_reward_evidence(native, tmp_path, monkeypatch, final, status, response, gate):
+    value = sample()
+    value.status = status
+    value.response = response
+    verifier = SimpleNamespace(score_floor=lambda target: -0.5)
+    value.reward = shared.score(monkeypatch, value, verifier, final=final)
+    assert value.reward == -0.5
+
+    recorder = native.create_recorder(arguments(tmp_path, final=final))
+    saved = read_record(recorder, value)["responses"][0]
+    assert saved["reward"] == -0.5
+    assert saved["validity"] == {"components": {"test": "completed"}, "valid": True}
+    assert value.metadata["verifier_diagnostics"]["test"]["reward_gate"] == gate
+
+
 def test_different_reasoning_contracts_have_different_evidence_keys(native, tmp_path):
     keys = []
     for mode in ("required", "none"):
