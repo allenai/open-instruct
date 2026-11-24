@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -189,6 +190,22 @@ def test_never_overwrites_existing_output_or_report(tmp_path):
         rerender_prompts.rerender(source, output, new)
     assert source.read_bytes() == source_bytes and not output.exists()
     assert not list(tmp_path.glob(".out.jsonl.gz.*")) and not list(tmp_path.glob(".other.jsonl.gz.*"))
+
+
+def test_published_files_have_normal_creation_permissions(tmp_path):
+    tokenizer = run_data._tokenizer(str(checkpoint(tmp_path, NEW_TEMPLATE)))
+    source = tmp_path / "source.jsonl.gz"
+    output = tmp_path / "output.jsonl.gz"
+    reference = tmp_path / "reference"
+    reference.touch()
+    write(source, rows(tokenizer))
+
+    rerender_prompts.rerender(source, output, tokenizer)
+
+    report = output.with_name(output.name + ".report.json")
+    assert stat.S_IMODE(output.stat().st_mode) == stat.S_IMODE(reference.stat().st_mode)
+    assert stat.S_IMODE(report.stat().st_mode) == stat.S_IMODE(reference.stat().st_mode)
+    assert not list(tmp_path.glob(".output.jsonl.gz.*"))
 
 
 def test_null_metadata_reports_source_and_row(tmp_path):

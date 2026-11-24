@@ -67,12 +67,6 @@ def _publish(staged, output):
         ) from error
 
 
-def _stage(output, suffix):
-    descriptor, staged = tempfile.mkstemp(prefix=f".{output.name}.", suffix=suffix, dir=output.parent)
-    os.close(descriptor)
-    return Path(staged)
-
-
 def template_sha256(tokenizer):
     """The hash MILES compares against `metadata.rendering_template_sha256`."""
     template = tokenizer.chat_template
@@ -153,9 +147,11 @@ def rerender(source, output, tokenizer, *, examples=3):
     old_hashes = collections.Counter()
     changed_examples = []
     output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = _stage(output, ".tmp.gz" if output.name.endswith(".gz") else ".tmp")
-    staged_report = _stage(output, ".report.tmp")
-    try:
+    # Keep incomplete files private while allowing normal file creation to honor
+    # the destination's permissions and umask. Hard links require the same filesystem.
+    with tempfile.TemporaryDirectory(prefix=f".{output.name}.", dir=output.parent) as staging:
+        temporary = Path(staging) / output.name
+        staged_report = Path(staging) / report_path.name
         with _open(source, "r") as reader, _open(temporary, "w") as writer:
             for index, line in enumerate(reader, 1):
                 if not line.strip():
@@ -193,9 +189,6 @@ def rerender(source, output, tokenizer, *, examples=3):
         staged_report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         _publish(temporary, output)
         _publish(staged_report, report_path)
-    finally:
-        temporary.unlink(missing_ok=True)
-        staged_report.unlink(missing_ok=True)
     return report
 
 
