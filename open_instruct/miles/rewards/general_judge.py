@@ -245,8 +245,13 @@ def parse_judge_response(content: str) -> tuple[str, float]:
     blocks, outside_text, unclosed_langs = _scan_fenced_blocks(cleaned)
     if "json" in unclosed_langs:
         raise JudgeResponseError("general judge returned unclosed JSON fence")
+    has_outside_json = outside_text.lstrip().startswith("{") or bool(
+        re.search(r'\{[\s\S]*?"(?:SCORE|REASONING)"\s*:', outside_text)
+    )
     json_blocks = [body for lang, body in blocks if lang == "json" or body.startswith("{")]
     if len(json_blocks) == 1:
+        if has_outside_json:
+            raise JudgeResponseError("general judge response contains competing JSON objects")
         try:
             data = _loads_judge_json(json_blocks[0])
         except (json.JSONDecodeError, ValueError) as error:
@@ -259,11 +264,16 @@ def parse_judge_response(content: str) -> tuple[str, float]:
     if len(json_blocks) > 1:
         raise JudgeResponseError("general judge returned multiple JSON blocks")
 
-    if direct_candidate.startswith("{") or re.search(r'\{[\s\S]*?"(?:SCORE|REASONING)"\s*:', outside_text):
+    if direct_candidate.startswith("{") or has_outside_json:
         raise JudgeResponseError("general judge returned malformed JSON")
 
-    # Accept a single explicit Markdown score line for non-JSON replies, strictly outside code fences.
-    scores = re.findall(_MARKDOWN_SCORE_PATTERN, outside_text, flags=re.MULTILINE)
+    # Accept a single explicit Markdown score line for non-JSON replies, strictly outside code fences
+    # (or inside a sole unlabeled fence containing only the score line).
+    if not outside_text.strip() and not unclosed_langs and len(blocks) == 1 and blocks[0][0] == "":
+        sole_score = re.fullmatch(_MARKDOWN_SCORE_PATTERN, blocks[0][1])
+        scores = [sole_score.group(1)] if sole_score is not None else []
+    else:
+        scores = re.findall(_MARKDOWN_SCORE_PATTERN, outside_text, flags=re.MULTILINE)
     if len(scores) != 1:
         raise JudgeResponseError("general judge response has no unambiguous parseable SCORE")
     score = float(scores[0])
