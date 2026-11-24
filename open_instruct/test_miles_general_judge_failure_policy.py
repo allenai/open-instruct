@@ -40,6 +40,7 @@ def test_explicit_score_formats_agree(reply):
         '{"REASONING": "prefix {"answer":"bad","SCORE":10,}',
         '{"REASONING": "prefix {"answer":"bad"，"SCORE":10}',
         '{"REASONING": "prefix {"answer":"bad" "SCORE":10}',
+        '{"REASONING": "prefix {"answer":"bad" "note":"draft","SCORE":10}',
         '{"REASONING":"Poor answer","SCORE":2,"NOTE":"draft","SCORE":10,}',
         '{"REASONING":"Poor answer" "SCORE":2,"NOTE":"draft","SCORE":10}',
         '{"REASONING":"She said "hi".","SCORE":2,"NOTE":"draft","SCORE":10}',

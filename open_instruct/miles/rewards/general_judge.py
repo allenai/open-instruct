@@ -188,22 +188,15 @@ def _repair_json_separators(text: str) -> str:
     return re.sub(r",\s*\}\s*$", "}", text)
 
 
-def _has_nested_complete_object_to_end(tail: str, split_start: int, key_start: int) -> bool:
-    """Check whether the score could finish a nested object after repairing the separator."""
-    separator = '",' if tail[split_start] == '"' else ","
-    suffix = tail[key_start:]
-    search_from = 0
-    while True:
-        brace = tail.find("{", search_from, split_start)
-        if brace == -1:
-            return False
-        snippet = _repair_json_separators(tail[brace:split_start] + separator + suffix)
-        try:
-            _loads_judge_json(snippet)
-        except (json.JSONDecodeError, ValueError):
-            search_from = brace + 1
-        else:
-            return True
+def _has_unclosed_inner_object(text: str) -> bool:
+    """Detect an opening brace whose object might contain the proposed score."""
+    depth = 0
+    for brace in re.findall(r"[{}]", text):
+        if brace == "{":
+            depth += 1
+        elif depth:
+            depth -= 1
+    return depth > 0
 
 
 def _recover_final_json_score(text: str) -> float | None:
@@ -281,7 +274,7 @@ def _recover_final_json_score(text: str) -> float | None:
 
     for sep_start, key_start in split_candidates:
         before_split = tail[:sep_start]
-        if _has_nested_complete_object_to_end(tail, sep_start, key_start):
+        if _has_unclosed_inner_object(before_split):
             continue
         if re.search(r'(?:"\s*[,，]\s*|[,，]\s*\n\s*|"\s+)' + _JSON_SCORE_FIELD, before_split):
             raise JudgeResponseError("general judge returned duplicate SCORE keys")
