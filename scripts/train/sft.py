@@ -117,13 +117,13 @@ RECIPES = {
         # (FA4 rejects head_dim 256 on SM100), whole-block recompute (recompute_each_block) with the nested
         # checkpoint_attn / checkpoint_permute_moe_unpermute / checkpoint_second_unpermute off (#2291: -16%
         # s/step at the same CE; turning off block recompute instead OOMs).
-        "image": "01M7VCQM65SD251KYS4Z1AD8FG",
+        "image": "01M859SFVQ084G119EJTR3J2CE",
         "checkpoint": "/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-4t-decay159k-causal/step162974/model_and_optim",
         # c12r's half epoch: same cache, replay and loader seed, so the same step. EP shards experts over
         # the same 16 ranks, so the data-parallel batch stays 16 sequences per step.
         "steps": 18410,
         "seed": 34521,
-        "cache": "bf82a8fab8-6068a350-rowaligned",
+        "cache": "2db494257d-6068a350-rowaligned",
         "train_args": [
             "--config_name",
             "configs/olmo_core/olmo35_small_a4b_sft.json",
@@ -186,8 +186,10 @@ RECIPES = {
             # As in c12r: --seed names the cache; the data order is --data_loader_seed.
             "--seed",
             "33333",
+            # H182's replay (as H203 trained it), copied with the row-aligned marker main's check needs: every
+            # row tiles its part and ends with EOS, so none spans two parts.
             "--extra_numpy_dirs",
-            "/weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r",
+            "/weka/olmo-3p5-post-checkpoints/kevinfarhat/a4b-sft/replay-b1c12r-rowaligned",
             # Experts sharded across the 8 GPUs of a node.
             "--expert_parallel_degree",
             "8",

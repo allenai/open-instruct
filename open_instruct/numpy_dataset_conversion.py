@@ -348,7 +348,10 @@ def convert_hf_to_numpy_sft(
     logger.info("Collecting tokens from dataset...")
 
     if start_idx > 0:
-        train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))
+        # A run preempted after collecting every row resumes with nothing left to collect; `select` rejects
+        # the empty range that starts at the dataset's length, so take an empty slice instead.
+        remaining = range(start_idx, total_samples) if start_idx < total_samples else []
+        train_dataset_iter = train_dataset.select(remaining)
     else:
         train_dataset_iter = train_dataset
 

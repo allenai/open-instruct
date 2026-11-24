@@ -74,7 +74,9 @@ def test_a4b_recipe(monkeypatch, capsys):
     assert "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True" in cmd
     # c12r's data and length.
     c12r = plan(monkeypatch, capsys, "--recipe", "c12r")
-    for flag in ("--mixer_list", "--extra_numpy_dirs", "--seed", "--max_train_steps", "--max_seq_length"):
+    for flag in ("--mixer_list", "--seed", "--max_train_steps", "--max_seq_length"):
         assert value(cmd, flag) == value(c12r, flag)
+    # c12r's replay, copied with the row-aligned marker main's --extra_numpy_dirs check needs.
+    assert value(cmd, "--extra_numpy_dirs").endswith("/replay-b1c12r-rowaligned")
     mixer = cmd[cmd.index("--mixer_list") + 1 : cmd.index("--local_cache_dir")]
     assert mixer == c12r[c12r.index("--mixer_list") + 1 : c12r.index("--local_cache_dir")]

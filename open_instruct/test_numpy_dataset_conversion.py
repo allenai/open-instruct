@@ -833,6 +833,32 @@ class TestResumeEquivalence(_NumpySftTestBase):
                 with (golden / name).open("rb") as f1, (interrupted / name).open("rb") as f2:
                     self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
 
+    def test_resume_after_every_row_was_collected(self):
+        """A run preempted after its collect loop (here, in the statistics pass) resumes with nothing left to collect."""
+        golden = pathlib.Path(self.temp_dir.name) / "golden"
+        self._run(golden, resume=False)
+
+        interrupted = pathlib.Path(self.temp_dir.name) / "interrupted"
+        with (
+            unittest.mock.patch.object(
+                numpy_dataset_conversion, "_aggregate_stats", side_effect=RuntimeError("simulated interrupt")
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            self._run(interrupted, resume=False)
+        self.assertTrue((interrupted / "_boundaries.partial.bin").exists())
+
+        self._run(interrupted, resume=True)
+
+        artifacts = sorted(
+            p.name for p in golden.iterdir() if p.name.startswith(("token_ids_part_", "labels_mask_part_"))
+        )
+        self.assertGreater(len(artifacts), 0, "golden run produced no artifacts")
+        for name in artifacts:
+            opener = gzip.open if name.endswith(".gz") else open
+            with opener(golden / name, "rb") as f1, opener(interrupted / name, "rb") as f2:
+                self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
+
 
 if __name__ == "__main__":
     unittest.main()
