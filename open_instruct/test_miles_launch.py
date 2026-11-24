@@ -183,6 +183,12 @@ def test_every_weka_input_and_output_requires_mount_coverage(tmp_path, section):
     assert len(launch.specification(IMAGE_ID, run)["tasks"][0]["datasets"]) == 2
 
 
+def test_spawned_checkpoint_writers_are_rejected_on_beaker(tmp_path):
+    launch.specification(IMAGE_ID, spec(tmp_path, core={"checkpoint_thread_count": 4}))
+    with pytest.raises(ValueError, match="checkpoint_process_count.*checkpoint_thread_count"):
+        launch.specification(IMAGE_ID, spec(tmp_path, core={"checkpoint_process_count": 2}))
+
+
 @pytest.mark.parametrize("variable", ["HF_TOKEN", "CODE_EXECUTION_TOKEN"])
 def test_credentials_are_secret_references_and_never_inherited_plaintext(tmp_path, monkeypatch, variable):
     monkeypatch.setenv(variable, "PRIVATE-VALUE-SENTINEL")

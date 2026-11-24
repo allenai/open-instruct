@@ -97,5 +97,6 @@ def test_small_recipes_use_tiny_learning_baseline(path):
     assert options["calculate_per_token_loss"] is True
     assert "--calculate-per-token-loss" in config.arguments()
     assert options["grpo_std_normalization"] is False
-    assert options["async_data_buffer_capacity_factor"] == 4.0
+    # Eight nodes use a smaller completed queue so routing-replay payloads fit the Ray object store.
+    assert options["async_data_buffer_capacity_factor"] == (1.5 if path.stem == "eight-node" else 4.0)
     assert config.plan()["scoring_pass"]["optimizer_steps_per_collection"] == 1

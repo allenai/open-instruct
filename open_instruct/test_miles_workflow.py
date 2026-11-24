@@ -211,6 +211,34 @@ def test_resumable_time_stop_leaves_the_run_open(spec, monkeypatch):
         workflow.execute(spec)
 
 
+def test_attempts_on_one_output_root_share_a_wandb_run_id(spec, monkeypatch):
+    root = Path(spec.output["root"])
+    compile_spec = spec.compile
+    spec.compile = lambda prepared=None: _with_wandb(compile_spec(prepared))
+    run_ids = []
+
+    def prepare_data(data, hf_checkpoint, output, **kwargs):
+        output.mkdir(exist_ok=True)
+        (output / "train.jsonl").write_text(json.dumps({"metadata": {"verifiers": []}}) + "\n")
+        (output / "verifiers.json").write_text("{}")
+        return {"prompt_data": str(output / "train.jsonl"), "reward_config": str(output / "verifiers.json")}
+
+    def train(config, *, export_hf):
+        run_ids.append(config.miles["wandb_run_id"])
+        return {"completed_rollout_ids": [0], "stopped_for_time": True, "time_stop_resumable": len(run_ids) == 1}
+
+    monkeypatch.setattr(run_data, "prepare_data", prepare_data)
+    monkeypatch.setattr(workflow, "train_config", train)
+    workflow.execute(spec)
+    workflow.execute(spec)
+    assert run_ids[0] == run_ids[1] == (root / "wandb_run_id").read_text().strip()
+
+
+def _with_wandb(config):
+    config.miles.update(use_wandb=True, wandb_project="p")
+    return config
+
+
 @pytest.mark.parametrize("verifier", ["general-quality", "custom-quality"])
 def test_execute_rechecks_missing_judges_before_training_on_resume(spec, tmp_path, monkeypatch, verifier):
     prompt = tmp_path / "train.jsonl"
