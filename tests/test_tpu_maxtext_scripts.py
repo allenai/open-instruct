@@ -595,8 +595,11 @@ def test_small_mm_arms_train_the_same_text_rows():
         str(8076 * rows),
     }
     assert text_rows == {"129216"}
-    # The text arm overrides only its slice layout, schedule and data lines.
+    # The text arm overrides only its slice layout, schedule and data lines, plus EXTRA_ARGS to restore on every
+    # replica (its data1 mesh has a single replica).
+    assert "enable_single_replica_ckpt_restoring=false" in text["EXTRA_ARGS"].split()
     assert set(text) == {
+        "EXTRA_ARGS",
         "RUN_NAME",
         "STEPS",
         "SHARD_ARGS",
@@ -631,7 +634,8 @@ def test_small_mm_gate_overlays_are_the_run_plus_the_gate_flags(gate, run):
         "emo_document_expert_pool_probs=[1.0]",
     }
     assert set(run_env["TRAIN_ARGS"].split()) <= set(gate_env["TRAIN_ARGS"].split())
-    assert set(gate_env["EXTRA_ARGS"].split()) - set(base["EXTRA_ARGS"].split()) == {
+    restore = {"enable_single_replica_ckpt_restoring=false", "enable_single_replica_ckpt_restoring=true"}
+    assert set(gate_env["EXTRA_ARGS"].split()) - set(base["EXTRA_ARGS"].split()) - restore == {
         "save_checkpoint_on_completion=false"
     }
     assert int(gate_env["STEPS"]) == 20 < int(gate_env["CHECKPOINT_PERIOD"])
