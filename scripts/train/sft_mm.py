@@ -46,8 +46,8 @@ ENV = {
     "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
     "OLMO_SYMM_VDEV2D_AUTO_BUILD": "1",
     "HF_HOME": f"{HF_CACHE}/huggingface",
-    # Only a writable index cache for the OCR/caption tar sources; any shared directory works.
-    "HF_DATASETS_CACHE": "/weka/oe-training-default/jasonr/hf-home/datasets",
+    # Only a writable index cache for the OCR/caption tar sources; the shared cache mason.py uses for every job.
+    "HF_DATASETS_CACHE": "/weka/oe-adapt-default/allennlp/.cache/huggingface",
     "HF_HUB_CACHE": f"{HF_CACHE}/hub",
     "HF_HUB_OFFLINE": "1",
     "GRPC_ENABLE_FORK_SUPPORT": "false",
@@ -161,6 +161,12 @@ def main():
         help="Beaker minRuntime. H231's runs with 1h were preempted repeatedly by allocation balancing; 8h (the "
         "maximum) is what finished them.",
     )
+    parser.add_argument(
+        "--gate_reference",
+        action="store_true",
+        help="Write per-rank batch hashes for every step and step 1's eval-mode CE to <run dir>/gates: the GPU "
+        "reference for a TPU run's step-1 and batch-order gates.",
+    )
     parser.add_argument("--dry_run", action="store_true", help="Print the Beaker spec instead of submitting it.")
     args = parser.parse_args()
 
@@ -196,6 +202,10 @@ def main():
     ]
     if args.steps is not None:
         overrides.append(f"--recipe.stop_at_step={args.steps}")
+    if args.gate_reference:
+        # The GPU side of the placement gates (docs/algorithms/olmo35_mm_sft_tpu.md): per-rank batch hashes for
+        # every step, step 1's batch, and step 1 scored in eval mode (EMo eval pool = all 512 experts).
+        overrides += [f"--recipe.batch_hash_dir={output_root}/{name}/gates", "--recipe.step1_reference=true"]
 
     task = {
         "name": name,

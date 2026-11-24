@@ -131,6 +131,10 @@ on some text cells (BFCL in particular), so read single-run differences against 
 - **EMo pools.** Training samples causal pool sizes uniformly from 16 to 512. Evaluation uses pool 512, which is all
   experts. Exports and evals must run at 512. A TPU step-1 parity gate should also fix the pool at 512 (min = max),
   because otherwise the sampled pool differs between implementations.
+  The GPU reference for that gate comes from `sft_mm.py --recipe 4n-emo256k --steps 30 --gate_reference`: per-rank
+  batch hashes for every step and step 1 scored in eval mode, under `<run dir>/gates`. Eval mode and training with
+  min = max = 512 route identically in OLMo-core (`emo_router._pool_sizes` returns 512 for every token either way, so
+  the keep mask is all experts; the router has no jitter and the model no dropout).
 - **Naming.** `olmo35-tiny` is this 810M model, which used to be called "small". "Small" means the A4B model. Run and
   checkpoint names from before 2026-11 (`olmo35-small-mm-…`) refer to tiny.
 - **The pinned commit.** `OLMO_CORE_SHA` is on #942's branch, not on OLMo-core main. Do not delete that branch

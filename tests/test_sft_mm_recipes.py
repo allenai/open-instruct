@@ -78,6 +78,13 @@ def test_seed_steps_and_checkpoint(monkeypatch, capsys):
     assert [o for o in overrides if o.startswith("--recipe.base=")] == ["--recipe.base=/weka/x/step1"]
 
 
+def test_gate_reference(monkeypatch, capsys):
+    output, spec = plan(monkeypatch, capsys, "--recipe", "4n-emo256k", "--steps", "30", "--gate_reference")
+    overrides = torchrun_args(spec)[4:]
+    assert f"--recipe.batch_hash_dir={output}/gates" in overrides
+    assert "--recipe.step1_reference=true" in overrides
+
+
 def test_checkpoint_needs_name(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["sft_mm.py", "--recipe", "4n-emo256k", "--checkpoint", "/weka/x", "--dry_run"])
     with pytest.raises(SystemExit):
