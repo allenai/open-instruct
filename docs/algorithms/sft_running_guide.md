@@ -1,5 +1,12 @@
 # Running SFT: a known-good starting point
 
+All Olmo 3.5 SFT launches from open-instruct: text and multimodal, GPU and TPU.
+
+| | GPU (Beaker) | TPU (GKE) |
+|---|---|---|
+| Text | `scripts/train/sft.py` (this page) | [TPU SFT guide](tpu_sft_guide.md) |
+| Multimodal | `scripts/train/sft_mm.py` ([Olmo 3.5 multimodal SFT](olmo35_mm_sft.md)) | [Olmo 3.5 multimodal SFT](olmo35_mm_sft.md#tpu-launch-gke) |
+
 ## Olmo 3.5: one command
 
 ```bash
