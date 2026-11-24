@@ -43,8 +43,8 @@ External pieces the launcher drives, not copied here:
 
 ## TPU checkpoints
 
-Convert first (MaxText -> OLMo-core DCP, then the bitwise round-trip check; the TPU conversion tooling, not this
-directory), then run this launcher on the DCP. Name the label by the OLMo-core-equivalent step: MaxText's checkpoint
+Convert first with `scripts/tpu/maxtext/olmo35-mm/export_to_olmocore.sh` (MaxText -> OLMo-core DCP, then the
+bitwise round-trip check; see `docs/algorithms/olmo35_mm_sft_tpu.md`), then run this launcher on the DCP. Name the label by the OLMo-core-equivalent step: MaxText's checkpoint
 dir `S` is the state after `S + 1` updates (`checkpoints/5500` -> `s5501`, compared with GPU s5481;
 `checkpoints/10961` -> `s10962`).
 

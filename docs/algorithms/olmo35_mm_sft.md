@@ -87,13 +87,17 @@ GPU seed pair's spread.
 
 ## Export to HF
 
-Two exports are made from a native OLMo-core checkpoint:
+`scripts/export/olmo35_mm/export_all_job.sh` makes, from a native OLMo-core checkpoint:
 
-- **`hf_mm`**: the multimodal model (ViT, connector and LM) for the vision evals.
-- **`hf_text`**: the language model alone, as a text-only HF checkpoint for vLLM text evals.
+- **`olmo-core-export`**: the verified consolidated multimodal checkpoint. The vision evals read this, through
+  olmo-eval's `olmo_core_vlm` provider.
+- **`hf_text`**: the language model alone, as a text-only HF checkpoint for vLLM text evals, written by
+  `scripts/train/debug/convert_moe_checkpoint_to_hf.py` (which now accepts a multimodal checkpoint).
+- **`hf_mm`** (optional, `EXPORT_HF_MM=1`): the HF multimodal wrapper from the copied transformers plugin. No eval
+  uses it yet.
 
-The export and eval scripts live in `scripts/eval/olmo35_mm/`. For the text-only MoE conversion conventions, see
-`scripts/train/debug/convert_moe_checkpoint_to_hf.py`.
+The eval launcher is `scripts/eval/olmo35_mm/run_eval.sh`; see `scripts/export/olmo35_mm/README.md` and
+`scripts/eval/olmo35_mm/README.md`.
 
 **Check that `generation_config.json` lists `eos_token_id: [100265, 100257]`** (`<|im_end|>` and `<|endoftext|>`).
 `convert_moe_checkpoint_to_hf.py` writes that by default. The first multimodal exports listed only 100257, and vLLM
