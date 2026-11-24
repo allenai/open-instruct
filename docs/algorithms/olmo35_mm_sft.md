@@ -63,6 +63,7 @@ The other recipes are the remaining arms of the same sweep. Each one's overrides
 | `4n-emo256k` | B2e | (recommended) | 10,962 | H231 |
 | `4n-emo256k-up5` | B2e | image tokens' loss weighted so that images carry 5% of the loss | 10,962 | H231 Amendment 1 |
 | `4n-emo256k-tok5` | B2e | image dose of 12.675e9 tokens | 15,568 | H231 Amendment 1 |
+| `4n-emo256k-textonly` | B2e | text only (no images), the same C12 + replay text in open-instruct's order: the same-script text control | 9,205 | H272 (proposed) |
 | `4n-base` | B1 (64K multimodal midtrain, step 20000) | none | 10,962 | H230 |
 | `4n-vis10` | B1 | images at 10% of the loss | 10,962 | H230 |
 | `4n-vitlr` | B1 | ViT LR at LR/2 instead of LR/10 | 10,962 | H230 |

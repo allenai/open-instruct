@@ -82,6 +82,14 @@ RECIPES = {
         "steps": 15568,
         "timeout": "30h",
     },
+    # H272 (proposed): the text-only control. 4n-emo256k's recipe in the script's text-only mode: the same C12 +
+    # long-context replay text in open-instruct's data order, no images, so a text read against 4n-emo256k differs only
+    # in the images. Steps are derived from the text alone: ceil(294,560 / 32) = 9,205.
+    "4n-emo256k-textonly": {
+        "overrides": ["--recipe.base=256k-emo-causal", "--recipe.text_order=open_instruct"],
+        "steps": 9205,
+        "timeout": "24h",
+    },
     # H230 4n-base: the same recipe on base B1 (the 64K multimodal midtrain, step 20000).
     "4n-base": {"overrides": ["--recipe.base=64k"], "steps": 10962, "timeout": "16h"},
     # H230 4n-vis10: 4n-base with images at 10% of the loss.
