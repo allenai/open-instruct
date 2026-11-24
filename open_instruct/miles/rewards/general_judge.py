@@ -121,17 +121,24 @@ def general_judge_config(args: Any) -> GeneralJudgeConfig:
     )
 
 
+def _decode_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Decode a JSON object while rejecting duplicate SCORE keys."""
+    if sum(1 for key, _ in pairs if key == "SCORE") > 1:
+        raise JudgeResponseError("general judge returned duplicate SCORE keys")
+    return dict(pairs)
+
+
 def _loads_judge_json(text: str) -> Any:
     """Decode judge JSON, allowing unescaped control characters and stray backslashes."""
     try:
-        return json.loads(text, strict=False)
+        return json.loads(text, strict=False, object_pairs_hook=_decode_json_object)
     except json.JSONDecodeError:
         escaped = re.sub(
             r'\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\',
             lambda match: match.group(0) if match.group(1) is not None else r"\\",
             text,
         )
-        return json.loads(escaped, strict=False)
+        return json.loads(escaped, strict=False, object_pairs_hook=_decode_json_object)
 
 
 def parse_judge_response(content: str) -> tuple[str, float]:
@@ -149,27 +156,18 @@ def parse_judge_response(content: str) -> tuple[str, float]:
     try:
         data = _loads_judge_json(cleaned)
     except json.JSONDecodeError:
-        json_scores = [
-            quoted or unquoted
-            for quoted, unquoted in re.findall(
-                r'"SCORE"\s*:\s*(?:"\s*([0-9]+(?:\.[0-9]+)?)\s*"|([0-9]+(?:\.[0-9]+)?))(?=\s*(?:[,}]|$))',
-                cleaned,
-                flags=re.MULTILINE,
-            )
-        ]
-        if len(json_scores) == 1:
-            score = float(json_scores[0])
-        elif len(json_scores) > 1:
+        if cleaned.startswith("{"):
+            raise JudgeResponseError("general judge returned malformed JSON") from None
+        # Accept a single explicit Markdown score line for non-JSON replies, not numbers in prose.
+        scores = re.findall(
+            r"^\s*\*{0,2}SCORE\*{0,2}\s*:\*{0,2}\s*([0-9]+(?:\.[0-9]+)?)\s*$", content, flags=re.MULTILINE
+        )
+        if len(scores) != 1:
             raise JudgeResponseError("general judge response has no unambiguous parseable SCORE") from None
-        else:
-            # Accept a single explicit Markdown score line, not numbers in prose.
-            scores = re.findall(
-                r"^\s*\*{0,2}SCORE\*{0,2}\s*:\*{0,2}\s*([0-9]+(?:\.[0-9]+)?)\s*$", content, flags=re.MULTILINE
-            )
-            if len(scores) != 1:
-                raise JudgeResponseError("general judge response has no unambiguous parseable SCORE") from None
-            score = float(scores[0])
+        score = float(scores[0])
         reasoning = cleaned
+    except ValueError as error:
+        raise JudgeResponseError(f"general judge returned invalid JSON value: {error}") from error
     else:
         if not isinstance(data, dict) or "SCORE" not in data:
             raise JudgeResponseError("general judge JSON response must be an object with SCORE")
@@ -178,7 +176,7 @@ def parse_judge_response(content: str) -> tuple[str, float]:
             raise JudgeResponseError("general judge returned a boolean score")
         try:
             score = float(score_value)
-        except (TypeError, ValueError) as error:
+        except (TypeError, ValueError, OverflowError) as error:
             raise JudgeResponseError(f"general judge returned non-numeric SCORE {score_value!r}") from error
         reasoning = str(data.get("REASONING", ""))
     if not math.isfinite(score) or not 0 <= score <= 10:

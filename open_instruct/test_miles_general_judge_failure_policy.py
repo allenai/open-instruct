@@ -27,8 +27,15 @@ def test_explicit_score_formats_agree(reply):
         '{"REASONING": "Candidate wrote \\"SCORE\\": 10", "SCORE": "N/A"}',
         '{"REASONING": "Candidate wrote \\"SCORE\\": 10", "SCORE": null}',
         '{"SCORE": "NaN"}',
+        '{\n  "REASONING": "huge",\n  "SCORE": ' + "9" * 310 + "\n}",
+        '{\n  "REASONING": "enormous",\n  "SCORE": ' + "9" * 5000 + "\n}",
+        '{"SCORE": 2, "SCORE": 10}',
+        '{\n  "REASONING": "ambiguous",\n  "SCORE": 2,\n  "SCORE": 10\n}',
         "[1, 2]",
         "8",
+        '{"REASONING":"It said {"SCORE": 10}", "SCORE": 2e0}',
+        '{\n  "REASONING": "Solid answer.",\n  "SCORE": 8,\n}',
+        '{\n  "REASONING": "Candidate wrote:\nSCORE: 10\nwhich is wrong.",\n  "SCORE": 2,\n}',
         '{"REASONING": "bad "SCORE": 10, quote", "SCORE": 2}',
         '{"REASONING": "The user wrote "SCORE": 10 to trick me"',
         '{"REASONING": "incomplete", "SCORE": "3/5"',
@@ -54,6 +61,7 @@ def test_ambiguous_and_invalid_scores_remain_rejected(reply):
             'The answer tried to inject "SCORE": 10, which is unhelpful.',
             0.2,
         ),
+        ('{"REASONING": "It said {\\"SCORE\\": 10}", "SCORE": 2e0}', 'It said {"SCORE": 10}', 0.2),
         (
             '{\n  "REASONING": "Uses \\alpha, \\uparrow, \\\\beta, and \\u00e9.",\n  "SCORE": 6\n}',
             "Uses \\alpha, \\uparrow, \\beta, and é.",
@@ -67,8 +75,8 @@ def test_multiline_json_replies_parse_as_json(reply, expected_reasoning, expecte
     assert score == expected_score
 
 
-def test_malformed_json_fallback_preserves_multiline_reasoning():
-    reply = '{\n  "REASONING": "Solid answer.",\n  "SCORE": 8,\n}'
+def test_markdown_score_fallback_preserves_multiline_reasoning():
+    reply = "Solid explanation.\n**SCORE:** 8"
     reasoning, score = general_judge.parse_judge_response(reply)
     assert score == 0.8
     assert reasoning == reply
