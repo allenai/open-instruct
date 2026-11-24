@@ -514,7 +514,9 @@ def test_mm_gate_overlay_is_the_run_plus_the_gate_flags():
     run = kustomize_literals(MM_RUN / "kustomization.yaml")
     gate = kustomize_literals(SCRIPTS / "k8s/olmo35-mm-sft-4x4x8-gate/kustomization.yaml")
     assert run["RUN_NAME"] == gate["RUN_NAME"] == "CHANGE_ME"
-    assert gate["TRAIN_ARGS"].startswith(run["TRAIN_ARGS"] + " ")
+    # The gate runs the production args with a larger MoE buffer (a dropless first step), plus the gate flags.
+    assert "ragged_buffer_factor=3.0" in run["TRAIN_ARGS"]
+    assert gate["TRAIN_ARGS"].startswith(run["TRAIN_ARGS"].replace("ragged_buffer_factor=3.0", "ragged_buffer_factor=5.0") + " ")
     extra = set(gate["TRAIN_ARGS"].split()) - set(run["TRAIN_ARGS"].split())
     assert extra == {
         "emo_min_document_expert_pool=512",
