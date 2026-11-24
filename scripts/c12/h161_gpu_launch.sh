@@ -71,6 +71,8 @@ $P/nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
 CACHE=bf82a8fab8-6068a350-rowaligned
 TOKREV=8b9717061fae09d5be814373d189919a62a9a00d
 EXCLUDE_HOSTS="${EXCLUDE_HOSTS:-}"
+SECRETS=abhishekr
+TRACKING=1
 I_C12=449487
 EPOCH_STEPS=$((I_C12 / 16))   # 28,092
 OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/h161-gpu
@@ -120,6 +122,23 @@ $F/identity/identity.jsonl 1.0"
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/c12rf-gpu; DESC="ledger H210 c12rf"
          STEPS="${S_R:?S_R=<steps from H210 R4 prime>}"; EPOCHS=2; CKPT=$((STEPS / 2)); HOURS=48 ;;
+    c16n) # ledger H275 (c16-noag-half): C16 (ledger H257's frozen manifest; cache 3b590b5f7b-6068a350-rowaligned, built
+         # for H260 with this tokenizer revision and template) on noag at H182's half-epoch budget (S_R=18410, as H220's nh),
+         # rfn's base, HF reference, LR, replay dir and tokenizer; W&B off (chrisg runs, as H260); chrisg secrets.
+         B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
+         MODEL=$B/olmo35-small-mm-ckpt2-256k-noagentic/step21159-lm-olmocore/model_and_optim
+         HF_REF=$H/olmo35-small-mm-ckpt2-256k-noagentic-step21159-base-h149-c12seed
+         [[ "$SEED" == 34521 ]] || { echo "c16n runs seed 34521 only" >&2; exit 1; }
+         F=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/rf
+         MIXER="/weka/olmo-3p5-post-checkpoints/chrisg/h257/c16/c16-dolci-2cb5a8ad.parquet 1.0 \
+$F/filtered/00001-nemotron-tool-oi-en-bd-825bdb83-c12a3-be9ec34a.parquet 0.862426 \
+$F/filtered/00002-nemotron-sci-v2-h083sel-bd-16f9aaaa-c12a3-25035bd6.parquet 3.03277 \
+$F/filtered/00003-nemotron-ifchat-v3-if-decontam-1fee8794-c12-4e2daf40.parquet 4.937456 \
+$F/identity/identity.jsonl 1.0"
+         CACHE="${C16_CACHE:-3b590b5f7b-6068a350-rowaligned}"; TOKREV=03c29652a9d74902fe9d39bc0ad211748c7e7ae6
+         LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
+         OUT_ROOT=/weka/olmo-3p5-post-checkpoints/chrisg/c16-noag-gpu; DESC="ledger H275 c16-noag-half"; SECRETS=chrisg; TRACKING=0
+         STEPS="${S_R:?S_R=<steps>; 18410 for H275}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=24 ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
@@ -132,6 +151,7 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == scb ]] && RUN_NAME="s-c-b1-s${SEED}"
 [[ "$ARM" == c14f ]] && RUN_NAME="c14f-s${SEED}"
 [[ "$ARM" == rfn ]] && RUN_NAME="c12rf-noag-s${SEED}"
+[[ "$ARM" == c16n ]] && RUN_NAME="c16-noag-half-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
@@ -153,7 +173,7 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs $EPOCHS --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
---no_save_async --with_tracking --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
+--no_save_async $([[ "$TRACKING" == 1 ]] && echo --with_tracking) --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
 --local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR $EXTRA_ARGS"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
@@ -251,9 +271,9 @@ env = [
     {"name": "NCCL_SOCKET_IFNAME", "value": "ib"},
     {"name": "NCCL_IB_HCA", "value": "^=mlx5_bond_0"},
     $EXTRA_ENV
-    {"name": "HF_TOKEN", "secret": "abhishekr_HF_TOKEN"},
-    {"name": "WANDB_API_KEY", "secret": "abhishekr_WANDB_API_KEY"},
-    {"name": "BEAKER_TOKEN", "secret": "abhishekr_BEAKER_TOKEN"},
+    {"name": "HF_TOKEN", "secret": "${SECRETS}_HF_TOKEN"},
+    {"name": "WANDB_API_KEY", "secret": "${SECRETS}_WANDB_API_KEY"},
+    {"name": "BEAKER_TOKEN", "secret": "${SECRETS}_BEAKER_TOKEN"},
 ]
 task = {
     "name": "$RUN_NAME",
