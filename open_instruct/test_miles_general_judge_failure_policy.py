@@ -34,6 +34,14 @@ def test_explicit_score_formats_agree(reply):
         '{\n  "REASONING": "ambiguous",\n  "SCORE": 2,\n  "SCORE": 10\n}',
         '{"REASONING": "bad "quote"", "SCORE": 2, "SCORE": 10}',
         '{\n  "REASONING": "bad "quote"",\n  "SCORE": 2,\n  "SCORE": 10\n}',
+        '{"REASONING": {"answer":"bad","SCORE":10}',
+        '{"REASONING": "prefix {"answer":"bad","SCORE":10}',
+        '{"REASONING": "prefix {"answer":"bad","SCORE":10,}',
+        '{"REASONING":"Poor answer","SCORE":2,"NOTE":"draft","SCORE":10,}',
+        '{"REASONING":"Poor answer" "SCORE":2,"NOTE":"draft","SCORE":10}',
+        '{"REASONING":"She said "hi".","SCORE":2,"NOTE":"draft","SCORE":10}',
+        '{"REASONING":"She said "hi".","SCORE":2,"NOTE":"bad "q"","SCORE":10}',
+        '{"REASONING":"Poor answer","SCORE":2,"NOTE":"bad "q"","SCORE":10}',
         "[1, 2]",
         "8",
         "null",
@@ -92,8 +100,11 @@ def test_ambiguous_and_invalid_scores_remain_rejected(reply):
         ('{\n  "REASONING": "Good explanation."，\n  "SCORE": 8\n}', 0.8),
         # SCORE in a separate final JSON block (earlier block has no SCORE)
         ('{"REASONING": "Good explanation."}\n{"SCORE": 8}', 0.8),
+        ('{"REASONING": "She said "hi"."}\n{"SCORE": 8}', 0.8),
         ('```json\n{"REASONING": "Good explanation."}\n```\n```json\n{"SCORE": 8}\n```', 0.8),
         ('{"REASONING": "Good explanation."}\n```json\n{"SCORE": 8}\n```', 0.8),
+        ('{"REASONING": "She said "hi".", "NOTE": "ok", "SCORE": 7}', 0.7),
+        ('{"SCORE": 8,}', 0.8),
     ],
 )
 def test_malformed_json_recovers_unambiguous_final_score(reply, expected_score):

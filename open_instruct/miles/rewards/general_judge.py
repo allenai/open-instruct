@@ -122,10 +122,6 @@ def general_judge_config(args: Any) -> GeneralJudgeConfig:
 
 
 _MARKDOWN_SCORE_PATTERN = r"^\s*\*{0,2}SCORE\*{0,2}\s*:\*{0,2}\s*([0-9]+(?:\.[0-9]+)?)\s*$"
-_FINAL_JSON_SCORE_RE = re.compile(
-    r'(?P<sep>(?:^|\}\s*)\{\s*|"\s*[,，]\s*|[,，]\s*\n\s*|"\s+)"SCORE"\s*:\s*(?P<value>[^,\}\]\n]+?)\s*,?\s*\}\s*$',
-    flags=re.DOTALL,
-)
 
 
 def _decode_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -168,36 +164,111 @@ def _extract_json_score(data: Any) -> tuple[str, float]:
     return str(data.get("REASONING", "")), _normalize_score_value(data["SCORE"])
 
 
-def _recover_final_json_score(text: str) -> float | None:
-    """Recover an unambiguous final top-level SCORE field from malformed judge JSON."""
-    stripped = text.lstrip()
-    if stripped.startswith("{"):
+def _has_nested_complete_object_to_end(tail: str, split_start: int) -> bool:
+    """Return True if a '{' inside tail[:split_start] opens a complete JSON object reaching the end of tail."""
+    search_from = 0
+    while True:
+        brace = tail.find("{", search_from, split_start)
+        if brace == -1:
+            return False
+        snippet = re.sub(r",\s*\}\s*$", "}", tail[brace:])
         try:
-            first_obj, end_idx = json.JSONDecoder(strict=False, object_pairs_hook=_decode_json_object).raw_decode(
-                stripped
-            )
+            _loads_judge_json(snippet)
+        except (json.JSONDecodeError, ValueError):
+            search_from = brace + 1
+        else:
+            return True
+
+
+def _recover_final_json_score(text: str) -> float | None:
+    """Recover an unambiguous top-level final SCORE field from malformed judge JSON."""
+    brace_idx = text.find("{")
+    if brace_idx == -1:
+        return None
+    candidate = text[brace_idx:].strip()
+
+    # 1. Trailing comma right before '}' — decode structurally so duplicate-SCORE and type checks run.
+    without_trailing_comma = re.sub(r",\s*\}\s*$", "}", candidate)
+    if without_trailing_comma != candidate:
+        try:
+            data = _loads_judge_json(without_trailing_comma)
         except (json.JSONDecodeError, ValueError):
             pass
         else:
-            trailing = stripped[end_idx:].strip()
-            if isinstance(first_obj, dict) and "SCORE" in first_obj and re.search(r'"SCORE"\s*:', trailing):
-                raise JudgeResponseError("general judge response contains competing JSON objects")
+            return _extract_json_score(data)[1]
 
-    match = _FINAL_JSON_SCORE_RE.search(text)
-    if match is None:
-        return None
-    prefix = text[: match.start()]
-    sep = match.group("sep")
-    if sep.startswith("}") and re.search(r'"SCORE"\s*:', prefix):
-        raise JudgeResponseError("general judge response contains competing JSON objects")
-    if re.search(r'"SCORE"\s*:\s*[^,\}\n]+(?:[,，]\s*)?$', prefix):
-        raise JudgeResponseError("general judge returned duplicate SCORE keys")
-    raw_value = match.group("value").strip()
+    # 2. Separate final {"SCORE": ...} block after an earlier JSON object (or competing objects).
     try:
-        parsed_value = json.loads(raw_value)
-    except (json.JSONDecodeError, ValueError) as error:
-        raise JudgeResponseError(f"general judge returned non-numeric SCORE {raw_value!r}") from error
-    return _normalize_score_value(parsed_value)
+        first_obj, end_idx = json.JSONDecoder(strict=False, object_pairs_hook=_decode_json_object).raw_decode(
+            candidate
+        )
+    except (json.JSONDecodeError, ValueError):
+        separate = re.search(r"\}\s*(\{[\s\S]*\})\s*$", candidate)
+        if separate is not None and not re.search(r'"SCORE"\s*:', candidate[: separate.start()]):
+            final_candidate = re.sub(r",\s*\}\s*$", "}", separate.group(1))
+            try:
+                final_obj = _loads_judge_json(final_candidate)
+            except (json.JSONDecodeError, ValueError):
+                pass
+            else:
+                return _extract_json_score(final_obj)[1]
+    else:
+        trailing = candidate[end_idx:].strip()
+        if isinstance(first_obj, dict) and trailing:
+            if "SCORE" in first_obj and re.search(r'"SCORE"\s*:', trailing):
+                raise JudgeResponseError("general judge response contains competing JSON objects")
+            if "SCORE" not in first_obj and trailing.startswith("{"):
+                trailing_repaired = re.sub(r",\s*\}\s*$", "}", trailing)
+                try:
+                    final_obj = _loads_judge_json(trailing_repaired)
+                except (json.JSONDecodeError, ValueError):
+                    return None
+                return _extract_json_score(final_obj)[1]
+
+    # 3. Single top-level object whose leading string field (e.g. REASONING) has syntax errors
+    #    (unescaped quotes) or is followed by a missing/full-width comma.
+    opening = re.match(r'^\{\s*"(?P<key>[^"\n]+)"\s*:\s*"', candidate)
+    if opening is None or opening.group("key") == "SCORE":
+        return None
+
+    tail_start = opening.end()
+    tail = candidate[tail_start:]
+    locked_split: tuple[int, int] | None = None
+    try:
+        _, str_end = json.JSONDecoder(strict=False).raw_decode(candidate, tail_start - 1)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    else:
+        after_str = candidate[str_end:]
+        sep_match = re.match(r'^\s*(?:[,，]\s*|\s+)(?="[^"\n]+"\s*:)', after_str)
+        if sep_match is not None:
+            locked_split = (str_end - tail_start, str_end - tail_start + sep_match.end())
+
+    split_candidates = (
+        [locked_split]
+        if locked_split is not None
+        else [
+            (match.start(), match.end())
+            for match in re.finditer(r'(?:"\s*[,，]\s*|[,，]\s*\n\s*|"\s+)(?="[^"\n]+"\s*:)', tail)
+        ]
+    )
+
+    for sep_start, key_start in split_candidates:
+        before_split = tail[:sep_start]
+        if _has_nested_complete_object_to_end(tail, sep_start):
+            continue
+        if re.search(r'(?:"\s*[,，]\s*|[,，]\s*\n\s*|"\s+)"SCORE"\s*:', before_split):
+            raise JudgeResponseError("general judge returned duplicate SCORE keys")
+        suffix = re.sub(r'，(?=\s*")', ",", tail[key_start:])
+        suffix = re.sub(r",\s*\}\s*$", "}", suffix)
+        repaired = '{"REASONING": "", ' + suffix
+        try:
+            data = _loads_judge_json(repaired)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        return _extract_json_score(data)[1]
+
+    return None
 
 
 def _parse_json_candidate(candidate: str, fallback_reasoning: str) -> tuple[str, float] | None:
