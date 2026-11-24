@@ -15,6 +15,7 @@ import unittest
 import unittest.mock
 
 import numpy as np
+import torch
 from olmo_core import data as oc_data
 from parameterized import parameterized
 from transformers import AutoTokenizer
@@ -832,6 +833,188 @@ class TestResumeEquivalence(_NumpySftTestBase):
             else:
                 with (golden / name).open("rb") as f1, (interrupted / name).open("rb") as f2:
                     self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
+
+
+# Toy ids for the replay EOS fix: uint32 tokens (vocab above 2**16), as for the Olmo tokenizer.
+_R_PAD, _R_EOS, _R_IM, _R_VOCAB = 1, 2, 3, 100_352
+
+
+def _write_numpy_dir(numpy_dir, parts, row_aligned=None):
+    """Write converter-layout parts. Each row is (tokens, mask): a bool for every token, or one per token."""
+    os.makedirs(numpy_dir)
+    for index, rows in enumerate(parts):
+        tokens = np.array([t for row, _ in rows for t in row], dtype=np.uint32)
+        mask = np.array(
+            [m for row, ms in rows for m in (ms if isinstance(ms, list) else [ms] * len(row))], dtype=np.bool_
+        )
+        tokens.tofile(os.path.join(numpy_dir, f"token_ids_part_{index:04d}.npy"))
+        mask.tofile(os.path.join(numpy_dir, f"labels_mask_part_{index:04d}.npy"))
+        with gzip.open(os.path.join(numpy_dir, f"token_ids_part_{index:04d}.csv.gz"), "wt") as f:
+            start = 0
+            for row, _ in rows:
+                f.write(f"{start},{start + len(row)}\n")
+                start += len(row)
+    if row_aligned is not None:
+        with open(os.path.join(numpy_dir, "dataset_statistics.json"), "w") as f:
+            json.dump(
+                {
+                    "configuration": {numpy_dataset_conversion.ROW_ALIGNED_PARTS_KEY: row_aligned},
+                    "overall_statistics": {"total_instances": sum(len(rows) for rows in parts)},
+                },
+                f,
+            )
+
+
+def _file_bytes(numpy_dir):
+    out = {}
+    for name in sorted(os.listdir(numpy_dir)):
+        with open(os.path.join(numpy_dir, name), "rb") as f:
+            out[name] = f.read()
+    return out
+
+
+def _chat_row(*content):
+    """A chat row: prompt untrained, the assistant's tokens and its closing EOS trained."""
+    return [_R_IM, 10, 11, _R_IM, *content, _R_EOS], [False] * 4 + [True] * (len(content) + 1)
+
+
+class TestReplayFinalEosPositions(unittest.TestCase):
+    def test_selects_only_the_final_eos_of_replay_documents(self):
+        docs = [
+            [_R_IM, 10, 11, _R_EOS],  # chat stop: kept
+            [20, 21, _R_EOS],  # replay: its final EOS
+            [22, _R_EOS, 23, _R_EOS],  # replay with an interior EOS: only the final one
+            [24, 25],  # replay ending in another token, e.g. cut: nothing
+            [_R_EOS],  # one-token documents: their target comes from the previous document
+            [26],
+            [27, _R_EOS],  # two tokens: selected
+            [_R_IM, 12, _R_EOS, _R_IM, 13, _R_EOS],  # multi-turn chat row: every stop kept
+            [_R_IM],
+        ]
+        tokens = np.array([t for doc in docs for t in doc], dtype=np.uint32)
+        ends = np.cumsum([len(doc) for doc in docs])
+        bounds = np.stack([ends - [len(doc) for doc in docs], ends], axis=1)
+        positions = numpy_dataset_conversion.replay_final_eos_positions(tokens, bounds, _R_EOS, _R_IM)
+        self.assertEqual(positions.tolist(), [ends[1] - 1, ends[2] - 1, ends[6] - 1])
+        self.assertTrue((tokens[positions] == _R_EOS).all())
+
+
+class TestWriteReplayEosMaskedDir(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+
+    def _masked(self, src, name="masked"):
+        out = os.path.join(self.tmp, name)
+        return out, numpy_dataset_conversion.write_replay_eos_masked_dir(src, out, _R_EOS, _R_IM)
+
+    def test_clears_exactly_the_replay_final_eos_labels(self):
+        src = os.path.join(self.tmp, "src")
+        replay_untrained_end = [30, 31, _R_EOS], [True, True, False]
+        parts = [
+            [_chat_row(12), ([20, 21, _R_EOS], True), ([24, 25], True), replay_untrained_end],
+            [([22, _R_EOS, 23, _R_EOS], True), _chat_row(13, _R_EOS, 14), ([_R_EOS], True), ([27, _R_EOS], True)],
+        ]
+        _write_numpy_dir(src, parts, row_aligned=True)
+        before = _file_bytes(src)
+        out, receipt = self._masked(src)
+        self.assertEqual(_file_bytes(src), before)
+        # Part 0: the replay doc at 6-8 (the one at 11-13 is already untrained); part 1: the interior-EOS
+        # doc's last token (3) and the two-token doc's (14).
+        expected = {"0000": [8], "0001": [3, 14]}
+        for index, positions in expected.items():
+            src_mask = np.fromfile(os.path.join(src, f"labels_mask_part_{index}.npy"), dtype=np.bool_)
+            out_mask = np.fromfile(os.path.join(out, f"labels_mask_part_{index}.npy"), dtype=np.bool_)
+            self.assertEqual(np.flatnonzero(src_mask != out_mask).tolist(), positions)
+            self.assertFalse(out_mask[positions].any())
+            for name in (f"token_ids_part_{index}.npy", f"token_ids_part_{index}.csv.gz"):
+                self.assertTrue(os.path.islink(os.path.join(out, name)))
+                self.assertEqual(os.path.realpath(os.path.join(out, name)), os.path.realpath(os.path.join(src, name)))
+        self.assertTrue(os.path.islink(os.path.join(out, "dataset_statistics.json")))
+        self.assertEqual(
+            {
+                k: receipt[k]
+                for k in ("documents", "replay_documents", "chat_documents", "dropped", "already_untrained")
+            },
+            {"documents": 8, "replay_documents": 6, "chat_documents": 2, "dropped": 3, "already_untrained": 1},
+        )
+        with open(os.path.join(out, numpy_dataset_conversion.REPLAY_EOS_MASK_RECEIPT)) as f:
+            self.assertEqual(json.load(f), receipt)
+
+    def test_dir_without_replay_documents_is_byte_identical(self):
+        src = os.path.join(self.tmp, "chat")
+        _write_numpy_dir(src, [[_chat_row(12), _chat_row(13, _R_EOS, 14)]])
+        out, receipt = self._masked(src)
+        self.assertEqual(receipt["dropped"], 0)
+        with (
+            open(os.path.join(src, "labels_mask_part_0000.npy"), "rb") as a,
+            open(os.path.join(out, "labels_mask_part_0000.npy"), "rb") as b,
+        ):
+            self.assertEqual(a.read(), b.read())
+
+    def test_refuses_an_existing_output_dir(self):
+        src = os.path.join(self.tmp, "src")
+        _write_numpy_dir(src, [[([20, _R_EOS], True)]])
+        os.makedirs(os.path.join(self.tmp, "masked"))
+        with self.assertRaises(FileExistsError):
+            self._masked(src)
+        self.assertEqual(os.listdir(os.path.join(self.tmp, "masked")), [])
+
+    def test_multi_part_chat_rows_need_row_aligned_parts(self):
+        src = os.path.join(self.tmp, "legacy")
+        _write_numpy_dir(src, [[_chat_row(12)], [([20, _R_EOS], True)]])
+        with self.assertRaisesRegex(ValueError, "row_aligned_parts"):
+            self._masked(src)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "masked")))
+        # A replay-only dir has no chat row to cut, as the ledger's replay builders write them.
+        replay = os.path.join(self.tmp, "replay")
+        _write_numpy_dir(replay, [[([20, _R_EOS], True)], [([21, 22, _R_EOS], True)]])
+        self.assertEqual(self._masked(replay, "replay-masked")[1]["dropped"], 2)
+
+    def test_packed_training_drops_only_whole_replay_final_eos(self):
+        """Through OLMo-core's packing: same instances and tokens; one label fewer per replay document
+        that fits, none for chat rows or for a replay document truncated at the sequence length."""
+        sequence_length = 8
+        cache = os.path.join(self.tmp, "cache")
+        _write_numpy_dir(cache, [[_chat_row(12), _chat_row(13, 14)]])
+        src = os.path.join(self.tmp, "replay")
+        fitting = [[20, 21, 22, _R_EOS], [23, _R_EOS], [24, 25, 26, 27, 28, 29, 30, _R_EOS]]
+        too_long = [40, 41, 42, 43, 44, 45, 46, 47, 48, _R_EOS]  # truncated to its first 8 tokens
+        _write_numpy_dir(src, [[(doc, True) for doc in [*fitting, too_long, [50, 51]]]])
+        out, receipt = self._masked(src)
+        self.assertEqual(receipt["dropped"], 4)  # the truncated doc's EOS is cleared, then cut by packing
+
+        tokenizer = oc_data.TokenizerConfig(vocab_size=_R_VOCAB, eos_token_id=_R_EOS, pad_token_id=_R_PAD)
+        boundaries = olmo_core_finetune._document_boundary_kwargs(True, row_aligned_parts=True)
+        stats = olmo_core_finetune._check_extra_numpy_dirs(
+            [out], cache, tokenizer, sequence_length=sequence_length, require_metadata=True, log=False
+        )
+        self.assertEqual(stats[out].num_loss_tokens, sum(len(d) for d in [*fitting, too_long, [50, 51]]) - 4)
+        datasets = []
+        for name, replay in (("src", src), ("out", out)):
+            config = olmo_core_finetune._numpy_dataset_config(
+                cache,
+                tokenizer,
+                work_dir=os.path.join(self.tmp, f"work-{name}"),
+                sequence_length=sequence_length,
+                document_boundary_kwargs=boundaries,
+                extra_numpy_dirs=[replay],
+            )
+            datasets.append(config.build())
+            datasets[-1].prepare()
+        before, after = datasets
+        self.assertEqual(len(before), len(after))
+        dropped = []
+        for i in range(len(before)):
+            a, b = before[i], after[i]
+            self.assertTrue(torch.equal(a["input_ids"], b["input_ids"]))
+            self.assertTrue(torch.equal(a["doc_lens"], b["doc_lens"]))
+            self.assertFalse((b["label_mask"] & ~a["label_mask"]).any())
+            for position in torch.nonzero(a["label_mask"] & ~b["label_mask"]).flatten().tolist():
+                dropped.append(a["input_ids"][: position + 1].tolist()[-2:])
+        # Exactly one per fitting replay document: its final EOS, predicted from its own previous token.
+        self.assertEqual(sorted(dropped), sorted([doc[-2], _R_EOS] for doc in fitting))
 
 
 if __name__ == "__main__":

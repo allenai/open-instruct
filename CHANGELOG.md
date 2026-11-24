@@ -61,6 +61,7 @@ All notable changes to this project will be documented in this file.
 - MILES retains the strict standalone/training scoring check: drift above `core.scoring_check_tolerance` (default 0.001) stops training; eager scoring uses the same activation arithmetic as training (https://github.com/allenai/open-instruct/pull/2187).
 
 ### Added
+- Add `scripts/data/mask_replay_final_eos.py`, which writes a copy of a numpy SFT dir (such as a long-context replay dir for `--extra_numpy_dirs`) with no loss on each replay document's final `<|endoftext|>`, the fix of ledger H270, and `scripts/data/check_replay_eos_mask.py` to check one on real data (PR_URL).
 - Add opt-in MILES `core.refresh_min_group_size` (refresh only): keep a prompt group when enough members succeed and mask the transport-failed ones as dummies, which the default reward exclusion leaves out of the group baseline; the default `None` keeps whole-group requeue (https://github.com/allenai/open-instruct/pull/2299).
 - Add opt-in MILES historical-priority sampling that visits groups 1–4 in order each epoch, with deterministic within-group shuffle, optional source weights inside the active group, validated labels, and recoverable epoch cursors (https://github.com/allenai/open-instruct/pull/2251).
 - Add opt-in MILES training prompt exclusion with recorded source counts, preserved mixture weights, and empty-source protection (https://github.com/allenai/open-instruct/pull/2244).
