@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Merged Olmo-SGLang TP2 rounding and early abort, MILES refresh abort and configurable group retries, and upstream OLMo-core SwiGLU fixes. Prior Tiny TP2 graph refresh and Small graph parity ran on the earlier source bundle recorded in PR 2282. GPU validation of this combined source bundle is pending.",
+  "status": "GPU-validated on Open Instruct ecddc97 with Beaker image 01M87GVQ9PZ6YZ2ZMY81S1TXSG. Tiny TP1 refresh (https://beaker.org/ex/01M87GYN9D4H6AB7CTC63WHDH9) and Tiny TP2 refresh with automatic rounding (https://beaker.org/ex/01M87GYN4DZ9GND5SFK9VD6TDB) each completed four optimizer steps and four in-place weight updates with full decode CUDA graphs.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
