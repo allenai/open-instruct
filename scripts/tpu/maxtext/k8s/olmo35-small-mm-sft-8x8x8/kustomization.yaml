@@ -69,9 +69,12 @@ configMapGenerator:
   - OLMO_MM_SCHEDULE_STEPS=9632
   # Image rows are pulled only when their slot comes (about one per rank every ~30 s at ~5 s a step; measured ~10 s a
   # sequence after a ~6.5 min cold start on CPU). olmo_mm_num_workers 16 and one batch prefetched are in the config.
-  # single-replica restore: one data replica reads the base and broadcasts it (mid-training's setting; large
-  # simultaneous restores have tripped the project's GCS egress quota).
-  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=true
+  # enable_single_replica_ckpt_restoring=false: every data replica reads the base from GCS. With true (one replica
+  # reads and broadcasts, mid-training's setting) the broadcast left a few corrupted ViT weight values on the chips at
+  # coords (7,4,0/2/4/6) of tpu-v4-8x8x8-0 (2026-11-24; ledger issue #1608): NaN image rows at step 1, at varying
+  # places between identical runs. With false the same config was clean (20 steps, 0 non-finite at every probe).
+  # It costs 4x the restore reads (data4); coordinate start times on shared slices (GCS egress quota).
+  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=false
   # Orbax's multi-host barrier timeout (fixed 300 s) raised to 1 h: hosts that build the olmo_mm loader reach the
   # checkpoint-load barrier minutes after the others.
   - OLMO_ORBAX_BARRIER_TIMEOUT=3600

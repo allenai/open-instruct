@@ -30,7 +30,7 @@ configMapGenerator:
   # eval mode. The config already logs MOE-DROPPED / REQUIRED_RBF every step and MM-BATCH-HASH for steps 1-20;
   # SMALLMM-ROWS lines cover every step (OLMO_MM_ROW_HASH_STEPS, -1 = every step).
   - TRAIN_ARGS=olmo_vit_balance_crops=false emo_document_expert_pool_choices=[256] emo_document_expert_pool_probs=[1.0]
-  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=true save_checkpoint_on_completion=false
+  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=false save_checkpoint_on_completion=false
 patches:
 - target:
     kind: JobSet
