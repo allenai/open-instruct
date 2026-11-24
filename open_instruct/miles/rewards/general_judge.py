@@ -121,29 +121,47 @@ def general_judge_config(args: Any) -> GeneralJudgeConfig:
     )
 
 
+def _loads_judge_json(text: str) -> Any:
+    """Decode judge JSON, allowing unescaped control characters and stray backslashes."""
+    try:
+        return json.loads(text, strict=False)
+    except json.JSONDecodeError:
+        escaped = re.sub(
+            r'\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\',
+            lambda match: match.group(0) if match.group(1) is not None else r"\\",
+            text,
+        )
+        return json.loads(escaped, strict=False)
+
+
 def parse_judge_response(content: str) -> tuple[str, float]:
     """Parse and normalize Open-Instruct's JSON-or-SCORE judge response."""
     content = re.sub(r"<think>\s*.*?\s*</think>\s*", "", content, flags=re.DOTALL)
     content = content.replace("<answer>", "").replace("</answer>", "")
     cleaned = content.strip()
-    if cleaned.startswith("```json"):
+    if cleaned[:7].lower() == "```json":
         cleaned = cleaned[7:]
     elif cleaned.startswith("```"):
         cleaned = cleaned[3:]
     if cleaned.endswith("```"):
         cleaned = cleaned[:-3]
-    cleaned = cleaned.replace("\r\n", "\n").replace("\n", "\\n")
-    cleaned = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", cleaned).strip()
+    cleaned = cleaned.replace("\r\n", "\n").strip()
     try:
-        data = json.loads(cleaned)
-        reasoning = str(data.get("REASONING", ""))
-        score_value = data["SCORE"]
-        if isinstance(score_value, bool):
-            raise JudgeResponseError("general judge returned a boolean score")
-        score = float(score_value)
-    except (json.JSONDecodeError, TypeError, ValueError, KeyError, AttributeError):
-        match = re.search(r'"SCORE"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?', cleaned)
-        if match is None:
+        data = _loads_judge_json(cleaned)
+    except json.JSONDecodeError:
+        json_scores = [
+            quoted or unquoted
+            for quoted, unquoted in re.findall(
+                r'"SCORE"\s*:\s*(?:"\s*([0-9]+(?:\.[0-9]+)?)\s*"|([0-9]+(?:\.[0-9]+)?))(?=\s*(?:[,}]|$))',
+                cleaned,
+                flags=re.MULTILINE,
+            )
+        ]
+        if len(json_scores) == 1:
+            score = float(json_scores[0])
+        elif len(json_scores) > 1:
+            raise JudgeResponseError("general judge response has no unambiguous parseable SCORE") from None
+        else:
             # Accept a single explicit Markdown score line, not numbers in prose.
             scores = re.findall(
                 r"^\s*\*{0,2}SCORE\*{0,2}\s*:\*{0,2}\s*([0-9]+(?:\.[0-9]+)?)\s*$", content, flags=re.MULTILINE
@@ -151,9 +169,18 @@ def parse_judge_response(content: str) -> tuple[str, float]:
             if len(scores) != 1:
                 raise JudgeResponseError("general judge response has no unambiguous parseable SCORE") from None
             score = float(scores[0])
-        else:
-            score = float(match.group(1))
         reasoning = cleaned
+    else:
+        if not isinstance(data, dict) or "SCORE" not in data:
+            raise JudgeResponseError("general judge JSON response must be an object with SCORE")
+        score_value = data["SCORE"]
+        if isinstance(score_value, bool):
+            raise JudgeResponseError("general judge returned a boolean score")
+        try:
+            score = float(score_value)
+        except (TypeError, ValueError) as error:
+            raise JudgeResponseError(f"general judge returned non-numeric SCORE {score_value!r}") from error
+        reasoning = str(data.get("REASONING", ""))
     if not math.isfinite(score) or not 0 <= score <= 10:
         raise JudgeResponseError(f"general judge returned out-of-range SCORE {score!r}")
     return reasoning, score / 10.0
