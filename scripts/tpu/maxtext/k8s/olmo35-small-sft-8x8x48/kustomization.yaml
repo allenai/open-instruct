@@ -1,0 +1,80 @@
+# Olmo 3.5 Small (A4B) text SFT on the 3,072-chip v4 8x8x48: the 3K hero recipe of the olmo-post-training-ledger's
+# experiments/h269/render.py (H262's causal r1 files, h262-3k/), production settings. 96 x 65,536 tokens a step on
+# data24 x FSDP4 x EP32 (olmo35-ep-as-cp, context load balancing off, 4 rows on each of 24 data hosts), LR 1.8e-4 with
+# 3% warmup then linear to 0 at LR_SCHEDULE_STEPS, causal EMO, ragged buffer 14 with REQUIRED_RBF and MOE-DROPPED
+# logged every step, a save every 500 updates and 30 kept, a 24 h JobSet deadline.
+# What differs from that render: MaxText is the fork commit in maxtext_source (abhishekraok/maxtext b4fabf77, branch
+# small-sft-3k: upstream d7287433 + the SFT port + the host-side (np) tail mask and log tail + causal EMO, the tree
+# render.py's launcher builds with four patches), with no patch step; pos_ce.patch, a logging-only diagnostic for
+# preflights, is not on it; and the launcher refuses the CHANGE_ME placeholders below.
+# Per run: RUN_NAME, LOAD_PARAMETERS_PATH, TRAIN_FILES, STEPS = LR_SCHEDULE_STEPS (a stream's RECEIPT.json final_update).
+# NUM_EPOCH=1 and enable_data_shuffling=false read a stream whose order is materialized in its files.
+# EMO off is render.py --emo off: in EXTRA_ARGS, emo_enabled=false moe_topk_pallas=true and drop the other emo_* flags.
+#   kubectl kustomize . | less     # check the render
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 create -k .
+# The JobSet is immutable and created suspended (Kueue admits it). To resume or relaunch, delete all three objects first
+# (kubectl delete -k .): create does not update an existing ConfigMap, so a JobSet created beside one would read stale
+# settings. Not apply -k: re-applying suspend: true to an admitted JobSet could suspend it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: olmo
+
+resources:
+- jobset.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- name: olmo35-small-sft-8x8x48-launcher
+  files:
+  - train_sft_perf.sh
+  - perf_wrapper.py # MaxText train_sft plus the env switches its docstring lists (SKIP_FINAL_SAVE, FORCE_NNX_CACHE, ...)
+  - maxtext_source # The MaxText fork and commit the launcher runs: the one place to bump.
+- name: olmo35-small-sft-8x8x48-env
+  literals:
+  # Set a unique name before launching; checkpoints go to OUTPUT_DIR/RUN_NAME.
+  - RUN_NAME=CHANGE_ME
+  - OUTPUT_DIR=gs://ai2-olmo-dev/olmo-3p5-maxtext/sft-runs
+  # gs://.../<step>/items of the start (H262's: gs://ai2-olmo-dev/olmo-3p5-maxtext/sft-bases/olmo35-small-14t-decay548k-200b-think-seeded/556000/items).
+  - LOAD_PARAMETERS_PATH=CHANGE_ME
+  - TOKENIZER_PATH=/mnt/post-training/tokenizers/olmo35-03c29652-c12rf-promoted
+  # A stream under gs://ai2-olmo-dev/post-training/data/ (e.g. hero-3k/streams/<stream>/data).
+  - TRAIN_FILES=/mnt/post-training/data/CHANGE_ME/*.parquet
+  - MODEL_NAME=olmo35-small-e256k8-sh2x
+  - MAXTEXT_SFT_LABELS=prefix
+  - MAXTEXT_SFT_TAIL_MASK_ONLY=1
+  - TOTAL_DEVICES=3072
+  - GLOBAL_BATCH=96
+  - PER_DEVICE_BATCH=0.03125
+  - SEQ_LEN=65536
+  - LR=1.8e-4
+  # EXTRA_ARGS' wsd_decay_steps_fraction=0.97 overrides the launcher's 1 - WARMUP_FRAC: change the two together.
+  - WARMUP_FRAC=0.03
+  - LR_SCHEDULE_STEPS=CHANGE_ME
+  - STEPS=CHANGE_ME
+  - NUM_EPOCH=1
+  - DATA_SEED=0
+  - SKIP_FINAL_SAVE=0
+  - SKIP_IDLE_SAVE=1
+  - DEFER_AUX_LOG=1
+  - FORCE_NNX_CACHE=1
+  - GC_FREEZE=1
+  - GC_MANUAL=50
+  - MAXTEXT_DATA_RESUMED_STEP=0
+  - MAXTEXT_DATA_SKIP_RAW=0
+  # Fast resume stays off: the pinned cursor recorder saves the wrong position (ledger #1437).
+  - MAXTEXT_DATA_STATE_DIR=
+  - MAXTEXT_FAST_RESUME=0
+  - MAXTEXT_FORWARD_BF16_ALL_PARAMS=1
+  - MAXTEXT_LOG_BATCH_HASH=1
+  - MAXTEXT_ROUND_PARAMS_BF16=1
+  - EXTRA_ARGS=override_model_config=true scan_layers=false checkpoint_storage_use_ocdbt=true checkpoint_storage_use_zarr3=true enable_checkpointing=true custom_mesh_and_rule=olmo35-ep-as-cp ici_data_parallelism=24 ici_fsdp_parallelism=4 ici_expert_parallelism=32 sharding_tolerance=0.3 allow_split_physical_axes=true shard_exp_on_fsdp=false shard_optimizer_over_data=false attention_local_load_balance=false context_parallel_load_balance=false z_loss_multiplier=1e-5 load_balance_loss_weight=0.01 moe_aux_loss_reduction=sum moe_global_load_balancing=true warmup_step_offset=1 float32_gate_logits=true gdn_state_dtype=float32 cast_params_to_compute_dtype=true mu_dtype=float32 olmoe3_per_layer_remat=true remat_policy=custom decoder_layer_input=device moe_routing_maps=device moe_routing=device context=device moe_combine=device megablox=true sparse_matmul=true use_tokamax_gmm=false use_gmm_v2=false moe_fused_swiglu_gmm=true moe_a2a_pipeline_chunks=false moe_fused_swiglu_bwd_tile_batch_seq=256 moe_fused_swiglu_bwd_tile_embed_dim=768 moe_fused_swiglu_bwd_tile_mlp_dim=768 moe_fused_swiglu_dwo_tile_embed_dim=768 moe_fused_swiglu_dwo_tile_mlp_dim=768 wi_tile_fwd_batch_seq=512 wi_tile_fwd_embed_dim=768 wi_tile_fwd_mlp_dim=768 wi_tile_dlhs_batch_seq=512 wi_tile_dlhs_embed_dim=384 wi_tile_dlhs_mlp_dim=1536 wi_tile_drhs_batch_seq=512 wi_tile_drhs_embed_dim=768 wi_tile_drhs_mlp_dim=768 wo_tile_fwd_batch_seq=512 wo_tile_fwd_embed_dim=384 wo_tile_fwd_mlp_dim=1536 wo_tile_dlhs_batch_seq=512 wo_tile_dlhs_embed_dim=768 wo_tile_dlhs_mlp_dim=768 wo_tile_drhs_batch_seq=512 wo_tile_drhs_embed_dim=384 wo_tile_drhs_mlp_dim=768 capacity_factor=-1 moe_lean_routing=true moe_a2a_expert_major=true moe_a2a_token_chunks=2 ragged_buffer_factor=14.0 log_required_ragged_buffer_factor=true log_moe_dropped_tokens=true use_tokamax_kda=false kda_chunked_impl=subblock kda_sub_block=16 gdn_chunk_size=128 kda_pallas_fused=true kda_fused_token_major=true kda_outer_block=32 kda_inverse_precision=high kda_fused_input_proj=true kda_flat_head_layout=true kda_fused_state_stride=0 attention=flash use_tokamax_splash=false fused_lm_head_ce=true fused_lm_head_ce_block_t=512 fused_lm_head_ce_block_v=1024 fused_lm_head_ce_block_t_bwd=512 fused_lm_head_ce_block_v_bwd=128 logits_dot_in_fp32=false vocab_tiling_seq_major=true num_vocab_tiling=8 jax_cache_dir=gs://ai2-olmo-dev/olmo-3p5-maxtext/sft-bench/jax_cache/sftbench-3k-r96-ep32 enable_gcp_goodput_metrics=false enable_gcp_step_deviation_metrics=false async_checkpointing=false wsd_decay_steps_fraction=0.97 generate_padding_batch_train=true emo_enabled=true moe_topk_pallas=false emo_causal_pool=true emo_document_expert_pool_choices=[32,64,256] emo_document_expert_pool_probs=[0.125,0.125,0.75] emo_threshold_by_bisection=true emo_eval_document_expert_pool=256 checkpoint_period=500 max_num_checkpoints_to_keep=30 enable_data_shuffling=false
+  - LIBTPU_INIT_ARGS=--xla_tpu_spmd_rng_bit_generator_unsafe=true --xla_tpu_bf16_emission_mode=NATIVE_EMISSION --xla_tpu_scoped_vmem_limit_kib=16384 --xla_tpu_overlap_compute_collective_tc=true --xla_enable_async_all_gather=true --xla_enable_async_collective_permute=true --xla_jf_rematerialization_percent_shared_memory_limit=98 --xla_tpu_user_reserved_hbm_bytes=0
+  # An environment variable, not a libtpu flag: v4 megacore frees ~1 GiB of HBM.
+  - TPU_MEGACORE=MEGACORE_DENSE
+
+# The image H262 ran (its MaxText and Tunix are replaced on PYTHONPATH by the launcher's).
+images:
+- name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain
+  digest: sha256:65b676e80be73a0b6de37106ef5e4993f1f770a6cee06b5b9c228cf9ff07b131
