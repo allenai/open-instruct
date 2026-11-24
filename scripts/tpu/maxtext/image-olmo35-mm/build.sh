@@ -9,7 +9,7 @@
 #     run   217c8458: the reference run's image (jasonr-olmo35-mmsft-perf)
 #     e4    ed83783e: the faster E4 flags (jasonr-olmo35-mmsft-perf2)
 #     gates e3543ef2: perf2 + olmo_mm_batch_hash_steps, for ../k8s/olmo35-mm-sft-4x4x8-gate (jasonr-olmo35-mmsft-gates)
-#     small 312e4a39: gates + Small mm SFT config + prepacked text / image rows + keep_sources + producer loader, for
+#     small e162d68a: gates + Small mm SFT config + prepacked text / image rows + keep_sources + producer loader, for
 #           ../k8s/olmo35-small-mm-sft-* (jasonr-small-mm-sft); OLMo-core 7074cf40 (#942 head + #964, same loader as fd9bba1ba)
 # An existing tag is never rebuilt or overwritten: if the registry already has it, the script says so and exits 0. Only
 # the -olmocore- tag is pushed; the MaxText base it builds on stays local to the build.

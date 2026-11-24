@@ -96,10 +96,10 @@ configMapGenerator:
   # --xla_tpu_enable_async_ragged_all_to_all (the launcher refuses it).
   - LIBTPU_INIT_ARGS=--xla_tpu_spmd_rng_bit_generator_unsafe=true --xla_tpu_bf16_emission_mode=NATIVE_EMISSION --xla_tpu_scoped_vmem_limit_kib=16384 --xla_tpu_overlap_compute_collective_tc=true --xla_enable_async_all_gather=true --xla_enable_async_collective_permute=true --xla_jf_rematerialization_percent_shared_memory_limit=98 --xla_tpu_user_reserved_hbm_bytes=0
 
-# ../../image-olmo35-mm (./build.sh small): jason718/maxtext@312e4a396fa2d37e5991483c49020329b1cb68bf (branch
+# ../../image-olmo35-mm (./build.sh small): jason718/maxtext@e162d68a82ff1fd29763283f8fba8ef03ba148b5 (branch
 # jasonr-small-mm-sft: the gates code + the Small config + the prepacked-text/image-row loader of jasonr-small-mm-data
 # + olmo_mm_keep_sources + mid-training's producer loader) +
 # allenai/OLMo-core@7074cf40 (#942 head with #964; the loader is fd9bba1ba's). Not built yet: build, then apply.
 images:
 - name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext
-  newTag: 312e4a396fa2d37e5991483c49020329b1cb68bf-olmocore-7074cf408
+  newTag: e162d68a82ff1fd29763283f8fba8ef03ba148b5-olmocore-7074cf408
