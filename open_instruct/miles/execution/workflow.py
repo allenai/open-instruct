@@ -24,6 +24,7 @@ from open_instruct import logger_utils
 from open_instruct.miles.configuration import advisories, inference_profiles, topology
 from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import evaluation
+from open_instruct.miles.execution import wandb_identity
 from open_instruct.miles.execution.timing import stage
 from open_instruct.miles.infrastructure import artifacts
 from open_instruct.miles.rewards import judging
@@ -78,6 +79,10 @@ def recovery_configuration_matches(root, previous, document):
     for key in ("auto_resume", "max_retries"):
         if key in document["launch"]:
             recorded.setdefault("launch", {})[key] = document["launch"][key]
+    # Workspaces control where jobs are submitted, not the saved training state.
+    # Authenticate the original specification before allowing either destination
+    # to move; keep resource, recipe, and evaluation-protocol checks strict.
+    adopt_keys(recorded["launch"], document["launch"], ("workspace",))
     # Liveness patience is operational; authenticate the saved spec first and
     # retain strict checks on startup coordination and all training settings.
     old_coordination = recorded.get("launch", {}).get("coordination")
@@ -89,12 +94,15 @@ def recovery_configuration_matches(root, previous, document):
     adopt_keys(recorded, document, ("compiler_cache",))
     if isinstance(recorded.get("core"), dict) and isinstance(document.get("core"), dict):
         adopt_keys(recorded["core"], document["core"], COMPILER_CACHE_CORE_KEYS)
+        # Serving-failure patience is operational, like heartbeat patience: a run
+        # stopped by the isolated group retry limit can resume with a higher one.
+        adopt_keys(recorded["core"], document["core"], ("max_group_retries",))
     # Checkpoint/evaluation cadence changes only future artifact production.
     # Keep training horizon, evaluation tasks/scorers, and all recipe fields strict.
     if isinstance(recorded.get("training"), dict) and isinstance(document.get("training"), dict):
         adopt_keys(recorded["training"], document["training"], ("save_interval",))
     if isinstance(recorded.get("evaluation"), dict) and isinstance(document.get("evaluation"), dict):
-        adopt_keys(recorded["evaluation"], document["evaluation"], ("interval",))
+        adopt_keys(recorded["evaluation"], document["evaluation"], ("interval", "workspace"))
         old_tasks = recorded["evaluation"].get("tasks", [])
         new_tasks = document["evaluation"].get("tasks", [])
         if len(old_tasks) == len(new_tasks):
@@ -403,6 +411,8 @@ def execute(spec):
         checkpoint_root = Path(config.miles["save"])
         if spec.launch["auto_resume"] and (checkpoint_root / "core-latest.json").exists():
             config.miles["load"] = str(checkpoint_root)
+        # Every attempt on this output root continues one W&B run; miles.wandb_run_id wins.
+        wandb_identity.apply(root, spec, config.miles)
         resolved_plan = config.plan()
         write_json(root / "resolved-plan.json", resolved_plan)
         advisories.emit(resolved_plan)

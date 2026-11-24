@@ -70,6 +70,13 @@ class CoreConfig:
     # It is also what ends a request on a stalled engine, so a hang is noticed after
     # this long. The default router timeout (14,400 s) is above it.
     refresh_request_timeout: float = 3600.0
+    # Experimental, refresh only. Keep a group when at least this many members
+    # succeed after transport failures or timeouts. Failed slots use one-token
+    # padding. Active partial groups require both router auxiliary weights to be zero.
+    refresh_min_group_size: int | None = None
+    # Isolated retries of one prompt group after recoverable serving failures; the next
+    # failure stops the run. Retries count only while other generation succeeds.
+    max_group_retries: int = 3
     snapshot_capacity: int = 2
     row_specialization: str = "static"
     compiler_cache: bool = True
@@ -187,6 +194,7 @@ class CoreConfig:
         validation.boolean(self.prepared_batch_overlap, "core.prepared_batch_overlap")
         validation.choice(self.publication_mode, "core.publication_mode", ("barrier", "engine_drain", "refresh"))
         validation.integer(self.snapshot_capacity, "core.snapshot_capacity", minimum=1)
+        validation.integer(self.max_group_retries, "core.max_group_retries", minimum=1)
         for name in ("engine_drain_timeout", "engine_update_timeout", "refresh_request_timeout"):
             validation.number(getattr(self, name), f"core.{name}")
             if getattr(self, name) <= 0:
@@ -283,6 +291,11 @@ class CoreConfig:
         validation.number(self.expert_balance_search_seconds, "core.expert_balance_search_seconds")
         if self.packing_max_tokens is not None:
             validation.integer(self.packing_max_tokens, "core.packing_max_tokens", minimum=1)
+        size = self.refresh_min_group_size
+        if size is not None and (type(size) is not int or size < 2):
+            raise constraints.error(
+                f"core.refresh_min_group_size must be an integer of at least 2 or null; got {size!r}"
+            )
         if type(self.max_policy_lag) is not int or self.max_policy_lag < 0:
             raise constraints.error("core.max_policy_lag must be a nonnegative integer")
         validation.choice(self.router_aux_loss_grouping, "core.router_aux_loss_grouping", ("pack", "sequence"))
@@ -653,6 +666,26 @@ class RunConfig:
         for name in ("rollout_batch_size", "n_samples_per_prompt", "num_rollout", "num_epoch"):
             if name in options and (type(options[name]) is not int or options[name] < 1):
                 raise constraints.error(f"miles.{name} must be a positive integer")
+        minimum = self.core.refresh_min_group_size
+        if minimum is not None:
+            if self.core.publication_mode != "refresh":
+                raise constraints.error("core.refresh_min_group_size requires core.publication_mode=refresh")
+            if minimum > options.get("n_samples_per_prompt", 1):
+                raise constraints.error("core.refresh_min_group_size cannot exceed miles.n_samples_per_prompt")
+            partial = minimum < options.get("n_samples_per_prompt", 1)
+            if partial and (self.core.router_aux_loss_weight or self.core.router_z_loss_weight):
+                raise constraints.error(
+                    "Experimental partial refresh groups require "
+                    "core.router_aux_loss_weight=0 and core.router_z_loss_weight=0"
+                )
+            post_process = options.get("custom_reward_post_process_path")
+            if partial and post_process not in (None, EXCLUDE_UNGRADED, EXCLUDE_TRUNCATED):
+                # Mirrors MILES: partial groups pass masked dummies to the post-process,
+                # which must declare honors_exclude_from_reward_baseline (ours do).
+                raise constraints.error(
+                    "core.refresh_min_group_size below miles.n_samples_per_prompt requires the built-in reward "
+                    f"post-process or {EXCLUDE_UNGRADED} / {EXCLUDE_TRUNCATED}; got {post_process}"
+                )
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
         if collection and collection % samples:
             raise constraints.error(

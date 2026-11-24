@@ -387,7 +387,8 @@ def _verify_rendering_template(metadata, tokenizer):
         template = tokenizer.chat_template
         if not isinstance(template, str) or template_hash != hashlib.sha256(template.encode()).hexdigest():
             raise InputError(
-                "Prepared rendering template hash differs from the checkpoint chat template; re-render inputs"
+                "Prepared rendering template hash differs from the checkpoint chat template; re-render inputs "
+                "(python -m scripts.miles.rerender_prompts)"
             )
 
 

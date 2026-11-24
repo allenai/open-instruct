@@ -38,6 +38,13 @@ def specification(image, spec, *, hostnames=None, compiled=None):
         return opd_launch.specification(image, spec)
     evaluation.validate_scicode_reference_path(spec.evaluation)
     config = compiled if compiled is not None else spec.compile()
+    if config.core.checkpoint_process_count:
+        # Spawned writers rebuild CUDA IPC tensors via pidfd_getfd, which Beaker containers
+        # forbid; the first save then fails with BrokenProcessPool (wbcont-01).
+        raise InputError(
+            "core.checkpoint_process_count does not work in Beaker containers (pidfd_getfd is not "
+            "permitted, so the first checkpoint save fails); unset it and use core.checkpoint_thread_count"
+        )
     layout = topology.plan(spec, config)
     host_networking = layout["replicas"] > 1 or bool(spec.judges["judging"]["bindings"])
     allocated = layout["gpus_per_replica"]

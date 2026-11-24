@@ -189,6 +189,23 @@ def test_std_normalization_and_raw_passthrough_use_graded_responses_only(exclusi
     assert unnormalized == [1.0, 0.0, 1.0, 0.0]
 
 
+def test_partial_group_dummies_stay_out_of_the_baseline(exclusion, make_sample, batch):
+    # MILES replaces a transport-failed member with a masked copy of a sibling.
+    samples = batch()[:3] + [make_sample(1.0, group_index=0, index=3)]
+    samples[3].metadata["exclude_from_reward_baseline"] = True
+    _, normalized = exclusion.exclude_ungraded(args(grpo_std_normalization=True), samples)
+    values = torch.tensor([1.0, 0.0, 1.0])
+    expected = ((values - values.mean()) / (values.std() + 1e-6)).tolist() + [0.0]
+    assert normalized == pytest.approx(expected)
+    assert [sample.remove_sample for sample in samples] == [False, False, False, True]
+
+
+def test_exclusion_hooks_declare_that_they_honor_the_baseline_flag(exclusion):
+    # MILES refuses partial refresh groups with a post-process that lacks this declaration.
+    for hook in (exclusion.exclude_ungraded, exclusion.exclude_truncated):
+        assert hook.honors_exclude_from_reward_baseline is True
+
+
 def test_exclusion_requires_group_index_and_single_segment_rollouts(exclusion, make_sample):
     with pytest.raises(ValueError, match="group index"):
         exclusion.exclude_ungraded(args(), [make_sample(1.0, group_index=None, index=0)])
