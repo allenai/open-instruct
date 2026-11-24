@@ -106,11 +106,12 @@ RECIPES = {
         # The first ephemeral checkpoint (step 1000) lands after about 41 minutes.
         "min_runtime": "45m",
     },
-    # Olmo 3.5 Small hero (A4B MoE). c12r's data, cache, seeds and length (half an epoch of C12 plus the 10%
+    # Olmo 3.5 Small hero (A4B MoE). c12r's data, seeds and length (half an epoch of C12 plus the 10%
     # long-context replay) on the hero's 4T decay endpoint, peak LR 7.3e-5 (c12r's 2e-4 scaled by the bases'
     # pretraining LRs, 2e-4 x 4.04e-4 / 1.1e-3): the a4b arm of scripts/c12/h161_gpu_launch.sh on branch
-    # a4b-bigbatch (ledger H203). 2 x 8 B300 on holmes with experts sharded 8 ways inside each node; estimated ~38 h
-    # of training (~7.4 s/step from the #2291 300-step benchmark with nested checkpoints off).
+    # a4b-bigbatch (ledger H203). 2 x 8 B300 on holmes with experts sharded 8 ways inside each node; ~38 h of
+    # training (7.3 s/step over steps 100-300 on this image). On H203's own cache this image reproduces H203's
+    # CE step for step; main's cache has H203's tokens but also labels each turn's opening <think> (#1879).
     "a4b": {
         # Built from main (this repo's -cuda13-moe image: CUDA 13 + transformer-engine, which the A4B MoE needs).
         # The model config is configs/olmo_core/olmo35_small_a4b_sft.json: EMO off, sync_1d EP, flash_2 attention
@@ -119,10 +120,12 @@ RECIPES = {
         # s/step at the same CE; turning off block recompute instead OOMs).
         "image": "01M859SFVQ084G119EJTR3J2CE",
         "checkpoint": "/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-4t-decay159k-causal/step162974/model_and_optim",
-        # c12r's half epoch: same cache, replay and loader seed, so the same step. EP shards experts over
+        # c12r's half epoch: same rows, replay and loader seed, so the same step. EP shards experts over
         # the same 16 ranks, so the data-parallel batch stays 16 sequences per step.
         "steps": 18410,
         "seed": 34521,
+        # main's tokenization of c12r's mix (cache v10, tokenizer_default). The job dies before training if the
+        # arguments, tokenizer or code resolve to a different cache.
         "cache": "2db494257d-6068a350-rowaligned",
         "train_args": [
             "--config_name",

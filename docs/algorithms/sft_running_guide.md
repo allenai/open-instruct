@@ -33,14 +33,19 @@ uv run python scripts/train/sft.py --recipe a4b
 `a4b` is `c12r` (same data, replay, seeds and 18,410 steps) on the Olmo 3.5 Small
 hero (the A4B MoE) at its 4T decay endpoint (`olmo35-4b-active-4t-decay159k-causal`
 step 162974), peak LR 7.3e-5, with experts sharded 8 ways inside each node and the
-fused linear+CE loss. It runs on 2×8 B300 on `ai2/holmes`; about 7.4 s/step and 38 h are
-estimates from a 300-step run of the same flags (with the nested checkpoints off, per #2291)
-on the earlier image `01M6XV36`. The pinned image passed a 40-step smoke test (8.20 s/step
-over steps 10–40, matching CE); no full training run has used this recipe yet. It pins its
-own image because main's image has no transformer-engine, which the A4B MoE needs; that
-image also holds the model config (`scripts/c12/a4b_sft_config.json`), with whole-block
-recompute and the nested attention/MoE checkpoints off. All CLI flags documented above for
-`c12r` apply.
+fused linear+CE loss. It runs on 2×8 B300 on `ai2/holmes` at about 7.3 s/step (steps
+100–300), about 38 h for the full run. It pins a `-cuda13-moe` image built from main
+(transformer-engine, which the A4B MoE needs). The model config is
+`configs/olmo_core/olmo35_small_a4b_sft.json`: whole-block recompute with the nested
+attention/MoE checkpoints off (#2291), EMO off, `sync_1d` expert parallelism, `flash_2`
+attention.
+
+The data is H203's, tokenized by main: the same 29,450,253,121 tokens and rows, but main's
+labels also train on each assistant turn's opening `<think>` (#1879), so its CE is not
+H203's to the digit. On H203's own cache, the pinned image reproduces H203 (ledger)
+step for step (step-1 CE 1.29798 vs 1.29801). The replay is a copy of H182's
+(`replay-b1c12r`) with the row-aligned marker main's `--extra_numpy_dirs` check needs.
+All CLI flags documented above for `c12r` apply.
 
 Exporting these checkpoints to HF for evaluation is not yet one command; it follows
 ledger hypothesis H167's G4 step.
