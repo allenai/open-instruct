@@ -81,7 +81,7 @@ def test_seed_steps_and_checkpoint(monkeypatch, capsys):
 def test_gate_reference(monkeypatch, capsys):
     output, spec = plan(monkeypatch, capsys, "--recipe", "4n-emo256k", "--steps", "30", "--gate_reference")
     overrides = torchrun_args(spec)[4:]
-    assert f"--recipe.batch_hash_dir={output}/gates" in overrides
+    assert f"--recipe.batch_hash_dir={output.removeprefix('Output: ')}/gates" in overrides
     assert "--recipe.step1_reference=true" in overrides
 
 
