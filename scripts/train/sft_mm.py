@@ -163,6 +163,14 @@ def main():
         help="Stop after this many steps. The LR schedule keeps the recipe's full horizon, so this is for smoke tests.",
     )
     parser.add_argument("--workspace", default="ai2/olmo-instruct")
+    parser.add_argument(
+        "--output_root",
+        help="Where the run saves (<output_root>/<name>). Default: the user's deletable scratch on oe-adapt-default; "
+        "a run to keep saves under /weka/olmo-3p5-post-checkpoints/<user>/ (skills/storage in the ledger).",
+    )
+    parser.add_argument(
+        "--work_dir", help="The data loader's per-run index dir. Default: beside the default output root."
+    )
     parser.add_argument("--priority", default="high")
     parser.add_argument(
         "--min_runtime",
@@ -197,7 +205,8 @@ def main():
         user = "<user>"
     scratch = f"/weka/oe-adapt-default/allennlp/deletable_checkpoint/{user}"
     # The recipe saves to <output_root>/<run name>; the work dir holds the data loader's per-run indices.
-    output_root, work_dir = f"{scratch}/sft", f"{scratch}/sft_mm_work"
+    output_root = args.output_root or f"{scratch}/sft"
+    work_dir = args.work_dir or f"{scratch}/sft_mm_work"
 
     overrides = list(recipe["overrides"])
     if args.checkpoint:

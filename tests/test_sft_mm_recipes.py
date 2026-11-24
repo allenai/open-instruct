@@ -96,3 +96,14 @@ def test_job_script_is_valid_bash(monkeypatch, capsys, tmp_path):
     script = tmp_path / "job.sh"
     script.write_text(spec["tasks"][0]["arguments"][0])
     RUN(["bash", "-n", str(script)], check=True)
+
+
+def test_output_root_and_work_dir(monkeypatch, capsys):
+    root, work = (
+        "/weka/olmo-3p5-post-checkpoints/me/olmo35-mm-sft/checkpoints",
+        "/weka/olmo-3p5-post-checkpoints/me/cache",
+    )
+    output, spec = plan(monkeypatch, capsys, "--recipe", "4n-emo256k", "--output_root", root, "--work_dir", work)
+    assert output.startswith(f"Output: {root}/")
+    script = spec["tasks"][0]["arguments"][0]
+    assert f"--recipe.output_root={root}" in script and f"--recipe.work_dir={work}" in script
