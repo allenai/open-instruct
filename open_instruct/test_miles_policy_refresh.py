@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from open_instruct.miles.configuration.config import CoreConfig, RunConfig
+from open_instruct.miles.configuration.config import EXCLUDE_TRUNCATED, EXCLUDE_UNGRADED, CoreConfig, RunConfig
 
 
 def configured():
@@ -77,3 +77,75 @@ def test_refresh_checks_effective_json_graph_overrides(encode):
             "sglang_cuda_graph_config": encode({"decode": {"backend": "full"}}),
         },
     ).validate()
+
+
+def test_refresh_min_group_size_defaults_off_and_compiles_into_core_config():
+    assert CoreConfig().refresh_min_group_size is None
+    assert '"refresh_min_group_size": null' in configured().arguments()[-1]
+    config = configured()
+    config = dataclasses.replace(
+        config,
+        core=dataclasses.replace(
+            config.core, refresh_min_group_size=2, router_aux_loss_weight=0, router_z_loss_weight=0
+        ),
+        miles={**config.miles, "n_samples_per_prompt": 4, "global_batch_size": 8},
+    )
+    config.validate()
+    assert '"refresh_min_group_size": 2' in config.arguments()[-1]
+
+
+@pytest.mark.parametrize("value", [1, 0, True, 2.0, "2"])
+def test_refresh_min_group_size_must_be_an_integer_of_at_least_two(value):
+    with pytest.raises(ValueError, match="refresh_min_group_size"):
+        CoreConfig(publication_mode="refresh", max_policy_lag=2, refresh_min_group_size=value)
+
+
+def test_partial_groups_accept_only_baseline_aware_post_processes():
+    config = configured()
+    n = 4
+
+    def with_post_process(path):
+        miles = {**config.miles, "n_samples_per_prompt": n, "global_batch_size": 2 * n}
+        if path is not None:
+            miles["custom_reward_post_process_path"] = path
+        core = dataclasses.replace(
+            config.core,
+            refresh_min_group_size=n - 1,
+            reward_zero_truncated=False,
+            router_aux_loss_weight=0,
+            router_z_loss_weight=0,
+        )
+        return RunConfig(core, miles)
+
+    for accepted in (None, EXCLUDE_UNGRADED, EXCLUDE_TRUNCATED):
+        with_post_process(accepted).validate()
+    with pytest.raises(ValueError, match="requires the built-in reward post-process"):
+        with_post_process("custom.post_process").validate()
+    # Full groups keep any post-process.
+    miles = {
+        **config.miles,
+        "n_samples_per_prompt": n,
+        "global_batch_size": 2 * n,
+        "custom_reward_post_process_path": "custom.post_process",
+    }
+    RunConfig(
+        dataclasses.replace(config.core, refresh_min_group_size=n, reward_zero_truncated=False), miles
+    ).validate()
+
+
+def test_refresh_min_group_size_requires_refresh_and_fits_the_group():
+    config = configured()
+    with pytest.raises(ValueError, match="cannot exceed"):
+        dataclasses.replace(config, core=dataclasses.replace(config.core, refresh_min_group_size=3)).validate()
+    with pytest.raises(ValueError, match="publication_mode=refresh"):
+        RunConfig(CoreConfig(refresh_min_group_size=2), dict(config.miles)).validate()
+
+
+@pytest.mark.parametrize("weight", ["router_aux_loss_weight", "router_z_loss_weight"])
+def test_partial_groups_reject_router_losses(weight):
+    config = configured()
+    weights = dict(router_aux_loss_weight=0.0, router_z_loss_weight=0.0)
+    weights[weight] = 0.1
+    core = dataclasses.replace(config.core, refresh_min_group_size=2, **weights)
+    with pytest.raises(ValueError, match=rf"Experimental partial refresh groups require .*{weight}=0"):
+        RunConfig(core, {**config.miles, "n_samples_per_prompt": 4, "global_batch_size": 8}).validate()
