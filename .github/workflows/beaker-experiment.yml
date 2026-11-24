@@ -1,0 +1,80 @@
+name: Beaker Experiment Launch
+
+# TEMPORARY (branch kevinfarhat/rc-integration-2-image, never merged): build the MILES application image
+# (runtime/miles/Dockerfile, target "application") from the rc integration 2 commit 5b5d4f608 on the pinned binary base,
+# and create it on Beaker. No experiments are launched and no shared alias is published.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_BUILDKIT: "1"
+  MAIN_COMMIT: 5b5d4f6087d0ee349f5fbeaec7d677ce0b1f3def
+
+jobs:
+  launch-experiment:
+    name: Build MILES image (no launches)
+    runs-on: 8-Core-XL-Runner-Ubuntu-Latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use the integration commit's source (not this temp branch's commit)
+        run: |
+          git checkout --detach "$MAIN_COMMIT"
+          git rev-parse HEAD
+          test -z "$(git status --porcelain)"
+
+      - name: Free disk
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          docker system prune -af || true
+          df -h /
+
+      - name: Setup Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup Beaker
+        uses: allenai/setup-beaker@v2
+        with:
+          token: ${{ secrets.BEAKER_TOKEN }}
+          workspace: ai2/open-instruct-dev
+
+      - name: Pull pinned MILES binary base
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          BASE_BEAKER=$(jq -r .base_image.beaker runtime/miles/runtime.lock.json)
+          BASE_DOCKER=$(jq -r .base_image.docker_id runtime/miles/runtime.lock.json)
+          beaker image pull "$BASE_BEAKER" miles-binary-base:locked
+          docker image inspect miles-binary-base:locked --format '{{.Id}}'
+          test "$(docker image inspect miles-binary-base:locked --format '{{.Id}}')" = "$BASE_DOCKER"
+          df -h /
+
+      - name: Build application image and create it on Beaker
+        env:
+          BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
+        run: |
+          COMMIT=$(git rev-parse HEAD)
+          test "$COMMIT" = "$MAIN_COMMIT"
+          IMAGE_NAME="open-instruct-miles-rc2-${COMMIT:0:12}"
+          python scripts/miles/build_image.py --base-image miles-binary-base:locked --tag "$IMAGE_NAME"
+          docker run --rm --entrypoint cat "$IMAGE_NAME" /opt/core-rl/source-revision
+          df -h /
+          BEAKER_USER=$(beaker account whoami --format json | jq -r '.[0].name')
+          beaker image create "$IMAGE_NAME" -n "$IMAGE_NAME" -w "ai2/$BEAKER_USER" \
+            --description "TEMP MILES rc integration (dress rehearsal) (not for merge); open-instruct commit $COMMIT"
+          beaker image get "$BEAKER_USER/$IMAGE_NAME" --format json | jq '.[0] | {id, fullName, description, created}'
