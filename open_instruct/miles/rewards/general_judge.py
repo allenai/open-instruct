@@ -217,7 +217,7 @@ def _has_unclosed_inner_container(text: str) -> bool:
 def _recover_final_json_score(text: str) -> float | None:
     """Recover an unambiguous top-level final SCORE field from malformed judge JSON."""
     brace_idx = text.find("{")
-    if brace_idx == -1:
+    if brace_idx == -1 or _has_unclosed_inner_container(text[:brace_idx]):
         return None
     candidate = text[brace_idx:].strip()
 
