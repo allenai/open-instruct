@@ -9,6 +9,7 @@ import json
 import re
 import statistics
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 O = Path("/weka/oe-adapt-default/jacobm/olmicro")
@@ -126,32 +127,112 @@ keys = sorted({k for r in rows for k in r}, key=lambda k: list(rows[0]).index(k)
 with (OUT / "minerva_aime_evals.csv").open("w", newline="") as f:
     w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(rows)
 
-# Signal fraction (groups with mixed rewards) from inference records, by policy-version band.
-sig = []
-for name, size, *_ in RUNS:
-    files = glob.glob(str(O / f"inference-records/**/{name}-*/records-*.jsonl"), recursive=True)
-    if not files:
-        continue
-    bins = {}
-    for path in files:
+def group_records(name):
+    """Completed (non-aborted) group records of a run, from its MILES inference records."""
+    for path in glob.glob(str(O / f"inference-records/**/{name}-*/records-*.jsonl"), recursive=True):
         for line in open(path):
             try:
                 r = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if "responses" not in r or r.get("filter_decision") == "aborted":
-                continue
-            rs = [float(x["reward"]) for x in r["responses"]]
-            v = max(int(p) for x in r["responses"] for p in (x.get("policy_versions") or ["0"]))
-            b = "0-49" if v < 50 else ("50-199" if v < 200 else ("200-349" if v < 350 else "350-399"))
-            c = sum(x >= 1 for x in rs)
-            k = "signal" if 0 < c < len(rs) else ("all_wrong" if c == 0 else "all_right")
-            bins.setdefault(b, {"signal": 0, "all_wrong": 0, "all_right": 0})[k] += 1
+            if "responses" in r and r.get("filter_decision") != "aborted":
+                yield r
+
+
+def version(r):
+    return max(int(p) for x in r["responses"] for p in (x.get("policy_versions") or ["0"]))
+
+
+# Signal fraction (groups with mixed rewards) from inference records, by policy-version band.
+sig = []
+for name, size, *_ in RUNS:
+    bins = {}
+    for r in group_records(name):
+        rs = [float(x["reward"]) for x in r["responses"]]
+        v = version(r)
+        b = "0-49" if v < 50 else ("50-199" if v < 200 else ("200-349" if v < 350 else "350-399"))
+        c = sum(x >= 1 for x in rs)
+        k = "signal" if 0 < c < len(rs) else ("all_wrong" if c == 0 else "all_right")
+        bins.setdefault(b, {"signal": 0, "all_wrong": 0, "all_right": 0})[k] += 1
     for b, d in sorted(bins.items(), key=lambda kv: int(kv[0].split("-")[0])):
         n = sum(d.values())
         sig.append({"run": name, "size": size, "policy_versions": b, "groups": n, **{f"{k}_pct": round(100 * v / n, 1) for k, v in d.items()}})
 with (OUT / "signal_fraction.csv").open("w", newline="") as f:
     w = csv.DictWriter(f, fieldnames=list(sig[0])); w.writeheader(); w.writerows(sig)
+
+# Response length per 50-update policy-version band from inference records. "all" is every generated group;
+# "trained" (zero-std runs only) drops the groups filter_zero_std_groups removed before training. Groups finished under
+# the post-update-399 weights were drained at shutdown and never trained on (and skew long), so they are left out.
+lens = []
+for name, size, *_ in RUNS:
+    bins, any_filtered = {}, False
+    for r in group_records(name):
+        v = version(r)
+        if v >= 400:
+            continue
+        d = bins.setdefault(50 * (v // 50), {"all": [], "trained": []})
+        rows = [(int(x["response_tokens"]), str(x.get("truncated")) == "True", float(x["reward"]) >= 1) for x in r["responses"]]
+        d["all"] += rows
+        if r.get("filter_decision") == "filtered":
+            any_filtered = True
+        else:
+            d["trained"] += rows
+    for b, d in sorted(bins.items()):
+        for subset in ["all", "trained"] if any_filtered else ["all"]:
+            rows = d[subset]
+            if not rows:
+                continue
+            t = sorted(n for n, _, _ in rows)
+            lens.append({"run": name, "size": size, "policy_versions": f"{b}-{b + 49}", "subset": subset, "responses": len(rows),
+                         "mean_tokens": round(statistics.mean(t)), "median_tokens": round(statistics.median(t)), "p90_tokens": t[int(0.9 * (len(t) - 1))],
+                         "truncated_pct": round(100 * statistics.mean(tr for _, tr, _ in rows), 2), "correct_pct": round(100 * statistics.mean(c for _, _, c in rows), 1)})
+with (OUT / "response_lengths.csv").open("w", newline="") as f:
+    w = csv.DictWriter(f, fieldnames=list(lens[0])); w.writeheader(); w.writerows(lens)
+
+# Generation throughput over updates 100-399 (runs that stop before update 200, such as the 4+4 2.7B 32k run, from their
+# first version + 25). t(v) is when the first group carrying policy version v was recorded. End-to-end rates divide all
+# generation in [t(lo), t(hi)) (zero-std-filtered groups included) by that wall time, so they include in-loop evals and
+# weight syncs; median_s_per_update (the median t(v+1) - t(v)) leaves the eval pauses out. Decode rates are SGLang's
+# per-engine "gen throughput" log lines in the same window (TP1, so per GPU), with the requests that engine was decoding.
+DECODE = re.compile(r"\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\] Decode batch, #running-req: (\d+),.*gen throughput \(token/s\): ([\d.]+)")
+gpus = {r["run"]: r["inference_gpus"] for r in inventory}
+tput = []
+for name, size, *_ in RUNS:
+    recs = sorted((r["recorded_unix"], version(r), len(r["responses"]), sum(int(x["response_tokens"]) for x in r["responses"]),
+                   r.get("filter_decision") != "filtered") for r in group_records(name))
+    if not recs:
+        continue
+    top = max(v for _, v, *_ in recs if v < 400)
+    lo, hi = (100, top + 1) if top >= 200 else (min(v for _, v, *_ in recs) + 25, top + 1)
+    if hi - lo < 50:
+        continue
+    first, m = {}, -1
+    for t, v, *_ in recs:
+        while m < v:
+            m += 1
+            first[m] = t
+    t_lo, t_hi = first[lo], first.get(hi, recs[-1][0])
+    win = [r for r in recs if t_lo <= r[0] < t_hi]
+    sec = t_hi - t_lo
+    dec = []
+    for path in glob.glob(str(O / f"runs/{name}/wandb/wandb/run-*/files/output_*.log")):
+        for line in open(path, errors="replace"):
+            if "gen throughput" in line and (d := DECODE.search(line)):
+                ts = datetime.strptime(d[1], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+                if t_lo <= ts < t_hi:
+                    dec.append((int(d[2]), float(d[3])))
+    tput.append({
+        "run": name, "size": size, "inference_gpus": gpus[name], "updates": f"{lo}-{hi - 1}", "wall_hours": round(sec / 3600, 2),
+        "mean_s_per_update": round(sec / (hi - lo), 1), "median_s_per_update": round(statistics.median(first[v + 1] - first[v] for v in range(lo, hi - 1)), 1),
+        "responses_per_s": round(sum(n for _, _, n, _, _ in win) / sec, 2),
+        "trained_responses_per_s": round(sum(n for _, _, n, _, k in win if k) / sec, 2),
+        "gen_tokens_per_s": round(sum(tok for _, _, _, tok, _ in win) / sec),
+        "gen_tokens_per_s_per_gpu": round(sum(tok for _, _, _, tok, _ in win) / sec / gpus[name]),
+        "decode_tokens_per_s_per_gpu_median": round(statistics.median(x for _, x in dec)) if dec else "",
+        "decode_running_requests_median": statistics.median(n for n, _ in dec) if dec else "",
+    })
+with (OUT / "throughput.csv").open("w", newline="") as f:
+    w = csv.DictWriter(f, fieldnames=list(tput[0])); w.writeheader(); w.writerows(tput)
 
 # Difficulty-filtering summary per size from dataset manifests.
 def kept(d):

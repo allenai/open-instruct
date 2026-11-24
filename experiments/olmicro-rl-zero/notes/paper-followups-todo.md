@@ -20,6 +20,9 @@ Actionable follow-up experiments and analyses identified while drafting the RL-z
     - `[training] filter_zero_std_groups = true`
   - Validate, preflight, and submit via `tools/submit_excluding.py --exclude holmes-cs-aus-511.reviz.ai2.in` on 1 × 8-B300 node (2 trainer + 6 inference GPUs, identical to the 450M/275M zstd runs).
 - **Estimated cost:** ~3–4 h on 1 × 8-B300 node (the unfiltered 810M combined run took 1.73 h; ~20–35% keep rate means ~3–5× generation early, shrinking as signal rises).
+- **Status (2026-11-24): running.** Submitted at 2:39 PM PST and running since 2:42 PM PST as Beaker experiment `01M87VE3DZ6BV3EG17N4G37V9C`; the config is `configs/olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124.toml`.
+  - **Expected wall time:** ~3.5–5 h rather than 3–4 h. Zero-std filtering made the 450M and 275M runs 2.1× and 2.8× slower than their unfiltered runs (`tables/runs.csv`).
+  - **Post-run:** add the run to `RUNS` in `tools/gather_results.py` before re-running it.
 - **Post-run:** Re-run `tools/gather_results.py` to refresh `tables/runs.csv`, `tables/in_loop_evals.csv`, and `tables/signal_fraction.csv`. If final MATH-500 beats 22.2, update Tables `tab:rl-scaling` and `tab:rl-small-models` in `sections/post_training_results.tex`, Table `tab:rl-all-runs` in `sections/appendicies/rl_zero.tex`, and regenerate `figures/rl_zero_scaling.pdf` (also update the GPU-hours range in Section 4.3 and Section 1 if wall time changes).
 
 ---
@@ -34,6 +37,23 @@ Actionable follow-up experiments and analyses identified while drafting the RL-z
 - **How to run:**
   - Run `tools/length_by_version.py <RUN_NAME> 0 50 100 150 200 250 300 350` on Weka (or extend `tools/gather_results.py` to emit a `tables/response_lengths.csv` with mean, median, p90, and truncation rate per 50-update bin for every run in `tables/runs.csv`).
 - **Estimated cost:** CPU-only, <5 min.
+- **Status (2026-11-24): done.** `tools/gather_results.py` now writes `tables/response_lengths.csv`, which has a row for each run and each 50-update policy-version bin.
+  - **Columns:** response count, mean / median / p90 tokens, truncation %, correct %.
+  - **Subsets:** `subset = all` covers every generated group. `subset = trained` exists only for zero-std runs and drops the groups the filter removed.
+  - **Excluded:** groups finished under the post-update-399 weights. They were drained at shutdown, never trained on, and skew long.
+  - Mean tokens below are for updates 0–49 → 350–399; medians are in parentheses.
+  - **Long-CoT growth appears only at ≥1.4B, and the corrected numbers are larger than the ~10k / ~8.5k above:**
+    - **2.7B 32k:** 3.4k → 14.6k (0.9k → 14.5k), truncation ≤0.8%.
+    - **1.4B own band:** 1.3k → 8.9k (0.66k → 8.9k).
+    - **1.4B combined:** 1.5k → 10.1k.
+    - The jump starts at updates 50–99 for the 2.7B and around 150–199 for the 1.4B.
+    - **2.7B 8k cap:** rises to 5.5k by updates 100–149 (42% truncated). The cap then pushes it back to 3.9k (2.5% truncated).
+  - **≤810M, no growth under any recipe:** the median stays flat or shrinks, and the mean drops as the long tail of rambling, truncated responses disappears.
+    - **810M own band:** 1.3k → 0.59k (0.61k → 0.43k).
+    - **810M combined:** 1.2k → 0.54k (0.59k → 0.47k).
+    - **450M combined + zstd:** 1.2k → 0.63k (0.43k → 0.48k).
+    - **275M combined + zstd:** 1.7k → 0.57k (0.57k → 0.37k).
+    - **Without zstd,** the 450M / 275M means stay at ~1.0–1.1k at the end and medians are flat (~0.55k). Zero-std filtering mainly removes the long tail at these sizes.
 
 ---
 
@@ -64,6 +84,24 @@ Actionable follow-up experiments and analyses identified while drafting the RL-z
 ### 7. Inference throughput (`rollouts/sec` / tokens/sec) summary for Section 4.3
 - **Why it could help:** Yashas asked in Section 4.3 whether we can summarize `rollouts/sec` (and optionally compare against external small models) so readers have concrete throughput numbers alongside B300 GPU-hours.
 - **How to run:** First extract steady-state `rollouts/sec` and generated `tokens/sec/GPU` per size from Weka/W&B logs of our existing runs (CPU-only). Optionally run a short throughput benchmark (e.g., 20 steps or standalone SGLang rollout sweep at 32k) comparing an Olmicro size against a parameter-matched pure transformer (e.g., Qwen3 1.7B/4B) to highlight the 4:1 hybrid throughput advantage.
+- **Status (2026-11-24): CPU part done.** `tools/gather_results.py` now writes `tables/throughput.csv`, covering updates 100–399 of each run.
+  - **Where the numbers come from:** the end-to-end rates are everything generated (filtered groups included) divided by wall time, so in-loop evals, checkpoint saves and weight syncs are included. The decode rates are SGLang's per-engine `gen throughput` log lines; engines are TP1, so per engine means per GPU.
+  - **Headline runs:**
+
+    | Run (trainer + inference GPUs) | Responses/s | Generated tok/s (per inference GPU) | s/update median (mean) |
+    |---|---|---|---|
+    | 2.7B 32k (4+12) | 2.97 | 36.0k (3.0k) | 74 (86) |
+    | 2.7B 8k (4+4) | 6.28 | 27.8k (7.0k) | 32 (41) |
+    | 1.4B own band (4+4) | 4.73 | 29.4k (7.3k) | 44 (54) |
+    | 810M combined (2+6) | 22.2 | 16.6k (2.8k) | 4.9 (11.7) |
+    | 450M combined + zstd (2+6) | 30.7 generated, 8.2 trained | 25.4k (4.2k) | 19 (31) |
+    | 275M combined + zstd (2+6) | 31.4 generated, 6.6 trained | 29.2k (4.9k) | 28 (39) |
+
+  - **Zero-std filter cost:** the filter generates 3.7–4.7× more responses than it trains.
+  - **Caveat before quoting these numbers:** they are what our RL recipe achieved, not hardware limits.
+    - **Inference is concurrency-bound.** `in_flight = 512` is split across the engines, and per-GPU decode rate tracks requests per engine. The 4-engine runs average 74–92 requests per engine and decode 6.8–10.7k tok/s per GPU. The 6- and 12-engine runs average 21–34 requests and decode 3.6–6.0k tok/s per GPU.
+    - **Sub-1B runs without the filter are trainer- and eval-bound.** Their median is 4–11 s/update but their mean is 10–20 s; the gap is mostly the eval and checkpoint pauses every 50 updates.
+    - **For an architecture claim** (e.g. Olmicro vs. Qwen3 throughput), run the optional standalone SGLang sweep at fixed high concurrency rather than quoting these numbers.
 
 ### 8. Base `pass@k` vs. post-RL predictability (cross-model / ladder check)
 - **Why it could help:** Yashas asked in Section 4 whether base `pass@1` or `pass@k` better predicts post-RL accuracy. Across our 5 Olmicro sizes alone, base MATH `pass@1` and `pass@64` are collinear ($r = 0.98$), so separating them requires running matched RL-zero on external models (e.g., Qwen3 / Qwen3.5) or architecture-ladder checkpoints that differ in `pass@k` at similar `pass@1`. Only pursue if co-authors want a cross-model RL comparison.

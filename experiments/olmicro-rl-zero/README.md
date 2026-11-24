@@ -184,7 +184,7 @@ On Weka (`/weka/oe-adapt-default/jacobm/olmicro/`):
 In this folder:
 - `tables/`:
   - `runs.csv`, `in_loop_evals.csv`, `minerva_aime_evals.csv` (also per subject and pass@k);
-  - `signal_fraction.csv`, `difficulty_filtering.csv`;
+  - `signal_fraction.csv`, `response_lengths.csv` (training response length per 50-update bin), `throughput.csv` (generation and update rates, updates 100–399), `difficulty_filtering.csv`;
   - `math500-2.7b-runs-20261118.csv` (the 2.7B chart data).
 - `configs/`: every run TOML used (training runs, export-only and eval-only runs, smokes). Paths inside point at Weka.
 - `tools/`: data prep, sweep/eval generation and scoring, config generators, submit/preflight helpers, monitoring and orchestration scripts, Beaker specs (`tools/beaker-specs/`), FLA configs, the compiler-cache patch, and `gather_results.py`, which rebuilds `tables/`. These are snapshots of working scripts, not maintained library code.
