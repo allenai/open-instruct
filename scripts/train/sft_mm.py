@@ -76,6 +76,12 @@ RECIPES = {
         "steps": 10962,
         "timeout": "24h",
     },
+    # The dose sweep (ledger, proposed): 4n-emo256k with images at 3% of the loss (image tokens' weight x2.088).
+    "4n-emo256k-up3": {
+        "overrides": ["--recipe.base=256k-emo-causal", "--recipe.image_loss_share=0.03"],
+        "steps": 10962,
+        "timeout": "24h",
+    },
     # H231 Amendment 1: 4n-emo256k with the image dose raised to 12.675B tokens (images ~5% of the loss mass).
     "4n-emo256k-tok5": {
         "overrides": ["--recipe.base=256k-emo-causal", "--recipe.image_dose_tokens=1.2675e10"],
