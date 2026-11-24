@@ -15,17 +15,19 @@
   GC_MANUAL=N        with GC_FREEZE: also gc.disable() and run gc.collect() on every N-th Tunix save() call (once per
                      step), so no automatic collection lands inside a step's host work (x1e still had ~1.6 s every ~12).
 """
+import gc
 import os
 import sys
 import time
+
 from absl import app
+from maxtext.input_pipeline import multihost_dataloading
 from maxtext.trainers.post_train.sft import train_sft as T
+from tunix.sft import checkpoint_manager, peft_trainer
 
 
 def main():
     if os.environ.get("SKIP_FINAL_SAVE") == "1":
-        from tunix.sft import peft_trainer
-
         peft_trainer.PeftTrainer._save_last_checkpoint = lambda self: None
 
     if os.environ.get("DEFER_AUX_LOG") == "1":
@@ -55,9 +57,7 @@ def main():
         print("perf_wrapper: DEFER_AUX_LOG on", flush=True)
 
     if os.environ.get("SKIP_IDLE_SAVE") == "1":
-        from tunix.sft import checkpoint_manager as tcm
-
-        orig_save = tcm.CheckpointManager.save
+        orig_save = checkpoint_manager.CheckpointManager.save
 
         # Tunix resolves save_interval_steps into a save_decision_policy, so take the period from the MaxText argv.
         periods = [int(a.split("=", 1)[1]) for a in sys.argv[1:] if a.startswith("checkpoint_period=")]
@@ -69,20 +69,15 @@ def main():
                 return False
             if os.environ.get("MAXTEXT_DATA_STATE_DIR"):
                 # Fast-resume data state (raw rows consumed through this step), written before the checkpoint.
-                from maxtext.input_pipeline import multihost_dataloading
-
                 multihost_dataloading.write_data_state(step)
             return orig_save(self, step, model, optimizer, save_only_lora_params=save_only_lora_params, force=force,
                              custom_metadata=custom_metadata)
 
-        tcm.CheckpointManager.save = save
+        checkpoint_manager.CheckpointManager.save = save
         print("perf_wrapper: SKIP_IDLE_SAVE on", flush=True)
 
     if os.environ.get("GC_FREEZE") == "1":
-        import gc
-        from tunix.sft import peft_trainer as tpt
-
-        orig_train = tpt.PeftTrainer.train
+        orig_train = peft_trainer.PeftTrainer.train
 
         def train(self, *args, **kwargs):
             gc.collect()
@@ -93,13 +88,11 @@ def main():
                 print(f"perf_wrapper: GC_MANUAL gc.disable(), collect every {gc_every} steps", flush=True)
             return orig_train(self, *args, **kwargs)
 
-        tpt.PeftTrainer.train = train
+        peft_trainer.PeftTrainer.train = train
 
         gc_every = int(os.environ.get("GC_MANUAL", "0") or 0)
         if gc_every > 0:
-            from tunix.sft import checkpoint_manager as tcm2
-
-            inner_save = tcm2.CheckpointManager.save  # SKIP_IDLE_SAVE's wrapper when on (patched above)
+            inner_save = checkpoint_manager.CheckpointManager.save  # SKIP_IDLE_SAVE's wrapper when on (patched above)
 
             def gc_save(self, step, *args, **kwargs):
                 if step % gc_every == 0:
@@ -109,7 +102,7 @@ def main():
                         print(f"perf_wrapper: GC_MANUAL step {step} collected {n} in {time.perf_counter() - t0:.3f} s", flush=True)
                 return inner_save(self, step, *args, **kwargs)
 
-            tcm2.CheckpointManager.save = gc_save
+            checkpoint_manager.CheckpointManager.save = gc_save
 
     if os.environ.get("FORCE_NNX_CACHE") == "1":
 
