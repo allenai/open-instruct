@@ -451,7 +451,7 @@ MM = SCRIPTS / "olmo35-mm"
 MM_RUN = SCRIPTS / "k8s/olmo35-mm-sft-4x4x8"
 
 
-@pytest.mark.parametrize("label", ["run", "e4", "gates"])
+@pytest.mark.parametrize("label", ["run", "e4", "gates", "small"])
 @pytest.mark.parametrize("exists", [False, True])
 def test_mm_image_build_pins_commits_and_never_rebuilds_a_tag(tmp_path, label, exists):
     pins = {
@@ -504,9 +504,9 @@ def test_mm_image_build_refuses_unknown_label(tmp_path):
     assert "unknown image" in result.stderr
 
 
-def kustomize_literals(path):
+def kustomize_literals(path, name="olmo35-mm-sft-env"):
     config = yaml.safe_load(path.read_text())
-    literals = next(g["literals"] for g in config["configMapGenerator"] if g["name"] == "olmo35-mm-sft-env")
+    literals = next(g["literals"] for g in config["configMapGenerator"] if g["name"] == name)
     return dict(item.split("=", 1) for item in literals)
 
 
@@ -573,6 +573,114 @@ def test_mm_launcher_refuses_async_ragged_all_to_all(tmp_path):
     )
     assert result.returncode == 1
     assert "must not set" in result.stderr
+
+
+SMALL_RUN = SCRIPTS / "k8s/olmo35-small-mm-sft-8x8x8"
+SMALL_ENV = "olmo35-small-mm-sft-env"
+
+
+def small_literals(overlay="olmo35-small-mm-sft-8x8x8"):
+    return kustomize_literals(SCRIPTS / f"k8s/{overlay}/kustomization.yaml", SMALL_ENV)
+
+
+def test_small_mm_arms_train_the_same_text_rows():
+    image, text = small_literals(), small_literals("olmo35-small-mm-sft-4x4x8-noimg")
+    assert image["RUN_NAME"] == text["RUN_NAME"] == "CHANGE_ME"
+    rows = 16
+    assert int(image["OLMO_MM_SCHEDULE_STEPS"]) == int(image["STEPS"]) == 9632
+    assert int(text["OLMO_MM_SCHEDULE_STEPS"]) == int(text["STEPS"]) == 8076
+    assert int(text["OLMO_MM_IMAGE_ROWS"]) == 0 and text["OLMO_MM_CONFIG"] == ""
+    text_rows = {arm["OLMO_MM_TEXT_ROWS"] for arm in (image, text)} | {
+        str(9632 * rows - int(image["OLMO_MM_IMAGE_ROWS"])),
+        str(8076 * rows),
+    }
+    assert text_rows == {"129216"}
+    # The text arm overrides only its slice layout, schedule and data lines.
+    assert set(text) == {
+        "RUN_NAME",
+        "STEPS",
+        "SHARD_ARGS",
+        "TRAIN_ARGS",
+        "OLMO_MM_CONFIG",
+        "OLMO_MM_IMAGE_ROWS",
+        "OLMO_MM_SCHEDULE_STEPS",
+        "OLMO_MM_TEXT_ROWS",
+    }
+    assert "learning_rate_schedule_steps=8076" in text["TRAIN_ARGS"].split()
+    shard = dict(arg.split("=") for arg in text["SHARD_ARGS"].split())
+    assert (
+        int(shard["ici_data_parallelism"]) * int(shard["ici_fsdp_parallelism"]) * int(shard["ici_expert_parallelism"])
+        == 128
+    )
+    assert float(shard["per_device_batch_size"]) * 128 == rows
+
+
+@pytest.mark.parametrize(
+    "gate,run",
+    [
+        ("olmo35-small-mm-sft-8x8x8-gate", "olmo35-small-mm-sft-8x8x8"),
+        ("olmo35-small-mm-sft-4x4x8-noimg-gate", "olmo35-small-mm-sft-4x4x8-noimg"),
+    ],
+)
+def test_small_mm_gate_overlays_are_the_run_plus_the_gate_flags(gate, run):
+    base = small_literals()
+    run_env = {**base, **(small_literals(run) if run != "olmo35-small-mm-sft-8x8x8" else {})}
+    gate_env = small_literals(gate)
+    assert set(gate_env["TRAIN_ARGS"].split()) - set(run_env["TRAIN_ARGS"].split()) == {
+        "emo_document_expert_pool_choices=[256]",
+        "emo_document_expert_pool_probs=[1.0]",
+    }
+    assert set(run_env["TRAIN_ARGS"].split()) <= set(gate_env["TRAIN_ARGS"].split())
+    assert set(gate_env["EXTRA_ARGS"].split()) - set(base["EXTRA_ARGS"].split()) == {
+        "save_checkpoint_on_completion=false"
+    }
+    assert int(gate_env["STEPS"]) == 20 < int(gate_env["CHECKPOINT_PERIOD"])
+
+
+def small_launcher_env(**overrides):
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("WANDB", "OLMO", "TRAIN"))}
+    env.update(small_literals())
+    env.update(
+        {
+            "DRY_RUN": "1",
+            "JOB_COMPLETION_INDEX": "0",
+            "RUN_NAME": "test-run",
+            "LOAD_PARAMETERS_PATH": "gs://bucket/checkpoints/4625/items",
+        },
+        **overrides,
+    )
+    return env
+
+
+@pytest.mark.parametrize("name", ["LOAD_PARAMETERS_PATH", "OLMO_MM_CONFIG", "TRAIN_ARGS", "STEPS"])
+def test_small_mm_launcher_refuses_placeholders(name):
+    result = subprocess.run(
+        ["bash", str(SMALL_RUN / "train_mm_sft.sh")],
+        env=small_launcher_env(**{name: "x CHANGE_ME"}),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 2
+    assert f"Set {name}" in result.stderr
+
+
+def test_small_mm_launcher_dry_run_prints_the_train_command():
+    result = subprocess.run(
+        ["bash", str(SMALL_RUN / "train_mm_sft.sh")],
+        env=small_launcher_env(),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    line = next(line for line in result.stdout.splitlines() if line.startswith("DRY_RUN:"))
+    assert "maxtext.trainers.pre_train.train /deps/src/maxtext/configs/olmo/olmo35_small_mm_sft_64k.yml" in line
+    for arg in ["run_name=test-run", "steps=9632", "load_parameters_path=gs://bucket/checkpoints/4625/items"]:
+        assert f" {arg} " in line
+    assert (
+        "olmo_mm_config_path=/deps/src/maxtext/configs/olmo/olmo_mm/olmo35_small_mmsft_images_s2v1_1p55b.json" in line
+    )
 
 
 @pytest.mark.parametrize(

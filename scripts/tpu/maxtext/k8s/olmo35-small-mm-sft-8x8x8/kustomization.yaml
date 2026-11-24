@@ -1,0 +1,105 @@
+# Olmo 3.5 Small (A4B) multimodal SFT on TPU: the IMAGE arm of the Small ablation (ledger issue #1608), on the 512-chip
+# v4 8x8x8 (128 hosts), post-training queue. Owner decisions (Nov 24): text-matched arms; images on the 8x8x8, the
+# text-only arm on a 4x4x8 (../olmo35-small-mm-sft-4x4x8-noimg). Recipe in the image's
+# configs/olmo/olmo35_small_mm_sft_64k.yml (jason718/maxtext jasonr-small-mm-sft):
+#   - model olmo35-small-e256k8-sh2x + SigLIP2 25L + connector, scan_layers=true: the run9 mid-training checkpoint
+#     loads as is (decoder.layers_0.layer_N + decoder.scanned_blocks, vision kept; 858/858 parameters checked by name
+#     and shape against checkpoint 4625's metadata), all parameters train, fresh optimizer; <think> 100256 /
+#     </think> 100266 (untrained in the base) seeded at step 0 from the means of their pieces;
+#   - 16 x 65,536 a step, 9,632 steps; LR LM 7.3e-5 / connector 1.46e-4 / ViT 7.3e-6, 3% warmup (288) then linear to
+#     0 at 9,632; AdamW 0.9 / 0.95 / 1e-8, wd 0, clip 1.0 per group, z-loss 1e-5, load balancing 0.01 (sum, global),
+#     router losses over loss tokens; one token-weighted CE;
+#   - EMo causal with run9's pools (32 / 64 / 256 at 1/8, 1/8, 3/4; bisection; min 8; eval 256), both arms;
+#   - data4 x FSDP4 x EP32 on olmo35-ep-as-cp, context_parallel_load_balance=false, ragged buffer 14, REQUIRED_RBF and
+#     MOE-DROPPED every step (H267's layout); the 16 trained rows sit on 4 data hosts x 4 rows;
+#   - data: the text team's prepacked C16 control stream (H263's), all 129,216 rows of steps 1-8,076 in order, plus
+#     24,896 image rows (image-only stage-2 v1, 1.55B image tokens, ~1.5% of the loss) in evenly scheduled row slots,
+#     drawn by 16 OLMo-core image loader ranks (one per trained row, 4 per data host); a SMALLMM-ROWS line per step and
+#     data host names every row (text file#row or image hash); MM-BATCH-HASH for the image ranks' first 20 batches.
+# The pre-run gate is ../olmo35-small-mm-sft-8x8x8-gate. Run it first.
+#   kubectl kustomize . | less     # check the render
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+# The JobSet is immutable: delete it (kubectl -n olmo delete jobset olmo35-small-mm-sft) before applying again; the
+# same RUN_NAME then resumes from its last checkpoint (text rows skip by index; each image rank rebuilds the image
+# sequences it already drew, ~10 s each). Stop a run by deactivating its Kueue workload (spec.active=false).
+# The launcher refuses to start while RUN_NAME, LOAD_PARAMETERS_PATH, OLMO_MM_CONFIG, STEPS, TRAIN_ARGS or
+# SHARD_ARGS still hold CHANGE_ME.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: olmo
+
+resources:
+- jobset.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- name: olmo35-small-mm-sft-launcher
+  files:
+  - train_mm_sft.sh
+- name: olmo35-small-mm-sft-env
+  literals:
+  # Set a unique name before launching. Checkpoints and host logs go under OUTPUT_DIR/RUN_NAME; W&B uses it as the id.
+  - RUN_NAME=CHANGE_ME
+  - OUTPUT_DIR=gs://ai2-olmo-dev/post-training/runs
+  # The base: one committed save of the Small 256K multimodal mid-training (run9 hero), the same <step> for both arms.
+  # Parameters only (fresh optimizer); per-array zarr v2 as mid-training writes it. Saves land every 125 steps.
+  - LOAD_PARAMETERS_PATH=gs://ai2-olmo-dev/olmo-3p5-maxtext/runs/olmo35-small-mt256k-run9-v4-8x8x48-hero/checkpoints/CHANGE_ME/items
+  - CONFIG=/deps/src/maxtext/configs/olmo/olmo35_small_mm_sft_64k.yml
+  # The config's own schedule length; OLMO_MM_SCHEDULE_STEPS below places the image rows over the same steps.
+  - STEPS=9632
+  # ~0.8 TB a save with optimizer state; the config keeps up to 30, so nothing is deleted during the run. MaxText's
+  # checkpoint S holds the state after S+1 updates; the final save is dir 9631 (= step 9632).
+  - CHECKPOINT_PERIOD=1000
+  # Empty = the config's own mesh (data 4 x fsdp 4 x expert 32, per_device_batch_size 0.03125 = 16 rows).
+  - SHARD_ARGS=
+  # Recipe overrides; empty = the config as it is (think rows seeded at step 0 by the config).
+  - TRAIN_ARGS=
+  # The image-only OLMo-core mixture (stage-2 v1 without text_sft, 1.55B image tokens), shipped in the image.
+  - OLMO_MM_CONFIG=/deps/src/maxtext/configs/olmo/olmo_mm/olmo35_small_mmsft_images_s2v1_1p55b.json
+  # Prepacked text (16 rows a file, step00001..16152.npz, read over gs://); this run trains files 1-8,076 in order.
+  - OLMO_MM_TEXT_NPZ_DIR=gs://ai2-olmo-dev/post-training/data/c16-small-tpu-1501/prepacked/control/steps
+  # Guard: 9,632 x 16 - 24,896 image rows = 129,216 text rows = files 1-8,076, the text arm's rows exactly.
+  - OLMO_MM_TEXT_ROWS=129216
+  - OLMO_MM_IMAGE_ROWS=24896
+  - OLMO_MM_SCHEDULE_STEPS=9632
+  # Image rows are pulled only when their slot comes (about one per rank every ~30 s at ~5 s a step; measured ~10 s a
+  # sequence after a ~6.5 min cold start on CPU). olmo_mm_num_workers 16 and one batch prefetched are in the config.
+  # single-replica restore: one data replica reads the base and broadcasts it (mid-training's setting; large
+  # simultaneous restores have tripped the project's GCS egress quota).
+  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=true
+  # Orbax's multi-host barrier timeout (fixed 300 s) raised to 1 h: hosts that build the olmo_mm loader reach the
+  # checkpoint-load barrier minutes after the others.
+  - OLMO_ORBAX_BARRIER_TIMEOUT=3600
+  # W&B through Secret Manager (read with the node service account); empty turns W&B off.
+  - WANDB_SECRET=projects/ai2-olmo/secrets/wandb-api-key/versions/latest
+  - WANDB_ENTITY=ai2-llm
+  - WANDB_PROJECT=olmo35-maxtext
+  # The image recipe's data env, as OLMo-core's olmo35_mm_sft_beaker.py sets it, with the writable caches on local disk.
+  - MOLMO_DATA_DIR=/weka/oe-training-default/mm-olmo
+  - HF_HUB_CACHE=/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/hub
+  - HF_HUB_OFFLINE=1
+  - HF_HOME=/tmp/hf-home
+  - HF_DATASETS_CACHE=/tmp/hf-datasets
+  # As MaxText's Olmo 3.5 mid-training README requires (host-loop fast paths, no two-stage reduce-scatter).
+  - OLMOE3_ENABLE_2STAGE_RS=0
+  - OLMOE3_FAST_HOST_LOOP=1
+  - OLMOE3_FAST_SC_DEVICE_PUT=1
+  # An environment variable, not a libtpu flag: v4 megacore frees ~1 GiB of HBM.
+  - TPU_MEGACORE=MEGACORE_DENSE
+  - JAX_PLATFORMS=tpu,cpu
+  - ENABLE_PJRT_COMPATIBILITY=true
+  - XCLOUD_ENVIRONMENT=GCP
+  - DECOUPLE_GCLOUD=TRUE
+  # The Small text recipe's (h262-3k env.json) and mid-training's libtpu flags. Never add
+  # --xla_tpu_enable_async_ragged_all_to_all (the launcher refuses it).
+  - LIBTPU_INIT_ARGS=--xla_tpu_spmd_rng_bit_generator_unsafe=true --xla_tpu_bf16_emission_mode=NATIVE_EMISSION --xla_tpu_scoped_vmem_limit_kib=16384 --xla_tpu_overlap_compute_collective_tc=true --xla_enable_async_all_gather=true --xla_enable_async_collective_permute=true --xla_jf_rematerialization_percent_shared_memory_limit=98 --xla_tpu_user_reserved_hbm_bytes=0
+
+# ../../image-olmo35-mm (./build.sh small): jason718/maxtext@312e4a396fa2d37e5991483c49020329b1cb68bf (branch
+# jasonr-small-mm-sft: the gates code + the Small config + the prepacked-text/image-row loader of jasonr-small-mm-data
+# + olmo_mm_keep_sources + mid-training's producer loader) +
+# allenai/OLMo-core@7074cf40 (#942 head with #964; the loader is fd9bba1ba's). Not built yet: build, then apply.
+images:
+- name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext
+  newTag: 312e4a396fa2d37e5991483c49020329b1cb68bf-olmocore-7074cf408

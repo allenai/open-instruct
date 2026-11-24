@@ -1,0 +1,53 @@
+# TEXT-ONLY arm of the Small ablation (ledger issue #1608), on a v4 4x4x8 (128 chips, 32 hosts; owner decision Nov 24):
+# ../olmo35-small-mm-sft-8x8x8 with the image rows off (OLMO_MM_IMAGE_ROWS=0: step k trains prepacked file k, all 16
+# rows, files 1-8,076 = the same 129,216 text rows the image arm trains, in the same order), its own schedule
+# (8,076 steps: 3% warmup = 242, linear to 0 at 8,076), and H263's production layout for Small on 128 chips:
+# data1 x FSDP16 x EP8 on olmo35-ep-as-cp, per_device_batch_size 0.125 (128 rows loaded, rows 0-15 trained, on 8
+# data hosts x 2 rows), routing buffer factor 4.5. Same image, base, model (the vision tower is loaded and in the
+# optimizer; it sees no crops), think-row seeding, EMo, LR peak and optimizer as the image arm.
+# Differences from the image arm besides the images, by the owner's layout decision: the mesh (EP8 vs EP32: the
+# per-slice load-balancing loss and the required buffer depend on placement), the buffer (4.5 vs 14) and the slice.
+# H263 measured on this layout: ~9.6 s an update at EMo off and scan_layers=false; factor 7 did not fit (32.9 of
+# 31.75 GiB), 4.5 did. Here EMo is causal and the stack scanned: the gate (../olmo35-small-mm-sft-4x4x8-noimg-gate)
+# checks memory, REQUIRED_RBF and MOE-DROPPED before the run; fallback remat_policy=full (TRAIN_ARGS).
+#   kubectl kustomize . | less
+#   kubectl --context gke_ai2-olmo_us-central2-b_gke-tpu-v4 apply -k .
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../olmo35-small-mm-sft-8x8x8
+nameSuffix: -noimg
+configMapGenerator:
+- name: olmo35-small-mm-sft-env
+  behavior: merge
+  literals:
+  - RUN_NAME=CHANGE_ME
+  - STEPS=8076
+  - SHARD_ARGS=ici_data_parallelism=1 ici_fsdp_parallelism=16 ici_expert_parallelism=8 per_device_batch_size=0.125 ragged_buffer_factor=4.5
+  # The 8,076-step schedule: int(8076 * 0.02996...) = 242 warmup, int(8076 * 0.97003...) = 7,834 decay.
+  - TRAIN_ARGS=learning_rate_schedule_steps=8076 warmup_steps_fraction=0.02996532937097573 wsd_decay_steps_fraction=0.9700346706290243
+  # No image mixture, no image rows.
+  - OLMO_MM_CONFIG=
+  - OLMO_MM_IMAGE_ROWS=0
+  - OLMO_MM_SCHEDULE_STEPS=8076
+  - OLMO_MM_TEXT_ROWS=129216
+patches:
+- target:
+    kind: JobSet
+    name: olmo35-small-mm-sft
+  patch: |
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/parallelism
+      value: 32
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/completions
+      value: 32
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/nodeSelector/cloud.google.com~1gke-tpu-topology
+      value: 4x4x8
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/containers/0/envFrom/0/configMapRef/name
+      value: olmo35-small-mm-sft-env-noimg
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/volumes/0/configMap/name
+      value: olmo35-small-mm-sft-launcher-noimg

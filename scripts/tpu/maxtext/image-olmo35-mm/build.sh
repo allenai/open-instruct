@@ -5,10 +5,12 @@
 # loader). The tag is <maxtext commit>-olmocore-<first 9 of the OLMo-core commit>, the scheme of the reference run's
 # image. As in ../image/build.sh, the Dockerfile travels inside the build config as a base64 tarball (no source
 # upload), in steps of < 10,000 characters (Cloud Build's per-argument limit).
-#   ./build.sh [run|e4|gates]   (default run; maxtext_source pins each)
+#   ./build.sh [run|e4|gates|small]   (default run; maxtext_source pins each)
 #     run   217c8458: the reference run's image (jasonr-olmo35-mmsft-perf)
 #     e4    ed83783e: the faster E4 flags (jasonr-olmo35-mmsft-perf2)
 #     gates e3543ef2: perf2 + olmo_mm_batch_hash_steps, for ../k8s/olmo35-mm-sft-4x4x8-gate (jasonr-olmo35-mmsft-gates)
+#     small 312e4a39: gates + Small mm SFT config + prepacked text / image rows + keep_sources + producer loader, for
+#           ../k8s/olmo35-small-mm-sft-* (jasonr-small-mm-sft); OLMo-core 7074cf40 (#942 head + #964, same loader as fd9bba1ba)
 # An existing tag is never rebuilt or overwritten: if the registry already has it, the script says so and exits 0. Only
 # the -olmocore- tag is pushed; the MaxText base it builds on stays local to the build.
 # BUILD_SERVICE_ACCOUNT optionally names the account to build as (a full projects/<project>/serviceAccounts/<email>
