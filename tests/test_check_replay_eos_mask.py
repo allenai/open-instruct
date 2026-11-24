@@ -67,7 +67,8 @@ def setup_dirs(tmp_path, untrained_final=False):
     if untrained_final:
         set_label(replay, 2, False)
     write_dir(chat, [[[IM, 10, EOS], [IM, 11, EOS, IM, 12, EOS]]], mask=False, manifest=False)
-    numpy_dataset_conversion.write_replay_eos_masked_dir(replay, masked, EOS, IM)
+    pinned = check_script.sha256(os.path.join(replay, "manifest.jsonl"))
+    numpy_dataset_conversion.write_replay_eos_masked_dir(replay, masked, pinned, EOS, IM)
     return replay, chat, masked
 
 
@@ -155,3 +156,29 @@ def test_fails_a_chat_cache_row_without_im_start(tmp_path):
     write_dir(chat, [[[IM, 10, EOS], [11, EOS]]], mask=False, manifest=False)
     result = run(replay, masked, chat)
     assert not result["pass"] and result["totals"]["chat_not_im_start"] == 1
+
+
+def test_fails_a_blank_metadata_line(tmp_path):
+    replay, chat, masked = setup_dirs(tmp_path)
+    with gzip.open(os.path.join(replay, "token_ids_part_0001.csv.gz"), "at") as f:  # OUT's symlink sees it too
+        f.write("\n")
+    result = run(replay, masked, chat)
+    assert not result["pass"]
+    assert result["totals"]["metadata_malformed_lines"] == result["totals"]["statistics_mismatch"] == 1
+
+
+def test_fails_missing_output_statistics(tmp_path):
+    replay, chat, masked = setup_dirs(tmp_path)
+    os.remove(os.path.join(masked, "dataset_statistics.json"))
+    result = run(replay, masked, chat)
+    assert not result["pass"] and result["totals"]["statistics_missing"] == 1
+
+
+def test_fails_a_chat_part_whose_rows_do_not_tile_it(tmp_path):
+    replay, _, masked = setup_dirs(tmp_path)
+    chat = str(tmp_path / "chat-short")
+    write_dir(chat, [[[IM, 10, EOS, IM, 11, EOS]]], mask=False, manifest=False)
+    with gzip.open(os.path.join(chat, "token_ids_part_0000.csv.gz"), "wt") as f:
+        f.write("0,3\n")
+    result = run(replay, masked, chat)
+    assert not result["pass"] and result["totals"]["untiled_parts"] == 1

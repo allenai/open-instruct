@@ -9,6 +9,7 @@ The output layout for each `output_dir` is:
 """
 
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -646,6 +647,9 @@ OLMO35_IM_START_TOKEN_ID = 100264
 # The replay build's record (the ledger's experiments/c11/c11_replay.py build): one JSON line per document with its
 # `part`, `start`, `end` and `length_with_eos`.
 REPLAY_MANIFEST = "manifest.jsonl"
+# sha256 of H182's replay manifest (/weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r), computed
+# 2026-11-24; its ids, rows and tokens match the ledger's experiments/h182/receipts/r2_b1c12r.json.
+H182_REPLAY_MANIFEST_SHA256 = "2683f40911e79e95bae4d2202ada1b7f677b2b8daacf649b25ee929cd8dcc412"
 _PART_RE = {
     kind: re.compile(re.escape(glob).replace(r"\*", r"(\d+)") + "$")
     for kind, glob in (
@@ -690,8 +694,16 @@ def _numpy_dir_parts(numpy_dir: str) -> dict[str, dict[str, str]]:
 
 
 def _read_document_bounds(metadata_path: str) -> np.ndarray:
+    """Every line of a `.csv.gz` as (start, end). A blank or malformed line is refused: OLMo-core cannot parse
+    it, and main's startup check counts it as a row."""
+    rows = []
     with gzip.open(metadata_path, "rt") as f:
-        return np.array([line.split(",")[:2] for line in f if line.strip()], dtype=np.int64).reshape(-1, 2)
+        for number, line in enumerate(f, 1):
+            fields = line.rstrip("\n").split(",")
+            if len(fields) < 2 or not (fields[0].isdigit() and fields[1].isdigit()):
+                raise ValueError(f"{metadata_path}: line {number} is not a start,end row: {line!r}.")
+            rows.append((int(fields[0]), int(fields[1])))
+    return np.array(rows, dtype=np.int64).reshape(-1, 2)
 
 
 def _replay_manifest_bounds(src_dir: str) -> dict[str, np.ndarray]:
@@ -720,10 +732,14 @@ def _replay_manifest_bounds(src_dir: str) -> dict[str, np.ndarray]:
 def write_replay_eos_masked_dir(
     src_dir: str,
     out_dir: str,
+    expected_manifest_sha256: str,
     eos_token_id: int = OLMO35_EOS_TOKEN_ID,
     im_start_token_id: int = OLMO35_IM_START_TOKEN_ID,
 ) -> dict[str, Any]:
     """Write `out_dir`: the replay dir `src_dir` with the final-EOS label of each replay document cleared.
+
+    `src_dir`'s manifest must have sha256 `expected_manifest_sha256` (H182's: `H182_REPLAY_MANIFEST_SHA256`),
+    checked before anything is written, so the boundaries are the build's and not a rewritten record.
 
     Ledger H270's fix as data, for a long-context replay dir passed to olmo_core_finetune.py's
     `--extra_numpy_dirs` and written by the ledger's replay build, whose `manifest.jsonl` records every
@@ -741,6 +757,18 @@ def write_replay_eos_masked_dir(
     dropped for it. Returns the statistics written.
     """
     src_dir = os.path.realpath(src_dir)
+    manifest_path = os.path.join(src_dir, REPLAY_MANIFEST)
+    if not os.path.exists(manifest_path):
+        raise ValueError(f"{src_dir} has no {REPLAY_MANIFEST}, the replay build's per-document record.")
+    digest = hashlib.sha256()
+    with open(manifest_path, "rb") as f:
+        while block := f.read(1 << 24):
+            digest.update(block)
+    if digest.hexdigest() != expected_manifest_sha256:
+        raise ValueError(
+            f"{manifest_path} has sha256 {digest.hexdigest()}, not the pinned {expected_manifest_sha256}; "
+            "its boundaries cannot be tied to the replay build."
+        )
     parts = _numpy_dir_parts(src_dir)
     manifest = _replay_manifest_bounds(src_dir)
     if not parts["tokens"] or not (

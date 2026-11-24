@@ -919,9 +919,13 @@ class TestWriteReplayEosMaskedDir(unittest.TestCase):
         self.cache = os.path.join(self.tmp, "cache")
         _write_replay_dir(self.cache, [[_chat_row(12), _chat_row(13, 14)]], manifest=False)
 
-    def _masked(self, src, name="masked"):
+    def _masked(self, src, name="masked", manifest_sha256=None):
+        """Mask `src`, pinning its manifest's current sha256 unless another is given."""
+        if manifest_sha256 is None:
+            with open(os.path.join(src, "manifest.jsonl"), "rb") as f:
+                manifest_sha256 = hashlib.sha256(f.read()).hexdigest()
         out = os.path.join(self.tmp, name)
-        return out, numpy_dataset_conversion.write_replay_eos_masked_dir(src, out, _R_EOS, _R_IM)
+        return out, numpy_dataset_conversion.write_replay_eos_masked_dir(src, out, manifest_sha256, _R_EOS, _R_IM)
 
     def _startup_check(self, numpy_dir, sequence_length=8):
         """Current main's extra-dir validation at startup, under metadata boundaries (the default)."""
@@ -985,15 +989,35 @@ class TestWriteReplayEosMaskedDir(unittest.TestCase):
         ):
             self.assertEqual(a.read(), b.read())
 
-    def _refused(self, src, pattern):
+    def _refused(self, src, pattern, manifest_sha256=None):
         with self.assertRaisesRegex(ValueError, pattern):
-            self._masked(src)
+            self._masked(src, manifest_sha256=manifest_sha256)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "masked")))
+
+    def test_refuses_a_manifest_that_is_not_the_pinned_one(self):
+        """A rewritten manifest and CSV that cut [44, EOS, 55, EOS] at its interior EOS agree with each other."""
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([44, _R_EOS, 55, _R_EOS], True)]])
+        with open(os.path.join(src, "manifest.jsonl"), "rb") as f:
+            pinned = hashlib.sha256(f.read()).hexdigest()
+        with open(os.path.join(src, "manifest.jsonl"), "w") as f:
+            f.writelines(json.dumps({"part": 0, "start": a, "end": b}) + "\n" for a, b in ((0, 2), (2, 4)))
+        with gzip.open(os.path.join(src, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,2\n2,4\n")
+        self._refused(src, "not the pinned", manifest_sha256=pinned)
+
+    def test_refuses_a_blank_csv_line(self):
+        """OLMo-core cannot parse it, and main's startup check would count it as a row."""
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([20, _R_EOS], True), ([21, _R_EOS], True)]])
+        with gzip.open(os.path.join(src, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,2\n\n2,4\n")
+        self._refused(src, "not a start,end row")
 
     def test_refuses_a_dir_without_the_build_manifest(self):
         src = os.path.join(self.tmp, "src")
         _write_replay_dir(src, [[([20, 21, _R_EOS], True)]], manifest=False)
-        self._refused(src, "manifest.jsonl")
+        self._refused(src, "manifest.jsonl", manifest_sha256="0" * 64)
 
     def test_refuses_csv_rows_that_differ_from_the_manifest(self):
         """Rows split at an interior EOS, as an EOS scan gives, would make that EOS look final."""

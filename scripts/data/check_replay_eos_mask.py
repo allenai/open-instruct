@@ -17,9 +17,13 @@ yet recorded in the ledger. The check:
      token is <|endoftext|>, and the tokens before it hash to its tokens_sha256.
   4. Every inventory document's final label is untrained in OUT: a drop if SRC trained it, counted separately as
      already untrained if not. No other label differs: none cleared elsewhere, none added.
-Each --chat_dir (the chat cache trained beside it, which the fix leaves unmodified) must have every document start
-with <|im_start|>, so H270's rule would clear nothing there either. Inventory documents longer than
---max_seq_length are counted: training truncates them, so their cleared label never reaches a batch.
+  5. Every .csv.gz line is a start,end row, and OUT's dataset_statistics.json passes main's startup reading of it:
+     the row-aligned marker, total_instances equal to the metadata line count, and trainable_tokens equal to
+     OUT's trained labels.
+Each --chat_dir (the chat cache trained beside it, which the fix leaves unmodified) must have rows that tile each
+part and every document starting with <|im_start|>, so H270's rule would clear nothing there either. Inventory
+documents longer than --max_seq_length are counted: training truncates them, so their cleared label never reaches
+a batch.
 PASS (exit 0) iff every zero count is 0 and found == drops + already untrained == the pinned row count.
 """
 
@@ -61,6 +65,9 @@ ZERO = (
     "files_differ",
     "untiled_parts",
     "boundary_rows_differ",
+    "metadata_malformed_lines",
+    "statistics_missing",
+    "statistics_mismatch",
     "not_found",
     "mask_not_binary",
     "labels_added",
@@ -104,9 +111,28 @@ def token_memmap(numpy_dir: str, index: str, num_tokens: int) -> np.memmap:
     return np.memmap(path, mode="r", dtype=np.dtype(f"uint{8 * (os.path.getsize(path) // num_tokens)}"))
 
 
-def csv_rows(numpy_dir: str, index: str) -> np.ndarray:
+def csv_rows(numpy_dir: str, index: str) -> tuple[np.ndarray, int]:
+    """A part's `.csv.gz` as (start, end) rows, and how many of its lines are not such a row: OLMo-core cannot
+    parse those, and main's startup check counts every line as a row."""
+    rows, malformed = [], 0
     with gzip.open(os.path.join(numpy_dir, f"token_ids_part_{index}.csv.gz"), "rt") as f:
-        return np.array([line.split(",")[:2] for line in f if line.strip()], dtype=np.int64).reshape(-1, 2)
+        for line in f:
+            fields = line.rstrip("\n").split(",")
+            if len(fields) >= 2 and fields[0].isdigit() and fields[1].isdigit():
+                rows.append((int(fields[0]), int(fields[1])))
+            else:
+                malformed += 1
+    return np.array(rows, dtype=np.int64).reshape(-1, 2), malformed
+
+
+def tiles(rows: np.ndarray, num_tokens: int) -> bool:
+    return bool(
+        len(rows)
+        and rows[0, 0] == 0
+        and rows[-1, 1] == num_tokens
+        and (rows[1:, 0] == rows[:-1, 1]).all()
+        and (rows[:, 1] >= rows[:, 0]).all()
+    )
 
 
 def check(
@@ -158,7 +184,9 @@ def check(
         ):
             t["untiled_parts"] += 1
             continue
-        t["boundary_rows_differ"] += int(not np.array_equal(csv_rows(replay_dir, index), rows))
+        metadata, malformed = csv_rows(replay_dir, index)
+        t["metadata_malformed_lines"] += malformed
+        t["boundary_rows_differ"] += int(not np.array_equal(metadata, rows))
         part: collections.Counter = collections.Counter()
         for r, s, e in zip(records, starts, ends):
             doc = np.asarray(tokens[s:e])
@@ -172,6 +200,7 @@ def check(
         out = np.fromfile(os.path.join(masked_dir, f"labels_mask_part_{index}.npy"), dtype=np.uint8)
         part["mask_not_binary"] = int((src > 1).sum() + (out > 1).sum())
         src, out = src != 0, out != 0
+        t["out_trained_tokens"] += int(out.sum())
         final = ends - 1
         cleared = src & ~out
         cleared[final] = False
@@ -195,10 +224,33 @@ def check(
         found, _ = list_parts(chat_dir)
         for index in sorted(found["tokens"] & found["mask"] & found["metadata"]):
             num_tokens = os.path.getsize(os.path.join(chat_dir, f"labels_mask_part_{index}.npy"))
-            rows = csv_rows(chat_dir, index)
+            rows, malformed = csv_rows(chat_dir, index)
+            t["metadata_malformed_lines"] += malformed
+            if not tiles(rows, num_tokens):
+                t["untiled_parts"] += 1
+                continue
             rows = rows[rows[:, 1] > rows[:, 0]]
             t["chat_docs"] += len(rows)
             t["chat_not_im_start"] += int((token_memmap(chat_dir, index, num_tokens)[rows[:, 0]] != im_start).sum())
+
+    # OUT's own statistics, as main's startup check reads them (_check_row_aligned_cache): the row-aligned marker,
+    # one row per metadata line, and loss tokens counted from OUT's masks.
+    stats_path = os.path.join(masked_dir, "dataset_statistics.json")
+    t["statistics_missing"] = int(not os.path.isfile(stats_path))
+    if os.path.isfile(stats_path):
+        with open(stats_path) as f:
+            stats = json.load(f)
+        metadata_lines = 0
+        for name in os.listdir(masked_dir):
+            if name.startswith("token_ids_part_") and name.endswith(".csv.gz"):
+                with gzip.open(os.path.join(masked_dir, name), "rt") as f:
+                    metadata_lines += sum(1 for _ in f)
+        overall = stats.get("overall_statistics", {})
+        t["statistics_mismatch"] = int(
+            stats.get("configuration", {}).get("row_aligned_parts") is not True
+            or overall.get("total_instances") != metadata_lines
+            or overall.get("trainable_tokens") != t["out_trained_tokens"]
+        )
 
     ok = (
         all(t[k] == 0 for k in ZERO)
