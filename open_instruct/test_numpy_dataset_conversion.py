@@ -859,6 +859,23 @@ class TestResumeEquivalence(_NumpySftTestBase):
             with opener(golden / name, "rb") as f1, opener(interrupted / name, "rb") as f2:
                 self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
 
+    def test_resume_rejects_partial_files_longer_than_the_dataset(self):
+        golden = pathlib.Path(self.temp_dir.name) / "golden"
+        with (
+            unittest.mock.patch.object(
+                numpy_dataset_conversion, "_aggregate_stats", side_effect=RuntimeError("simulated interrupt")
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            self._run(golden, resume=False)
+        with (
+            unittest.mock.patch.object(
+                numpy_dataset_conversion, "_recover_partial_state", return_value=(10**6, 10**8)
+            ),
+            self.assertRaisesRegex(ValueError, "belong to another dataset"),
+        ):
+            self._run(golden, resume=True)
+
 
 if __name__ == "__main__":
     unittest.main()
