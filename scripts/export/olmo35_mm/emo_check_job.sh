@@ -11,6 +11,7 @@ STEP=${1:?usage: emo_check_job.sh STEP_DIR OUT_DIR}
 OUT=${2:?usage: emo_check_job.sh STEP_DIR OUT_DIR}
 HERE=$(cd "$(dirname "$0")" && pwd)
 OC=${OLMO_CORE_DIR:?set OLMO_CORE_DIR to an allenai/OLMo-core checkout at the multimodal SFT code}
+[[ -z ${OLMO_CORE_SHA:-} || $(git -C "$OC" rev-parse HEAD) == "$OLMO_CORE_SHA" ]] || { echo "$OC is not at OLMO_CORE_SHA=$OLMO_CORE_SHA" >&2; exit 1; }
 pip install -q -e "${OC}[fla,kernel-fun]" 2>&1 | tail -1
 export PYTHONPATH=$OC/src:$HERE/transformers_plugin/src
 CFG=$STEP/config.json

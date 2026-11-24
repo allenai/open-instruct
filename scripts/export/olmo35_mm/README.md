@@ -81,9 +81,12 @@ pip install -e scripts/export/olmo35_mm/transformers_plugin --no-deps -e scripts
 They are separate distributions on purpose: the vLLM plugin registers through the `vllm.general_plugins` entry point,
 which must not load in every open-instruct vLLM process, and `register()` imports OLMo-core's MoE v2 HF classes.
 
-The text eval cells H182/H231/H271 were scored with the scaling-ladders plugin trees their specs recorded
-(`scaling-ladders-hero` on Weka for most cells, `ladders-3542d99.tar` for BFCL). `run_eval.sh` keeps those by default;
-`PLUGIN_DIR=` points new runs at these copies instead.
+SFT evals never use scaling-ladders. `scripts/eval/olmo35_mm/launch_text_cells.py` rewrites every recorded text cell to
+install these copies from GitHub at an open-instruct commit, drops the BFCL cells' scaling-ladders archive steps, and
+refuses a spec that still mentions scaling-ladders. Note for comparisons: H182/H231/H271's text cells were scored
+with older plugin trees (a `scaling-ladders-hero` checkout for most cells; scaling-ladders `3542d99` for BFCL, whose
+vLLM executor predates the one copied here), so numbers from those runs and from these cells are only comparable
+after one checkpoint is scored both ways.
 
 ## Tests
 
@@ -100,7 +103,7 @@ export. `test_olmo35_mm_vllm_plugin.py` is scaling-ladders' `test_vllm_multimoda
 
 ## Pins
 
-- OLMo-core: allenai/OLMo-core@fd9bba1ba3f12721ae1ff3493f0b266366debec6 (#942) for `export_multimodal_olmoddp.py`,
+- OLMo-core: allenai/OLMo-core@7074cf408a157b71c5c74fbc749c4a757e047367 (#942 head, with #964) for `export_multimodal_olmoddp.py`,
   the multimodal model and the HF text model code.
 - Plugins: allenai/scaling-ladders@59534d7bda695c8dcbd7eb8e873472cba05c4993 (copied).
 - Export/eval scripts: H271's `/root/mmsft-eval/{export,tpu}` (olmo-post-training-ledger `experiments/mmsft/tpu/`),

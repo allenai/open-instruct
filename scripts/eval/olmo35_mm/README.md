@@ -68,4 +68,5 @@ Generalized from the scripts that ran H271 (olmo-post-training-ledger `experimen
 `run_gpu_seed_eval.sh`, `compare_tpu_gpu.py`, `compare_seeds.py`, `sanity_job.sh`, `sanity_vlm.py`, `export/*`).
 Changes: one launcher for GPU and TPU-converted checkpoints (the TPU-only stage/convert/verify stages moved to the
 TPU tooling), per-label job logs, paths as environment variables, the stop-token fix in the export, EMo check skipped
-for non-EMo runs, and the text cells' plugin source selectable (`PLUGIN_DIR`).
+for non-EMo runs, and the text cells' OLMoE3 plugins installed from this repo (`scripts/export/olmo35_mm`) at an open-instruct commit,
+never from scaling-ladders.

@@ -22,10 +22,11 @@ import shlex
 import subprocess
 import tempfile
 
-# allenai/OLMo-core#942 (branch jasonr/olmo35-multimodal-sft) head, the commit H230/H231 trained at. It is not on
+# allenai/OLMo-core#942 (branch jasonr/olmo35-multimodal-sft) head: H230/H231 trained at its parent fd9bba1ba; this
+# commit adds only #964 (HF export writes the <|im_end|> stop token), no training change. It is not on
 # OLMo-core main: if that branch is squash-merged and deleted, GitHub may stop serving this commit.
 OLMO_CORE_REPO = "https://github.com/allenai/OLMo-core.git"
-OLMO_CORE_SHA = "fd9bba1ba3f12721ae1ff3493f0b266366debec6"
+OLMO_CORE_SHA = "7074cf408a157b71c5c74fbc749c4a757e047367"
 # akshitab/olmo-core-tch2130cu130-fa4-rma-2026-09-11 (torch 2.13 + CUDA 13, FA4): the image H230/H231 ran on.
 IMAGE = "01M28XX5N4KM6PD0G81KC41BDW"
 CLUSTER = "ai2/holmes"

@@ -39,8 +39,9 @@ uv run python scripts/train/sft_mm.py --recipe 4n-emo256k --seed 34522    # the 
 multimodal sibling of [`sft.py`](sft_running_guide.md). It uses the same flags (`--checkpoint`, `--name`, `--seed`,
 `--steps`, `--workspace`, `--priority`, `--dry_run`) and the same resume-by-rerun behavior. The launch itself differs:
 
-- **Training code:** each replica fetches `allenai/OLMo-core` at `OLMO_CORE_SHA` (the #942 head the H230/H231 runs
-  trained at), checks that it got that commit, installs it, and runs `src/scripts/train/Olmo35-Multimodal-SFT.py`.
+- **Training code:** each replica fetches `allenai/OLMo-core` at `OLMO_CORE_SHA` (#942's head, `7074cf40`: the commit
+  H230/H231 trained at, `fd9bba1ba`, plus #964, which fixes the stop tokens in OLMo-core's own HF export and changes
+  no training code), checks that it got that commit, installs it, and runs `src/scripts/train/Olmo35-Multimodal-SFT.py`.
   open-instruct's own `olmo-core` pin in `pyproject.toml` is not involved, so text SFT is unaffected.
 - **Image:** the OLMo-core image the runs used (`olmo-core-tch2130cu130-fa4-rma-2026-09-11`: torch 2.13, CUDA 13,
   FA4), pinned by Beaker ID. Nothing needs building.

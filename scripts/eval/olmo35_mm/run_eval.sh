@@ -30,8 +30,8 @@
 #   EVAL_HOME                 local state, specs, launch logs [~/.cache/olmo35-mm-eval]; JOB_LOG [$EVAL_HOME/jobs/$LABEL.log]
 #   OI_JOB_DIR                this open-instruct checkout as Beaker jobs see it (on Weka) [this checkout, if on /weka]
 #   OLMO_CORE_DIR             job-visible allenai/OLMo-core checkout at the multimodal SFT code (#942)
-#                             [/weka/oe-training-default/jasonr/home/OLMo-core-wt-sweep-fd9bba1]
-#   OLMO_CORE_SHA             OLMo-core the vision jobs install [fd9bba1ba3f12721ae1ff3493f0b266366debec6 = #942]
+#                             [/weka/oe-training-default/jasonr/home/OLMo-core-mmsft-7074cf4]
+#   OLMO_CORE_SHA             OLMo-core the vision jobs install [7074cf408a157b71c5c74fbc749c4a757e047367 = #942 head, with #964]
 #   OLMO_EVAL_DIR             local allenai/olmo-eval checkout, branch jasonr/olmo35-mmsft-eval, pushed and clean
 #                             (eval_vision.sh runs its HEAD) [/root/olmo-eval-wt-mmsft]; OLMO_EVAL_PY [python]
 #   OLMO_EVAL_JOB_DIR         the same olmo-eval as jobs see it (sanity) [/weka/oe-training-default/jasonr/home/olmo-eval-wt-mmsft]
@@ -42,8 +42,8 @@
 #   JOB_CLUSTERS, JOB_PREEMPTIBLE  1-GPU jobs (export/sanity/emocheck) [ai2/holmes], [unset = not preemptible]
 #   JOB_IMAGE                 [01M28XX5N4KM6PD0G81KC41BDW = akshitab/olmo-core-tch2130cu130-fa4-rma-2026-09-11]
 #   TEXT_CLUSTER              [ai2/holmes]; BFCL_CLUSTER [ai2/jupiter]; BFCL_WORKSPACE [ai2/olmo-instruct]
-#   PLUGIN_DIR                re-point the text cells' OLMoE3 plugins at a job-visible scripts/export/olmo35_mm
-#                             [unset = the recorded scaling-ladders runtime, needed for comparisons with past runs]
+#   OI_REF                    open-instruct commit the text cells install the OLMoE3 plugins from (never
+#                             scaling-ladders) [this checkout's HEAD; must be pushed]
 #   SANITY_REF                reference export(s) for the sanity side-by-side [none]
 set -uo pipefail
 LABEL=${1:?usage: run_eval.sh LABEL STEP_DIR}
@@ -68,8 +68,8 @@ STATE=$EVAL_HOME/state/$LABEL; SPECS=$EVAL_HOME/specs/$LABEL; LAUNCH=$EVAL_HOME/
 JOB_LOG=${JOB_LOG:-$EVAL_HOME/jobs/$LABEL.log}
 if [[ -z ${OI_JOB_DIR:-} && $OI_DIR == /weka/* ]]; then OI_JOB_DIR=$OI_DIR; fi
 OI_JOB_DIR=${OI_JOB_DIR:-}
-export OLMO_CORE_DIR=${OLMO_CORE_DIR:-/weka/oe-training-default/jasonr/home/OLMo-core-wt-sweep-fd9bba1}
-OLMO_CORE_SHA=${OLMO_CORE_SHA:-fd9bba1ba3f12721ae1ff3493f0b266366debec6}
+export OLMO_CORE_DIR=${OLMO_CORE_DIR:-/weka/oe-training-default/jasonr/home/OLMo-core-mmsft-7074cf4}
+OLMO_CORE_SHA=${OLMO_CORE_SHA:-7074cf408a157b71c5c74fbc749c4a757e047367}
 OLMO_EVAL_DIR=${OLMO_EVAL_DIR:-/root/olmo-eval-wt-mmsft}; OLMO_EVAL_PY=${OLMO_EVAL_PY:-python}
 OLMO_EVAL_JOB_DIR=${OLMO_EVAL_JOB_DIR:-/weka/oe-training-default/jasonr/home/olmo-eval-wt-mmsft}
 LEDGER_DIR=${LEDGER_DIR:-/root/olmo-post-training-ledger}
@@ -153,7 +153,7 @@ if [[ -n $REUSE ]]; then
   EXP=reused; note "reusing the existing verified export in $OUT (REUSE_EXPORT=1)"
 fi
 if has export && [[ -z $EXP ]]; then
-  EXP=$(submit "mmsft-export-$LABEL" "OLMO_CORE_DIR=$OLMO_CORE_DIR bash $(job_script export/olmo35_mm/export_all_job.sh) $DCP $OUT") \
+  EXP=$(submit "mmsft-export-$LABEL" "OLMO_CORE_DIR=$OLMO_CORE_DIR OLMO_CORE_SHA=$OLMO_CORE_SHA bash $(job_script export/olmo35_mm/export_all_job.sh) $DCP $OUT") \
     || die "export submit failed"
   record export "$EXP"; note "export: $EXP"
 fi
@@ -172,7 +172,7 @@ text_export_ok() {  # hf_text exists and passed the smoke (TOKENIZER-CHECK OK)
 # ------------------------------------------------------------------------------------------------ sanity
 if has sanity && [[ -z $(recorded sanity) ]]; then
   vision_export_ok || die "export job $EXP failed before the verified olmo-core-export"
-  id=$(submit "mmsft-sanity-$LABEL" "OLMO_CORE_DIR=$OLMO_CORE_DIR OLMO_EVAL_JOB_DIR=$OLMO_EVAL_JOB_DIR bash $(job_script eval/olmo35_mm/sanity_job.sh) $OUT/olmo-core-export ${SANITY_REF:-}") \
+  id=$(submit "mmsft-sanity-$LABEL" "OLMO_CORE_DIR=$OLMO_CORE_DIR OLMO_CORE_SHA=$OLMO_CORE_SHA OLMO_EVAL_JOB_DIR=$OLMO_EVAL_JOB_DIR bash $(job_script eval/olmo35_mm/sanity_job.sh) $OUT/olmo-core-export ${SANITY_REF:-}") \
     || die "sanity submit failed"
   record sanity "$id"; note "sanity: $id"
 fi
@@ -216,7 +216,7 @@ fi
 # ------------------------------------------------------------------------------------------------ emocheck
 if has emocheck && [[ -z $(recorded emocheck) ]]; then
   text_export_ok || die "text export failed; see beaker experiment logs $EXP"
-  id=$(submit "mmsft-emocheck-$LABEL" "OLMO_CORE_DIR=$OLMO_CORE_DIR bash $(job_script export/olmo35_mm/emo_check_job.sh) $DCP $OUT") \
+  id=$(submit "mmsft-emocheck-$LABEL" "OLMO_CORE_DIR=$OLMO_CORE_DIR OLMO_CORE_SHA=$OLMO_CORE_SHA bash $(job_script export/olmo35_mm/emo_check_job.sh) $DCP $OUT") \
     || die "emo check submit failed"
   record emocheck "$id"; note "emocheck: $id"
 fi
@@ -229,7 +229,7 @@ if has text && [[ $TEXT_CELLS != none && -z $(recorded text) ]]; then
     local cmd=(python3 "$HERE/launch_text_cells.py" "$OUT/export/hf_text" "$LABEL" --olmo-eval-dir "$OLMO_EVAL_DIR"
       --ledger "$LEDGER_DIR" --cells "$@" --cluster "$cluster" --workspace "$ws" --priority "$PRIORITY"
       --user "$SECRET_USER" --specs "$SPECS/text")
-    [[ -n ${PLUGIN_DIR:-} ]] && cmd+=(--plugin-dir "$PLUGIN_DIR")
+    [[ -n ${OI_REF:-} ]] && cmd+=(--oi-ref "$OI_REF")
     [[ -n $DRY ]] && cmd+=(--dry-run)
     echo "+ ${cmd[*]}"
     "${cmd[@]}" 2>&1 | while read -r line; do [[ -n $line ]] && note "text cell $line"; done

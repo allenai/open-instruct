@@ -2,17 +2,21 @@
 
     python launch_text_cells.py HF_TEXT_DIR LABEL --olmo-eval-dir DIR --ledger DIR --cells ifeval gpqa ... \\
         [--cluster ai2/holmes] [--workspace ai2/oe-olmo3p5-mt] [--priority urgent] [--user NAME] \\
-        [--plugin-dir DIR] [--specs DIR] [--dry-run]
+        [--oi-ref SHA] [--specs DIR] [--dry-run]
 
 Each cell's Beaker spec is built by olmo-eval's ``scripts/olmo35_mmsft/text_cells.py`` ``build()`` (allenai/olmo-eval
 branch jasonr/olmo35-mmsft-eval, H231/H271's runs used 11dce79286f3787238e4d051e137b534e6b7f82e) from the ledger's
 recorded H182 text SFT control specs (``experiments/h182/eval/{specs,holmes-cu130/specs}``): task, sampling, olmo-eval
-commit, vLLM and the OLMoE3 plugins stay as recorded; only the model path, names, per-user secrets and placement
-change. A refused priority is retried one level lower (urgent -> high -> normal), per cell.
+commit and vLLM stay as recorded; the model path, names, per-user secrets and placement change. A refused priority is
+retried one level lower (urgent -> high -> normal), per cell.
 
-``--plugin-dir`` points the cells' OLMoE3 vLLM/transformers plugin installs at a job-visible copy of this repo's
-``scripts/export/olmo35_mm`` instead of the recorded scaling-ladders trees. Off by default: the recorded runtime is
-what the GPU arms were scored with, so a TPU-vs-GPU or seed comparison must keep it.
+No scaling-ladders: the recorded specs install the OLMoE3 vLLM/transformers plugins from scaling-ladders trees (a Weka
+checkout, or for BFCL an unpacked scaling-ladders archive). Every cell is rewritten to install this repo's copies
+instead, ``scripts/export/olmo35_mm/{vllm_plugin,transformers_plugin}`` at open-instruct commit ``--oi-ref`` (default:
+this checkout's HEAD, which must be pushed), from GitHub; the archive steps are dropped. A spec that still mentions
+scaling-ladders after the rewrite is refused. The copies are a newer plugin than some recorded cells ran (see
+scripts/export/olmo35_mm/README.md), so a comparison with numbers scored under the recorded runtime needs the
+reference re-scored with these cells first.
 
 Prints one ``<experiment name>: <id>`` line per cell (``DRYRUN <spec path>`` with --dry-run), the format
 run_eval.sh records and compare.py reads.
@@ -26,9 +30,16 @@ from importlib import util
 from pathlib import Path
 
 PRIORITIES = ("urgent", "high", "normal")
+OI_REPO = "https://github.com/allenai/open-instruct.git"
+PLUGIN_SUBDIR = "scripts/export/olmo35_mm"
+PACKAGES = {"vllm_plugin": "olmoe3-vllm-plugin", "transformers_plugin": "olmoe3-transformers-plugin"}
 # Recorded plugin installs: a requirement `olmoe3-...-plugin @ file:///.../ladders/olmoe3/<pkg>` (vLLM cells) or an
 # editable install of an unpacked scaling-ladders archive `-e /tmp/hero-ladder/ladders/olmoe3/<pkg>` (BFCL cells).
-PLUGIN_PATH = re.compile(r"(file://)?/[^\s,\"']*?/ladders/olmoe3/(vllm_plugin|transformers_plugin)")
+FILE_REQ = re.compile(r"file:///[^\s,\"']*?/ladders/olmoe3/(vllm_plugin|transformers_plugin)")
+EDITABLE = re.compile(r"-e\s+/[^\s,\"']*?/ladders/olmoe3/(vllm_plugin|transformers_plugin)")
+# The BFCL cells' archive steps: checksum, unpack and existence check of the scaling-ladders archive.
+ARCHIVE_LINE = re.compile(r"^.*(ladders-[0-9a-f]{7,40}\.tar|/tmp/hero-ladder/ladders).*\n?", re.MULTILINE)
+SCALING_LADDERS = re.compile(r"scaling-ladders|/ladders/olmoe3|ladders-[0-9a-f]{7,40}\.tar|hero-ladder")
 
 
 def load_text_cells(olmo_eval_dir: Path):
@@ -41,15 +52,23 @@ def load_text_cells(olmo_eval_dir: Path):
     return module
 
 
-def use_plugin_dir(spec: dict, plugin_dir: str) -> int:
-    """Re-point the cell's OLMoE3 plugin installs at ``plugin_dir``/{vllm_plugin,transformers_plugin}; returns hits."""
+def plugin_url(ref: str, pkg: str) -> str:
+    return f"git+{OI_REPO}@{ref}#subdirectory={PLUGIN_SUBDIR}/{pkg}"
+
+
+def use_open_instruct_plugins(spec: dict, ref: str) -> int:
+    """Install the cell's OLMoE3 plugins from this repo at ``ref`` instead of scaling-ladders; returns installs moved.
+
+    Raises SystemExit if any scaling-ladders reference is left.
+    """
     hits = 0
 
     def sub(text: str) -> str:
         nonlocal hits
-        new, n = PLUGIN_PATH.subn(lambda m: f"{m.group(1) or ''}{plugin_dir.rstrip('/')}/{m.group(2)}", text)
-        hits += n
-        return new
+        text, n1 = FILE_REQ.subn(lambda m: plugin_url(ref, m.group(1)), text)
+        text, n2 = EDITABLE.subn(lambda m: f"'{PACKAGES[m.group(1)]} @ {plugin_url(ref, m.group(1))}'", text)
+        hits += n1 + n2
+        return ARCHIVE_LINE.sub("", text)
 
     task = spec["tasks"][0]
     task["arguments"] = [sub(a) for a in task["arguments"]]
@@ -58,7 +77,21 @@ def use_plugin_dir(spec: dict, plugin_dir: str) -> int:
         {**entry, "value": sub(entry["value"])} if isinstance(entry.get("value"), str) else entry
         for entry in task.get("envVars", [])
     ]
+    left = SCALING_LADDERS.findall(json.dumps(spec))
+    if left:
+        raise SystemExit(f"spec still references scaling-ladders after the rewrite: {sorted(set(left))}")
     return hits
+
+
+def head_ref() -> str:
+    here = Path(__file__).resolve().parent
+    return subprocess.run(["git", "-C", str(here), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def check_pushed(ref: str) -> None:
+    res = subprocess.run(["gh", "api", f"repos/allenai/open-instruct/commits/{ref}", "--jq", ".sha"], capture_output=True, text=True)
+    if res.returncode != 0 or not res.stdout.strip().startswith(ref[:7]):
+        raise SystemExit(f"open-instruct commit {ref} is not on GitHub; push it first (the cells install the plugins from it)")
 
 
 def cell_source(ledger: Path, prefix: str, cell: str, cluster: str) -> Path:
@@ -83,11 +116,14 @@ def main() -> None:
     parser.add_argument("--workspace", default="ai2/oe-olmo3p5-mt")
     parser.add_argument("--priority", default="urgent", choices=PRIORITIES)
     parser.add_argument("--user", required=True, help="prefix of the <user>_HF_TOKEN / <user>_WANDB_API_KEY secrets")
-    parser.add_argument("--plugin-dir", default=None)
+    parser.add_argument("--oi-ref", default=None, help="open-instruct commit to install the plugins from [HEAD]")
     parser.add_argument("--specs", type=Path, default=Path("specs"))
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    ref = args.oi_ref or head_ref()
+    if not args.dry_run:
+        check_pushed(ref)
     text_cells = load_text_cells(args.olmo_eval_dir)
     args.specs.mkdir(parents=True, exist_ok=True)
     for cell in args.cells:
@@ -96,8 +132,8 @@ def main() -> None:
         result = None
         for priority in PRIORITIES[PRIORITIES.index(args.priority) :]:
             spec = text_cells.build(str(source), args.model, name, args.user, args.cluster, priority)
-            if args.plugin_dir and use_plugin_dir(spec, args.plugin_dir) == 0:
-                raise SystemExit(f"{source}: no OLMoE3 plugin install to re-point")
+            if use_open_instruct_plugins(spec, ref) == 0:
+                raise SystemExit(f"{source}: no OLMoE3 plugin install to move off scaling-ladders")
             path = args.specs / f"{name}.json"
             path.write_text(json.dumps(spec, indent=1))
             if args.dry_run:

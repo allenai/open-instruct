@@ -11,6 +11,7 @@ set -uo pipefail
 [[ $# -ge 1 ]] || { sed -n 2,10p "$0"; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 OC=${OLMO_CORE_DIR:?set OLMO_CORE_DIR}
+[[ -z ${OLMO_CORE_SHA:-} || $(git -C "$OC" rev-parse HEAD) == "$OLMO_CORE_SHA" ]] || { echo "$OC is not at OLMO_CORE_SHA=$OLMO_CORE_SHA" >&2; exit 1; }
 OE=${OLMO_EVAL_JOB_DIR:?set OLMO_EVAL_JOB_DIR}
 TOK=${OLMO35_TOKENIZER:-/weka/oe-training-default/jasonr/mmsft-eval/tokenizers/dolma2-tokenizer-olmo35-8b97170}
 IMG=${SANITY_IMAGE:-/weka/oe-training-default/jasonr/mmsft-eval/tpu/sanity/coco_153632.jpg}

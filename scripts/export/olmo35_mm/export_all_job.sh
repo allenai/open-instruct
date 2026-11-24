@@ -24,6 +24,7 @@ OUT=${2:?usage: export_all_job.sh STEP_DIR OUT_DIR}
 HERE=$(cd "$(dirname "$0")" && pwd)
 OI=$(cd "$HERE/../../.." && pwd)
 OC=${OLMO_CORE_DIR:?set OLMO_CORE_DIR to an allenai/OLMo-core checkout at the multimodal SFT code}
+[[ -z ${OLMO_CORE_SHA:-} || $(git -C "$OC" rev-parse HEAD) == "$OLMO_CORE_SHA" ]] || { echo "$OC is not at OLMO_CORE_SHA=$OLMO_CORE_SHA" >&2; exit 1; }
 TOK=${OLMO35_SFT_TOKENIZER:-/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c12/a7/cache-neptune/numpy_sft/bf82a8fab8-6068a350-rowaligned/tokenizer}
 DEV=${EXPORT_DEVICE:-cuda}
 echo "MMSFT-EXPORT-ALL-START $(date -u +%FT%TZ) $STEP"
