@@ -426,7 +426,11 @@ def _parse_judge_response(content: str) -> tuple[str, float]:
         if any(not math.isfinite(float(s)) or float(s) / 10.0 != recovered for s in preamble_scores):
             raise JudgeResponseError("general judge response contains conflicting JSON and Markdown scores")
         return cleaned, recovered
-    if direct_candidate.startswith("{") or re.search(r'\{[\s\S]*?"(?:SCORE|REASONING)"\s*:', outside_text):
+    if (
+        direct_candidate.startswith("{")
+        or _contains_json_score(outside_text)
+        or re.search(r'\{[\s\S]*?"REASONING"\s*:', outside_text)
+    ):
         raise JudgeResponseError("general judge returned malformed JSON")
 
     # Accept a single explicit Markdown score line for non-JSON replies, strictly outside code fences

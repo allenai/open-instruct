@@ -85,12 +85,14 @@ def test_ambiguous_and_invalid_scores_remain_rejected(reply):
         r'{"\u0053CORE": 2}' + '\n```json\n{"SCORE": 10}\n```',
         "```json\n" + r'{"\u0053CORE": 2}' + '\n```\n```json\n{"SCORE": 10}\n```',
         '{"SCORE": 2}\n' + r'{"\u0053CORE": 10}',
+        "Verdict:\n" + r'{"\u0053CORE": "N/A"}' + "\nSCORE: 10",
+        "Verdict:\n" + r'{"\u0053CORE": 2}' + "\nSCORE: 10",
         r'{"REASONING":"Poor answer" "\u0053CORE":2,"NOTE":"draft","SCORE":10}',
     ],
 )
 def test_competing_escaped_score_keys_are_rejected(reply):
     with pytest.raises(
-        general_judge.JudgeResponseError, match="competing JSON objects|multiple JSON blocks|duplicate"
+        general_judge.JudgeResponseError, match="competing JSON objects|multiple JSON blocks|duplicate|malformed JSON"
     ):
         general_judge.parse_judge_response(reply)
 
