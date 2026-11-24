@@ -15,6 +15,10 @@ allenai/open-instruct#1933. It matches open-instruct's OLMo-core SFT:
 | `k8s/instruct-sft-4x4x8/` | Overlay: the Olmo 3 7B Instruct SFT recipe on one reserved `4x4x8` slice (128 chips) at 32,768 tokens. |
 | `k8s/olmo35-sft-4x4x8/` | Overlay: the Olmo 3.5 tiny SFT recipe (16 rows of 65,536 tokens, 11,768 steps) on one `4x4x8` slice. Start here: it is the cheapest per chip-hour. |
 | `k8s/olmo35-sft-8x8x8/` | Overlay: the same budget at 64 rows and 2,942 steps on one `8x8x8` (512 chips), for when no `4x4x8` is free. ~1.09x the chip-hours, ~3.6x sooner (projected); its data order differs, so compare it only with a same-slice control. |
+| `k8s/olmo35-mm-sft-4x4x8/` | Overlay: Olmo 3.5 tiny multimodal SFT (OLMo-core `olmo35_mm_sft`, B2e base, 32 rows of 65,536 tokens, 10,962 steps) through MaxText's `pre_train` trainer with OLMo-core's data loader in-process; the settings of ledger H271's run. Guide: `docs/algorithms/olmo35_mm_sft_tpu.md`. |
+| `k8s/olmo35-mm-sft-4x4x8-gate/` | Overlay: that run's pre-run gate (20 steps, EMo pool fixed at 512, OLMo-core-comparable batch hashes, no checkpoints). |
+| `image-olmo35-mm/` | The multimodal SFT image: MaxText from jason718/maxtext at a pinned commit plus OLMo-core fd9bba1ba. `build.sh [run\|e4\|gates]`. |
+| `olmo35-mm/` | Multimodal checkpoint conversion (OLMo-core DCP to MaxText with `<think>` seeding, and back, both checked bitwise) and `check_gates.py`. |
 | `k8s/watch_jobset.sh` | Waits for a JobSet and saves every pod's log. |
 | `data/` | `build_full_dolci.py` writes Dolci-Instruct-SFT as globally shuffled parquet shards. `count_tokens.py` sizes a run. |
 | `export_hf.sh` | MaxText checkpoint to HF, with the base model's `config.json` and the training tokenizer. |
