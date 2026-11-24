@@ -162,6 +162,7 @@ case "$MODE" in
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
 esac
 TIMEOUT="${TIMEOUT:-${HOURS}h}"
+TRACK_ARG=""; [[ "$TRACKING" == 1 ]] && TRACK_ARG="--with_tracking"
 OUTPUT_DIR="$OUT_ROOT/$RUN_NAME"
 DUMP_DIR="$OUTPUT_DIR/step1"
 
@@ -173,7 +174,7 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --weight_decay 0.0 --max_grad_norm 1.0 --num_epochs $EPOCHS --max_train_steps $STEPS --attn_implementation flash_2 \
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
---no_save_async $([[ "$TRACKING" == 1 ]] && echo --with_tracking) --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
+--no_save_async $TRACK_ARG --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
 --local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR $EXTRA_ARGS"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
