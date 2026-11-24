@@ -97,6 +97,21 @@ reward filtering. A short error burst cannot become fatal just because no more
 requests finish. The check runs while waiting for generation or buffer space,
 not only at optimizer boundaries.
 
+A separate limit stops a run when one prompt group keeps failing while other
+generation succeeds: after `core.max_group_retries` isolated retries (default 3),
+the group's next failure is fatal. Failures with no successful generation in
+between are left to the 50% rule. Every group attempt draws the same risk, so
+the chance of hitting the limit grows with run length. On three OLMo 3.5 Small
+runs (November 2026), 205 of 28,053 group attempts failed with router transport
+errors (0.73%). The failures came in bursts across many groups, not repeatedly
+on one prompt: one group failed twice, against about 1.5 expected by chance.
+At that rate, a 660-update run at 2,048 responses per update (roughly 170,000-260,000 group
+attempts) has about a 0.05-0.2% chance of some group reaching a fourth failure
+with the default. The chance is about 3-4% if the failure rate rises to 2%. For
+multi-day runs, set `core.max_group_retries = 5`, which brings the 2% case to
+about 1e-5. It takes effect only with a MILES pin that reads the field
+(allenai/miles-olmo-core#55); older pins keep 3.
+
 Unknown HTTP/server errors, invalid configuration, and invalid sample/policy
 provenance remain fatal. Only typed generation deadlines are recoverable; an
 unrelated timeout is not automatically treated as a serving failure. Server-side
