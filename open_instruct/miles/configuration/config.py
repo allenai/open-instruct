@@ -70,9 +70,9 @@ class CoreConfig:
     # It is also what ends a request on a stalled engine, so a hang is noticed after
     # this long. The default router timeout (14,400 s) is above it.
     refresh_request_timeout: float = 3600.0
-    # Refresh only: keep a prompt group when at least this many members succeed
-    # and the rest failed with a transport error or refresh_request_timeout;
-    # each failed member becomes a fully masked dummy. None keeps whole groups.
+    # Experimental, refresh only. Keep a group when at least this many members
+    # succeed after transport failures or timeouts. Failed slots use one-token
+    # padding. Active partial groups require both router auxiliary weights to be zero.
     refresh_min_group_size: int | None = None
     snapshot_capacity: int = 2
     row_specialization: str = "static"
@@ -668,12 +668,14 @@ class RunConfig:
                 raise constraints.error("core.refresh_min_group_size requires core.publication_mode=refresh")
             if minimum > options.get("n_samples_per_prompt", 1):
                 raise constraints.error("core.refresh_min_group_size cannot exceed miles.n_samples_per_prompt")
+            partial = minimum < options.get("n_samples_per_prompt", 1)
+            if partial and (self.core.router_aux_loss_weight or self.core.router_z_loss_weight):
+                raise constraints.error(
+                    "Experimental partial refresh groups require "
+                    "core.router_aux_loss_weight=0 and core.router_z_loss_weight=0"
+                )
             post_process = options.get("custom_reward_post_process_path")
-            if minimum < options.get("n_samples_per_prompt", 1) and post_process not in (
-                None,
-                EXCLUDE_UNGRADED,
-                EXCLUDE_TRUNCATED,
-            ):
+            if partial and post_process not in (None, EXCLUDE_UNGRADED, EXCLUDE_TRUNCATED):
                 # Mirrors MILES: partial groups pass masked dummies to the post-process,
                 # which must declare honors_exclude_from_reward_baseline (ours do).
                 raise constraints.error(
