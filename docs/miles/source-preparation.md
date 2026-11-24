@@ -550,6 +550,67 @@ training rows get IF-target and template checks, evaluation rows get template
 checks only, without retokenizing or rewriting either partition. Source
 preparation uses the shared checkpoint tokenizer loader, preserving the serialized tokenization backend.
 
+### Re-rendering prepared prompts for a new start checkpoint
+
+When the start checkpoint changes, its chat template can differ from the one the
+prepared prompts were rendered with, even when the rendered text would not change.
+Data preparation then stops with "Prepared rendering template hash differs from the
+checkpoint chat template; re-render inputs". Re-render the prompts with the new
+checkpoint's tokenizer before launching:
+
+```bash
+python -m scripts.miles.rerender_prompts INPUT.jsonl.gz NEW_CHECKPOINT OUTPUT.jsonl.gz
+```
+
+The tool renders `metadata.messages` with the checkpoint's chat template and
+recomputes the template hash and saved prompt token fields. MILES rebuilds its
+run-specific token cache for the new export. Tool rows also use
+their saved function declarations and must be compatible with the new template's
+tool-call protocol. ToolRL's `think_prefix_in_prompt` is recomputed in the label
+and verifier target. An older structured tool export without saved declarations
+needs to be exported again before it can be re-rendered.
+
+The command writes a new file atomically using a hard link. It stops on an
+unsupported row or if the output or report already exists. The report records
+file hashes, template hashes, and how many prompts changed. Point
+`data.prompt_data` at the output in a new run root. Qualification receipts bound
+to the old file hash do not carry over. For a new Workbench release with
+updated qualification evidence, render and export from the canonical collection.
+
+Prepared files and checkpoints are usually on WEKA, so run the tool as a small CPU
+Beaker job. Use an image built from open-instruct at or after this tool was added
+(the launcher's MILES image works: the repository is at `/opt/core-rl`). Mount every
+bucket the checkpoint's files link into (SFT exports on `olmo-3p5-post-checkpoints`
+can be symlinks into `olmo-3p5-checkpoints`):
+
+```yaml
+version: v2
+budget: ai2/oe-other
+tasks:
+  - name: rerender-prompts
+    image: {beaker: IMMUTABLE_IMAGE_ID}
+    command: [bash, -c]
+    arguments:
+      - >-
+        cd /opt/core-rl && python -m scripts.miles.rerender_prompts
+        /weka/olmo-3p5-post-checkpoints/robertb/miles/h196-dolci-control-20261113/inputs/dolci.jsonl.gz
+        /weka/olmo-3p5-post-checkpoints/PATH/TO/NEW_CHECKPOINT
+        /weka/olmo-3p5-post-checkpoints/YOUR_USERNAME/miles/inputs/dolci-NEW.jsonl.gz
+    datasets:
+      - {mountPath: /weka/olmo-3p5-post-checkpoints, source: {weka: olmo-3p5-post-checkpoints}}
+      - {mountPath: /weka/olmo-3p5-checkpoints, source: {weka: olmo-3p5-checkpoints}}
+    resources: {gpuCount: 0, cpuCount: 8, memory: 64GiB}
+    context: {priority: high, preemptible: true}
+    constraints: {cluster: [ai2/holmes, ai2/jupiter]}
+    timeout: 2h
+    result: {path: /output}
+```
+
+Submit it with `beaker experiment create rerender.yaml --workspace ai2/olmo-instruct`.
+Re-rendering the 84,577 H196 Dolci rows for the H258 SFT export took one such job
+(Beaker 01M7WAR5PQHAE30C4DXWYP10XH, with the prototype of this script): every input was
+byte-identical and only the template hash changed.
+
 New XML next-action references must satisfy their declared argument schemas and
 retain full comparator reward after serialization and parsing. Incompatible
 references are reported through the existing omitted-row dispositions. This

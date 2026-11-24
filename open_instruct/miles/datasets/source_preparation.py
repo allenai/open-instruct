@@ -484,6 +484,8 @@ def prepare(plan_path, output, tokenizer):
                             "verifiers": [{"name": verifier, "target": target}],
                         },
                     }
+                    if "tools" in template_options:
+                        row["metadata"]["tools"] = template_options["tools"]
                     if effective_adapter in long_context.ADAPTERS:
                         row["metadata"]["adapter"] = effective_adapter
                     if spec["adapter"] == "dolci_if_v1":
