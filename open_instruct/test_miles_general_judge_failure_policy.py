@@ -1,6 +1,7 @@
 """Malformed judge outputs cannot terminate a run or masquerade as valid grades."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -68,6 +69,22 @@ def test_explicit_score_formats_agree(reply):
 )
 def test_ambiguous_and_invalid_scores_remain_rejected(reply):
     with pytest.raises(general_judge.JudgeResponseError):
+        general_judge.parse_judge_response(reply)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        r'{"\u0053CORE": 2}' + '\n```json\n{"SCORE": 10}\n```',
+        "```json\n" + r'{"\u0053CORE": 2}' + '\n```\n```json\n{"SCORE": 10}\n```',
+        '{"SCORE": 2}\n' + r'{"\u0053CORE": 10}',
+        r'{"REASONING":"Poor answer" "\u0053CORE":2,"NOTE":"draft","SCORE":10}',
+    ],
+)
+def test_competing_escaped_score_keys_are_rejected(reply):
+    with pytest.raises(
+        general_judge.JudgeResponseError, match="competing JSON objects|multiple JSON blocks|duplicate"
+    ):
         general_judge.parse_judge_response(reply)
 
 
@@ -208,6 +225,30 @@ def test_exhausted_malformed_reply_is_measured_zero_then_next_request_can_succee
     assert diagnostics["attempts"][0]["raw_reply"] == "malformed"
     assert run_score(request_setup) == 0.8
     assert request_setup.metadata["verifier_diagnostics"]["general-quality"]["status"] == "ok"
+
+
+@pytest.mark.parametrize("preamble", ["", "Here is my evaluation:\n"])
+def test_decoder_recursion_exhausts_judge_retries_as_reported_zero(monkeypatch, request_setup, preamble):
+    body = '{"REASONING": [[0]], "SCORE": 8}'
+    reply = preamble + body
+    request = Mock(return_value=reply)
+    raw_decode = json.JSONDecoder.raw_decode
+
+    def reject_excessive_nesting(decoder, text, idx=0):
+        if text == body:
+            raise RecursionError("maximum recursion depth exceeded")
+        return raw_decode(decoder, text, idx)
+
+    monkeypatch.setattr(general_judge, "_request", request)
+    monkeypatch.setattr(json.JSONDecoder, "raw_decode", reject_excessive_nesting)
+    assert run_score(request_setup, "zero") == 0.0
+    assert request.call_count == 3
+    diagnostics = request_setup.metadata["verifier_diagnostics"]["general-quality"]
+    assert diagnostics["status"] == "judge_error"
+    assert diagnostics["fallback_reward"] == 0.0
+    assert [attempt["error"] for attempt in diagnostics["attempts"]] == [
+        "general judge returned JSON nested too deeply"
+    ] * 3
 
 
 @pytest.mark.parametrize("policy", ["raise", "invalid"])

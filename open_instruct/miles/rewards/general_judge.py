@@ -122,6 +122,8 @@ def general_judge_config(args: Any) -> GeneralJudgeConfig:
 
 
 _MARKDOWN_SCORE_PATTERN = r"^\s*\*{0,2}SCORE\*{0,2}\s*:\*{0,2}\s*([0-9]+(?:\.[0-9]+)?)\s*$"
+# Used for incomplete objects, where the keys cannot be checked after JSON decoding.
+_JSON_SCORE_FIELD = r'"(?:S|\\u0053)(?:C|\\u0043)(?:O|\\u004[fF])(?:R|\\u0052)(?:E|\\u0045)"\s*:'
 
 
 def _decode_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -142,6 +144,23 @@ def _loads_judge_json(text: str) -> Any:
             text,
         )
         return json.loads(escaped, strict=False, object_pairs_hook=_decode_json_object)
+
+
+def _contains_json_score(text: str) -> bool:
+    """Find a competing top-level score among JSON objects embedded in a reply."""
+    decoder = json.JSONDecoder(strict=False, object_pairs_hook=_decode_json_object)
+    opening_delimiter = re.compile(r"[{\[]")
+    offset = 0
+    while (opening := opening_delimiter.search(text, offset)) is not None:
+        start = opening.start()
+        try:
+            data, offset = decoder.raw_decode(text, start)
+        except (json.JSONDecodeError, ValueError):
+            # An incomplete object may still contain a competing grade.
+            return re.search(_JSON_SCORE_FIELD, text[start:]) is not None
+        if isinstance(data, dict) and "SCORE" in data:
+            return True
+    return False
 
 
 def _normalize_score_value(score_value: Any) -> float:
@@ -204,7 +223,7 @@ def _recover_final_json_score(text: str) -> float | None:
         )
     except (json.JSONDecodeError, ValueError):
         separate = re.search(r"\}\s*(\{[\s\S]*\})\s*$", candidate)
-        if separate is not None and not re.search(r'"SCORE"\s*:', candidate[: separate.start()]):
+        if separate is not None and not re.search(_JSON_SCORE_FIELD, candidate[: separate.start()]):
             final_candidate = re.sub(r",\s*\}\s*$", "}", separate.group(1))
             try:
                 final_obj = _loads_judge_json(final_candidate)
@@ -215,7 +234,7 @@ def _recover_final_json_score(text: str) -> float | None:
     else:
         trailing = candidate[end_idx:].strip()
         if isinstance(first_obj, dict) and trailing:
-            if "SCORE" in first_obj and re.search(r'"SCORE"\s*:', trailing):
+            if "SCORE" in first_obj and _contains_json_score(trailing):
                 raise JudgeResponseError("general judge response contains competing JSON objects")
             if "SCORE" not in first_obj and trailing.startswith("{"):
                 trailing_repaired = re.sub(r",\s*\}\s*$", "}", trailing)
@@ -228,7 +247,7 @@ def _recover_final_json_score(text: str) -> float | None:
     # 3. Single top-level object whose leading string field (e.g. REASONING) has syntax errors
     #    (unescaped quotes) or is followed by a missing/full-width comma.
     opening = re.match(r'^\{\s*"(?P<key>[^"\n]+)"\s*:\s*"', candidate)
-    if opening is None or opening.group("key") == "SCORE":
+    if opening is None or re.fullmatch(_JSON_SCORE_FIELD, f'"{opening.group("key")}":'):
         return None
 
     tail_start = opening.end()
@@ -257,7 +276,7 @@ def _recover_final_json_score(text: str) -> float | None:
         before_split = tail[:sep_start]
         if _has_nested_complete_object_to_end(tail, sep_start):
             continue
-        if re.search(r'(?:"\s*[,，]\s*|[,，]\s*\n\s*|"\s+)"SCORE"\s*:', before_split):
+        if re.search(r'(?:"\s*[,，]\s*|[,，]\s*\n\s*|"\s+)' + _JSON_SCORE_FIELD, before_split):
             raise JudgeResponseError("general judge returned duplicate SCORE keys")
         suffix = re.sub(r'，(?=\s*")', ",", tail[key_start:])
         suffix = re.sub(r",\s*\}\s*$", "}", suffix)
@@ -352,6 +371,13 @@ def parse_judge_response(content: str) -> tuple[str, float]:
     can retry or exclude the sample. Re-check these assumptions when changing the judge
     model or rubric prompt.
     """
+    try:
+        return _parse_judge_response(content)
+    except RecursionError as error:
+        raise JudgeResponseError("general judge returned JSON nested too deeply") from error
+
+
+def _parse_judge_response(content: str) -> tuple[str, float]:
     content = re.sub(r"<think>\s*.*?\s*</think>\s*", "", content, flags=re.DOTALL)
     content = content.replace("<answer>", "").replace("</answer>", "")
     cleaned = content.replace("\r\n", "\n").strip()
@@ -370,12 +396,11 @@ def parse_judge_response(content: str) -> tuple[str, float]:
     blocks, outside_text, unclosed_langs = _scan_fenced_blocks(cleaned)
     if "json" in unclosed_langs:
         raise JudgeResponseError("general judge returned unclosed JSON fence")
-    has_competing_outside_json = bool(re.search(r'\{[\s\S]*?"SCORE"\s*:', outside_text))
     json_blocks = [body for lang, body in blocks if lang == "json" or body.startswith("{")]
     if json_blocks:
-        if has_competing_outside_json:
+        if _contains_json_score(outside_text):
             raise JudgeResponseError("general judge response contains competing JSON objects")
-        if len(json_blocks) > 1 and any(re.search(r'"SCORE"\s*:', block) for block in json_blocks[:-1]):
+        if any(_contains_json_score(block) for block in json_blocks[:-1]):
             raise JudgeResponseError("general judge returned multiple JSON blocks with SCORE")
         parsed = _parse_json_candidate(json_blocks[-1], cleaned)
         if parsed is None:
