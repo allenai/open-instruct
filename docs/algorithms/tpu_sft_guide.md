@@ -112,8 +112,8 @@ resume.
 - **Regular 20-60 s steps on the streaming loader are its read-ahead.** Each data host tokenizes in blocks of 1,000
   documents on one reader thread, behind a 128-row buffer (`prefetch_buffer_size` in MaxText's
   `hf_data_processing.py`), so the step waits about once per 1,000 documents per host. Small on the `8x8x8` averaged
-  7.4 s a step against 4.7 s steady; a 2,048-row buffer removed the waits without changing a batch (ledger H267,
-  Amendment 5). Prepacked step files avoid them too.
+  7.4 s a step against 4.7 s steady; a 2,048-row buffer (`MAXTEXT_HF_PREFETCH_ROWS=2048`, abhishekraok/maxtext
+  from ef157c29) removed the waits without changing a batch (ledger H267, Amendment 5). Prepacked step files avoid them too.
 - **Keep `remat_policy=full`.** Saving dot outputs except the MLP's gained 0.7%, with the same loss.
 - Outside stalls a step is ~4.0 s of device compute and ~0.2-0.5 s idle. FSDP all-gather waits are ~16% of the
   compute, and `num_vocab_tiling=16` costs ~4% (the 205 MB embedding is all-gathered and its gradient all-reduced
@@ -223,8 +223,8 @@ Startup takes ~35 min: the 32 pods start a few minutes after admission, then the
 saves every pod's log when the JobSet ends. Pod logs vanish once the JobSet is deleted
 or restarted, so save them before either.
 
-Give a production JobSet no job deadline, or one at least 1.5x its projected wall time (steps x mean seconds per
-step). An `activeDeadlineSeconds` kept from a preflight overlay ends the run with `DeadlineExceeded` and no final save.
+Give a production JobSet no job deadline, or one at least 1.5x its projected wall time (startup plus steps x mean
+seconds per step). An `activeDeadlineSeconds` kept from a preflight overlay ends the run with `DeadlineExceeded` and no final save.
 
 ## 5. Read the loss
 
