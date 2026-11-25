@@ -732,12 +732,13 @@ class RunConfig:
         if options.get("fully_async", False) and self.core.max_policy_lag == 0:
             raise constraints.error("Async training requires an explicit positive core.max_policy_lag")
 
-    def _validate_engine_drain(self, options, collection, samples):
+    def _validate_engine_drain(self, options, collection, samples, *, allowed_engine_sizes=(1,)):
         if not options.get("fully_async", False):
             raise constraints.error("engine_drain requires miles.fully_async=true")
-        if options.get("rollout_num_gpus_per_engine", 1) != 1:
+        if options.get("rollout_num_gpus_per_engine", 1) not in allowed_engine_sizes:
+            supported = " or ".join(f"TP{size}" for size in allowed_engine_sizes)
             raise constraints.error(
-                "engine_drain currently supports TP1 serving only", constraints.Category.NOT_IMPLEMENTED
+                f"engine_drain currently supports {supported} serving only", constraints.Category.NOT_IMPLEMENTED
             )
         if collection != samples:
             raise constraints.error(
@@ -809,10 +810,10 @@ class RunConfig:
                 )
 
     def _validate_refresh(self, options, collection, samples):
-        # The first qualification shares the independent publisher's resident
-        # TP1/single-turn restrictions, without its immutable snapshots.
+        # Refresh uses the shared TP-aware broadcast rather than the independent
+        # engine-drain delivery actors. Keep the latter's TP1 boundary intact.
         try:
-            self._validate_engine_drain(options, collection, samples)
+            self._validate_engine_drain(options, collection, samples, allowed_engine_sizes=(1, 2))
         except InputError as error:
             raise InputError(str(error).replace("engine_drain", "refresh")) from error
         if not (options.get("use_tis", False) or score_centering.uses_importance_sampling(options)) or options.get(

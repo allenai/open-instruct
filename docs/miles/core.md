@@ -81,6 +81,15 @@ On a failed refresh run, cleanup cancels outstanding producer work instead of
 draining requests that may be waiting on paused engines. Shared-engine evaluation
 and successful shutdown retain their separate generation-drain boundaries.
 
+Refresh supports TP1 and TP2 resident serving. For TP2, set
+`inference.rollout_tensor_parallel_size = 2`, allocate an even `inference.gpus`,
+and use a compatible Olmo MoE checkpoint. MILES selects Core-compatible rounding
+by default for the supported hybrid configuration. The trainer's expert
+parallelism is independent. The shared transport broadcasts each full HF weight
+bucket to every engine TP rank, and each rank's loader selects its shard. Independent `engine_drain` publication remains
+TP1. A short mechanics recipe is `tests/miles/configs/tp2-refresh.toml`; it uses
+four GPUs to check Tiny publication with full decode graphs and eager prefill.
+
 SGLang starts from HF config/tokenizer/weights. Core imports those weights into
 its native training representation. Updated policies are streamed directly as
 serving tensors; no HF directory or Megatron conversion is written per update.

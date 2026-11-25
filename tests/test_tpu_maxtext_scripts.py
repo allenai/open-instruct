@@ -3,7 +3,9 @@
 import copy
 import hashlib
 import json
+import math
 import os
+import re
 import runpy
 import shutil
 import subprocess
@@ -177,6 +179,107 @@ esac
     assert result.returncode == 1
     assert (logs / "good.log").read_text() == "good log\n"
     assert (logs / "bad.log").read_text() == "previous snapshot"
+
+
+SMALL_3K = SCRIPTS / "k8s/olmo35-small-sft-8x8x48"
+
+
+def overlay_generators(overlay):
+    kustomization = yaml.safe_load((overlay / "kustomization.yaml").read_text())
+    return {gen["name"].rsplit("-", 1)[1]: gen for gen in kustomization["configMapGenerator"]}
+
+
+def overlay_env(overlay):
+    return dict(literal.split("=", 1) for literal in overlay_generators(overlay)["env"]["literals"])
+
+
+def test_small_sft_3k_pins_a_fork_commit_and_applies_no_patches():
+    repo, sha = (SMALL_3K / "maxtext_source").read_text().split()
+    assert repo == "https://github.com/abhishekraok/maxtext.git" and re.fullmatch("[0-9a-f]{40}", sha)
+    assert overlay_generators(SMALL_3K)["launcher"]["files"] == [
+        "train_sft_perf.sh",
+        "perf_wrapper.py",
+        "maxtext_source",
+    ]
+    assert not list(SMALL_3K.glob("*.patch"))
+    launcher = (SMALL_3K / "train_sft_perf.sh").read_text()
+    assert ".patch" not in launcher and not re.search(r"\bpatch\s+-", launcher)
+
+
+def test_small_sft_3k_slice_mesh_and_batch_agree():
+    env = overlay_env(SMALL_3K)
+    tokens = env["EXTRA_ARGS"].split()
+    args = dict(token.split("=", 1) for token in tokens)
+    assert len(args) == len(tokens)  # no flag given twice
+    jobset = yaml.safe_load((SMALL_3K / "jobset.yaml").read_text())
+    job = jobset["spec"]["replicatedJobs"][0]["template"]["spec"]
+    pod = job["template"]["spec"]
+    chips = math.prod(int(n) for n in pod["nodeSelector"]["cloud.google.com/gke-tpu-topology"].split("x"))
+    assert chips == int(env["TOTAL_DEVICES"]) == 4 * job["parallelism"] == 4 * job["completions"]
+    assert chips == math.prod(int(args[f"ici_{axis}_parallelism"]) for axis in ("data", "fsdp", "expert"))
+    assert int(env["GLOBAL_BATCH"]) == chips * float(env["PER_DEVICE_BATCH"])  # no gradient accumulation
+    names = {kind: gen["name"] for kind, gen in overlay_generators(SMALL_3K).items()}
+    assert pod["containers"][0]["envFrom"][0]["configMapRef"]["name"] == names["env"]
+    assert pod["volumes"][0]["configMap"]["name"] == names["launcher"]
+
+
+@pytest.mark.parametrize(
+    "case,code,stderr",
+    [
+        ("template", 2, "Set RUN_NAME"),
+        ("pinned", 7, ""),
+        ("bad pin", 2, "maxtext_source must hold"),
+        ("empty base", 1, "LOAD_PARAMETERS_PATH"),
+    ],
+)
+def test_small_sft_3k_launcher_fetches_the_pinned_commit(tmp_path, case, code, stderr):
+    launcher = tmp_path / "launcher"
+    launcher.mkdir()
+    shutil.copy(SMALL_3K / "train_sft_perf.sh", launcher)
+    shutil.copy(SMALL_3K / "maxtext_source", launcher)
+    if case == "bad pin":
+        (launcher / "maxtext_source").write_text("https://github.com/abhishekraok/maxtext.git b4fabf77\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # Stands in for python3: the batch arithmetic runs for real, the download script is captured and fails.
+    executable(
+        bin_dir / "python3",
+        """#!/bin/bash
+if [[ "$1" == - ]]; then cat > "$CAPTURE"; exit 7; fi
+if [[ "$1" == -c && "$2" == *slots* ]]; then exec "$REAL_PYTHON" "$@"; fi
+echo "$TMP_PATH"
+""",
+    )
+    env = overlay_env(SMALL_3K)
+    if case != "template":
+        env.update(
+            RUN_NAME="test-run",
+            LOAD_PARAMETERS_PATH="gs://bucket/0/items",
+            TRAIN_FILES="/data/stream/*.parquet",
+            STEPS="10",
+            LR_SCHEDULE_STEPS="10",
+        )
+    if case == "empty base":
+        env["LOAD_PARAMETERS_PATH"] = ""  # would train from random init
+    capture = tmp_path / "download.py"
+    env = {
+        **os.environ,
+        **env,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CAPTURE": str(capture),
+        "REAL_PYTHON": sys.executable,
+        "TMP_PATH": str(tmp_path),
+    }
+    result = subprocess.run(
+        ["bash", str(launcher / "train_sft_perf.sh")], env=env, capture_output=True, text=True, timeout=15
+    )
+    assert result.returncode == code, result.stdout + result.stderr
+    assert stderr in result.stderr
+    if case == "pinned":
+        _, sha = (SMALL_3K / "maxtext_source").read_text().split()
+        assert f'"https://codeload.github.com/abhishekraok/maxtext/tar.gz/{sha}"' in capture.read_text()
+    else:
+        assert not capture.exists()
 
 
 @pytest.mark.parametrize("image", ["image", "image-olmo35-rf", "image-olmo35-fs", "image-olmo35-dr"])

@@ -1,0 +1,125 @@
+# Olmo 3.5 Small text SFT on the 3,072-chip v4 8x8x48 slice (768 hosts) of gke-tpu-v4, post-training queue. Field for
+# field the JobSet of the ledger's H262/H269 3K manifest (experiments/h269/h262-3k/jobset.json as render.py writes it),
+# including the fields the API server would default (network, startup and success policies, port protocols), so the
+# rendered overlay compares equal to it.
+apiVersion: jobset.x-k8s.io/v1alpha2
+kind: JobSet
+metadata:
+  name: olmo35-small-sft-8x8x48
+  namespace: olmo
+  labels:
+    kueue.x-k8s.io/queue-name: post-training
+    # Re-check both labels with the slice's owner at hand-over.
+    kueue.x-k8s.io/priority-class: post-training-borrowed-v4
+spec:
+  suspend: true # Kueue admits it.
+  failurePolicy:
+    # A failure stops the run for reading; resume by re-creating the JobSet (the trainer restores the latest save).
+    maxRestarts: 0
+    restartStrategy: Recreate
+  network:
+    enableDNSHostnames: true
+    publishNotReadyAddresses: true
+  startupPolicy:
+    startupPolicyOrder: AnyOrder
+  successPolicy:
+    operator: All
+  replicatedJobs:
+  - name: slice
+    groupName: default
+    replicas: 1 # Slices. More than one is a JAX multislice job.
+    template:
+      metadata: {}
+      spec:
+        activeDeadlineSeconds: 86400 # 24 h, so a full run needs no forced resume.
+        parallelism: 768 # Hosts per slice.
+        completions: 768
+        completionMode: Indexed
+        backoffLimit: 0 # Multi-host TPU jobs are all-or-nothing.
+        template:
+          metadata:
+            annotations:
+              # GKE's gcsfuse CSI driver adds a sidecar that mounts the data bucket. "0" lifts its resource
+              # limits; the TPU hosts have CPU and memory to spare.
+              gke-gcsfuse/volumes: "true"
+              gke-gcsfuse/cpu-limit: "0"
+              gke-gcsfuse/memory-limit: "0"
+              gke-gcsfuse/ephemeral-storage-limit: "0"
+          spec:
+            # libtpu only forms a multi-host slice on the host network. A hostNetwork pod acts as the node's service
+            # account for MaxText's own GCS calls (checkpoints); the gcsfuse mounts still authenticate as this service
+            # account (hostNetworkPodKSA below).
+            serviceAccountName: olmo
+            hostNetwork: true
+            dnsPolicy: ClusterFirstWithHostNet # Resolve the JobSet's pod hostnames from the host network.
+            # Never restart a container in place: a failed host fails the Job.
+            restartPolicy: Never
+            nodeSelector:
+              cloud.google.com/gke-tpu-accelerator: tpu-v4-podslice
+              cloud.google.com/gke-tpu-topology: 8x8x48
+            tolerations:
+            - key: google.com/tpu
+              operator: Equal
+              value: present
+              effect: NoSchedule
+            containers:
+            - name: maxtext
+              image: us-docker.pkg.dev/ai2-olmo/olmo/maxtext-posttrain # digest pinned by kustomization.yaml images:; apply with -k, not -f
+              command: [bash, /launcher/train_sft_perf.sh]
+              envFrom:
+              - configMapRef:
+                  name: olmo35-small-sft-8x8x48-env
+              env:
+              # Only needed if the tokenizer download gets rate limited.
+              - name: HF_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: hf-token
+                    key: token
+                    optional: true
+              ports:
+              - containerPort: 8471 # TPU runtime.
+                protocol: TCP
+              - containerPort: 8080 # MXLA coordinator.
+                protocol: TCP
+              - containerPort: 8431 # TPU metrics.
+                protocol: TCP
+              volumeMounts:
+              - name: launcher
+                mountPath: /launcher
+                readOnly: true
+              - name: post-training-data
+                mountPath: /mnt/post-training/data
+                readOnly: true
+              - name: post-training-tokenizers
+                mountPath: /mnt/post-training/tokenizers
+                readOnly: true
+              resources:
+                limits:
+                  google.com/tpu: "4" # All chips on the host; every TPU container must take the whole host.
+                requests:
+                  ephemeral-storage: 24Gi
+            volumes:
+            - name: launcher
+              configMap:
+                name: olmo35-small-sft-8x8x48-launcher
+            # Only the data/ and tokenizers/ subfolders of the project bucket's post-training folder, read-only
+            # (narrow_mounts.py).
+            - name: post-training-data
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                readOnly: true
+                volumeAttributes:
+                  bucketName: ai2-olmo-dev
+                  mountOptions: only-dir=post-training/data,implicit-dirs,metadata-cache:ttl-secs:-1,metadata-cache:stat-cache-max-size-mb:-1,metadata-cache:type-cache-max-size-mb:-1,file-system:kernel-list-cache-ttl-secs:-1
+                  gcsfuseMetadataPrefetchOnMount: "true"
+                  hostNetworkPodKSA: "true" # Authenticate the mount as serviceAccountName despite hostNetwork.
+            - name: post-training-tokenizers
+              csi:
+                driver: gcsfuse.csi.storage.gke.io
+                readOnly: true
+                volumeAttributes:
+                  bucketName: ai2-olmo-dev
+                  mountOptions: only-dir=post-training/tokenizers,implicit-dirs,metadata-cache:ttl-secs:-1,metadata-cache:stat-cache-max-size-mb:-1,metadata-cache:type-cache-max-size-mb:-1,file-system:kernel-list-cache-ttl-secs:-1
+                  gcsfuseMetadataPrefetchOnMount: "true"
+                  hostNetworkPodKSA: "true" # Authenticate the mount as serviceAccountName despite hostNetwork.

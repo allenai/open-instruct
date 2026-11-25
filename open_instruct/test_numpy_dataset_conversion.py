@@ -6,6 +6,7 @@ Run from project root:
 
 import gc
 import gzip
+import hashlib
 import json
 import os
 import pathlib
@@ -15,6 +16,7 @@ import unittest
 import unittest.mock
 
 import numpy as np
+import torch
 from olmo_core import data as oc_data
 from parameterized import parameterized
 from transformers import AutoTokenizer
@@ -875,6 +877,255 @@ class TestResumeEquivalence(_NumpySftTestBase):
             self.assertRaisesRegex(ValueError, "belong to another dataset"),
         ):
             self._run(golden, resume=True)
+
+
+# Toy ids for the replay EOS fix: uint32 tokens (vocab above 2**16), as for the Olmo tokenizer.
+_R_PAD, _R_EOS, _R_IM, _R_VOCAB = 1, 2, 3, 100_352
+
+
+def _write_replay_dir(numpy_dir, parts, manifest=True):
+    """Write a replay dir as the ledger's c11_replay.py build does: per part, token ids, a one-byte mask and a
+    .csv.gz row per document, plus `manifest.jsonl` (part, start, end, length_with_eos, tokens_sha256) and a
+    `stats.json` but no `dataset_statistics.json`. Each document is (tokens, mask): one bool, or one per token."""
+    os.makedirs(numpy_dir)
+    records = []
+    for index, docs in enumerate(parts):
+        tokens = np.array([t for doc, _ in docs for t in doc], dtype=np.uint32)
+        mask = np.array(
+            [m for doc, ms in docs for m in (ms if isinstance(ms, list) else [ms] * len(doc))], dtype=np.bool_
+        )
+        tokens.tofile(os.path.join(numpy_dir, f"token_ids_part_{index:04d}.npy"))
+        mask.tofile(os.path.join(numpy_dir, f"labels_mask_part_{index:04d}.npy"))
+        with gzip.open(os.path.join(numpy_dir, f"token_ids_part_{index:04d}.csv.gz"), "wt") as f:
+            start = 0
+            for doc, _ in docs:
+                f.write(f"{start},{start + len(doc)}\n")
+                sha = hashlib.sha256(np.array(doc[:-1], dtype=np.uint32).tobytes()).hexdigest()
+                records.append(
+                    {
+                        "part": index,
+                        "start": start,
+                        "end": start + len(doc),
+                        "id": f"doc{len(records)}",
+                        "length_with_eos": len(doc),
+                        "tokens_sha256": sha,
+                    }
+                )
+                start += len(doc)
+    if manifest:
+        with open(os.path.join(numpy_dir, "manifest.jsonl"), "w") as f:
+            f.writelines(json.dumps(r) + "\n" for r in records)
+    with open(os.path.join(numpy_dir, "stats.json"), "w") as f:
+        json.dump({"docs": len(records)}, f)
+
+
+def _file_bytes(numpy_dir):
+    out = {}
+    for name in sorted(os.listdir(numpy_dir)):
+        with open(os.path.join(numpy_dir, name), "rb") as f:
+            out[name] = f.read()
+    return out
+
+
+def _chat_row(*content):
+    """A chat row: prompt untrained, the assistant's tokens and its closing EOS trained."""
+    return [_R_IM, 10, 11, _R_IM, *content, _R_EOS], [False] * 4 + [True] * (len(content) + 1)
+
+
+class TestReplayFinalEosPositions(unittest.TestCase):
+    def test_selects_only_the_final_eos_of_replay_documents(self):
+        docs = [
+            [_R_IM, 10, 11, _R_EOS],  # chat stop: kept
+            [20, 21, _R_EOS],  # replay: its final EOS
+            [22, _R_EOS, 23, _R_EOS],  # replay with an interior EOS: only the final one
+            [24, 25],  # replay ending in another token, e.g. cut: nothing
+            [_R_EOS],  # one-token documents: their target comes from the previous document
+            [26],
+            [27, _R_EOS],  # two tokens: selected
+            [_R_IM, 12, _R_EOS, _R_IM, 13, _R_EOS],  # multi-turn chat row: every stop kept
+            [_R_IM],
+        ]
+        tokens = np.array([t for doc in docs for t in doc], dtype=np.uint32)
+        ends = np.cumsum([len(doc) for doc in docs])
+        bounds = np.stack([ends - [len(doc) for doc in docs], ends], axis=1)
+        positions = numpy_dataset_conversion.replay_final_eos_positions(tokens, bounds, _R_EOS, _R_IM)
+        self.assertEqual(positions.tolist(), [ends[1] - 1, ends[2] - 1, ends[6] - 1])
+        self.assertTrue((tokens[positions] == _R_EOS).all())
+
+
+class TestWriteReplayEosMaskedDir(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        self.tokenizer = oc_data.TokenizerConfig(vocab_size=_R_VOCAB, eos_token_id=_R_EOS, pad_token_id=_R_PAD)
+        self.cache = os.path.join(self.tmp, "cache")
+        _write_replay_dir(self.cache, [[_chat_row(12), _chat_row(13, 14)]], manifest=False)
+
+    def _masked(self, src, name="masked", manifest_sha256=None):
+        """Mask `src`, pinning its manifest's current sha256 unless another is given."""
+        if manifest_sha256 is None:
+            with open(os.path.join(src, "manifest.jsonl"), "rb") as f:
+                manifest_sha256 = hashlib.sha256(f.read()).hexdigest()
+        out = os.path.join(self.tmp, name)
+        return out, numpy_dataset_conversion.write_replay_eos_masked_dir(src, out, manifest_sha256, _R_EOS, _R_IM)
+
+    def _startup_check(self, numpy_dir, sequence_length=8):
+        """Current main's extra-dir validation at startup, under metadata boundaries (the default)."""
+        return olmo_core_finetune._check_extra_numpy_dirs(
+            [numpy_dir], self.cache, self.tokenizer, sequence_length=sequence_length, require_metadata=True, log=False
+        )[numpy_dir]
+
+    def test_clears_exactly_the_replay_final_eos_labels(self):
+        src = os.path.join(self.tmp, "src")
+        parts = [
+            [([20, 21, _R_EOS], True), ([24, 25], True), ([30, 31, _R_EOS], [True, True, False])],
+            [([22, _R_EOS, 23, _R_EOS], True), _chat_row(13, _R_EOS, 14), ([_R_EOS], True), ([27, _R_EOS], True)],
+        ]
+        _write_replay_dir(src, parts)
+        before = _file_bytes(src)
+        out, stats = self._masked(src)
+        self.assertEqual(_file_bytes(src), before)
+        # Part 0: the doc at 0-2 (the one at 5-7 is already untrained; 3-4 ends in another token). Part 1: the
+        # interior-EOS doc's final token (3), not its interior EOS (1), and the two-token doc's (14); the chat
+        # row and the one-token doc keep theirs.
+        for index, positions in {"0000": [2], "0001": [3, 14]}.items():
+            src_mask = np.fromfile(os.path.join(src, f"labels_mask_part_{index}.npy"), dtype=np.bool_)
+            out_mask = np.fromfile(os.path.join(out, f"labels_mask_part_{index}.npy"), dtype=np.bool_)
+            self.assertEqual(np.flatnonzero(src_mask != out_mask).tolist(), positions)
+            for name in (f"token_ids_part_{index}.npy", f"token_ids_part_{index}.csv.gz"):
+                self.assertEqual(os.path.realpath(os.path.join(out, name)), os.path.realpath(os.path.join(src, name)))
+        self.assertEqual(
+            os.path.realpath(os.path.join(out, "manifest.jsonl")),
+            os.path.realpath(os.path.join(src, "manifest.jsonl")),
+        )
+        self.assertFalse(os.path.exists(os.path.join(out, "stats.json")))  # the source's counts are stale here
+        change = stats["configuration"]["replay_eos_mask"]
+        self.assertEqual((change["documents"], change["dropped"], change["already_untrained"]), (7, 3, 1))
+        # 23 tokens, less one already untrained, four chat prompt tokens and three dropped.
+        self.assertEqual(stats["overall_statistics"]["trainable_tokens"], 23 - 1 - 4 - 3)
+        with open(os.path.join(out, "dataset_statistics.json")) as f:
+            self.assertEqual(json.load(f), stats)
+
+    def test_masked_dir_passes_startup_validation_on_main(self):
+        """The c11 layout has no dataset_statistics.json, so main refuses a multi-part source dir; the masked
+        dir's statistics carry the row-alignment marker and the new loss-token count."""
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([20, 21, _R_EOS], True), ([22, _R_EOS], True)], [([23, 24, 25, _R_EOS], True)]])
+        with self.assertRaisesRegex(ValueError, "dataset_statistics.json"):
+            self._startup_check(src)
+        out, stats = self._masked(src)
+        checked = self._startup_check(out)
+        self.assertEqual((checked.num_parts, checked.num_docs, checked.num_tokens), (2, 3, 9))
+        self.assertEqual(checked.num_loss_tokens, 9 - 3)
+        self.assertEqual(stats["overall_statistics"]["trainable_tokens"], checked.num_loss_tokens)
+        self.assertTrue(stats["configuration"][numpy_dataset_conversion.ROW_ALIGNED_PARTS_KEY])
+
+    def test_dir_whose_documents_all_start_with_im_start_is_byte_identical(self):
+        src = os.path.join(self.tmp, "chat")
+        _write_replay_dir(src, [[_chat_row(12), _chat_row(13, _R_EOS, 14)]])
+        out, stats = self._masked(src)
+        self.assertEqual(stats["configuration"]["replay_eos_mask"]["dropped"], 0)
+        with (
+            open(os.path.join(src, "labels_mask_part_0000.npy"), "rb") as a,
+            open(os.path.join(out, "labels_mask_part_0000.npy"), "rb") as b,
+        ):
+            self.assertEqual(a.read(), b.read())
+
+    def _refused(self, src, pattern, manifest_sha256=None):
+        with self.assertRaisesRegex(ValueError, pattern):
+            self._masked(src, manifest_sha256=manifest_sha256)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "masked")))
+
+    def test_refuses_a_manifest_that_is_not_the_pinned_one(self):
+        """A rewritten manifest and CSV that cut [44, EOS, 55, EOS] at its interior EOS agree with each other."""
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([44, _R_EOS, 55, _R_EOS], True)]])
+        with open(os.path.join(src, "manifest.jsonl"), "rb") as f:
+            pinned = hashlib.sha256(f.read()).hexdigest()
+        with open(os.path.join(src, "manifest.jsonl"), "w") as f:
+            f.writelines(json.dumps({"part": 0, "start": a, "end": b}) + "\n" for a, b in ((0, 2), (2, 4)))
+        with gzip.open(os.path.join(src, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,2\n2,4\n")
+        self._refused(src, "not the pinned", manifest_sha256=pinned)
+
+    def test_refuses_a_blank_csv_line(self):
+        """OLMo-core cannot parse it, and main's startup check would count it as a row."""
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([20, _R_EOS], True), ([21, _R_EOS], True)]])
+        with gzip.open(os.path.join(src, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,2\n\n2,4\n")
+        self._refused(src, "not a start,end row")
+
+    def test_refuses_a_dir_without_the_build_manifest(self):
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([20, 21, _R_EOS], True)]], manifest=False)
+        self._refused(src, "manifest.jsonl", manifest_sha256="0" * 64)
+
+    def test_refuses_csv_rows_that_differ_from_the_manifest(self):
+        """Rows split at an interior EOS, as an EOS scan gives, would make that EOS look final."""
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([22, _R_EOS, 23, _R_EOS], True)]])
+        with gzip.open(os.path.join(src, "token_ids_part_0000.csv.gz"), "wt") as f:
+            f.write("0,2\n2,4\n")
+        self._refused(src, "differ from the manifest")
+
+    def test_refuses_a_document_cut_between_parts(self):
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([20, 21], True)], [([22, _R_EOS], True)]])
+        with open(os.path.join(src, "manifest.jsonl"), "w") as f:  # one document over both parts
+            f.write(json.dumps({"part": 0, "start": 0, "end": 4, "length_with_eos": 4}) + "\n")
+        self._refused(src, "index set")
+
+    def test_refuses_orphan_parts(self):
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([20, _R_EOS], True)]])
+        np.ones(2, dtype=np.bool_).tofile(os.path.join(src, "labels_mask_part_0001.npy"))
+        self._refused(src, "index set")
+
+    def test_refuses_an_existing_output_dir(self):
+        src = os.path.join(self.tmp, "src")
+        _write_replay_dir(src, [[([20, _R_EOS], True)]])
+        os.makedirs(os.path.join(self.tmp, "masked"))
+        with self.assertRaises(FileExistsError):
+            self._masked(src)
+        self.assertEqual(os.listdir(os.path.join(self.tmp, "masked")), [])
+
+    def test_packed_training_drops_only_whole_replay_final_eos(self):
+        """Through OLMo-core's packing: same instances and tokens; one label fewer per replay document that
+        fits, none for chat rows or for a replay document truncated at the sequence length."""
+        sequence_length = 8
+        src = os.path.join(self.tmp, "replay")
+        fitting = [[20, 21, 22, _R_EOS], [23, _R_EOS], [24, 25, 26, 27, 28, 29, 30, _R_EOS]]
+        too_long = [40, 41, 42, 43, 44, 45, 46, 47, 48, _R_EOS]  # truncated to its first 8 tokens
+        _write_replay_dir(src, [[(doc, True) for doc in [*fitting, too_long]]])
+        out, stats = self._masked(src)
+        self.assertEqual(stats["configuration"]["replay_eos_mask"]["dropped"], 4)  # too_long's is cut by packing
+        boundaries = olmo_core_finetune._document_boundary_kwargs(True, row_aligned_parts=True)
+        datasets = []
+        for name, replay in (("src", src), ("out", out)):
+            config = olmo_core_finetune._numpy_dataset_config(
+                self.cache,
+                self.tokenizer,
+                work_dir=os.path.join(self.tmp, f"work-{name}"),
+                sequence_length=sequence_length,
+                document_boundary_kwargs=boundaries,
+                extra_numpy_dirs=[replay],
+            )
+            datasets.append(config.build())
+            datasets[-1].prepare()
+        before, after = datasets
+        self.assertEqual(len(before), len(after))
+        dropped = []
+        for i in range(len(before)):
+            a, b = before[i], after[i]
+            self.assertTrue(torch.equal(a["input_ids"], b["input_ids"]))
+            self.assertTrue(torch.equal(a["doc_lens"], b["doc_lens"]))
+            self.assertFalse((b["label_mask"] & ~a["label_mask"]).any())
+            for position in torch.nonzero(a["label_mask"] & ~b["label_mask"]).flatten().tolist():
+                dropped.append(a["input_ids"][: position + 1].tolist()[-2:])
+        # Exactly one per fitting replay document: its final EOS, predicted from its own previous token.
+        self.assertEqual(sorted(dropped), sorted([doc[-2], _R_EOS] for doc in fitting))
 
 
 if __name__ == "__main__":
