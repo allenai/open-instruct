@@ -8,6 +8,9 @@ The output layout for each `output_dir` is:
     dataset_statistics.{json,txt}  # per-dataset stats
 """
 
+import collections
+import contextlib
+import functools
 import gzip
 import io
 import json
@@ -15,10 +18,14 @@ import os
 import pathlib
 import sys
 import time
+from collections.abc import Callable, Iterable, Iterator
+from concurrent import futures
 from datetime import datetime
 from typing import Any, Literal
 
 import numpy as np
+import pyarrow as pa
+from pyarrow import compute
 from tqdm import tqdm
 
 from open_instruct import dataset_transformation, logger_utils, utils
@@ -33,6 +40,15 @@ LABELS_MASK_NPY_GLOB = "labels_mask_part_*.npy"
 TOKEN_IDS_METADATA_GLOB = "token_ids_part_*.csv.gz"
 # Set in dataset_statistics.json's configuration when the parts were cut only between rows.
 ROW_ALIGNED_PARTS_KEY = "row_aligned_parts"
+
+# The collect loop reads batches on worker threads, up to _COLLECT_PREFETCH_BATCHES ahead of the writer. The shuffled
+# rows are scattered over the memory-mapped Arrow cache, so reading them is random access, and pyarrow copies them out
+# with the GIL released, so the threads' reads overlap. Peak memory is about _COLLECT_PREFETCH_BATCHES batches of
+# token ids, labels and attention masks.
+_COLLECT_WORKERS = 16
+_COLLECT_PREFETCH_BATCHES = 32
+# Elements per chunk when summing the label mask per row: a 1 GiB int64 temporary.
+_SEGMENT_SUM_CHUNK = 1 << 27
 
 
 def _select_token_dtype(vocab_size: int):
@@ -183,6 +199,34 @@ def _recover_partial_state(
     return num_samples, current_position
 
 
+def _segment_sums(values: np.ndarray, starts: np.ndarray, chunk_size: int = _SEGMENT_SUM_CHUNK) -> np.ndarray:
+    """int64 sums of `values[starts[i]:starts[i + 1]]`, the last segment running to the end of `values`.
+
+    `starts` must be non-decreasing, so a segment whose start equals the next one's sums to 0. `values` is read
+    `chunk_size` elements at a time, so a memory-mapped array is never cast to int64 whole, which is what
+    `np.add.reduceat(values, starts, dtype=np.int64)` does.
+    """
+    n = len(values)
+    bounds = np.append(np.asarray(starts, dtype=np.int64), n)
+    if bounds[0] < 0 or np.any(np.diff(bounds) < 0):
+        raise ValueError("Segment starts must be non-negative, non-decreasing and at most len(values).")
+    # prefix[i] = sum of values[: bounds[i]].
+    prefix = np.empty(len(bounds), dtype=np.int64)
+    running = 0
+    done = 0
+    for chunk_start in range(0, n, chunk_size):
+        chunk_end = min(chunk_start + chunk_size, n)
+        cumsum = np.cumsum(values[chunk_start:chunk_end], dtype=np.int64)
+        # The bounds in [chunk_start, chunk_end); every earlier bound is filled in already.
+        upto = int(np.searchsorted(bounds, chunk_end, side="left"))
+        offsets = bounds[done:upto] - chunk_start
+        prefix[done:upto] = running + np.where(offsets > 0, cumsum[np.maximum(offsets - 1, 0)], 0)
+        running += int(cumsum[-1])
+        done = upto
+    prefix[done:] = running
+    return np.diff(prefix)
+
+
 def _aggregate_stats(
     train_dataset,
     boundaries_path: pathlib.Path,
@@ -212,11 +256,8 @@ def _aggregate_stats(
     sample_lengths = (boundaries[:, 1] - boundaries[:, 0]).astype(np.int64)
 
     labels_mm = np.memmap(labels_path, mode="r", dtype=np.uint8, shape=(total_tokens,))
-    starts = boundaries[:, 0].astype(np.intp)
-    trainable_counts = np.add.reduceat(labels_mm, starts, dtype=np.int64)
-    zero_length_mask = sample_lengths == 0
-    if zero_length_mask.any():
-        trainable_counts = np.where(zero_length_mask, 0, trainable_counts)
+    # The rows are contiguous, so each row's segment runs from its start to the next row's, and an empty row sums to 0.
+    trainable_counts = _segment_sums(labels_mm, boundaries[:, 0])
 
     num_samples_skipped = int((trainable_counts == 0).sum())
     total_trainable_tokens = int(trainable_counts.sum())
@@ -252,6 +293,108 @@ def _aggregate_stats(
         "num_samples_skipped": num_samples_skipped,
         "max_token_id": max_token_id,
     }
+
+
+def _prefetch_in_order(
+    items: Iterable[Any],
+    fn: Callable[[Any], Any],
+    workers: int = _COLLECT_WORKERS,
+    depth: int = _COLLECT_PREFETCH_BATCHES,
+) -> Iterator[Any]:
+    """Yield `fn(item)` for each item in order, computing up to `depth` results ahead on `workers` threads."""
+    pending: collections.deque[futures.Future] = collections.deque()
+    with futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        try:
+            for item in items:
+                pending.append(pool.submit(fn, item))
+                if len(pending) >= depth:
+                    yield pending.popleft().result()
+            while pending:
+                yield pending.popleft().result()
+        finally:
+            for future in pending:
+                future.cancel()
+
+
+def _list_column_parts(column: pa.ChunkedArray | pa.Array, name: str) -> tuple[np.ndarray, np.ndarray]:
+    """The flattened values of an Arrow list column, and its row offsets as int64 starting at 0."""
+    array = column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column
+    if array.null_count:
+        raise ValueError(f"{name} has null rows")
+    values = compute.list_flatten(array)
+    if values.null_count:
+        raise ValueError(f"{name} has null values")
+    offsets = np.zeros(len(array) + 1, dtype=np.int64)
+    np.cumsum(compute.list_value_length(array).to_numpy(zero_copy_only=False), out=offsets[1:])
+    return values.to_numpy(zero_copy_only=False), offsets
+
+
+def _prepare_collect_batch(batch: pa.Table, token_dtype) -> dict[str, Any]:
+    """Turn one Arrow batch into the arrays the collect loop writes. Runs on a worker thread."""
+    tokens, token_offsets = _list_column_parts(batch[dataset_transformation.INPUT_IDS_KEY], "input_ids")
+    labels, label_offsets = _list_column_parts(batch[dataset_transformation.LABELS_KEY], "labels")
+    attention, attention_offsets = _list_column_parts(
+        batch[dataset_transformation.ATTENTION_MASK_KEY], "attention_mask"
+    )
+    empty_rows = np.flatnonzero(token_offsets[1:] == token_offsets[:-1])
+    bad_attention = np.flatnonzero(attention != 1)
+    bad_attention_row = (
+        int(np.searchsorted(attention_offsets, bad_attention[0], side="right")) - 1 if bad_attention.size else None
+    )
+    return {
+        "tokens": tokens.astype(token_dtype),
+        "token_offsets": token_offsets,
+        "labels_mask": (labels != -100).astype(np.uint8),
+        "label_offsets": label_offsets,
+        "first_empty_row": int(empty_rows[0]) if empty_rows.size else None,
+        "bad_attention_row": bad_attention_row,
+        "bad_attention": None
+        if bad_attention_row is None
+        else attention[attention_offsets[bad_attention_row] : attention_offsets[bad_attention_row + 1]],
+    }
+
+
+def _write_collect_batch(
+    prepared: dict[str, Any],
+    current_position: int,
+    tokens_fh,
+    labels_fh,
+    boundaries_fh,
+    first_row: int,
+    reject_empty_rows: bool,
+) -> tuple[int, int]:
+    """Append one prepared batch to the partial files and return (rows written, new position).
+
+    The files get the bytes a row-by-row loop would write, in the same order. That loop checks each row for emptiness
+    before writing it and checks its attention mask after, so on either failure the rows before the failing one, and
+    for a bad attention mask the failing row too, are written before the error is raised.
+    """
+    token_offsets = prepared["token_offsets"]
+    num_rows = len(token_offsets) - 1
+    empty_row = prepared["first_empty_row"] if reject_empty_rows else None
+    bad_row = prepared["bad_attention_row"]
+    error: Exception | None = None
+    if empty_row is not None and (bad_row is None or empty_row <= bad_row):
+        num_rows = empty_row
+        error = ValueError(
+            f"--row_aligned_parts cannot write empty row {first_row + empty_row}: "
+            "each row must contain at least one token to have a metadata boundary."
+        )
+    elif bad_row is not None:
+        num_rows = bad_row + 1
+        error = AssertionError(f"Expected all attention mask values to be 1, but found: {prepared['bad_attention']}")
+
+    prepared["tokens"][: token_offsets[num_rows]].tofile(tokens_fh)
+    prepared["labels_mask"][: prepared["label_offsets"][num_rows]].tofile(labels_fh)
+    pairs = np.empty((num_rows, 2), dtype=_BOUNDARIES_DTYPE)
+    pairs[:, 0] = token_offsets[:num_rows]
+    pairs[:, 1] = token_offsets[1 : num_rows + 1]
+    pairs += current_position
+    pairs.tofile(boundaries_fh)
+    current_position += int(token_offsets[num_rows])
+    if error is not None:
+        raise error
+    return num_rows, current_position
 
 
 def convert_hf_to_numpy_sft(
@@ -348,15 +491,18 @@ def convert_hf_to_numpy_sft(
     logger.info("Collecting tokens from dataset...")
 
     if start_idx > 0:
-        train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))
+        # datasets rejects select(range(N, N)), so a resume that finds every row collected selects [] instead.
+        train_dataset_iter = train_dataset.select(range(start_idx, total_samples) if start_idx < total_samples else [])
     else:
         train_dataset_iter = train_dataset
 
-    train_dataset_iter = train_dataset_iter.with_format("numpy")
-
-    input_ids_key = dataset_transformation.INPUT_IDS_KEY
-    labels_key = dataset_transformation.LABELS_KEY
-    attention_mask_key = dataset_transformation.ATTENTION_MASK_KEY
+    train_dataset_iter = train_dataset_iter.select_columns(
+        [
+            dataset_transformation.INPUT_IDS_KEY,
+            dataset_transformation.LABELS_KEY,
+            dataset_transformation.ATTENTION_MASK_KEY,
+        ]
+    ).with_format("arrow")
 
     progress = tqdm(
         desc="Collecting tokens",
@@ -375,37 +521,25 @@ def convert_hf_to_numpy_sft(
         tokens_path.open("ab") as tokens_fh,
         labels_path.open("ab") as labels_fh,
         boundaries_path.open("ab") as boundaries_fh,
+        contextlib.closing(
+            _prefetch_in_order(
+                train_dataset_iter.iter(batch_size=batch_size),
+                functools.partial(_prepare_collect_batch, token_dtype=token_dtype),
+            )
+        ) as prepared_batches,
     ):
-        for batch in train_dataset_iter.iter(batch_size=batch_size):
-            batch_input_ids = batch[input_ids_key]
-            batch_labels = batch[labels_key]
-            batch_attention = batch[attention_mask_key]
-
-            for sample_tokens, sample_labels, sample_attention in zip(batch_input_ids, batch_labels, batch_attention):
-                idx += 1
-                sample_length = len(sample_tokens)
-                if row_aligned_parts and sample_length == 0:
-                    raise ValueError(
-                        f"--row_aligned_parts cannot write empty row {idx}: "
-                        "each row must contain at least one token to have a metadata boundary."
-                    )
-
-                tokens_arr = np.asarray(sample_tokens, dtype=token_dtype)
-                labels_arr = np.asarray(sample_labels)
-                labels_mask = (labels_arr != -100).astype(np.uint8)
-
-                tokens_arr.tofile(tokens_fh)
-                labels_mask.tofile(labels_fh)
-                np.array([current_position, current_position + sample_length], dtype=_BOUNDARIES_DTYPE).tofile(
-                    boundaries_fh
-                )
-                current_position += sample_length
-
-                assert (sample_attention == 1).all(), (
-                    f"Expected all attention mask values to be 1, but found: {sample_attention}"
-                )
-
-            progress.update(len(batch_input_ids))
+        for prepared in prepared_batches:
+            num_rows, current_position = _write_collect_batch(
+                prepared,
+                current_position,
+                tokens_fh,
+                labels_fh,
+                boundaries_fh,
+                first_row=idx + 1,
+                reject_empty_rows=row_aligned_parts,
+            )
+            idx += num_rows
+            progress.update(num_rows)
             _flush_partial_files(tokens_fh, labels_fh, boundaries_fh)
 
             now = time.perf_counter()
