@@ -251,7 +251,14 @@ def compute_identity(fn, fn_name: str, fn_kwargs: dict, tc, cache_version: str) 
         for k, v in getattr(tok, "init_kwargs", {}).items()
         if k not in ("name_or_path", "tokenizer_file", "vocab_file", "merges_file")
     }
-    backend = tok.backend_tokenizer.to_str() if getattr(tok, "is_fast", False) else ""
+    backend = ""
+    if getattr(tok, "is_fast", False):
+        # A call with truncation or padding leaves its settings in the backend's state; they are per call, not part
+        # of the tokenizer, and the tokenize functions set them on every call.
+        spec = json.loads(tok.backend_tokenizer.to_str())
+        spec.pop("truncation", None)
+        spec.pop("padding", None)
+        backend = json.dumps(spec, sort_keys=True)
     return {
         "format": FORMAT,
         "fn_name": fn_name,
@@ -538,6 +545,10 @@ class MissFn:
         return row
 
 
+class _UnreadableShard(Exception):
+    """A shard that failed to open earlier in this process; its rows are tokenized."""
+
+
 class _ShardReader:
     """Random row access to shards, with per-chunk numpy views over the memory maps."""
 
@@ -546,11 +557,19 @@ class _ShardReader:
         self.tables = {}
         self.starts = {}
         self.views = {}
+        self.failed: set[int] = set()
 
     def row(self, f: int, r: int):
         t = self.tables.get(f)
         if t is None:
-            t = self.tables[f] = _open_shard(self.paths[f])
+            if f in self.failed:
+                raise _UnreadableShard(self.paths[f])
+            try:
+                t = self.tables[f] = _open_shard(self.paths[f])
+            except Exception:
+                # For example, another job sealed (renamed) an incoming shard after this job indexed it.
+                self.failed.add(f)
+                raise
             self.starts[f] = np.cumsum([0] + [len(c) for c in t.column(KEY).chunks])
         starts = self.starts[f]
         c = int(np.searchsorted(starts, r, side="right")) - 1
@@ -620,18 +639,23 @@ class AssembleFn:
             "ends": ends,
             "stats": {},
             "warned": 0,
+            # Two instances can run in one worker process, so the stats file name carries an instance id too.
+            "instance": uuid.uuid4().hex[:12],
         }
 
-    def _count(self, idx: int, what: str) -> None:
+    def _count(self, idx: int, what: str, read_failure: bool = False) -> None:
         s = self._state
         rank = int(np.searchsorted(s["ends"], idx, side="right"))
-        st = s["stats"].setdefault(rank, {"served": 0, "fallback": 0, "seen": 0})
+        st = s["stats"].setdefault(rank, {"served": 0, "fallback": 0, "read_failure": 0, "seen": 0})
         st[what] += 1
+        st["read_failure"] += int(read_failure)
         st["seen"] += 1
         first_fallbacks = what == "fallback" and st["fallback"] <= 16
         if first_fallbacks or st["seen"] % 1000 == 0 or idx == int(s["ends"][min(rank, len(s["ends"]) - 1)]) - 1:
             with contextlib.suppress(Exception):
-                _write_json_atomic(os.path.join(self.plan_dir, f"stats-{rank}-{os.getpid()}.json"), st, fsync=False)
+                _write_json_atomic(
+                    os.path.join(self.plan_dir, f"stats-{rank}-{os.getpid()}-{s['instance']}.json"), st, fsync=False
+                )
 
     def _serve(self, row, idx: int) -> bool:
         s = self._state
@@ -655,17 +679,19 @@ class AssembleFn:
     def __call__(self, row, idx, **fn_kwargs):
         if self._state is None:
             self._load()
+        read_failure = False
         try:
             served = self._serve(row, idx)
         except Exception as e:
             served = False
-            if self._state["warned"] < 5:
+            read_failure = True
+            if self._state["warned"] < 5 and not isinstance(e, _UnreadableShard):
                 self._state["warned"] += 1
                 _say(f"row {idx}: store read failed ({e!r}); tokenizing it", warning=True)
         if served:
             self._count(idx, "served")
             return row
-        self._count(idx, "fallback")
+        self._count(idx, "fallback", read_failure=read_failure)
         return self.fn(row, **fn_kwargs)
 
 
@@ -727,14 +753,11 @@ def cached_map(
         _say(f"the Hugging Face map cache already holds {new_fingerprint}; loading it")
         return original()
     t0 = time.perf_counter()
-    plan_dir = None
     try:
         prep = _prepare(dataset, fn, fn_name, tc, cache_version, num_proc_for_rows, fn_kwargs, root, new_fingerprint)
         plan_dir = prep["plan_dir"]
     except Exception:
         _say("SETUP FAILED; running the original map:\n" + traceback.format_exc(), warning=True)
-        if plan_dir:
-            shutil.rmtree(plan_dir, ignore_errors=True)
         return original()
     t1 = time.perf_counter()
     try:
@@ -751,26 +774,34 @@ def cached_map(
         shutil.rmtree(plan_dir, ignore_errors=True)
         return original()
     t2 = time.perf_counter()
-    stats = {"served": 0, "fallback": 0}
+    stats = {"served": 0, "fallback": 0, "read_failure": 0}
     for p in glob.glob(os.path.join(plan_dir, "stats-*.json")):
         try:
             with open(p) as f:
                 st = json.load(f)
             stats["served"] += st["served"]
             stats["fallback"] += st["fallback"]
+            stats["read_failure"] += st.get("read_failure", 0)
         except Exception:
             pass
     shutil.rmtree(plan_dir, ignore_errors=True)
     s = prep["summary"]
     s.update(
-        served=stats["served"], fallbacks=stats["fallback"], prep_s=round(t1 - t0, 2), assemble_s=round(t2 - t1, 2)
+        served=stats["served"],
+        fallbacks=stats["fallback"],
+        read_failures=stats["read_failure"],
+        prep_s=round(t1 - t0, 2),
+        assemble_s=round(t2 - t1, 2),
     )
     rate = s.get("proc_s_per_row")
     if rate:
         saved_rows = s["rows"] - s["tokenized"] - stats["fallback"]
         s["est_saved_s"] = round(max(0, saved_rows) * rate / max(1, num_proc or 1), 1)
-    if stats["fallback"]:
-        _say(f"{stats['fallback']} rows failed a check and were tokenized instead", warning=True)
+    checks_failed = stats["fallback"] - stats["read_failure"]
+    if checks_failed:
+        _say(f"{checks_failed} rows failed a check and were tokenized instead", warning=True)
+    if stats["read_failure"]:
+        _say(f"{stats['read_failure']} rows could not be read from the store and were tokenized", warning=True)
     _say(
         f"{fn_name}: {s['rows']:,} rows, {s['hits']:,} from the store, {s['tokenized']:,} tokenized "
         f"({s['miss_rows']:,} miss rows), {stats['fallback']:,} fallbacks; store {s['store_shards']} shards, "
@@ -918,8 +949,12 @@ def _prepare(dataset, fn, fn_name, tc, cache_version, num_proc_for_rows, fn_kwar
 
     plan_dir = tempfile.mkdtemp(prefix="trc-plan-")
     key_mat = _mat32(compute.if_else(pa.array(has_key), qkeys, pa.scalar(bytes(32), pa.binary())))
-    np.save(os.path.join(plan_dir, "file.npy"), file_no)
-    np.save(os.path.join(plan_dir, "row.npy"), row_no)
-    np.save(os.path.join(plan_dir, "key.npy"), key_mat)
-    np.save(os.path.join(plan_dir, "has_key.npy"), has_key)
+    try:
+        np.save(os.path.join(plan_dir, "file.npy"), file_no)
+        np.save(os.path.join(plan_dir, "row.npy"), row_no)
+        np.save(os.path.join(plan_dir, "key.npy"), key_mat)
+        np.save(os.path.join(plan_dir, "has_key.npy"), has_key)
+    except Exception:
+        shutil.rmtree(plan_dir, ignore_errors=True)
+        raise
     return {"plan_dir": plan_dir, "paths": paths, "summary": summary}

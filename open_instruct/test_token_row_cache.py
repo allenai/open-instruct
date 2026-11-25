@@ -182,7 +182,16 @@ class TestTokenRowCache(unittest.TestCase):
         parquet.write_table(pa.Table.from_pylist(rows), path)
         return str(path)
 
-    def _tokenize(self, data_path, store=None, hf_cache=None, max_seq_length=512, template="tulu", with_filter=False):
+    def _tokenize(
+        self,
+        data_path,
+        store=None,
+        hf_cache=None,
+        max_seq_length=512,
+        template="tulu",
+        with_filter=False,
+        fn=TOKENIZE_FN,
+    ):
         """get_dataset_v1 with the SFT tokenize transform, in a fresh Hugging Face datasets cache unless `hf_cache`
         is given. Returns the dataset, the tokenize map's output file bytes, the row cache's summaries and its log.
 
@@ -192,8 +201,9 @@ class TestTokenRowCache(unittest.TestCase):
         slot = self.root / "hf-slot"
         fresh = hf_cache is None
         hf_cache = slot if fresh else hf_cache
-        fns = [TOKENIZE_FN] + (["sft_tulu_filter_v1"] if with_filter else [])
-        args = [dataset_transformation.sft_tokenize_fn_args(max_seq_length, "keep")] + ([{}] if with_filter else [])
+        fns = [fn] + (["sft_tulu_filter_v1"] if with_filter else [])
+        fn_args = {} if fn == "sft_tulu_tokenize_without_truncation_v1" else {"max_seq_length": max_seq_length}
+        args = [fn_args] + ([{}] if with_filter else [])
         start = len(self.handler.messages)
         if store is not None:
             os.environ[token_row_cache.ROOT_ENV] = str(store)
@@ -308,6 +318,47 @@ class TestTokenRowCache(unittest.TestCase):
         }
         self.assertEqual(len(others), 3)
         self.assertNotIn(digest(base), others)
+
+    @parameterized.expand([("last_turn_tulu_tokenize_and_truncate_v1",), ("sft_tulu_tokenize_without_truncation_v1",)])
+    def test_other_tokenize_transforms(self, fn):
+        path = self._write("a", _rows(60, seed=8))
+        ref = self._tokenize(path, fn=fn)
+        cold = self._tokenize(path, store=self.store, fn=fn)
+        warm = self._tokenize(path, store=self.store, fn=fn)
+        self._assert_same(ref, cold)
+        self._assert_same(ref, warm)
+        self.assertEqual((warm[2][0]["tokenized"], warm[2][0]["fallbacks"]), (0, 0))
+
+    def test_identity_ignores_per_call_truncation_state(self):
+        tc = dataset_transformation.TokenizerConfig(
+            tokenizer_name_or_path=TOKENIZER_PATH, tokenizer_revision="main", chat_template_name="tulu"
+        )
+        fn = dataset_transformation.TRANSFORM_FNS[TOKENIZE_FN][0]
+        kwargs = {"tokenizer": tc.tokenizer, **dataset_transformation.sft_tokenize_fn_args(512, "keep")}
+        before = token_row_cache.identity_digest(token_row_cache.compute_identity(fn, TOKENIZE_FN, kwargs, tc, "v10"))
+        tc.tokenizer("some text", truncation=True, max_length=7)
+        after = token_row_cache.identity_digest(token_row_cache.compute_identity(fn, TOKENIZE_FN, kwargs, tc, "v10"))
+        self.assertEqual(before, after)
+
+    def test_a_shard_gone_after_indexing_is_tokenized(self):
+        # As when another job seals (renames) an incoming shard between this job's index and its final map.
+        path = self._write("a", _rows(60, seed=9))
+        ref = self._tokenize(path)
+        self._tokenize(path, store=self.store)
+        real_prepare = token_row_cache._prepare
+
+        def prepare_then_remove(*args, **kwargs):
+            prep = real_prepare(*args, **kwargs)
+            for shard in prep["paths"]:
+                os.remove(shard)
+            return prep
+
+        with unittest.mock.patch.object(token_row_cache, "_prepare", side_effect=prepare_then_remove):
+            got = self._tokenize(path, store=self.store)
+        self._assert_same(ref, got)
+        (summary,) = got[2]
+        self.assertEqual(summary["read_failures"], summary["rows"])
+        self.assertEqual(summary["fallbacks"], summary["rows"])
 
     def test_damaged_store_is_detected_and_repaired(self):
         rows = _rows(120, seed=4)
