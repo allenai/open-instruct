@@ -31,6 +31,17 @@ generation_config.json gets eos_token_id [100265, 100257] (<|im_end|>, <|endofte
 chat stop list for the default Olmo 3 chat tokenizer, as chat SFT exports need. A tokenizer with other ids, or a
 base/midtrain export that should stop only at <|endoftext|>, passes --eos-token-ids explicitly (e.g. 100257).
 
+KDA decay weights: every tensor is written as bfloat16 except each KDA layer's `A_log` and `dt_bias`, which are
+written as float32, the dtype olmo-core's KDA and its HF modeling declare for them (and only for them). `--kda-decay`
+sets their value, which must be the one the training forward used:
+
+- `bf16-grid` (default): the float32 master rounded to the bfloat16 grid. Right for a checkpoint whose forward saw
+  bfloat16-rounded weights: OLMo-core training with bfloat16 model weights and float32 masters, and MaxText SFT with
+  MAXTEXT_FORWARD_BF16_ALL_PARAMS=1. The values equal those of the all-bfloat16 exports this script wrote before.
+- `fp32`: the float32 master as stored. Right for a checkpoint whose forward used float32 decay weights (MaxText
+  pretraining and midtraining). Serve such an export with a loader that keeps the two tensors in float32: loading
+  it into an all-bfloat16 model rounds them again.
+
 Note for GDN-based MoE hybrids (not KDA): olmo-core's `is_olmo_hybrid_model`
 returns True for them and routes to the dense-hybrid exporter, which crashes on
 the missing `feed_forward` attribute. KDA is unaffected because
@@ -38,13 +49,17 @@ the missing `feed_forward` attribute. KDA is unaffected because
 """
 
 import argparse
+import contextlib
 import json
 import pathlib
 import tempfile
 
+import olmo_core.nn.hf.convert_checkpoint as core_convert
 import torch
 from olmo_core.config import DType
 from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_keys
+from olmo_core.distributed.utils import get_full_tensor
+from olmo_core.nn.attention import KimiDeltaAttention
 from olmo_core.nn.hf import convert_checkpoint_to_hf
 from olmo_core.nn.transformer.config import TransformerConfig
 from olmo_core.utils import prepare_cli_environment
@@ -111,6 +126,75 @@ def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir:
     return dist_cp_sd.get_model_state_dict(model, options=options)
 
 
+KDA_DECAY_MODES = ("bf16-grid", "fp32")
+
+
+def kda_decay_keys(model: torch.nn.Module) -> set[str]:
+    """State-dict keys of every KDA layer's decay weights, the tensors olmo-core's KDA declares float32."""
+    return {
+        f"{name}.{weight}"
+        for name, module in model.named_modules()
+        if isinstance(module, KimiDeltaAttention)
+        for weight in ("A_log", "dt_bias")
+    }
+
+
+def cast_for_export(
+    model_state_dict: dict, decay_keys: set[str], kda_decay: str, dtype: torch.dtype = torch.bfloat16
+) -> dict:
+    """Cast a model state dict for export: ``dtype`` for every tensor except the KDA decay weights, kept float32.
+
+    ``kda_decay`` picks the decay weights' value: ``bf16-grid`` rounds the float32 master to the bfloat16 grid
+    (the value an all-bfloat16 export stores), ``fp32`` keeps the master.
+    """
+    if kda_decay not in KDA_DECAY_MODES:
+        raise ValueError(f"kda_decay must be one of {KDA_DECAY_MODES}, got {kda_decay!r}")
+    missing = sorted(decay_keys - set(model_state_dict))
+    if missing:
+        raise KeyError(f"KDA decay weights missing from the model state dict: {missing}")
+    cast = {}
+    moved = 0
+    for key, value in model_state_dict.items():
+        if key not in decay_keys:
+            cast[key] = value.to(dtype=dtype)
+            continue
+        master = value.to(dtype=torch.float32)
+        on_grid = master.to(dtype=torch.bfloat16).to(dtype=torch.float32)
+        moved += int((on_grid != master).sum())
+        cast[key] = on_grid if kda_decay == "bf16-grid" else master
+    if decay_keys:
+        logger.info(
+            "KDA decay weights: %d tensors written as float32 (%s); %d elements of the masters are off the bfloat16 grid",
+            len(decay_keys),
+            kda_decay,
+            moved,
+        )
+    return cast
+
+
+@contextlib.contextmanager
+def kda_decay_export(kda_decay: str):
+    """Make olmo-core's converter save KDA decay weights as float32 while this context is open.
+
+    ``convert_checkpoint_to_hf`` hands ``save_hf_model`` one dtype for every tensor. This wraps that call: the state
+    dict is cast here, per tensor, and saved as it is. Checkpoint loading and everything else stay olmo-core's.
+    """
+    save_hf_model = core_convert.save_hf_model
+
+    def save(save_dir, model_state_dict, model, *args, dtype=None, **kwargs):
+        if dtype is None:
+            return save_hf_model(save_dir, model_state_dict, model, *args, dtype=None, **kwargs)
+        full = {key: get_full_tensor(state) for key, state in model_state_dict.items()}
+        cast = cast_for_export(full, kda_decay_keys(model), kda_decay, dtype.as_pt())
+        return save_hf_model(save_dir, cast, model, *args, dtype=None, **kwargs)
+
+    core_convert.save_hf_model = save
+    try:
+        yield
+    finally:
+        core_convert.save_hf_model = save_hf_model
+
+
 CHAT_EOS_TOKEN_IDS = (100265, 100257)  # <|im_end|>, <|endoftext|>
 
 
@@ -148,6 +232,14 @@ def main() -> None:
     # looks like a converted-but-unvalidated checkpoint -- the exact state that let
     # a 38%-logit-error conversion through on Olmo-Hybrid-7B. Do not silence it.
     parser.add_argument("--device", type=torch.device, default=torch.device("cuda"))
+    parser.add_argument(
+        "--kda-decay",
+        choices=KDA_DECAY_MODES,
+        default="bf16-grid",
+        help="Value of each KDA layer's A_log and dt_bias (always written as float32): the master rounded to the "
+        "bfloat16 grid (default; the value a bfloat16-forward run trained with) or the float32 master as stored "
+        "(for a checkpoint whose forward used float32 decay weights).",
+    )
     args = parser.parse_args()
 
     payload = json.loads(pathlib.Path(args.config).read_text())
@@ -163,19 +255,20 @@ def main() -> None:
         model_state_dict = load_ddp_main_params(
             str(pathlib.Path(args.checkpoint_input_path) / "model_and_optim"), model_config, work_dir
         )
-    convert_checkpoint_to_hf(
-        original_checkpoint_path=args.checkpoint_input_path,
-        output_path=args.huggingface_output_dir,
-        transformer_config_dict=model_config,
-        tokenizer_config_dict=tokenizer_config,
-        model_state_dict=model_state_dict,
-        dtype=DType.bfloat16,
-        max_sequence_length=args.max_sequence_length,
-        tokenizer_id=args.tokenizer,
-        validate=args.validate,
-        device=args.device,
-        validation_device=args.device,
-    )
+    with kda_decay_export(args.kda_decay):
+        convert_checkpoint_to_hf(
+            original_checkpoint_path=args.checkpoint_input_path,
+            output_path=args.huggingface_output_dir,
+            transformer_config_dict=model_config,
+            tokenizer_config_dict=tokenizer_config,
+            model_state_dict=model_state_dict,
+            dtype=DType.bfloat16,
+            max_sequence_length=args.max_sequence_length,
+            tokenizer_id=args.tokenizer,
+            validate=args.validate,
+            device=args.device,
+            validation_device=args.device,
+        )
     write_generation_eos(pathlib.Path(args.huggingface_output_dir), args.eos_token_ids)
     logger.info("CONVERSION_OK")
 
