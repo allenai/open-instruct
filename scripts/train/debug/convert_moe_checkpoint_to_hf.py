@@ -39,8 +39,9 @@ sets their value, which must be the one the training forward used:
   bfloat16-rounded weights: OLMo-core training with bfloat16 model weights and float32 masters, and MaxText SFT with
   MAXTEXT_FORWARD_BF16_ALL_PARAMS=1. The values equal those of the all-bfloat16 exports this script wrote before.
 - `fp32`: the float32 master as stored. Right for a checkpoint whose forward used float32 decay weights (MaxText
-  pretraining and midtraining). Serve such an export with a loader that keeps the two tensors in float32: loading
-  it into an all-bfloat16 model rounds them again.
+  pretraining and midtraining). Serve such an export with a loader that keeps the two tensors in float32: casting
+  the whole model to bfloat16 rounds them again. It needs `--skip-validation`: olmo-core's validation casts its
+  reference model to one dtype, so it would compare rounded decay weights with unrounded ones.
 
 Note for GDN-based MoE hybrids (not KDA): olmo-core's `is_olmo_hybrid_model`
 returns True for them and routes to the dense-hybrid exporter, which crashes on
@@ -54,12 +55,12 @@ import json
 import pathlib
 import tempfile
 
-import olmo_core.nn.hf.convert_checkpoint as core_convert
 import torch
 from olmo_core.config import DType
 from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_keys
 from olmo_core.distributed.utils import get_full_tensor
 from olmo_core.nn.attention import KimiDeltaAttention
+from olmo_core.nn.hf import convert_checkpoint as core_convert
 from olmo_core.nn.hf import convert_checkpoint_to_hf
 from olmo_core.nn.transformer.config import TransformerConfig
 from olmo_core.utils import prepare_cli_environment
@@ -241,6 +242,8 @@ def main() -> None:
         "(for a checkpoint whose forward used float32 decay weights).",
     )
     args = parser.parse_args()
+    if args.kda_decay == "fp32" and args.validate:
+        parser.error("--kda-decay fp32 needs --skip-validation: validation rounds the reference's decay weights")
 
     payload = json.loads(pathlib.Path(args.config).read_text())
     model_config = payload["model"]

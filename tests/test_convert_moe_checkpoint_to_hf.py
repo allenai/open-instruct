@@ -9,7 +9,8 @@ from copy import deepcopy
 import pytest
 import torch
 from olmo_core.config import DType
-from olmo_core.nn.attention import KimiDeltaAttentionConfig
+from olmo_core.nn.attention import AttentionConfig, GateConfig, GateGranularity, KimiDeltaAttentionConfig
+from olmo_core.nn.attention.backend import AttentionBackendName
 from olmo_core.nn.ddp.block import OLMoDDPTransformerBlockConfig
 from olmo_core.nn.hf import convert_checkpoint_to_hf
 from olmo_core.nn.layer_norm import LayerNormConfig, LayerNormType
@@ -35,7 +36,8 @@ WIDTH, EXPERTS, VOCAB = 128, 4, 64
 
 
 def small_kda_config() -> OLMoDDPModelConfig:
-    """Two KDA layers, one dense and one with routed experts (after olmo-core's olmo3moe export fixture)."""
+    """Two KDA layers, one dense and one with routed experts, and the full-attention layer olmo-core's exporter
+    requires beside them (after olmo-core's olmo3moe export fixture)."""
     norm = LayerNormConfig(name=LayerNormType.rms, eps=1e-6, bias=False)
     sparse = OLMoDDPTransformerBlockConfig(
         name=TransformerBlockType.moe_fused_v2,
@@ -55,13 +57,27 @@ def small_kda_config() -> OLMoDDPModelConfig:
     )
     dense = deepcopy(sparse)
     dense.routed_experts = dense.routed_experts_router = None
+    full = deepcopy(sparse)
+    full.sequence_mixer = AttentionConfig(
+        n_heads=2,
+        n_kv_heads=1,
+        head_dim=64,
+        bias=False,
+        rope=None,
+        qk_norm=deepcopy(norm),
+        use_head_qk_norm=True,
+        qk_norm_per_head_gains=True,
+        scalable_softmax=True,
+        backend=AttentionBackendName.torch,
+        gate=GateConfig(granularity=GateGranularity.elementwise),
+    )
     return OLMoDDPModelConfig(
         name=TransformerType.moe_fused_v2,
         d_model=WIDTH,
-        n_layers=2,
+        n_layers=3,
         vocab_size=VOCAB,
         block=sparse,
-        block_overrides={0: dense, 1: deepcopy(sparse)},
+        block_overrides={0: dense, 1: deepcopy(sparse), 2: full},
         lm_head=LMHeadConfig(layer_norm=deepcopy(norm), bias=False),
         embedding_norm=deepcopy(norm),
         embed_scale=WIDTH**0.5,
@@ -166,3 +182,11 @@ def test_cast_refuses_a_state_dict_without_the_decay_weights():
         convert_script.cast_for_export({"w": torch.ones(2)}, {"blocks.0.attention.A_log"}, "fp32")
     with pytest.raises(ValueError, match="kda_decay"):
         convert_script.cast_for_export({"w": torch.ones(2)}, set(), "float32")
+
+
+def test_fp32_needs_skip_validation(monkeypatch, capsys):
+    """olmo-core's validation casts its reference model to one dtype, which would round the float32 decay weights."""
+    monkeypatch.setattr("sys.argv", ["convert", "-i", "in", "-o", "out", "-c", "config.json", "--kda-decay", "fp32"])
+    with pytest.raises(SystemExit):
+        convert_script.main()
+    assert "--skip-validation" in capsys.readouterr().err
