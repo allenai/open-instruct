@@ -4,6 +4,7 @@ Run from project root:
     uv run pytest open_instruct/test_numpy_dataset_conversion.py -v
 """
 
+import functools
 import gc
 import gzip
 import json
@@ -11,9 +12,11 @@ import os
 import pathlib
 import shutil
 import tempfile
+import time
 import unittest
 import unittest.mock
 
+import datasets
 import numpy as np
 from olmo_core import data as oc_data
 from parameterized import parameterized
@@ -832,6 +835,334 @@ class TestResumeEquivalence(_NumpySftTestBase):
             else:
                 with (golden / name).open("rb") as f1, (interrupted / name).open("rb") as f2:
                     self.assertEqual(f1.read(), f2.read(), msg=f"mismatch in {name}")
+
+
+class TestSegmentSums(unittest.TestCase):
+    @staticmethod
+    def _reference(values, starts):
+        """np.add.reduceat with empty segments set to 0, which is what _aggregate_stats computed before."""
+        out = np.zeros(len(starts), dtype=np.int64)
+        lengths = np.diff(np.append(starts, len(values)))
+        inside = starts < len(values)
+        if inside.any():
+            out[inside] = np.add.reduceat(values, starts[inside], dtype=np.int64)
+        out[lengths == 0] = 0
+        return out
+
+    @parameterized.expand([(1,), (3,), (64,), (1 << 27,)])
+    def test_matches_reduceat(self, chunk_size):
+        rng = np.random.default_rng(chunk_size)
+        for trial in range(20):
+            lengths = rng.choice([0, 0, 1, 2, 5, 17, 130], size=int(rng.integers(1, 40)))
+            values = rng.integers(0, 2, size=int(lengths.sum()), dtype=np.uint8)
+            starts = np.concatenate([[0], np.cumsum(lengths)[:-1]]).astype(np.int64)
+            with self.subTest(trial=trial):
+                result = numpy_dataset_conversion._segment_sums(values, starts, chunk_size=chunk_size)
+                np.testing.assert_array_equal(result, self._reference(values, starts))
+                np.testing.assert_array_equal(result, [values[s : s + n].sum() for s, n in zip(starts, lengths)])
+
+    def test_trailing_empty_segment(self):
+        # np.add.reduceat rejects a start equal to len(values), which a trailing empty row has.
+        values = np.array([1, 0, 1], dtype=np.uint8)
+        result = numpy_dataset_conversion._segment_sums(values, np.array([0, 3, 3]), chunk_size=2)
+        np.testing.assert_array_equal(result, [2, 0, 0])
+
+    def test_no_values(self):
+        values = np.zeros(0, dtype=np.uint8)
+        np.testing.assert_array_equal(numpy_dataset_conversion._segment_sums(values, np.array([0, 0])), [0, 0])
+
+    def test_rejects_decreasing_starts(self):
+        with self.assertRaises(ValueError):
+            numpy_dataset_conversion._segment_sums(np.ones(4, dtype=np.uint8), np.array([0, 3, 2]))
+
+
+class TestPrefetchInOrder(unittest.TestCase):
+    def test_yields_in_input_order(self):
+        def slow_for_even(x):
+            time.sleep(0.002 * (x % 2 == 0))
+            return x * x
+
+        for workers, depth in ((1, 1), (4, 2), (16, 32)):
+            with self.subTest(workers=workers, depth=depth):
+                result = list(
+                    numpy_dataset_conversion._prefetch_in_order(range(50), slow_for_even, workers=workers, depth=depth)
+                )
+                self.assertEqual(result, [x * x for x in range(50)])
+
+    def test_reraises_worker_errors_in_order(self):
+        def fail_on_three(x):
+            if x == 3:
+                raise KeyError(x)
+            return x
+
+        seen = []
+        with self.assertRaises(KeyError):
+            for x in numpy_dataset_conversion._prefetch_in_order(range(10), fail_on_three, workers=4, depth=4):
+                seen.append(x)
+        self.assertEqual(seen, [0, 1, 2])
+
+    def test_closing_early_stops_reading_input(self):
+        consumed = []
+
+        def items():
+            for i in range(1000):
+                consumed.append(i)
+                yield i
+
+        gen = numpy_dataset_conversion._prefetch_in_order(items(), lambda x: x, workers=2, depth=4)
+        self.assertEqual(next(gen), 0)
+        gen.close()
+        self.assertLessEqual(len(consumed), 4)
+
+
+def _synthetic_tokenized_dataset(num_rows, seed, value_type="int64", num_chunks=4):
+    """Tokenized rows like a real SFT mix, in `num_chunks` Arrow chunks: empty, one-token and long rows, -100 spans,
+    rows with nothing trainable, token ids up to the dolma2 vocabulary, and four sources."""
+    rng = np.random.default_rng(seed)
+    columns = {key: [] for key in (*dataset_transformation.TOKENIZED_SFT_DATASET_KEYS, "source")}
+    for i in range(num_rows):
+        length = int(rng.choice([0, 1, 2, int(rng.integers(3, 400)), int(rng.integers(400, 3000))]))
+        if i == 7:
+            length = 20000
+        tokens = rng.integers(0, 100278, size=length)
+        labels = tokens.copy()
+        if length:
+            labels[: int(rng.integers(0, length + 1))] = -100
+            if i % 11 == 0:
+                labels[:] = -100
+        columns[dataset_transformation.INPUT_IDS_KEY].append(tokens.tolist())
+        columns[dataset_transformation.LABELS_KEY].append(labels.tolist())
+        columns[dataset_transformation.ATTENTION_MASK_KEY].append([1] * length)
+        columns["source"].append(f"source-{i % 4}")
+    columns[dataset_transformation.DATASET_ORIGIN_KEY] = columns.pop("source")
+    sequence = datasets.Sequence(datasets.Value(value_type))
+    features = datasets.Features(
+        {
+            dataset_transformation.INPUT_IDS_KEY: sequence,
+            dataset_transformation.LABELS_KEY: sequence,
+            dataset_transformation.ATTENTION_MASK_KEY: sequence,
+            dataset_transformation.DATASET_ORIGIN_KEY: datasets.Value("string"),
+        }
+    )
+    bounds = np.linspace(0, num_rows, num_chunks + 1).astype(int)
+    return datasets.concatenate_datasets(
+        [
+            datasets.Dataset.from_dict({k: v[lo:hi] for k, v in columns.items()}, features=features)
+            for lo, hi in zip(bounds[:-1], bounds[1:])
+        ]
+    )
+
+
+def _row_loop_partial_files(dataset, token_dtype, reject_empty_rows=False):
+    """The three partial files' bytes as the row-by-row collect loop wrote them before it was batched, and the
+    error it raised, if any. It checked a row for emptiness before writing it and its attention mask after."""
+    tokens, labels, boundaries = bytearray(), bytearray(), bytearray()
+    position = 0
+    for idx, row in enumerate(dataset.with_format("numpy")):
+        sample_tokens = row[dataset_transformation.INPUT_IDS_KEY]
+        if reject_empty_rows and len(sample_tokens) == 0:
+            return (bytes(tokens), bytes(labels), bytes(boundaries)), ValueError(f"empty row {idx}")
+        tokens += np.asarray(sample_tokens, dtype=token_dtype).tobytes()
+        labels += (np.asarray(row[dataset_transformation.LABELS_KEY]) != -100).astype(np.uint8).tobytes()
+        boundaries += np.array([position, position + len(sample_tokens)], dtype=np.int64).tobytes()
+        position += len(sample_tokens)
+        if not (row[dataset_transformation.ATTENTION_MASK_KEY] == 1).all():
+            return (bytes(tokens), bytes(labels), bytes(boundaries)), AssertionError(f"attention mask in row {idx}")
+    return (bytes(tokens), bytes(labels), bytes(boundaries)), None
+
+
+_PARTIAL_NAMES = ("_tokens.partial.bin", "_labels.partial.bin", "_boundaries.partial.bin")
+
+
+class TestBatchedCollect(_NumpySftTestBase):
+    """The batched, threaded collect loop writes the partial files byte for byte as the row-by-row loop did."""
+
+    SHUFFLE_SEED = 3
+
+    def _convert(self, dataset, output_dir, batch_size=1000, workers=None, resume=False, row_aligned_parts=False):
+        """Run convert_hf_to_numpy_sft on an already tokenized dataset. Returns the partial files' bytes as the
+        statistics stage saw them, or None if it was not reached."""
+        snapshot = {}
+        real_aggregate = numpy_dataset_conversion._aggregate_stats
+
+        def aggregate(**kwargs):
+            snapshot["files"] = tuple((output_dir / name).read_bytes() for name in _PARTIAL_NAMES)
+            return real_aggregate(**kwargs)
+
+        real_prefetch = numpy_dataset_conversion._prefetch_in_order
+        prefetch = (
+            real_prefetch if workers is None else functools.partial(real_prefetch, workers=workers, depth=2 * workers)
+        )
+        with (
+            unittest.mock.patch.object(
+                dataset_transformation, "get_cached_dataset_tulu_with_statistics", return_value=(dataset, {})
+            ),
+            unittest.mock.patch.object(numpy_dataset_conversion, "_aggregate_stats", side_effect=aggregate),
+            unittest.mock.patch.object(numpy_dataset_conversion, "_prefetch_in_order", side_effect=prefetch),
+        ):
+            numpy_dataset_conversion.convert_hf_to_numpy_sft(
+                output_dir=output_dir,
+                dataset_mixer_list=[],
+                dataset_mixer_list_splits=[],
+                tc=self._make_tc(),
+                dataset_transform_fn=[],
+                transform_fn_args=[],
+                dataset_target_columns=dataset_transformation.TOKENIZED_SFT_DATASET_KEYS,
+                dataset_config_hash="synthetic",
+                shuffle_seed=self.SHUFFLE_SEED,
+                batch_size=batch_size,
+                resume=resume,
+                row_aligned_parts=row_aligned_parts,
+            )
+        return snapshot.get("files")
+
+    def _expected(self, dataset, reject_empty_rows=False):
+        token_dtype = numpy_dataset_conversion._select_token_dtype(self._make_tc().tokenizer.vocab_size)
+        return _row_loop_partial_files(
+            dataset.shuffle(seed=self.SHUFFLE_SEED), token_dtype, reject_empty_rows=reject_empty_rows
+        )
+
+    def _outputs(self, output_dir):
+        """Every part file's bytes, and the statistics without their timestamp and directory."""
+        out = {
+            path.name: path.read_bytes()
+            for path in sorted(output_dir.iterdir())
+            if path.name.startswith(("token_ids_part_", "labels_mask_part_"))
+        }
+        stats = json.loads((output_dir / "dataset_statistics.json").read_text())
+        del stats["timestamp"], stats["output_directory"]
+        out["dataset_statistics.json"] = stats
+        return out
+
+    @parameterized.expand(
+        [
+            ("int64_default", "int64", 1000, None),
+            ("int32_default", "int32", 1000, None),
+            ("one_row_batches", "int64", 1, 3),
+            ("odd_batches_one_worker", "int64", 7, 1),
+            ("large_batches", "int32", 4096, 16),
+            ("batches_of_999", "int64", 999, 8),
+        ]
+    )
+    def test_partial_files_match_row_loop(self, _name, value_type, batch_size, workers):
+        dataset = _synthetic_tokenized_dataset(1500, seed=1, value_type=value_type)
+        output_dir = pathlib.Path(self.temp_dir.name) / "out"
+        files = self._convert(dataset, output_dir, batch_size=batch_size, workers=workers)
+        expected, error = self._expected(dataset)
+        self.assertIsNone(error)
+        for name, got, want in zip(_PARTIAL_NAMES, files, expected):
+            self.assertEqual(got, want, msg=f"mismatch in {name}")
+
+        stats = json.loads((output_dir / "dataset_statistics.json").read_text())["overall_statistics"]
+        trainable = [sum(label != -100 for label in row) for row in dataset[dataset_transformation.LABELS_KEY]]
+        self.assertEqual(stats["total_tokens"], sum(len(row) for row in dataset[dataset_transformation.INPUT_IDS_KEY]))
+        self.assertEqual(stats["trainable_tokens"], sum(trainable))
+        self.assertEqual(stats["instances_filtered"], sum(count == 0 for count in trainable))
+
+    def test_bad_attention_mask_raises_after_writing_the_same_rows(self):
+        dataset = _synthetic_tokenized_dataset(300, seed=2)
+        shuffled_position = 123
+        original_index = dataset.shuffle(seed=self.SHUFFLE_SEED)._indices.column(0)[shuffled_position].as_py()
+        masks = list(dataset[dataset_transformation.ATTENTION_MASK_KEY])
+        masks[original_index] = [1] * 5 + [0]
+        dataset = dataset.remove_columns(dataset_transformation.ATTENTION_MASK_KEY).add_column(
+            dataset_transformation.ATTENTION_MASK_KEY, masks
+        )
+        expected, error = self._expected(dataset)
+        self.assertIsInstance(error, AssertionError)
+        self.assertEqual(len(expected[2]) // 16, shuffled_position + 1)
+        for batch_size in (1, 50, 1000):
+            output_dir = pathlib.Path(self.temp_dir.name) / f"bad-mask-{batch_size}"
+            with self.subTest(batch_size=batch_size):
+                with self.assertRaisesRegex(AssertionError, "Expected all attention mask values to be 1"):
+                    self._convert(dataset, output_dir, batch_size=batch_size)
+                for name, want in zip(_PARTIAL_NAMES, expected):
+                    self.assertEqual((output_dir / name).read_bytes(), want, msg=f"mismatch in {name}")
+
+    def test_row_aligned_empty_row_raises_after_writing_the_rows_before_it(self):
+        dataset = _synthetic_tokenized_dataset(300, seed=4)
+        expected, error = self._expected(dataset, reject_empty_rows=True)
+        self.assertIsInstance(error, ValueError)
+        first_empty = len(expected[2]) // 16
+        for batch_size in (1, 64, 1000):
+            output_dir = pathlib.Path(self.temp_dir.name) / f"empty-{batch_size}"
+            with self.subTest(batch_size=batch_size):
+                with self.assertRaisesRegex(ValueError, f"cannot write empty row {first_empty}:"):
+                    self._convert(dataset, output_dir, batch_size=batch_size, row_aligned_parts=True)
+                for name, want in zip(_PARTIAL_NAMES, expected):
+                    self.assertEqual((output_dir / name).read_bytes(), want, msg=f"mismatch in {name}")
+
+    def test_first_failure_in_row_order_wins_within_a_batch(self):
+        dataset = _synthetic_tokenized_dataset(300, seed=4)
+        order = dataset.shuffle(seed=self.SHUFFLE_SEED)._indices.column(0).to_pylist()
+        lengths = [len(row) for row in dataset[dataset_transformation.INPUT_IDS_KEY]]
+        first_empty = next(p for p, i in enumerate(order) if lengths[i] == 0)
+        before = max(p for p in range(first_empty) if lengths[order[p]] > 0)
+        after = min(p for p in range(first_empty + 1, len(order)) if lengths[order[p]] > 0)
+        for bad_position, error_type in ((before, AssertionError), (after, ValueError)):
+            masks = list(dataset[dataset_transformation.ATTENTION_MASK_KEY])
+            masks[order[bad_position]] = [0] * lengths[order[bad_position]]
+            bad = dataset.remove_columns(dataset_transformation.ATTENTION_MASK_KEY).add_column(
+                dataset_transformation.ATTENTION_MASK_KEY, masks
+            )
+            expected, error = self._expected(bad, reject_empty_rows=True)
+            self.assertIsInstance(error, error_type)
+            output_dir = pathlib.Path(self.temp_dir.name) / f"mixed-{bad_position}"
+            with self.subTest(bad_position=bad_position), self.assertRaises(error_type):
+                self._convert(bad, output_dir, batch_size=1000, row_aligned_parts=True)
+            for name, want in zip(_PARTIAL_NAMES, expected):
+                self.assertEqual((output_dir / name).read_bytes(), want, msg=f"mismatch in {name}")
+
+    def test_resume_after_every_row_was_collected(self):
+        dataset = _synthetic_tokenized_dataset(400, seed=5)
+        golden = pathlib.Path(self.temp_dir.name) / "golden"
+        self._convert(dataset, golden)
+
+        interrupted = pathlib.Path(self.temp_dir.name) / "interrupted"
+        with (
+            unittest.mock.patch.object(
+                numpy_dataset_conversion, "_aggregate_stats", side_effect=RuntimeError("simulated interrupt")
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            self._convert(dataset, interrupted)
+        self.assertTrue((interrupted / "_boundaries.partial.bin").exists())
+
+        files = self._convert(dataset, interrupted, resume=True)
+        self.assertEqual(files, self._expected(dataset)[0])
+        self.assertEqual(self._outputs(interrupted), self._outputs(golden))
+
+    def test_resume_from_a_torn_tail(self):
+        dataset = _synthetic_tokenized_dataset(400, seed=6)
+        golden = pathlib.Path(self.temp_dir.name) / "golden"
+        self._convert(dataset, golden, batch_size=64)
+
+        interrupted = pathlib.Path(self.temp_dir.name) / "interrupted"
+        real_flush = numpy_dataset_conversion._flush_partial_files
+        calls = {"n": 0}
+
+        def fail_on_third(*args):
+            real_flush(*args)
+            calls["n"] += 1
+            if calls["n"] == 3:
+                raise RuntimeError("simulated interrupt")
+
+        with (
+            unittest.mock.patch.object(numpy_dataset_conversion, "_flush_partial_files", side_effect=fail_on_third),
+            self.assertRaises(RuntimeError),
+        ):
+            self._convert(dataset, interrupted, batch_size=64)
+        # Half a row in the token and label files and half a boundary pair, as a write cut short leaves them.
+        with (interrupted / "_tokens.partial.bin").open("ab") as f:
+            f.write(b"\x07" * 10)
+        with (interrupted / "_labels.partial.bin").open("ab") as f:
+            f.write(b"\x01" * 5)
+        with (interrupted / "_boundaries.partial.bin").open("ab") as f:
+            f.write(b"\x00" * 8)
+
+        files = self._convert(dataset, interrupted, batch_size=100, resume=True)
+        self.assertEqual(files, self._expected(dataset)[0])
+        self.assertEqual(self._outputs(interrupted), self._outputs(golden))
 
 
 if __name__ == "__main__":
