@@ -20,9 +20,17 @@ Actionable follow-up experiments and analyses identified while drafting the RL-z
     - `[training] filter_zero_std_groups = true`
   - Validate, preflight, and submit via `tools/submit_excluding.py --exclude holmes-cs-aus-511.reviz.ai2.in` on 1 × 8-B300 node (2 trainer + 6 inference GPUs, identical to the 450M/275M zstd runs).
 - **Estimated cost:** ~3–4 h on 1 × 8-B300 node (the unfiltered 810M combined run took 1.73 h; ~20–35% keep rate means ~3–5× generation early, shrinking as signal rises).
-- **Status (2026-11-24): running.** Submitted at 2:39 PM PST and running since 2:42 PM PST as Beaker experiment `01M87VE3DZ6BV3EG17N4G37V9C`; the config is `configs/olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124.toml`.
-  - **Expected wall time:** ~3.5–5 h rather than 3–4 h. Zero-std filtering made the 450M and 275M runs 2.1× and 2.8× slower than their unfiltered runs (`tables/runs.csv`).
-  - **Post-run:** add the run to `RUNS` in `tools/gather_results.py` before re-running it.
+- **Status (2026-11-24): done.** The run ran from 2:42 to 5:24 PM PST (2.7 h) as Beaker experiment `01M87VE3DZ6BV3EG17N4G37V9C`; the config is `configs/olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124.toml`.
+  - **Outputs:** all 400 updates; HF export at `/weka/oe-adapt-default/jacobm/olmicro/runs/olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124/export-hf`. Core checkpoints were kept every 50 updates.
+  - **Result: it beats 22.2 and becomes the 810M headline run.**
+    - MATH-500 goes 11.3 → **23.8** (peak 24.0 at u150), against 10.5 → 22.2 (peak 24.0 at u350) without the filter.
+    - GSM8K Platinum goes 32.5 → **50.6**, against 47.7 without the filter.
+    - MATH-500 by update (0–400 every 50): 11.3, 14.0, 20.4, 24.0, 23.0, 23.2, 22.9, 22.5, 23.8. The run rises much faster, then plateaus from u150.
+  - **Caveat:** the MATH-500 gain (+1.6) is close to eval noise. The same base scored 10.2 / 10.5 / 11.3 in the initial evals of the three 810M runs, and the ratio to base is the same 2.1×. The GSM8K gain (+2.8) and the faster rise are clearer.
+  - **Signal and lengths:** 21% of groups carry signal at updates 0–49 and 37% at 350–399. Mean length goes 1.27k → 0.62k, the same shrinking as the other ≤810M runs.
+  - **Cost:** 1.55× the unfiltered wall time (2.7 h vs 1.7 h). It generates 48 responses/s and trains on 17/s (`tables/throughput.csv`).
+  - **Recipe split:** the two-regime split now holds: **≥1.4B** trains on its own pass band, and **≤810M** on the combined pool with the zero-std filter. The results-branch README and `tables/` are updated.
+  - **Still to do on the paper side (Overleaf):** update `tab:rl-scaling`, `tab:rl-small-models` and `tab:rl-all-runs` and regenerate `figures/rl_zero_scaling.pdf`. Use 2.7 h for the GPU-hours.
 - **Post-run:** Re-run `tools/gather_results.py` to refresh `tables/runs.csv`, `tables/in_loop_evals.csv`, and `tables/signal_fraction.csv`. If final MATH-500 beats 22.2, update Tables `tab:rl-scaling` and `tab:rl-small-models` in `sections/post_training_results.tex`, Table `tab:rl-all-runs` in `sections/appendicies/rl_zero.tex`, and regenerate `figures/rl_zero_scaling.pdf` (also update the GPU-hours range in Section 4.3 and Section 1 if wall time changes).
 
 ---
@@ -94,10 +102,11 @@ Actionable follow-up experiments and analyses identified while drafting the RL-z
     | 2.7B 8k (4+4) | 6.28 | 27.8k (7.0k) | 32 (41) |
     | 1.4B own band (4+4) | 4.73 | 29.4k (7.3k) | 44 (54) |
     | 810M combined (2+6) | 22.2 | 16.6k (2.8k) | 4.9 (11.7) |
+    | 810M combined + zstd (2+6) | 48.2 generated, 17.1 trained | 29.4k (4.9k) | 10.1 (15.0) |
     | 450M combined + zstd (2+6) | 30.7 generated, 8.2 trained | 25.4k (4.2k) | 19 (31) |
     | 275M combined + zstd (2+6) | 31.4 generated, 6.6 trained | 29.2k (4.9k) | 28 (39) |
 
-  - **Zero-std filter cost:** the filter generates 3.7–4.7× more responses than it trains.
+  - **Zero-std filter cost:** the filter generates 2.8× more responses than it trains at 810M, and 3.7–4.7× more at 450M/275M.
   - **Caveat before quoting these numbers:** they are what our RL recipe achieved, not hardware limits.
     - **Inference is concurrency-bound.** `in_flight = 512` is split across the engines, and per-GPU decode rate tracks requests per engine. The 4-engine runs average 74–92 requests per engine and decode 6.8–10.7k tok/s per GPU. The 6- and 12-engine runs average 21–34 requests and decode 3.6–6.0k tok/s per GPU.
     - **Sub-1B runs without the filter are trainer- and eval-bound.** Their median is 4–11 s/update but their mean is 10–20 s; the gap is mostly the eval and checkpoint pauses every 50 updates.

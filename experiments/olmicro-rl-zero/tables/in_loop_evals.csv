@@ -110,3 +110,12 @@ olmicro-810m-lc-math-rl-refresh-32k-combined-20261119,810M,250,21.68,45.8,in-loo
 olmicro-810m-lc-math-rl-refresh-32k-combined-20261119,810M,300,21.73,47.08,in-loop
 olmicro-810m-lc-math-rl-refresh-32k-combined-20261119,810M,350,24.04,49.34,in-loop
 olmicro-810m-lc-math-rl-refresh-32k-combined-20261119,810M,400,22.23,47.75,in-loop
+olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124,810M,0,11.27,32.53,in-loop
+olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124,810M,50,13.98,36.6,in-loop
+olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124,810M,100,20.42,43.49,in-loop
+olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124,810M,150,24.04,45.39,in-loop
+olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124,810M,200,22.99,47.27,in-loop
+olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124,810M,250,23.19,48.3,in-loop
+olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124,810M,300,22.94,48.97,in-loop
+olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124,810M,350,22.54,50.41,in-loop
+olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124,810M,400,23.79,50.56,in-loop

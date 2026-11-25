@@ -30,6 +30,7 @@ RUNS = [
     ("olmicro-1.4b-lc-math-rl-refresh-32k-combined-20261119", "1.4B", "long-context", "32k cap, own band + 2.7B band", "combined-lc1.4b-32k (4,969)"),
     ("olmicro-810m-lc-math-rl-refresh-32k-20261119", "810M", "long-context", "32k cap, own band", "passband-lc810m-32k-full (2,043)"),
     ("olmicro-810m-lc-math-rl-refresh-32k-combined-20261119", "810M", "long-context", "32k cap, own band + 2.7B band", "combined-lc810m-32k (5,416)"),
+    ("olmicro-810m-lc-math-rl-refresh-32k-combined-zstd-20261124", "810M", "long-context", "as combined + filter_zero_std_groups", "combined-lc810m-32k (5,416)"),
     ("olmicro-450m-lc-math-rl-refresh-32k-combined-20261119", "450M", "long-context", "32k cap, own band + 2.7B band", "combined-lc450m-32k (5,283)"),
     ("olmicro-450m-lc-math-rl-refresh-32k-combined-zstd-20261120", "450M", "long-context", "as combined + filter_zero_std_groups", "combined-lc450m-32k (5,283)"),
     ("olmicro-275m-lc-math-rl-refresh-32k-combined-20261119", "275M", "long-context", "32k cap, own band + 2.7B band", "combined-lc275m-32k (5,209)"),

@@ -14,7 +14,7 @@ Best run per size, judged by the final checkpoint on MATH-500. All runs use 400 
 |---|---|---|---|---|
 | 2.7B | own pass band, 32k cap | 37.4 → **77.3** | 68.3 → **90.3** | 3.6 h (8) + 7.5 h (16) |
 | 1.4B | own pass band | 23.5 → **49.9** | 55.8 → **73.2** | 5.6 h (8) |
-| 810M | own band + 2.7B band | 10.5 → **22.2** | 31.9 → **47.7** | 1.7 h (8) |
+| 810M | own band + 2.7B band, zero-std filter | 11.3 → **23.8** | 32.5 → **50.6** | 2.7 h (8) |
 | 450M | own band + 2.7B band, zero-std filter | 5.1 → **14.8** | 18.7 → **33.6** | 5.2 h (8) |
 | 275M | own band + 2.7B band, zero-std filter | 3.1 → **6.3** | 6.8 → **11.5** | 6.5 h (8) |
 
@@ -47,7 +47,7 @@ Every checkpoint of the 2.7B 8k and 32k runs and of the 1.4B own-band run is in 
 5. **A 32k response cap is worth it at 2.7B; an 8k cap is a decent cheaper ablation.**
    - **32k vs 8k, in-loop MATH-500:** 32k reaches 73% by update 150–200 and ends at 77.3. 8k gets to 73.6 by update 400.
    - **Offline evals:** 32k is +4 on Minerva MATH and +4.7 on AIME pass@1. Most of the AIME gain (about 3 of the 4.7 points) needs responses longer than 16k tokens: at a 16k cap the 32k model scores 11.5.
-   - **Lengths:** the 32k model's mean response grows to ~10k tokens (~20k on AIME). The 8k model learns to stay short (~4k).
+   - **Lengths:** the 32k model's mean training response grows to ~15k tokens by updates 350–399 (~20k on AIME). The 8k model learns to stay short (~4k). See `tables/response_lengths.csv`; long responses only emerge at ≥1.4B, while ≤810M models shrink to ~0.5–0.65k.
 6. **Larger models keep many more prompt groups informative.** These are groups whose 8 rewards are not all the same; all-correct and all-wrong groups give zero gradient.
 
    | run | updates 0–49 | 50–199 | 200–349 | 350–399 |
@@ -64,14 +64,22 @@ Every checkpoint of the 2.7B 8k and 32k runs and of the 1.4B own-band run is in 
    - **The check:** after RL, the 810M solved 33% of the 2.7B-band prompts its base had solved 0/16 times (1,124 of 3,373).
    - **The fix:** training on its own band ∪ the 2.7B band (5,416 prompts) removed the late decline: peak 24.0, final 22.2 vs 21.4.
    - **The limit:** at 1.4B the combined set cost about 2 points (48.1 vs 49.9), since its own band wasn't overfitting. At 450M/275M the combined set is mostly prompts they can't solve yet (11–25% signal), and learning was slow.
-8. **For the smallest models, drop zero-signal groups.** With `filter_zero_std_groups = true` on the combined sets, the 450M improved 12.1 → 14.8 MATH-500 and 29.9 → 33.6 GSM8K, and the 275M 4.8 → 6.3 and 9.6 → 11.5.
-   - The cost is generation: early on, only ~12% of groups survive, so each update samples ~8× more groups.
-   - At these sizes that is affordable: the runs took 5–6.5 h instead of 2–2.5 h.
-   - We have not tried this on 810M/1.4B.
+8. **At ≤810M, drop zero-signal groups.** These runs use `filter_zero_std_groups = true` on the combined sets.
+   - **450M:** MATH-500 12.1 → 14.8 and GSM8K 29.9 → 33.6.
+   - **275M:** MATH-500 4.8 → 6.3 and GSM8K 9.6 → 11.5.
+   - **810M:** MATH-500 22.2 → 23.8 and GSM8K 47.7 → 50.6. It reached 24.0 by update 150, which the unfiltered run only matched at update 350.
+     - The 810M MATH-500 gain is close to eval noise: the same base scored 10.2–11.3 in the initial evals of the three 810M runs.
+     - The GSM8K gain and the faster rise are clearer.
+   - **The cost is generation:** at 450M/275M only ~12% of groups survive early on, so each update samples ~8× more groups.
+   - **That cost is affordable at these sizes:**
+     - 450M/275M: 5–6.5 h instead of 2–2.5 h;
+     - 810M, where 21–37% of groups carry signal: 2.7 h instead of 1.7 h.
+   - Not tried at 1.4B, whose own band already has 51–77% signal.
+   - So the recipe splits in two: **≥1.4B** trains on its own pass band, and **≤810M** on own band ∪ 2.7B band with the zero-std filter.
 
 ## Setup
 
-- **Models.** `allenai/olmicro-{275m,450m,810m,1.4b,2.7b}-base` at the stage3 (long-context, 64k) finals: `stage3-step0047684` for 275M and 450M, `stage3-step0023842` for 810M, 1.4B and 2.7B. HF `main` held only a README at the time.
+- **Models.** `allenai/olmicro-{275m,450m,810m,1.4b,2.7b}-base` at the stage3 (long-context, 64k) finals: `stage3-step0047684` for 275M and 450M, `stage3-step0023842` for 810M, 1.4B and 2.7B. HF `main` held only a README at the time. It now holds identical files (weights, config and `SHA256SUMS`, checked 2026-11-23), so `main` is the same base.
   - All files are verified against `SHA256SUMS`.
   - OLMo-core model configs come from the HF bucket (`stage3/checkpoints/step…/config.json`).
   - All sizes share head_dim 128 (attention and GDN key), GDN value dim 256, a NoPE full-attention layer every 5th layer, and the same tokenizer.
@@ -128,7 +136,8 @@ See `tables/runs.csv` for experiment links, topology, wall time and first/final/
 | **1.4B own band** | **49.9** (50.7) | |
 | 1.4B combined | 48.1 (48.5) | |
 | 810M own band | 21.4 (23.4 @ u250) | declines after u250 |
-| **810M combined** | **22.2** (24.0 @ u350) | |
+| 810M combined | 22.2 (24.0 @ u350) | |
+| **810M combined + zero-std filter** | **23.8** (24.0 @ u150) | |
 | 450M combined | 12.1 | |
 | **450M combined + zero-std filter** | **14.8** | |
 | 275M combined | 4.8 | |
@@ -160,15 +169,14 @@ Each of these cost real time; the fixes are in the configs and tools here.
 
 ## Open questions and suggested next steps
 
-See `notes/paper-followups-todo.md` for a prioritized, implementor-ready list of follow-ups tied to Section 4.2 of the Olmicro technical report (highest priority: `810M combined + filter_zero_std_groups = true` and CPU-only response-length extraction from Weka records).
+See `notes/paper-followups-todo.md` for a prioritized, implementor-ready list of follow-ups tied to Section 4.2 of the Olmicro technical report (highest priority: `810M combined + filter_zero_std_groups = true` and CPU-only response-length extraction from Weka records). As of 2026-11-24 both of those are done, as is the CPU part of the throughput summary (`tables/throughput.csv`).
 
-- **Minerva/AIME for the small-model runs** (810M combined, 450M/275M zero-std, 1.4B combined): HF exports exist, and each eval takes ~10–20 min of one node.
-- **Zero-std filtering at 810M and 1.4B.** It helped a lot below 810M. At 810M the combined set has 19–35% signal, so the filter would likely help there too.
+- **Minerva/AIME for the small-model runs** (810M / 450M / 275M zero-std, 1.4B combined): HF exports exist, and each eval takes ~10–20 min of one node.
+- **Zero-std filtering at 1.4B (combined set).** It would allow one recipe for every size ≤1.4B; low priority, since the 1.4B own band did not overfit.
 - **More updates for 450M/275M.** Both were still rising at update 400.
 - **A targeted add-back for the 2.7B.** Sample the 2.7B 32k final on the 8,350 prompts its base never solved, and add the ones it now solves. Adding all unsolved prompts lost 8 points in the midtrain v1 A/B; this targeted version is untested. Cost: ~1–2 node-hours.
 - **A 1.4B rest-of-pool sweep** (~640 more prompts at 1/16) if the 1.4B moves to the combined recipe.
 - **A 16k cap for 450M/275M**: no measurable loss in the sweeps, and ~30% fewer tokens, because >16k responses are mostly loops.
-- **Confirm HF `main` = stage3 finals** via `SHA256SUMS` once `main` is populated.
 
 ## Where things are
 
