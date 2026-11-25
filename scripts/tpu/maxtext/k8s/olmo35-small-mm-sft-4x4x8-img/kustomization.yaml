@@ -1,0 +1,54 @@
+# IMAGE arm of the Small ablation (H273, ledger issue #1608) as it ran: jasonr-small-mm-abl-img4-s4750, JobSet
+# olmo35-small-mm-sft-img4, started 2026-11-24 15:00 UTC on a v4 4x4x8 at the text arm's exact layout (data1 x
+# FSDP16 x EP8, per_device_batch_size 0.125, buffer 4.5, restore on every replica). It moved here from the 8x8x8
+# after the 8x8x8's single-replica restore broadcast corrupted ViT weights on four chips (see
+# ../olmo35-small-mm-sft-8x8x8). ../olmo35-small-mm-sft-4x4x8-noimg with the image rows on: 24,896 stage-2 v1 image
+# rows over 9,632 steps (the same 129,216 text rows, every row once, in order), the 8x8x8 arm's own schedule
+# (config defaults: 3% warmup = 288, linear to 0 at 9,632), balanced crops off, non-finite probe on (logging only).
+# Image maxtext:fbec61fe…-olmocore-7074cf408 (padding-safe ViT + probes; same training math as e162d68a).
+#   kubectl kustomize . | less
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../olmo35-small-mm-sft-8x8x8
+nameSuffix: -img4
+configMapGenerator:
+- name: olmo35-small-mm-sft-env
+  behavior: merge
+  literals:
+  - RUN_NAME=CHANGE_ME
+  # data1 x FSDP16 x EP8 has one replica, so Orbax's single-replica restore (broadcast from the primary replica) fails
+  # with "All devices are in the primary replica" (2026-11-24 gate). Restore on every replica instead.
+  - EXTRA_ARGS=log_period=1 jax_cache_dir=gs://ai2-olmo-dev/post-training/jax_cache enable_single_replica_ckpt_restoring=false
+  - STEPS=9632
+  - SHARD_ARGS=ici_data_parallelism=1 ici_fsdp_parallelism=16 ici_expert_parallelism=8 per_device_batch_size=0.125 ragged_buffer_factor=4.5
+  # The 8,076-step schedule: int(8076 * 0.02996...) = 242 warmup, int(8076 * 0.97003...) = 7,834 decay.
+  - TRAIN_ARGS=olmo_vit_balance_crops=false log_nonfinite_probe=true
+  # No image mixture, no image rows.
+  - OLMO_MM_CONFIG=/deps/src/maxtext/configs/olmo/olmo_mm/olmo35_small_mmsft_images_s2v1_1p55b.json
+  - OLMO_MM_IMAGE_ROWS=24896
+  - OLMO_MM_SCHEDULE_STEPS=9632
+  - OLMO_MM_TEXT_ROWS=129216
+patches:
+- target:
+    kind: JobSet
+    name: olmo35-small-mm-sft
+  patch: |
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/parallelism
+      value: 32
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/completions
+      value: 32
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/nodeSelector/cloud.google.com~1gke-tpu-topology
+      value: 4x4x8
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/containers/0/envFrom/0/configMapRef/name
+      value: olmo35-small-mm-sft-env-img4
+    - op: replace
+      path: /spec/replicatedJobs/0/template/spec/template/spec/volumes/0/configMap/name
+      value: olmo35-small-mm-sft-launcher-img4
+images:
+- name: us-docker.pkg.dev/ai2-olmo/olmo/maxtext
+  newTag: fbec61fe102a9e23d6e4e38f0eb73eb47e389f8d-olmocore-7074cf408
