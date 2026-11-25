@@ -1,9 +1,10 @@
 # OLMo 3.5 Small (A4B) on B300
 
-Measured MILES RL layouts for OLMo 3.5 Small ("Hero Small", A4B,
+MILES RL layouts for OLMo 3.5 Small ("Hero Small", A4B,
 `olmo35-small-e256k8-sh2x`) on `ai2/holmes` B300 nodes. Configs:
 [two-node-mech](../../configs/miles/examples/small/two-node-mech.toml),
-[four-node](../../configs/miles/examples/small/four-node.toml) and
+[four-node](../../configs/miles/examples/small/four-node.toml),
+[seven-node](../../configs/miles/examples/small/seven-node.toml), and
 [eight-node](../../configs/miles/examples/small/eight-node.toml). The current recipes
 use the Tiny batch/LR/loss baseline from PR #2271; historical measurements below
 used the earlier settings. They run four mechanics or 30 timing updates without
@@ -28,7 +29,7 @@ used the default head precision.
   (`/weka/olmo-3p5-post-checkpoints/robertb/miles/h196-dolci-control-20261113/inputs/`,
   84,577 rendered rows). Its rendering was made for Tiny but uses the same tokenizer and chat
   template as this export. There is no held-out split, so do not set `training.eval_interval`.
-- Code verifier needs `CODE_EXECUTION_TOKEN`. The four- and eight-node recipes map it to
+- Code verifier needs `CODE_EXECUTION_TOKEN`. The four-, seven-, and eight-node recipes map it to
   `robertb_MILES_PR2178_CODE_EXECUTION_TOKEN`, the shared code-service token secret in
   `ai2/olmo-instruct`. In another workspace, create or select that workspace's secret and
   put its name there. Never put the token value in the TOML. Check the first updates' driver
@@ -43,7 +44,15 @@ used the default head precision.
 |---|---|---|---|---|
 | two-node-mech | 2 | 8 GPUs, EP8 | 7 × TP1 | 1 × Qwen3-32B |
 | four-node | 4 | 8 GPUs, EP8 | 23 × TP1 | 1 × Qwen3-32B |
+| seven-node | 7 | 16 GPUs, 2 nodes × EP8 | 39 × TP1 | 1 × Qwen3-32B |
 | eight-node | 8 | 16 GPUs, 2 nodes × EP8 | 47 × TP1 | 1 × Qwen3-32B |
+
+The seven-node config removes one inference node from the eight-node layout and scales the
+unfinished producer budget to 8,736 samples (39 × 224). It keeps the same trainer and judge
+allocations, per-engine settings, and completed buffer. In the eight-node
+[rc02-v10 run](https://beaker.org/ex/01M867HA5AET397YVXMA6GE0KJ), the trainer barely waited
+for generation in updates 31–40 and completed work accumulated upstream. The seven-node
+layout is plan-validated. Its throughput and policy lag still need a matched GPU run.
 
 - Trainer (EP8, 4 nodes): peak reserved 220.5 GiB of 268.6 GiB per B300 (rank 0 peak
   allocated 209.7 GiB). With 2 × EP8 (8 nodes): 169.7 GiB. Packs are 34,816 tokens, below the
@@ -54,7 +63,7 @@ used the default head precision.
 - Engine at R=160 (previous four-node example): KDA state for 192 slots 26.7 GB (SSM 26.39 + conv
   0.31); KV pool auto-sized to 3,823,488 tokens, 72.9 GB (K 36.46 + V 36.46); 32.0 GB free
   after pools and 30.5 GB after CUDA graphs at `mem_fraction_static` 0.88.
-- Engine at R=224 (four- and eight-node examples): 256 KDA slots; KV pool auto-sized to 3,919,232 tokens
+- Engine at R=224 (four-, seven-, and eight-node examples): 256 KDA slots; KV pool auto-sized to 3,919,232 tokens
   at `mem_fraction_static` 0.92; 19.7 GB free after CUDA graphs; full-attention KV peak 71%.
 
 ## Settings that matter
@@ -74,7 +83,7 @@ used the default head precision.
   224 × engines, `sglang_mem_fraction_static` 0.92, no `sglang_max_total_tokens` key (RunSpec's
   default cap, R × context = 7,798,784 tokens, is above the 3,919,232-token memory-sized pool), and
   `core.refresh_request_timeout = 3600.0` (see [the timeout fix](#request-timeout-at-high-admission)).
-  The eight-node example uses the same R=224 serving settings and 3600 s timeout, plus completed-buffer
+  The seven- and eight-node examples use the same R=224 serving settings and 3600 s timeout, plus completed-buffer
   factor 1.5, `shared_memory = "400 GiB"` and `RAY_DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES=360000000000`:
   at factor 4 and Ray's 200 GB default, routing-replay payloads in the full completed queue filled the
   producer node's object store and delivery stalled past `refresh_request_timeout` (run failed at update 7).
@@ -156,7 +165,7 @@ policy age, stale/unused work and judge time before selecting a production topol
 
 ### Recipe alignment
 
-All three Small recipes, including mechanics, now use the Tiny learning baseline
+All Small recipes, including mechanics, now use the Tiny learning baseline
 from [PR #2271](https://github.com/allenai/open-instruct/pull/2271):
 
 | Setting | Current Small baseline | Historical Small measurements |
@@ -172,11 +181,11 @@ measure this combination. The serving geometry is the submitted timing4n-r224-t3
 geometry. Paths, credentials, runtime budgets and mechanics qualification controls
 also have the documented changes above.
 
-The completed-buffer factor is four (1,024 prompt groups / 8,192 responses) except on eight
-nodes (1.5: 384 groups / 3,072 responses). Unfinished producer budgets are 672, 5,152 and 10,528
-for the two/four/eight-node layouts, respectively (0.328, 2.516 and 5.141 optimizer batches). The
-nominal sum of unfinished budget plus completed-buffer capacity is therefore 4.328, 6.516 and
-6.641 batches. Finished siblings can live outside that accounting; these figures
+The completed-buffer factor is four (1,024 prompt groups / 8,192 responses) on two and four
+nodes, and 1.5 (384 groups / 3,072 responses) on seven and eight nodes. Unfinished producer
+budgets are 672, 5,152, 8,736, and 10,528 for the two-, four-, seven-, and eight-node layouts,
+respectively. The nominal sum of unfinished budget plus completed-buffer capacity is about
+4.33, 6.52, 5.77, and 6.64 optimizer batches. Finished siblings can live outside that accounting; these figures
 are not policy-age guarantees. Inspect measured age and useful throughput when
 tuning the new baseline.
 Do not copy Tiny's 12.5B inference preset, evaluator profile or cache geometry into
@@ -295,7 +304,7 @@ enable bounded recovery saves. Their inputs still have no held-out split.
 
 ## Checkpoint settings in the current starters
 
-The four- and eight-node templates now enable 10-update native recovery saves,
+The four-, seven-, and eight-node templates enable 10-update native recovery saves,
 automatic resume, retention of the latest two saves and 100-update permanent
 milestones, plus a final native save. Their 30-update starting budgets therefore
 save at 10/20/30; 100-update retention becomes relevant when the run is extended.

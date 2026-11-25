@@ -170,7 +170,7 @@ def test_switch_requires_a_boolean(value):
 )
 def test_maintained_examples_explain_their_filtering_choice(path):
     run = RunSpec.load(path)
-    enabled = path.stem in ("node", "three-node", "two-node-mech", "four-node", "eight-node")
+    enabled = path.stem in ("node", "three-node", "two-node-mech", "four-node", "seven-node", "eight-node")
     assert run.compile().core.filter_zero_std_groups is enabled
     assert run.compile().plan()["miles"]["dynamic_sampling_filter_path"] == (
         GRADED_STD_FILTER if enabled else GRADED_FILTER

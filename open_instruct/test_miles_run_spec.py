@@ -408,6 +408,7 @@ def test_all_researcher_examples_compile_to_native_arguments():
         "tiny/three-node.toml",
         "small/two-node-mech.toml",
         "small/four-node.toml",
+        "small/seven-node.toml",
         "small/eight-node.toml",
     }
     for path in paths:
