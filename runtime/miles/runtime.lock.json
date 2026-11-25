@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "TP2 fused expert sharding fix CPU-tested. Previous runtime GPU-validated on Open Instruct ecddc97 with Beaker image 01M87GVQ9PZ6YZ2ZMY81S1TXSG. Tiny TP1 refresh (https://beaker.org/ex/01M87GYN9D4H6AB7CTC63WHDH9) and Tiny TP2 refresh with automatic rounding (https://beaker.org/ex/01M87GYN4DZ9GND5SFK9VD6TDB) each completed four optimizer steps and four in-place weight updates with full decode CUDA graphs.",
+  "status": "TP2 fused expert sharding validated on two B300s with Core compatibility off (https://beaker.org/ex/01M8A4S67NCTHNHV3R0YE85ZAF). Both ranks loaded the expected weights in place during live publication and decoded successfully afterward. Previous runtime GPU-validated on Open Instruct ecddc97 with Beaker image 01M87GVQ9PZ6YZ2ZMY81S1TXSG. Tiny TP1 refresh (https://beaker.org/ex/01M87GYN9D4H6AB7CTC63WHDH9) and Tiny TP2 refresh with automatic rounding (https://beaker.org/ex/01M87GYN4DZ9GND5SFK9VD6TDB) each completed four optimizer steps and four in-place weight updates with full decode CUDA graphs.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -16,7 +16,7 @@
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",
-      "revision": "c3fbdfeb396949dbc439bc4534e6bc6a6811b24a"
+      "revision": "3c59b7e348dc62d72549ae44d31c4fdd8b8771f5"
     },
     "sglang": {
       "repository": "https://github.com/sgl-project/sglang.git",
