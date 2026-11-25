@@ -136,9 +136,13 @@ assert set(hf) == set(target), (sorted(set(target) - set(hf))[:10], sorted(set(h
 bad = [(k, list(np.shape(v)), target[k]) for k, v in hf.items() if list(np.shape(v)) != target[k]]
 assert not bad, bad[:10]
 os.makedirs(out, exist_ok=True)
-tensors = {
-    k: torch.from_numpy(np.ascontiguousarray(np.asarray(v, np.float32))).to(torch.bfloat16) for k, v in hf.items()
-}
+tensors = {}
+for name, value in hf.items():
+    tensor = torch.from_numpy(np.ascontiguousarray(np.asarray(value, np.float32)))
+    # KDA uses FP32 decay parameters even when its projections run in BF16.
+    if not name.endswith((".self_attn.A_log", ".self_attn.dt_bias")):
+        tensor = tensor.to(torch.bfloat16)
+    tensors[name] = tensor
 save_file(tensors, os.path.join(out, "model.safetensors"), metadata={"format": "pt"})
 for f in os.listdir(ref):
     # Copy model/tokenizer metadata, never the reference's weights or an index pointing to them.
