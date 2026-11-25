@@ -45,6 +45,7 @@ The main things we are looking for are:
 
 import copy
 import difflib
+import functools
 import hashlib
 import json
 import multiprocessing
@@ -68,7 +69,7 @@ from transformers.utils import chat_template_utils
 from transformers.utils.hub import extract_commit_hash
 
 from open_instruct import dataset_statistics as token_statistics
-from open_instruct import launch_utils, logger_utils, tokenizer_utils
+from open_instruct import launch_utils, logger_utils, token_row_cache, tokenizer_utils
 from open_instruct.utils import hf_whoami, max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
@@ -2614,7 +2615,26 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
             target_columns = [col for col in target_columns if col != TOOLS_COLUMN_KEY]
         target_columns = _preserve_column(ENV_CONFIG_KEY, dataset, target_columns)
 
-        if fn_type == "map":
+        row_cache_root = token_row_cache.store_root() if fn_name in _SFT_TOKENIZE_FNS else None
+        if fn_type == "map" and row_cache_root is not None:
+            dataset = token_row_cache.cached_map(
+                dataset,
+                fn,
+                fn_name=fn_name,
+                tc=tc,
+                cache_version=DATASET_CACHE_VERSION,
+                fn_kwargs=fn_kwargs,
+                remove_columns=[col for col in dataset.column_names if col not in target_columns],
+                num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+                new_fingerprint=new_fingerprint,
+                num_proc_for_rows=functools.partial(
+                    get_num_proc,
+                    num_available_cpus=num_proc,
+                    example_per_second_per_cpu=APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU,
+                ),
+                root=row_cache_root,
+            )
+        elif fn_type == "map":
             dataset = dataset.map(
                 fn,
                 fn_kwargs=fn_kwargs,

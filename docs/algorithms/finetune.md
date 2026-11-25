@@ -52,6 +52,12 @@ The recommended SFT implementation uses OLMo-core's native training infrastructu
 | | `--wandb_entity` | W&B entity (team) | `None` |
 | | `--logging_steps` | Log metrics every N steps | `1` |
 
+### Row-level tokenization cache
+
+A mix that changes some rows of a source, such as one that regenerates the final assistant turn of part of a dataset, gives that source a new fingerprint, so the usual Hugging Face map cache tokenizes all of it again. Set `OPEN_INSTRUCT_TOKEN_ROW_CACHE` to a shared directory, for example one on WEKA, to keep a store of tokenized rows keyed by their `messages` and `tools`. A later build then tokenizes only rows that no earlier build tokenized. The output is byte-identical to a build without the cache, so cache names do not change. It applies to the three SFT tokenize transforms (`sft_tulu_tokenize_and_truncate_v1`, `sft_tulu_tokenize_without_truncation_v1`, `last_turn_tulu_tokenize_and_truncate_v1`) and is off when the variable is unset.
+
+Rows are stored per identity: a digest of the tokenizer's state and files, the chat template, the transform's name, arguments and source code, the source of `dataset_transformation.py`, `token_row_cache.py` and `tokenizer_utils.py`, `DATASET_CACHE_VERSION` and the library versions. Any change to these starts a new, empty identity. If you change something the tokenize function depends on that the identity does not cover, such as an environment variable read while tokenizing, point the variable at a new directory. Each build logs a `TOK-ROW-CACHE SUMMARY` line with its hits, rows tokenized and fallbacks. Nothing deletes old identities; remove an identity's directory when no job is using it.
+
 ### Parallelism
 
 The script automatically selects the data-parallel strategy based on the number of nodes:
