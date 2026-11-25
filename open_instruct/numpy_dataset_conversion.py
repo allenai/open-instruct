@@ -43,8 +43,12 @@ ROW_ALIGNED_PARTS_KEY = "row_aligned_parts"
 
 # The collect loop reads batches on worker threads, up to _COLLECT_PREFETCH_BATCHES ahead of the writer. The shuffled
 # rows are scattered over the memory-mapped Arrow cache, so reading them is random access, and pyarrow copies them out
-# with the GIL released, so the threads' reads overlap. Peak memory is about _COLLECT_PREFETCH_BATCHES batches of
-# token ids, labels and attention masks.
+# with the GIL released, so the threads' reads overlap. Memory: each prepared batch waiting to be written holds about
+# 5 bytes per token (the token ids at the token dtype and a uint8 label mask), and each worker briefly holds about
+# 50 bytes per token of its batch (the three combined int64 columns and the temporaries). With batches of B tokens,
+# the peak is about B * (5 * _COLLECT_PREFETCH_BATCHES + 50 * _COLLECT_WORKERS) bytes: about 6.5 GB at the qwen-c12
+# mean (1,000 rows of ~6,800 tokens), and about 63 GB if every row of a 1,000-row batch had 65,536 tokens. Lower
+# `batch_size` for mixes of very long rows on small machines.
 _COLLECT_WORKERS = 16
 _COLLECT_PREFETCH_BATCHES = 32
 # Elements per chunk when summing the label mask per row: a 1 GiB int64 temporary.

@@ -1092,6 +1092,27 @@ class TestBatchedCollect(_NumpySftTestBase):
                 for name, want in zip(_PARTIAL_NAMES, expected):
                     self.assertEqual((output_dir / name).read_bytes(), want, msg=f"mismatch in {name}")
 
+    def test_first_failure_in_row_order_wins_within_a_batch(self):
+        dataset = _synthetic_tokenized_dataset(300, seed=4)
+        order = dataset.shuffle(seed=self.SHUFFLE_SEED)._indices.column(0).to_pylist()
+        lengths = [len(row) for row in dataset[dataset_transformation.INPUT_IDS_KEY]]
+        first_empty = next(p for p, i in enumerate(order) if lengths[i] == 0)
+        before = max(p for p in range(first_empty) if lengths[order[p]] > 0)
+        after = min(p for p in range(first_empty + 1, len(order)) if lengths[order[p]] > 0)
+        for bad_position, error_type in ((before, AssertionError), (after, ValueError)):
+            masks = list(dataset[dataset_transformation.ATTENTION_MASK_KEY])
+            masks[order[bad_position]] = [0] * lengths[order[bad_position]]
+            bad = dataset.remove_columns(dataset_transformation.ATTENTION_MASK_KEY).add_column(
+                dataset_transformation.ATTENTION_MASK_KEY, masks
+            )
+            expected, error = self._expected(bad, reject_empty_rows=True)
+            self.assertIsInstance(error, error_type)
+            output_dir = pathlib.Path(self.temp_dir.name) / f"mixed-{bad_position}"
+            with self.subTest(bad_position=bad_position), self.assertRaises(error_type):
+                self._convert(bad, output_dir, batch_size=1000, row_aligned_parts=True)
+            for name, want in zip(_PARTIAL_NAMES, expected):
+                self.assertEqual((output_dir / name).read_bytes(), want, msg=f"mismatch in {name}")
+
     def test_resume_after_every_row_was_collected(self):
         dataset = _synthetic_tokenized_dataset(400, seed=5)
         golden = pathlib.Path(self.temp_dir.name) / "golden"
