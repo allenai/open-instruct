@@ -64,7 +64,7 @@ def write_export(path: pathlib.Path, values, kda_decay: str, change=None) -> pat
     return path
 
 
-def run(monkeypatch, checkpoint, hf_dir, kda_decay, output) -> tuple[int, dict]:
+def run(monkeypatch, checkpoint, hf_dir, kda_decay, output):
     argv = ["check", "--checkpoint", str(checkpoint), "--hf-dir", str(hf_dir), "--kda-decay", kda_decay]
     monkeypatch.setattr("sys.argv", [*argv, "--output", str(output)])
     with pytest.raises(SystemExit) as exit_info:
