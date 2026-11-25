@@ -31,17 +31,20 @@ generation_config.json gets eos_token_id [100265, 100257] (<|im_end|>, <|endofte
 chat stop list for the default Olmo 3 chat tokenizer, as chat SFT exports need. A tokenizer with other ids, or a
 base/midtrain export that should stop only at <|endoftext|>, passes --eos-token-ids explicitly (e.g. 100257).
 
-KDA decay weights: every tensor is written as bfloat16 except each KDA layer's `A_log` and `dt_bias`, which are
-written as float32, the dtype olmo-core's KDA and its HF modeling declare for them (and only for them). `--kda-decay`
-sets their value, which must be the one the training forward used:
+KDA weights and `--kda-decay`: an export must store the value the training forward used. Five tensors per KDA layer
+can be float32 in a forward: the decay weights `A_log` and `dt_bias`, and the `q/k/v_conv1d` weights.
 
-- `bf16-grid` (default): the float32 master rounded to the bfloat16 grid. Right for a checkpoint whose forward saw
-  bfloat16-rounded weights: OLMo-core training with bfloat16 model weights and float32 masters, and MaxText SFT with
-  MAXTEXT_FORWARD_BF16_ALL_PARAMS=1. The values equal those of the all-bfloat16 exports this script wrote before.
-- `fp32`: the float32 master as stored. Right for a checkpoint whose forward used float32 decay weights (MaxText
-  pretraining and midtraining). Serve such an export with a loader that keeps the two tensors in float32: casting
-  the whole model to bfloat16 rounds them again. It needs `--skip-validation`: olmo-core's validation casts its
-  reference model to one dtype, so it would compare rounded decay weights with unrounded ones.
+- `bf16-grid` (default): every value is the float32 master rounded to the bfloat16 grid, as in every export this
+  script wrote before the option. Right for a checkpoint whose forward saw bfloat16-rounded weights: OLMo-core
+  training with bfloat16 model weights and float32 masters, and MaxText SFT with MAXTEXT_FORWARD_BF16_ALL_PARAMS=1.
+  `A_log` and `dt_bias` are stored as float32 (the dtype olmo-core's KDA and its HF modeling declare) holding the
+  rounded value; the convolution weights stay bfloat16, so nothing a loader sees of them changes.
+- `fp32`: all five tensors are stored as float32 masters, unrounded. Right for a checkpoint whose forward used them
+  in float32: MaxText pre_train.train (pretraining, midtraining, the Small joint SFT), which leaves small tensors
+  in float32, with `kda_conv_in_compute_dtype: false`. Serve such an export with a loader that keeps the five in
+  float32, as olmo-sglang's KDA layer allocates them; casting the whole model to bfloat16 rounds them again. It
+  needs `--skip-validation`: olmo-core's validation casts its reference model to one dtype, so it would compare
+  rounded weights with unrounded ones.
 
 Note for GDN-based MoE hybrids (not KDA): olmo-core's `is_olmo_hybrid_model`
 returns True for them and routes to the dense-hybrid exporter, which crashes on
@@ -130,45 +133,58 @@ def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir:
 KDA_DECAY_MODES = ("bf16-grid", "fp32")
 
 
-def kda_decay_keys(model: torch.nn.Module) -> set[str]:
-    """State-dict keys of every KDA layer's decay weights, the tensors olmo-core's KDA declares float32."""
-    return {
-        f"{name}.{weight}"
-        for name, module in model.named_modules()
-        if isinstance(module, KimiDeltaAttention)
-        for weight in ("A_log", "dt_bias")
-    }
+KDA_CONVS = ("q_conv1d", "k_conv1d", "v_conv1d")
+
+
+def kda_weight_keys(model: torch.nn.Module) -> tuple[set[str], set[str]]:
+    """State-dict keys of every KDA layer's decay weights and of its q/k/v convolution weights."""
+    decay, convs = set(), set()
+    for name, module in model.named_modules():
+        if isinstance(module, KimiDeltaAttention):
+            decay |= {f"{name}.A_log", f"{name}.dt_bias"}
+            convs |= {f"{name}.{conv}.weight" for conv in KDA_CONVS}
+    return decay, convs
 
 
 def cast_for_export(
-    model_state_dict: dict, decay_keys: set[str], kda_decay: str, other_dtype: torch.dtype = torch.bfloat16
+    model_state_dict: dict,
+    decay_keys: set[str],
+    conv_keys: set[str],
+    kda_decay: str,
+    other_dtype: torch.dtype = torch.bfloat16,
 ) -> dict:
-    """Cast a model state dict for export: the KDA decay weights stay float32, every other tensor gets ``other_dtype``.
+    """Cast a model state dict for export; ``kda_decay`` decides the KDA weights, the rest get ``other_dtype``.
 
-    ``kda_decay`` picks the decay weights' value: ``bf16-grid`` rounds the float32 master to the bfloat16 grid
-    (the value an all-bfloat16 export stores), ``fp32`` keeps the master.
+    ``bf16-grid``: the decay weights are float32 holding the master rounded to the bfloat16 grid, and the
+    convolution weights get ``other_dtype`` like everything else, so every value equals an all-bfloat16 export's.
+    ``fp32``: the decay and convolution weights are the float32 masters.
     """
     if kda_decay not in KDA_DECAY_MODES:
         raise ValueError(f"kda_decay must be one of {KDA_DECAY_MODES}, got {kda_decay!r}")
-    missing = sorted(decay_keys - set(model_state_dict))
+    missing = sorted((decay_keys | conv_keys) - set(model_state_dict))
     if missing:
-        raise KeyError(f"KDA decay weights missing from the model state dict: {missing}")
+        raise KeyError(f"KDA weights missing from the model state dict: {missing}")
     cast = {}
     off_grid = 0
     for key, value in model_state_dict.items():
-        if key not in decay_keys:
+        if key not in decay_keys and key not in conv_keys:
             cast[key] = value.to(dtype=other_dtype)
             continue
         master = value.to(dtype=torch.float32)
         on_grid = master.to(dtype=torch.bfloat16).to(dtype=torch.float32)
         off_grid += int((on_grid != master).sum())
-        cast[key] = on_grid if kda_decay == "bf16-grid" else master
+        if kda_decay == "fp32":
+            cast[key] = master
+        else:
+            cast[key] = on_grid if key in decay_keys else value.to(dtype=other_dtype)
     if decay_keys:
         outcome = "rounded to the bfloat16 grid" if kda_decay == "bf16-grid" else "kept off the bfloat16 grid"
         logger.info(
-            "KDA decay weights: %d tensors written as float32 (%s); %d elements %s",
-            len(decay_keys),
+            "KDA weights (%s): %d decay tensors written as float32, %d convolution tensors as %s; %d elements %s",
             kda_decay,
+            len(decay_keys),
+            len(conv_keys),
+            "float32" if kda_decay == "fp32" else other_dtype,
             off_grid,
             outcome,
         )
@@ -177,14 +193,14 @@ def cast_for_export(
 
 @contextlib.contextmanager
 def kda_decay_export(kda_decay: str):
-    """Make olmo-core's converter save KDA decay weights as float32 while this context is open.
+    """Make olmo-core's converter save KDA weights as ``kda_decay`` says while this context is open.
 
     ``convert_checkpoint_to_hf`` hands ``save_hf_model`` one dtype for every tensor. This wraps that call: the state
     dict is cast here, per tensor, and saved as it is. Checkpoint loading and everything else stay olmo-core's.
 
     The wrapper only acts if olmo-core calls ``save_hf_model`` through its module, as the pinned revision does. If the
     context closes without that call (olmo-core changed, or the model took the dense-hybrid exporter), an ``fp32``
-    request was dropped and the export holds rounded decay weights: that raises. With ``bf16-grid`` the values are
+    request was dropped and the export holds rounded KDA weights: that raises. With ``bf16-grid`` the values are
     the same either way, so it only logs.
     """
     save_hf_model = core_convert.save_hf_model
@@ -197,7 +213,7 @@ def kda_decay_export(kda_decay: str):
             # Not reached from this script, which always passes a dtype: forward the call unchanged.
             return save_hf_model(save_dir, model_state_dict, model, *args, dtype=None, **kwargs)
         full = {key: get_full_tensor(state) for key, state in model_state_dict.items()}
-        cast = cast_for_export(full, kda_decay_keys(model), kda_decay, dtype.as_pt())
+        cast = cast_for_export(full, *kda_weight_keys(model), kda_decay, dtype.as_pt())
         return save_hf_model(save_dir, cast, model, *args, dtype=None, **kwargs)
 
     core_convert.save_hf_model = save
@@ -209,7 +225,7 @@ def kda_decay_export(kda_decay: str):
         if kda_decay == "fp32":
             raise RuntimeError(
                 "--kda-decay fp32 was not applied: olmo-core's converter did not save through save_hf_model, "
-                "so the export holds bfloat16-rounded decay weights"
+                "so the export holds bfloat16-rounded KDA weights"
             )
         logger.info("olmo-core's converter did not save through save_hf_model; every tensor has its one dtype")
 
@@ -255,13 +271,13 @@ def main() -> None:
         "--kda-decay",
         choices=KDA_DECAY_MODES,
         default="bf16-grid",
-        help="Value of each KDA layer's A_log and dt_bias (always written as float32): the master rounded to the "
-        "bfloat16 grid (default; the value a bfloat16-forward run trained with) or the float32 master as stored "
-        "(for a checkpoint whose forward used float32 decay weights).",
+        help="KDA weights, by what the training forward used: bf16-grid (default) stores every value rounded to the "
+        "bfloat16 grid, as before; fp32 stores A_log, dt_bias and the q/k/v_conv1d weights as float32 masters, for "
+        "a checkpoint whose forward used them in float32.",
     )
     args = parser.parse_args()
     if args.kda_decay == "fp32" and args.validate:
-        parser.error("--kda-decay fp32 needs --skip-validation: validation rounds the reference's decay weights")
+        parser.error("--kda-decay fp32 needs --skip-validation: validation rounds the reference's KDA weights")
 
     payload = json.loads(pathlib.Path(args.config).read_text())
     model_config = payload["model"]

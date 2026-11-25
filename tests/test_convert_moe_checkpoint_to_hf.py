@@ -1,5 +1,5 @@
-"""scripts/train/debug/convert_moe_checkpoint_to_hf.py writes KDA decay weights as float32, with the value
---kda-decay picks, and every other tensor as bfloat16. Read back from a small export on CPU."""
+"""scripts/train/debug/convert_moe_checkpoint_to_hf.py writes KDA weights as --kda-decay says and every other tensor as
+bfloat16. Read back from a small export on CPU."""
 
 import importlib.util
 import pathlib
@@ -130,31 +130,36 @@ def export(checkpoint, output_dir, monkeypatch, kda_decay):
 
 
 def exported_key(exported, source_key):
-    """The exported tensor name for an olmo-core decay key ``blocks.<layer>.attention.<weight>``."""
-    _, layer, _, weight = source_key.split(".")
+    """The exported tensor name for an olmo-core KDA key ``blocks.<layer>.attention.<weight>``."""
+    _, layer, _, weight = source_key.split(".", 3)
     (name,) = [k for k in exported if f".layers.{layer}." in k and k.endswith(f".{weight}")]
     return name
 
 
 @requires_fla
 @pytest.mark.parametrize("kda_decay", convert_script.KDA_DECAY_MODES)
-def test_export_dtypes_and_decay_values(checkpoint, tmp_path, monkeypatch, kda_decay):
+def test_export_dtypes_and_kda_values(checkpoint, tmp_path, monkeypatch, kda_decay):
     _, state = checkpoint
-    masters = {k: v for k, v in state.items() if k.endswith((".attention.A_log", ".attention.dt_bias"))}
+    decay = {k: v for k, v in state.items() if k.endswith((".attention.A_log", ".attention.dt_bias"))}
+    convs = {
+        k: v for k, v in state.items() if k.endswith(tuple(f".attention.{c}.weight" for c in convert_script.KDA_CONVS))
+    }
     exported = export(checkpoint, tmp_path / "hf", monkeypatch, kda_decay)
-    decay_names = {source: exported_key(exported, source) for source in masters}
+    names = {source: exported_key(exported, source) for source in decay | convs}
 
-    # Two KDA layers, two decay weights each, and nothing else in float32.
-    assert len(masters) == len(set(decay_names.values())) == 4
+    # Two KDA layers: two decay weights and three convolution weights each.
+    assert (len(decay), len(convs), len(set(names.values()))) == (4, 6, 10)
+    want_float32 = set(decay) | (set(convs) if kda_decay == "fp32" else set())
     float32 = {name for name, value in exported.items() if value.dtype == torch.float32}
-    assert float32 == set(decay_names.values())
+    assert float32 == {names[source] for source in want_float32}
     assert {value.dtype for name, value in exported.items() if name not in float32} == {torch.bfloat16}
-    assert any(".q_conv1d." in name for name in exported) and any(".q_proj." in name for name in exported)
+    assert any(".q_proj." in name for name in exported)
 
-    for source, name in decay_names.items():
-        master = masters[source]
+    for source, name in names.items():
+        master = (decay | convs)[source]
+        assert not torch.equal(master, master.to(torch.bfloat16).to(torch.float32)), source  # off the grid
         want = master if kda_decay == "fp32" else master.to(torch.bfloat16).to(torch.float32)
-        assert torch.equal(exported[name].reshape(master.shape), want), f"{source} -> {name}"
+        assert torch.equal(exported[name].to(torch.float32).reshape(master.shape), want), f"{source} -> {name}"
 
 
 @requires_fla
@@ -178,9 +183,11 @@ def test_fp32_raises_if_the_wrapped_save_never_ran():
 
 def test_cast_refuses_a_state_dict_without_the_decay_weights():
     with pytest.raises(KeyError, match="A_log"):
-        convert_script.cast_for_export({"w": torch.ones(2)}, {"blocks.0.attention.A_log"}, "fp32")
+        convert_script.cast_for_export({"w": torch.ones(2)}, {"blocks.0.attention.A_log"}, set(), "fp32")
+    with pytest.raises(KeyError, match="q_conv1d"):
+        convert_script.cast_for_export({"w": torch.ones(2)}, set(), {"blocks.0.attention.q_conv1d.weight"}, "fp32")
     with pytest.raises(ValueError, match="kda_decay"):
-        convert_script.cast_for_export({"w": torch.ones(2)}, set(), "float32")
+        convert_script.cast_for_export({"w": torch.ones(2)}, set(), set(), "float32")
 
 
 def test_fp32_needs_skip_validation(monkeypatch, capsys):
