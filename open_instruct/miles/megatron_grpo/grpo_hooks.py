@@ -1,0 +1,107 @@
+"""Native Megatron GRPO hooks backed by the registered Open Instruct verifiers.
+
+``reward`` is MILES' ``--custom-rm-path``: it scores through ``rewards.registered_reward`` (the
+same registry, ``metadata.verifiers`` and weighted sum as the Core backend). ``post_process`` is
+``--custom-reward-post-process-path``: it records the raw verifier rewards and centers them within
+each complete prompt group, which MILES' GRPO estimator then broadcasts over response tokens.
+Settings arrive as ``OI_GRPO_*`` environment from ``grpo_runtime``.
+"""
+
+import copy
+import json
+import math
+import os
+from pathlib import Path
+from types import SimpleNamespace
+
+from open_instruct.miles.configuration.config import CoreConfig
+from open_instruct.miles.rewards import rewards
+
+OUTPUT_ENV = "OI_GRPO_OUTPUT"
+REWARD_CONFIG_ENV = "OI_GRPO_REWARD_CONFIG"
+ZERO_TRUNCATED_ENV = "OI_GRPO_REWARD_ZERO_TRUNCATED"
+FINAL_ANSWER_ONLY_ENV = "OI_GRPO_REWARD_FINAL_ANSWER_ONLY"
+EVIDENCE = "verifier-rewards.jsonl"
+
+
+def reward_environment(registry, reward_gates):
+    """``OI_GRPO_*`` reward settings for the hooks, from the run file's ``[reward]`` section."""
+    return {
+        REWARD_CONFIG_ENV: str(registry),
+        ZERO_TRUNCATED_ENV: "1" if reward_gates["zero_truncated"] else "0",
+        FINAL_ANSWER_ONLY_ENV: "1" if reward_gates["final_answer_only"] else "0",
+    }
+
+
+def scoring_args(args=None, environment=None):
+    """A copy of ``args`` carrying the ``CoreConfig`` reward fields ``registered_reward`` reads."""
+    environment = os.environ if environment is None else environment
+    scoring = copy.copy(args) if args is not None else SimpleNamespace()
+    scoring.olmo_core = CoreConfig(
+        reward_config=environment[REWARD_CONFIG_ENV],
+        reward_zero_truncated=environment.get(ZERO_TRUNCATED_ENV, "0") == "1",
+        reward_final_answer_only=environment.get(FINAL_ANSWER_ONLY_ENV, "0") == "1",
+    )
+    return scoring
+
+
+async def reward(args, sample, **kwargs):
+    """Score one sample (``rm_hub.async_rm``) or a list (``rm_hub.batched_async_rm``)."""
+    values = await rewards.registered_reward(scoring_args(args), sample)
+    for value in values if isinstance(values, list) else [values]:
+        if not math.isfinite(value):
+            raise ValueError("Nonfinite verifier reward")
+    return values
+
+
+def _status(sample):
+    status = getattr(sample, "status", None)
+    return getattr(status, "value", status)
+
+
+def post_process(args, samples, **kwargs):
+    """Retain the verifier signal, then center it within prompt groups for native GRPO."""
+    values = [float(sample.reward) for sample in samples]
+    if not values or not all(map(math.isfinite, values)):
+        raise ValueError("Missing or nonfinite verifier rewards")
+    if len(samples) % args.n_samples_per_prompt:
+        raise ValueError("Incomplete GRPO prompt group")
+    path = Path(os.environ[OUTPUT_ENV]) / EVIDENCE
+    with path.open("a") as stream:
+        for sample, value in zip(samples, values, strict=True):
+            if getattr(sample, "teacher_log_probs", None) is not None:
+                raise ValueError("Teacher scores must be absent from verifier GRPO")
+            stream.write(
+                json.dumps(
+                    {
+                        "sample_index": sample.index,
+                        "group_index": getattr(sample, "group_index", None),
+                        "tokens": sample.tokens,
+                        "response_length": sample.response_length,
+                        "response": sample.response,
+                        "status": _status(sample),
+                        "reward": value,
+                        "metadata": sample.metadata,
+                    },
+                    allow_nan=False,
+                )
+                + "\n"
+            )
+    groups = {}
+    for index, sample in enumerate(samples):
+        group = getattr(sample, "group_index", None)
+        groups.setdefault(group if group is not None else index // args.n_samples_per_prompt, []).append(index)
+    centered = [0.0] * len(samples)
+    for indices in groups.values():
+        if len(indices) != args.n_samples_per_prompt:
+            raise ValueError("GRPO requires complete fixed-fanout prompt groups")
+        prefixes = [samples[i].tokens[: len(samples[i].tokens) - samples[i].response_length] for i in indices]
+        if any(prefix != prefixes[0] for prefix in prefixes):
+            raise ValueError("GRPO prompt group contains different tokenized prompts")
+        mean = sum(values[i] for i in indices) / len(indices)
+        denominator = 1.0
+        if args.grpo_std_normalization:
+            denominator = math.sqrt(sum((values[i] - mean) ** 2 for i in indices) / (len(indices) - 1)) + 1e-6
+        for i in indices:
+            centered[i] = (values[i] - mean) / denominator
+    return values, centered
