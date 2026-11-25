@@ -106,34 +106,40 @@ RECIPES = {
         # The first ephemeral checkpoint (step 1000) lands after about 41 minutes.
         "min_runtime": "45m",
     },
-    # Olmo 3.5 Small hero (A4B MoE). c12r's data, cache, seeds and length (half an epoch of C12 plus the 10%
+    # Olmo 3.5 Small hero (A4B MoE). c12r's data, seeds and length (half an epoch of C12 plus the 10%
     # long-context replay) on the hero's 4T decay endpoint, peak LR 7.3e-5 (c12r's 2e-4 scaled by the bases'
     # pretraining LRs, 2e-4 x 4.04e-4 / 1.1e-3): the a4b arm of scripts/c12/h161_gpu_launch.sh on branch
-    # a4b-bigbatch (ledger H203). 2 x 8 B300 on holmes with experts sharded 8 ways inside each node; estimated ~38 h
-    # of training (~7.4 s/step from the #2291 300-step benchmark with nested checkpoints off).
+    # a4b-bigbatch (ledger H203). 2 x 8 B300 on holmes with experts sharded 8 ways inside each node; ~38 h of
+    # training (7.3 s/step over steps 100-300 on this image). On H203's own cache this image reproduces H203's
+    # CE step for step; main's cache has H203's tokens but also labels each turn's opening <think> (#1879).
     "a4b": {
-        # Built from the a4b-bigbatch line with #2291 (open-instruct e436f7647). main's image cannot run A4B: its
-        # MoE needs transformer-engine, which only that line's CUDA 13 Dockerfile installs. The image also holds
-        # scripts/c12/a4b_sft_config.json, which main does not: EMO off, sync_1d EP, flash_2 attention (the
-        # image's FA4 rejects head_dim 256 on SM100), whole-block recompute (recompute_each_block) with the
-        # nested checkpoint_attn / checkpoint_permute_moe_unpermute / checkpoint_second_unpermute off (#2291:
-        # -16% s/step at the same CE; turning off block recompute instead OOMs).
-        "image": "01M7VCQM65SD251KYS4Z1AD8FG",
+        # Built from main (this repo's -cuda13-moe image: CUDA 13 + transformer-engine, which the A4B MoE needs).
+        # The model config is configs/olmo_core/olmo35_small_a4b_sft.json: EMO off, sync_1d EP, flash_2 attention
+        # (FA4 rejects head_dim 256 on SM100), whole-block recompute (recompute_each_block) with the nested
+        # checkpoint_attn / checkpoint_permute_moe_unpermute / checkpoint_second_unpermute off (#2291: -16%
+        # s/step at the same CE; turning off block recompute instead OOMs).
+        "image": "01M859SFVQ084G119EJTR3J2CE",
         "checkpoint": "/weka/olmo-3p5-post-checkpoints/bases/olmo35-4b-active-4t-decay159k-causal/step162974/model_and_optim",
-        # c12r's half epoch: same cache, replay and loader seed, so the same step. EP shards experts over
+        # c12r's half epoch: same rows, replay and loader seed, so the same step. EP shards experts over
         # the same 16 ranks, so the data-parallel batch stays 16 sequences per step.
         "steps": 18410,
         "seed": 34521,
-        "cache": "bf82a8fab8-6068a350-rowaligned",
+        # main's tokenization of c12r's mix (cache v10, tokenizer_default). The job dies before training if the
+        # arguments, tokenizer or code resolve to a different cache.
+        "cache": "2db494257d-6068a350-rowaligned",
+        # The default run name (and so output directory) is versioned: runs of the earlier a4b recipe, named
+        # a4b-s<seed>, hold checkpoints whose loader state names H203's cache, which this recipe's loader rejects
+        # on resume. Resume such a run with the image, cache and replay it was launched with.
+        "name": "a4b-main",
         "train_args": [
             "--config_name",
-            "scripts/c12/a4b_sft_config.json",
+            "configs/olmo_core/olmo35_small_a4b_sft.json",
             "--tokenizer_name_or_path",
             "allenai/dolma2-tokenizer-olmo35",
             "--tokenizer_revision",
             "8b9717061fae09d5be814373d189919a62a9a00d",
             "--chat_template_name",
-            "olmo35",
+            "tokenizer_default",
             "--reserved_slot_tokens",
             "<think>",
             "</think>",
@@ -187,8 +193,10 @@ RECIPES = {
             # As in c12r: --seed names the cache; the data order is --data_loader_seed.
             "--seed",
             "33333",
+            # H182's replay (as H203 trained it), copied with the row-aligned marker main's check needs: every
+            # row tiles its part and ends with EOS, so none spans two parts.
             "--extra_numpy_dirs",
-            "/weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r",
+            "/weka/olmo-3p5-post-checkpoints/kevinfarhat/a4b-sft/replay-b1c12r-rowaligned",
             # Experts sharded across the 8 GPUs of a node.
             "--expert_parallel_degree",
             "8",
@@ -212,7 +220,9 @@ def main():
     parser.add_argument("--recipe", required=True, choices=sorted(RECIPES))
     parser.add_argument("--checkpoint", help="OLMo-core checkpoint (DCP) to start from. Default: the recipe's base.")
     parser.add_argument(
-        "--name", help="Run name; also the output directory. Default: <recipe>-s<seed>, plus -<steps>st with --steps."
+        "--name",
+        help="Run name; also the output directory. Default: <recipe name>-s<seed> (the recipe's "
+        "versioned name if it has one, else the recipe), plus -<steps>st with --steps.",
     )
     parser.add_argument(
         "--seed",
@@ -232,7 +242,7 @@ def main():
     seed = recipe["seed"] if args.seed is None else args.seed
     steps = recipe["steps"] if args.steps is None else args.steps
     # A short run gets its own default directory, so a later full run does not resume from it.
-    name = args.name or f"{args.recipe}-s{seed}" + ("" if args.steps is None else f"-{steps}st")
+    name = args.name or f"{recipe.get('name', args.recipe)}-s{seed}" + ("" if args.steps is None else f"-{steps}st")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         parser.error(f"--name {name!r} must start with a letter or digit, then letters, digits, '.', '_' or '-'.")
     if steps < 1:

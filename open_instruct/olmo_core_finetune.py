@@ -111,6 +111,16 @@ def _numpy_cache_dir(
     return os.path.join(local_cache_dir, _NUMPY_SFT_SUBDIR, name)
 
 
+def _check_expected_numpy_cache(numpy_dir: str, expected: str | None) -> None:
+    """Raise if a launch that names its cache (EXPECTED_NUMPY_CACHE) resolved to another one.
+
+    Runs before tokenizing, distributed init or a GPU, so a recipe whose arguments, tokenizer or code
+    drifted from its frozen cache dies at once instead of silently tokenizing a different dataset.
+    """
+    if expected and os.path.basename(numpy_dir) != expected:
+        raise RuntimeError(f"Resolved numpy cache {numpy_dir}, but EXPECTED_NUMPY_CACHE={expected}")
+
+
 def _check_row_aligned_cache(numpy_dir: str) -> None:
     """Raise unless `numpy_dir` was written with row-aligned parts: one metadata line per row."""
     stats_path = os.path.join(numpy_dir, "dataset_statistics.json")
@@ -562,6 +572,8 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
         args.training.max_seq_length,
         args.sft.row_aligned_parts,
     )
+    logger.info(f"Numpy SFT cache: {numpy_dir}")
+    _check_expected_numpy_cache(numpy_dir, os.environ.get("EXPECTED_NUMPY_CACHE"))
 
     if args.dataset.cache_dataset_only:
         pre_init_rank = int(os.environ.get("RANK", 0))

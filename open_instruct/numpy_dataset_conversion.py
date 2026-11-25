@@ -350,8 +350,16 @@ def convert_hf_to_numpy_sft(
     total_samples = len(train_dataset)
     logger.info("Collecting tokens from dataset...")
 
+    if start_idx > total_samples:
+        raise ValueError(
+            f"Partial files in {output_dir} hold {start_idx:,} rows but the dataset has {total_samples:,}; "
+            "they belong to another dataset. Delete them or rerun without --resume."
+        )
     if start_idx > 0:
-        train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))
+        # A run preempted after collecting every row resumes with nothing left to collect; `select` rejects
+        # the empty range that starts at the dataset's length, so take an empty slice instead.
+        remaining = range(start_idx, total_samples) if start_idx < total_samples else []
+        train_dataset_iter = train_dataset.select(remaining)
     else:
         train_dataset_iter = train_dataset
 
