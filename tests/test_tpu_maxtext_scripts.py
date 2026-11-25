@@ -403,12 +403,46 @@ def test_resize_refuses_existing_step(monkeypatch, tmp_path):
 
 
 def test_export_uses_sharded_reference_metadata_without_old_weights(monkeypatch, tmp_path):
+    decay = {
+        "A_log": np.array([1.234567], dtype=np.float32),
+        "dt_bias": np.array([0.1234567, -0.2345678], dtype=np.float32),
+    }
+    assert all(not torch.equal(value, value.bfloat16().float()) for value in map(torch.from_numpy, decay.values()))
+    scale = {"scale": np.ones(2, dtype=np.float32)}
+    linear = {"kernel": np.ones((2, 2), dtype=np.float32)}
+    projection_names = {
+        "w_q": "q_proj",
+        "w_k": "k_proj",
+        "w_v": "v_proj",
+        "f_proj_1": "f_proj_1",
+        "f_proj_2": "f_proj_2",
+        "w_b": "beta_proj",
+        "g_proj_1": "g_proj_1",
+        "g_proj_2": "g_proj_2",
+        "w_out": "o_proj",
+    }
     params = {
         "token_embedder": {"embedding": np.array([[1, 2]], dtype=np.float32)},
         "decoder": {
             "embedding_norm": {"scale": np.array([3, 4], dtype=np.float32)},
             "decoder_norm": {"scale": np.array([5, 6], dtype=np.float32)},
             "logits_dense": {"kernel": np.array([[7], [8]], dtype=np.float32)},
+            "layers_0": {
+                "layer_0": {
+                    "attn_in_norm": scale,
+                    "attn_out_norm": scale,
+                    "ffn_in_norm": scale,
+                    "ffn_out_norm": scale,
+                    "mixer": {
+                        **decay,
+                        **{name: linear for name in projection_names},
+                        "g_proj_2": {**linear, "bias": np.zeros(2, dtype=np.float32)},
+                        **{f"{kind}_conv": np.ones((2, 4), dtype=np.float32) for kind in "qkv"},
+                        "o_norm": scale,
+                    },
+                    "shared_ffn": {"wi_0": linear, "wi_1": linear, "wo": linear},
+                }
+            },
         },
     }
     checkpoint_stubs(monkeypatch, {"params": {"params": params}})
@@ -419,15 +453,34 @@ def test_export_uses_sharded_reference_metadata_without_old_weights(monkeypatch,
         "model.embed_norm.weight": (2,),
         "model.norm.weight": (2,),
         "lm_head.weight": (1, 2),
+        **{
+            f"model.layers.0.{position}_{block}_layernorm.weight": (2,)
+            for position in ("pre", "post")
+            for block in ("attention", "feedforward")
+        },
+        **{f"model.layers.0.self_attn.{name}": value.shape for name, value in decay.items()},
+        **{f"model.layers.0.self_attn.{name}.weight": (2, 2) for name in projection_names.values()},
+        **{f"model.layers.0.self_attn.{kind}_conv1d.weight": (2, 1, 4) for kind in "qkv"},
+        "model.layers.0.self_attn.g_proj_2.bias": (2,),
+        "model.layers.0.self_attn.o_norm.weight": (2,),
+        **{f"model.layers.0.mlp.{name}_proj.weight": (2, 2) for name in ("gate", "up", "down")},
     }
     weight_map = {}
     for i, (key, shape) in enumerate(shapes.items()):
         name = f"model-{i}.safetensors"
-        safetensors_torch.save_file({key: torch.zeros(shape)}, str(ref / name))
+        safetensors_torch.save_file({key: torch.zeros(shape, dtype=torch.bfloat16)}, str(ref / name))
         weight_map[key] = name
     (ref / "model.safetensors.index.json").write_text(json.dumps({"weight_map": weight_map}))
     (ref / "config.json").write_text(
-        json.dumps({"vocab_size": 1, "num_hidden_layers": 0, "num_attention_heads": 1, "head_dim": 2})
+        json.dumps(
+            {
+                "vocab_size": 1,
+                "num_hidden_layers": 1,
+                "num_attention_heads": 1,
+                "head_dim": 2,
+                "layer_types": ["linear_attention"],
+            }
+        )
     )
     (ref / "chat_templates").mkdir()
     (ref / "chat_templates/default.jinja").write_text("template")
@@ -439,6 +492,8 @@ def test_export_uses_sharded_reference_metadata_without_old_weights(monkeypatch,
     assert (out / "chat_templates/default.jinja").read_text() == "template"
     actual = safetensors_torch.load_file(str(out / "model.safetensors"))
     torch.testing.assert_close(actual["lm_head.weight"], torch.tensor([[7, 8]], dtype=torch.bfloat16))
+    for name, value in decay.items():
+        torch.testing.assert_close(actual[f"model.layers.0.self_attn.{name}"], torch.from_numpy(value), rtol=0, atol=0)
 
 
 def test_export_refuses_existing_output(monkeypatch, tmp_path):
