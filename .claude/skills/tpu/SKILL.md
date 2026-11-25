@@ -34,6 +34,15 @@ Rules an agent follows:
   all-gathers cost 140x once), and its own same-slice control.
 - **Stream `REQUIRED_RBF` from JAX process 0 from step 1** (`kubectl logs -f` on that pod) when a rule needs every step.
   Polling `kubectl logs` loses steps at kubelet's log rotation, and the agent account cannot read Cloud Logging.
+  Find that pod from the logs at each launch: it is not always the first pod, and it changes between launches.
+- **Give a production JobSet no job deadline, or one at least 1.5x its projected wall time** (steps x mean seconds per
+  step). An `activeDeadlineSeconds` kept from a preflight overlay ends the run with `DeadlineExceeded` and no final
+  save.
+- **Regular 20-60 s steps on the streaming loader are its read-ahead, not gcsfuse.** Each data host tokenizes in
+  blocks of 1,000 documents on one reader thread, behind a 128-row buffer (`prefetch_buffer_size` in MaxText's
+  `hf_data_processing.py`), so the step waits about once per 1,000 documents per host, and more often as hosts drift
+  apart: Small on the `8x8x8` averaged 7.4 s per step against 4.7 s steady. Raising the buffer to 2,048 rows removed
+  the waits without changing a batch (ledger H267, Amendment 5); prepacked step files avoid them too.
 - **Mount only the folders a job reads, never one that holds checkpoints.** gcsfuse's metadata prefetch lists
   everything under `only-dir` on every host at every pod start, so a mount of `post-training/` lists every run's
   checkpoints each time. Mount `post-training/data`
