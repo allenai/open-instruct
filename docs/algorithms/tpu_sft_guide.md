@@ -286,6 +286,11 @@ gcloud storage cp -r gs://ai2-olmo-dev/post-training/runs/<run>/checkpoints/<ste
 python scripts/tpu/maxtext/olmo35/export_maxtext_to_hf.py <local dir>/model_params <reference HF dir> <out>
 ```
 
+The export must store the values the training forward used, so add `--kda-decay bf16-grid` for a run launched with
+`MAXTEXT_FORWARD_BF16_ALL_PARAMS=1` (its forward saw every weight rounded to bfloat16), and `--kda-decay fp32` for a
+`pre_train.train` run, whose forward keeps KDA's decay and convolution weights in float32. The default,
+`decay-fp32`, keeps only `A_log` and `dt_bias` as float32 masters.
+
 The reference directory supplies tensor names, `config.json`, modeling code, tokenizer and chat template. Use an HF
 export of the same model with the matching tokenizer and chat template, and choose `<out>` under your own output
 location. One existing reference export is H045's:

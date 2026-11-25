@@ -402,12 +402,15 @@ def test_resize_refuses_existing_step(monkeypatch, tmp_path):
         runpy.run_path(str(SCRIPTS / "resize_vocab.py"), run_name="__main__")
 
 
-def test_export_uses_sharded_reference_metadata_without_old_weights(monkeypatch, tmp_path):
+@pytest.mark.parametrize("kda_decay", [None, "decay-fp32", "fp32", "bf16-grid"])
+def test_export_uses_sharded_reference_metadata_without_old_weights(monkeypatch, tmp_path, kda_decay):
     decay = {
         "A_log": np.array([1.234567], dtype=np.float32),
         "dt_bias": np.array([0.1234567, -0.2345678], dtype=np.float32),
     }
-    assert all(not torch.equal(value, value.bfloat16().float()) for value in map(torch.from_numpy, decay.values()))
+    convs = {f"{kind}_conv": np.full((2, 4), 1.234567 + i, dtype=np.float32) for i, kind in enumerate("qkv")}
+    off_grid = [*decay.values(), *convs.values()]
+    assert all(not torch.equal(value, value.bfloat16().float()) for value in map(torch.from_numpy, off_grid))
     scale = {"scale": np.ones(2, dtype=np.float32)}
     linear = {"kernel": np.ones((2, 2), dtype=np.float32)}
     projection_names = {
@@ -437,7 +440,7 @@ def test_export_uses_sharded_reference_metadata_without_old_weights(monkeypatch,
                         **decay,
                         **{name: linear for name in projection_names},
                         "g_proj_2": {**linear, "bias": np.zeros(2, dtype=np.float32)},
-                        **{f"{kind}_conv": np.ones((2, 4), dtype=np.float32) for kind in "qkv"},
+                        **convs,
                         "o_norm": scale,
                     },
                     "shared_ffn": {"wi_0": linear, "wi_1": linear, "wo": linear},
@@ -485,15 +488,28 @@ def test_export_uses_sharded_reference_metadata_without_old_weights(monkeypatch,
     (ref / "chat_templates").mkdir()
     (ref / "chat_templates/default.jinja").write_text("template")
     out = tmp_path / "out"
-    monkeypatch.setattr(sys, "argv", ["export", "source", str(ref), str(out)])
+    option = [] if kda_decay is None else ["--kda-decay", kda_decay]
+    monkeypatch.setattr(sys, "argv", ["export", "source", str(ref), str(out), *option])
     runpy.run_path(str(SCRIPTS / "olmo35/export_maxtext_to_hf.py"), run_name="__main__")
     assert sorted(path.name for path in out.glob("*.safetensors")) == ["model.safetensors"]
     assert not (out / "model.safetensors.index.json").exists()
     assert (out / "chat_templates/default.jinja").read_text() == "template"
     actual = safetensors_torch.load_file(str(out / "model.safetensors"))
     torch.testing.assert_close(actual["lm_head.weight"], torch.tensor([[7, 8]], dtype=torch.bfloat16))
+    # No option is decay-fp32: decay masters in float32, convolution weights rounded to bfloat16.
+    mode = kda_decay or "decay-fp32"
+    on_grid = lambda value: torch.from_numpy(value).bfloat16().float()  # noqa: E731
     for name, value in decay.items():
-        torch.testing.assert_close(actual[f"model.layers.0.self_attn.{name}"], torch.from_numpy(value), rtol=0, atol=0)
+        tensor = actual[f"model.layers.0.self_attn.{name}"]
+        assert tensor.dtype == torch.float32
+        assert torch.equal(tensor, on_grid(value) if mode == "bf16-grid" else torch.from_numpy(value))
+    for name, value in convs.items():
+        tensor = actual[f"model.layers.0.self_attn.{name}1d.weight"]
+        assert tensor.dtype == (torch.float32 if mode == "fp32" else torch.bfloat16)
+        want = torch.from_numpy(value) if mode == "fp32" else on_grid(value)
+        assert torch.equal(tensor.float().reshape(value.shape), want)
+    floating = {name for name, tensor in actual.items() if tensor.dtype == torch.float32}
+    assert len(floating) == (5 if mode == "fp32" else 2)
 
 
 def test_export_refuses_existing_output(monkeypatch, tmp_path):
