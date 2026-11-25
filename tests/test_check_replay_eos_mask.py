@@ -182,3 +182,14 @@ def test_fails_a_chat_part_whose_rows_do_not_tile_it(tmp_path):
         f.write("0,3\n")
     result = run(replay, masked, chat)
     assert not result["pass"] and result["totals"]["untiled_parts"] == 1
+
+
+def test_fails_an_incomplete_or_empty_chat_dir(tmp_path):
+    replay, chat, masked = setup_dirs(tmp_path)
+    os.remove(os.path.join(chat, "labels_mask_part_0000.npy"))
+    result = run(replay, masked, chat)
+    assert not result["pass"] and result["totals"]["part_set_mismatch"] == 1
+    empty = str(tmp_path / "chat-empty")
+    os.makedirs(empty)
+    result = run(replay, masked, empty)
+    assert not result["pass"] and result["totals"]["part_set_mismatch"] == 1

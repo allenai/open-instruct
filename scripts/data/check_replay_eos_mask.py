@@ -221,7 +221,12 @@ def check(
         per_part.append({"part": index, **part})
 
     for chat_dir in chat_dirs:
-        found, _ = list_parts(chat_dir)
+        found, orphans = list_parts(chat_dir)
+        # Same part-set rule as the replay dirs: every part complete, no orphans, and at least one part checked.
+        t["orphan_part_files"] += len(orphans)
+        t["part_set_mismatch"] += int(
+            not found["tokens"] or not (found["tokens"] == found["mask"] == found["metadata"])
+        )
         for index in sorted(found["tokens"] & found["mask"] & found["metadata"]):
             num_tokens = os.path.getsize(os.path.join(chat_dir, f"labels_mask_part_{index}.npy"))
             rows, malformed = csv_rows(chat_dir, index)
