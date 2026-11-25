@@ -103,58 +103,8 @@ def checkpoint():
     return config.as_config_dict(), state
 
 
-def export(checkpoint, output_dir, monkeypatch, kda_decay):
+def core_export(checkpoint, output_dir, monkeypatch):
     """Run olmo-core's converter as the script's main() does, with the tokenizer export stubbed (it needs the hub)."""
-    config, state = checkpoint
-    tokenizer = types.SimpleNamespace(
-        bos_token_id=None, eos_token_id=VOCAB - 1, pad_token_id=VOCAB - 2, all_special_tokens=[], model_max_length=32
-    )
-    monkeypatch.setattr(convert_script.core_convert, "export_checkpoint_tokenizer", lambda *a, **k: tokenizer)
-    with convert_script.kda_decay_export(kda_decay):
-        convert_checkpoint_to_hf(
-            original_checkpoint_path=None,
-            output_path=output_dir,
-            transformer_config_dict=deepcopy(config),
-            tokenizer_config_dict={"vocab_size": VOCAB, "eos_token_id": VOCAB - 1, "pad_token_id": VOCAB - 2},
-            model_state_dict={key: value.clone() for key, value in state.items()},
-            dtype=DType.bfloat16,
-            max_sequence_length=32,
-            validate=False,
-            device=torch.device("cpu"),
-        )
-    return load_file(str(pathlib.Path(output_dir) / "model.safetensors"))
-
-
-def split(exported):
-    decay = {k: v for k, v in exported.items() if k.endswith((".A_log", ".dt_bias"))}
-    return decay, {k: v for k, v in exported.items() if k not in decay}
-
-
-@requires_fla
-@pytest.mark.parametrize("kda_decay", convert_script.KDA_DECAY_MODES)
-def test_export_dtypes_and_decay_values(checkpoint, tmp_path, monkeypatch, kda_decay):
-    _, state = checkpoint
-    masters = {k: v for k, v in state.items() if k.endswith((".attention.A_log", ".attention.dt_bias"))}
-    decay, others = split(export(checkpoint, tmp_path / "hf", monkeypatch, kda_decay))
-
-    # Two KDA layers, two decay weights each, and nothing else in float32.
-    assert len(decay) == len(masters) == 4
-    assert {v.dtype for v in decay.values()} == {torch.float32}
-    assert {v.dtype for v in others.values()} == {torch.bfloat16}
-    assert any(".q_conv1d." in k for k in others) and any(".q_proj." in k for k in others)
-
-    by_shape_and_value = sorted(decay.values(), key=lambda v: (v.numel(), v.sum().item()))
-    expected = (
-        masters.values() if kda_decay == "fp32" else [m.to(torch.bfloat16).to(torch.float32) for m in masters.values()]
-    )
-    for got, want in zip(by_shape_and_value, sorted(expected, key=lambda v: (v.numel(), v.sum().item())), strict=True):
-        assert torch.equal(got.flatten(), want.flatten())
-
-
-@requires_fla
-def test_default_matches_the_all_bfloat16_export(checkpoint, tmp_path, monkeypatch):
-    """bf16-grid changes only the container: cast to bfloat16, the export equals the one written before this option."""
-    new = export(checkpoint, tmp_path / "new", monkeypatch, "bf16-grid")
     config, state = checkpoint
     tokenizer = types.SimpleNamespace(
         bos_token_id=None, eos_token_id=VOCAB - 1, pad_token_id=VOCAB - 2, all_special_tokens=[], model_max_length=32
@@ -162,7 +112,7 @@ def test_default_matches_the_all_bfloat16_export(checkpoint, tmp_path, monkeypat
     monkeypatch.setattr(convert_script.core_convert, "export_checkpoint_tokenizer", lambda *a, **k: tokenizer)
     convert_checkpoint_to_hf(
         original_checkpoint_path=None,
-        output_path=tmp_path / "old",
+        output_path=output_dir,
         transformer_config_dict=deepcopy(config),
         tokenizer_config_dict={"vocab_size": VOCAB, "eos_token_id": VOCAB - 1, "pad_token_id": VOCAB - 2},
         model_state_dict={key: value.clone() for key, value in state.items()},
@@ -171,10 +121,59 @@ def test_default_matches_the_all_bfloat16_export(checkpoint, tmp_path, monkeypat
         validate=False,
         device=torch.device("cpu"),
     )
-    old = load_file(str(tmp_path / "old" / "model.safetensors"))
+    return load_file(str(pathlib.Path(output_dir) / "model.safetensors"))
+
+
+def export(checkpoint, output_dir, monkeypatch, kda_decay):
+    with convert_script.kda_decay_export(kda_decay):
+        return core_export(checkpoint, output_dir, monkeypatch)
+
+
+def exported_key(exported, source_key):
+    """The exported tensor name for an olmo-core decay key ``blocks.<layer>.attention.<weight>``."""
+    _, layer, _, weight = source_key.split(".")
+    (name,) = [k for k in exported if f".layers.{layer}." in k and k.endswith(f".{weight}")]
+    return name
+
+
+@requires_fla
+@pytest.mark.parametrize("kda_decay", convert_script.KDA_DECAY_MODES)
+def test_export_dtypes_and_decay_values(checkpoint, tmp_path, monkeypatch, kda_decay):
+    _, state = checkpoint
+    masters = {k: v for k, v in state.items() if k.endswith((".attention.A_log", ".attention.dt_bias"))}
+    exported = export(checkpoint, tmp_path / "hf", monkeypatch, kda_decay)
+    decay_names = {source: exported_key(exported, source) for source in masters}
+
+    # Two KDA layers, two decay weights each, and nothing else in float32.
+    assert len(masters) == len(set(decay_names.values())) == 4
+    float32 = {name for name, value in exported.items() if value.dtype == torch.float32}
+    assert float32 == set(decay_names.values())
+    assert {value.dtype for name, value in exported.items() if name not in float32} == {torch.bfloat16}
+    assert any(".q_conv1d." in name for name in exported) and any(".q_proj." in name for name in exported)
+
+    for source, name in decay_names.items():
+        master = masters[source]
+        want = master if kda_decay == "fp32" else master.to(torch.bfloat16).to(torch.float32)
+        assert torch.equal(exported[name].reshape(master.shape), want), f"{source} -> {name}"
+
+
+@requires_fla
+def test_default_matches_the_all_bfloat16_export(checkpoint, tmp_path, monkeypatch):
+    """bf16-grid changes only the container: cast to bfloat16, the export equals the one written before this option."""
+    new = export(checkpoint, tmp_path / "new", monkeypatch, "bf16-grid")
+    old = core_export(checkpoint, tmp_path / "old", monkeypatch)
     assert set(new) == set(old) and {v.dtype for v in old.values()} == {torch.bfloat16}
     for key, value in old.items():
         assert torch.equal(new[key].to(torch.bfloat16), value), key
+
+
+def test_fp32_raises_if_the_wrapped_save_never_ran():
+    """A dropped fp32 request must not pass for an fp32 export (olmo-core changed, or the dense-hybrid exporter ran)."""
+    with pytest.raises(RuntimeError, match="fp32 was not applied"), convert_script.kda_decay_export("fp32"):
+        pass
+    with convert_script.kda_decay_export("bf16-grid"):
+        pass
+    assert convert_script.core_convert.save_hf_model.__module__ == "olmo_core.nn.hf.checkpoint"
 
 
 def test_cast_refuses_a_state_dict_without_the_decay_weights():
