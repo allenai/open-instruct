@@ -42,7 +42,7 @@ def test_recipe_plans_a_launch(monkeypatch, capsys, name):
     assert value(cmd, "--cluster") == recipe["cluster"]
     assert value(cmd, "--max_train_steps") == str(recipe["steps"])
     assert value(cmd, "--data_loader_seed") == str(recipe["seed"])
-    assert value(cmd, "--run_name") == f"{name}-s{recipe['seed']}"
+    assert value(cmd, "--run_name") == f"{recipe.get('name', name)}-s{recipe['seed']}"
     assert f"EXPECTED_NUMPY_CACHE={recipe['cache']}" in cmd
     for env in recipe.get("env", []):
         assert cmd[cmd.index(env) - 1] == "--env"
@@ -80,3 +80,18 @@ def test_a4b_recipe(monkeypatch, capsys):
     assert value(cmd, "--extra_numpy_dirs").endswith("/replay-b1c12r-rowaligned")
     mixer = cmd[cmd.index("--mixer_list") + 1 : cmd.index("--local_cache_dir")]
     assert mixer == c12r[c12r.index("--mixer_list") + 1 : c12r.index("--local_cache_dir")]
+
+
+def test_a4b_default_name_is_versioned(monkeypatch, capsys):
+    # The earlier a4b recipe's runs (a4b-s<seed>) hold checkpoints on H203's cache; a default launch of this
+    # recipe must not resume into them.
+    seed = sft.RECIPES["a4b"]["seed"]
+    cmd = plan(monkeypatch, capsys, "--recipe", "a4b")
+    assert value(cmd, "--run_name") == f"a4b-main-s{seed}"
+    assert value(cmd, "--output_dir").endswith(f"/sft/a4b-main-s{seed}")
+    assert (
+        value(plan(monkeypatch, capsys, "--recipe", "a4b", "--steps", "10"), "--run_name") == f"a4b-main-s{seed}-10st"
+    )
+    # An explicit --name is used as given.
+    cmd = plan(monkeypatch, capsys, "--recipe", "a4b", "--name", f"a4b-s{seed}")
+    assert value(cmd, "--run_name") == f"a4b-s{seed}"

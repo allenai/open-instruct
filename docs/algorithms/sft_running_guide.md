@@ -45,7 +45,10 @@ labels also train on each assistant turn's opening `<think>` (#1879), so its CE 
 H203's to the digit. On H203's own cache, the pinned image reproduces H203 (ledger)
 step for step (step-1 CE 1.29798 vs 1.29801). The replay is a copy of H182's
 (`replay-b1c12r`) with the row-aligned marker main's `--extra_numpy_dirs` check needs.
-All CLI flags documented above for `c12r` apply.
+All CLI flags documented above for `c12r` apply. Its default run name is `a4b-main-s<seed>`, not
+`a4b-s<seed>`: checkpoints from the earlier `a4b` recipe were written on H203's cache, which this
+recipe's data loader rejects on resume, so resume those runs with the image, cache and replay they
+were launched with.
 
 Exporting these checkpoints to HF for evaluation is not yet one command; it follows
 ledger hypothesis H167's G4 step.

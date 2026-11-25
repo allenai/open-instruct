@@ -127,6 +127,10 @@ RECIPES = {
         # main's tokenization of c12r's mix (cache v10, tokenizer_default). The job dies before training if the
         # arguments, tokenizer or code resolve to a different cache.
         "cache": "2db494257d-6068a350-rowaligned",
+        # The default run name (and so output directory) is versioned: runs of the earlier a4b recipe, named
+        # a4b-s<seed>, hold checkpoints whose loader state names H203's cache, which this recipe's loader rejects
+        # on resume. Resume such a run with the image, cache and replay it was launched with.
+        "name": "a4b-main",
         "train_args": [
             "--config_name",
             "configs/olmo_core/olmo35_small_a4b_sft.json",
@@ -216,7 +220,9 @@ def main():
     parser.add_argument("--recipe", required=True, choices=sorted(RECIPES))
     parser.add_argument("--checkpoint", help="OLMo-core checkpoint (DCP) to start from. Default: the recipe's base.")
     parser.add_argument(
-        "--name", help="Run name; also the output directory. Default: <recipe>-s<seed>, plus -<steps>st with --steps."
+        "--name",
+        help="Run name; also the output directory. Default: <recipe name>-s<seed> (the recipe's "
+        "versioned name if it has one, else the recipe), plus -<steps>st with --steps.",
     )
     parser.add_argument(
         "--seed",
@@ -236,7 +242,7 @@ def main():
     seed = recipe["seed"] if args.seed is None else args.seed
     steps = recipe["steps"] if args.steps is None else args.steps
     # A short run gets its own default directory, so a later full run does not resume from it.
-    name = args.name or f"{args.recipe}-s{seed}" + ("" if args.steps is None else f"-{steps}st")
+    name = args.name or f"{recipe.get('name', args.recipe)}-s{seed}" + ("" if args.steps is None else f"-{steps}st")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         parser.error(f"--name {name!r} must start with a letter or digit, then letters, digits, '.', '_' or '-'.")
     if steps < 1:
