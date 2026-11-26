@@ -20,6 +20,16 @@
 #          manifest's rows, plus 116 identity rows at 1.0, tokenizer revision 03c29652; RF_CACHE names it) in place of
 #          C12's, H182's replay dir, two passes, seed 34521, noag. S_R=<steps> from H210 R4'. Placement excludes
 #          holmes-cs-aus-544 (EXCLUDE_HOSTS, a hostname list of the live holmes nodes minus those).
+#   c16vs4 ledger H275's treatment arm (c16-vs4): c16n with the Dolci parquet replaced by the voice-and-safety swapped
+#          one (VS4_DOLCI_PARQUET) and the new-sources parquet added as a sixth mixer source at 1.0 (VS4_NEW_PARQUET).
+#          Everything else is c16n's. Workspace ai2/oe-olmo3p5-eval (WORKSPACE), priority urgent, min-runtime 8h,
+#          timeout 48h, W&B off and its secret not mounted (chrisg_WANDB_API_KEY is not in that workspace). The cache name
+#          is new: MODE=tokenize prints it (H161-NUMPY-CACHE) and train/smoke require it as VS4_CACHE, which becomes
+#          EXPECTED_NUMPY_CACHE and is also checked on disk before any GPU starts. Optional VS4_DOLCI_SHA256 and
+#          VS4_NEW_SHA256 are checked in the tokenize job. Tokenize runs in ai2/olmo-instruct by default (WORKSPACE_TOK):
+#          the eval workspace has no allocation on the CPU clusters.
+#   tokenize   (mode) 1 node, 0 GPUs: olmo_core_finetune.py --cache_dataset_only with the arm's exact tokenization
+#          arguments (patched for speed, below); prints the numpy cache dir name to pass back as VS4_CACHE.
 #   seed   --data_loader_seed; --seed stays 33333 because it names the cache (bf82a8fab8-6068a350-rowaligned).
 #   smoke  30 steps at the real size (2 x 8 GPUs), through scripts/c12/h161_smoke_wrap.py: every rank dumps its
 #          step-1 batch, no final checkpoint; then replica 0 runs scripts/c12/h161_refce.py on GPU 0, the HF step-1
@@ -46,6 +56,16 @@
 # WAIT_FOR_BASE=<minutes> (default 0: the job waits that long for the base's RECEIPT.json, then
 # exits 3 without training; for a smoke queued while the conversion job is still running), DRY_RUN=1.
 #
+# Tokenize-mode patches. The image's open-instruct (37a119ffd) is patched in the container before tokenizing, in this
+# order; each step fails the job with H161-*PATCH-FAILED if it does not apply. (1) sed: a resume with every row already
+# collected uses select([]) instead of select(range(N, N)), which datasets rejects. (2) tok_stats_patch.py: chunked
+# trainable-token sums. (3) tok_count_patch.py: backport of #1904, Arrow-batch token counting. (4) tok_collect_patch.py:
+# threaded Arrow collect loop. (5) tok_row_cache_patch.py: a row-level tokenization cache on WEKA, on by default
+# (TOK_ROW_CACHE=<dir> moves the store, default /weka/olmo-3p5-post-checkpoints/chrisg/token-row-cache; =off disables).
+# All five keep the output byte-identical (test_tok_collect_patch.py, test_tok_row_cache.py), which matters because the
+# cache directory name hashes the arguments, not the code. Copied from chrisg/qwen-c12-b1r (5790fd50a).
+# Notes: dev/projects/2026-11-12--sft-tokenization-speedups/README.md.
+#
 # Before the first launch, the cache must resolve inside a Beaker job: setup_tokenizer_and_cache forces
 # --local_cache_dir to the oe-adapt deletable cache when BEAKER_JOB_ID is set, so that dir holds a symlink
 # numpy_sft/bf82a8fab8-6068a350-rowaligned -> the frozen C12 cache (made 2026-10-30). EXPECTED_NUMPY_CACHE makes any
@@ -58,6 +78,7 @@ case "$SEED" in 34521|34522) ;; *) echo "seed must be 34521 or 34522" >&2; exit 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 IMAGE="${IMAGE:-01M5KX4ZAN00BJ00ARS7FNG79T}"
+WORKSPACE="${WORKSPACE:-}"
 # B2's LM tensors as fp32 optimizer masters (scripts/c12/b2_lm_to_olmocore_dcp.py; RECEIPT.json one level up).
 MODEL=/weka/olmo-3p5-post-checkpoints/bases/olmo35-small-mm-ckpt2-256k-amt/step22240-lm-olmocore/model_and_optim
 # H149's seeded B2 HF export (G4), the step-1 CE reference.
@@ -122,7 +143,7 @@ $F/identity/identity.jsonl 1.0"
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/abhishekr/c12rf-gpu; DESC="ledger H210 c12rf"
          STEPS="${S_R:?S_R=<steps from H210 R4 prime>}"; EPOCHS=2; CKPT=$((STEPS / 2)); HOURS=48 ;;
-    c16n) # ledger H275 (c16-noag-half): C16 (ledger H257's frozen manifest; cache 3b590b5f7b-6068a350-rowaligned, built
+    c16n|c16vs4) # ledger H275 (c16-noag-half): C16 (ledger H257's frozen manifest; cache 3b590b5f7b-6068a350-rowaligned, built
          # for H260 with this tokenizer revision and template) on noag at H182's half-epoch budget (S_R=18410, as H220's nh),
          # rfn's base, HF reference, LR, replay dir and tokenizer; W&B off (chrisg runs, as H260); chrisg secrets.
          B=/weka/olmo-3p5-post-checkpoints/bases; H=/weka/olmo-3p5-post-checkpoints/abhishekr/tpu-posttrain/hf
@@ -138,7 +159,21 @@ $F/identity/identity.jsonl 1.0"
          CACHE="${C16_CACHE:-3b590b5f7b-6068a350-rowaligned}"; TOKREV=03c29652a9d74902fe9d39bc0ad211748c7e7ae6
          LR=2e-4; EXTRA_ARGS="--extra_numpy_dirs /weka/olmo-3p5-post-checkpoints/abhishekr/h182/replay-b1c12r"
          OUT_ROOT=/weka/olmo-3p5-post-checkpoints/chrisg/c16-noag-gpu; DESC="ledger H275 c16-noag-half"; SECRETS=chrisg; TRACKING=0
-         STEPS="${S_R:?S_R=<steps>; 18410 for H275}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=24 ;;
+         STEPS="${S_R:?S_R=<steps>; 18410 for H275}"; EPOCHS=1; CKPT=$(((STEPS + 1) / 2)); HOURS=24
+         if [[ "$ARM" == c16vs4 ]]; then
+             # c16-vs4: c16n's recipe with the swapped Dolci parquet and a sixth source (new sources, weight 1.0).
+             C16_DOLCI=/weka/olmo-3p5-post-checkpoints/chrisg/h257/c16/c16-dolci-2cb5a8ad.parquet
+             VD="${VS4_DOLCI_PARQUET:?VS4_DOLCI_PARQUET=<swapped Dolci parquet>}"
+             VN="${VS4_NEW_PARQUET:?VS4_NEW_PARQUET=<new-sources parquet>}"
+             MIXER="${MIXER/$C16_DOLCI/$VD}"
+             [[ "$MIXER" == "$VD 1.0 "* ]] || { echo "Dolci parquet not replaced in MIXER" >&2; exit 1; }
+             MIXER="$MIXER $VN 1.0"
+             CACHE="${VS4_CACHE:-}"
+             if [[ "$MODE" != tokenize && -z "$CACHE" ]]; then echo "VS4_CACHE=<name printed by the tokenize job> is required" >&2; exit 1; fi
+             OUT_ROOT=/weka/olmo-3p5-post-checkpoints/chrisg/c16-vs4-gpu; DESC="ledger H275 c16-vs4"; HOURS=48
+             WORKSPACE="${WORKSPACE:-ai2/oe-olmo3p5-eval}"; PRIORITY="${PRIORITY:-urgent}"
+             TRAIN_MIN_RUNTIME=8h; NO_WANDB_SECRET=1
+         fi ;;
     hero) STEPS=$((2 * EPOCH_STEPS)); EPOCHS=2; CKPT=$EPOCH_STEPS; HOURS=40 ;;
     ctrl) STEPS=16303; EPOCHS=1; CKPT=8152; HOURS=12 ;;
     *) echo "unknown arm $ARM" >&2; exit 1 ;;
@@ -152,13 +187,16 @@ RUN_NAME="h161gpu-${ARM}-s${SEED}"
 [[ "$ARM" == c14f ]] && RUN_NAME="c14f-s${SEED}"
 [[ "$ARM" == rfn ]] && RUN_NAME="c12rf-noag-s${SEED}"
 [[ "$ARM" == c16n ]] && RUN_NAME="c16-noag-half-s${SEED}"
+[[ "$ARM" == c16vs4 ]] && RUN_NAME="c16-vs4-half-s${SEED}"
 case "$MODE" in
     smoke) STEPS=30; CKPT=1000000; SAVE_EVERY=1024; HOURS=1; RUN_NAME="${RUN_NAME}-smoke"
            MIN_RUNTIME="${MIN_RUNTIME:-10m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-0}" ;;
     resume) STEPS=30; CKPT=1000000; SAVE_EVERY=10; HOLD_AT=19; HOURS=2; RUN_NAME="${RUN_NAME}-resume"
            MIN_RUNTIME="${MIN_RUNTIME:-5m}"; ENTRY=/tmp/h161_smoke_wrap.py; AUTO_RESUME="${AUTO_RESUME:-1}"
            MAX_RETRIES="${MAX_RETRIES:-1}" ;;
-    train) MIN_RUNTIME="${MIN_RUNTIME:-$([[ "$ARM" == c14f ]] && echo 45m || echo 1h)}"; ENTRY=open_instruct/olmo_core_finetune.py; AUTO_RESUME="${AUTO_RESUME:-1}" ;;
+    train) MIN_RUNTIME="${MIN_RUNTIME:-${TRAIN_MIN_RUNTIME:-$([[ "$ARM" == c14f ]] && echo 45m || echo 1h)}}"; ENTRY=open_instruct/olmo_core_finetune.py; AUTO_RESUME="${AUTO_RESUME:-1}" ;;
+    tokenize) RUN_NAME="${RUN_NAME}-tokenize"; MIN_RUNTIME="${MIN_RUNTIME:-8h}"; HOURS=14; AUTO_RESUME="${AUTO_RESUME:-1}"
+           ENTRY=open_instruct/olmo_core_finetune.py; WORKSPACE="${WORKSPACE_TOK:-ai2/olmo-instruct}" ;;
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
 esac
 TIMEOUT="${TIMEOUT:-${HOURS}h}"
@@ -193,6 +231,13 @@ WAIT="$PATCH
 for i in \$(seq 1 ${WAIT_FOR_BASE:-0}); do [ -f $BASE_RECEIPT ] && break; sleep 60; done
 [ -f $BASE_RECEIPT ] || { echo H161-NO-BASE $BASE_RECEIPT; exit 3; }
 sha256sum $BASE_RECEIPT"
+if [[ "$ARM" == c16vs4 && "$MODE" != tokenize ]]; then
+    # The trainer tokenizes on the GPU nodes if its cache is missing; fail first instead.
+    NC=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/$CACHE
+    WAIT="$WAIT
+[ -f $NC/dataset_statistics.json ] || { echo H161-NO-CACHE $NC; exit 3; }
+ls $NC | head -3"
+fi
 TORCHRUN="torchrun --nnodes=2 --node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
 --master_port=29400 --nproc_per_node=8 $ENTRY $ARGS"
 if [[ "$MODE" == resume ]]; then
@@ -246,6 +291,41 @@ fi
 exit \$RC"
     EXTRA_ENV='{"name": "H161_DUMP_DIR", "value": "'"$DUMP_DIR"'"}, {"name": "H161_NO_FINAL_SAVE", "value": "1"},
     {"name": "H161_BATCH_HASH", "value": "1"},'
+elif [[ "$MODE" == tokenize ]]; then
+    STATS_PATCH=$(gzip -9c "$HERE/tok_stats_patch.py" | base64 | tr -d '\n')
+    COUNT_PATCH=$(gzip -9c "$HERE/tok_count_patch.py" | base64 | tr -d '\n')
+    COLLECT_PATCH=$(gzip -9c "$HERE/tok_collect_patch.py" | base64 | tr -d '\n')
+    ROWCACHE_PATCH=$(gzip -9c "$HERE/tok_row_cache_patch.py" | base64 | tr -d '\n')
+    ROWCACHE_ROOT="${TOK_ROW_CACHE:-/weka/olmo-3p5-post-checkpoints/chrisg/token-row-cache}"
+    # TOK_CPU_COUNT pins BEAKER_ASSIGNED_CPU_COUNT (open-instruct's num_proc), so the Hugging Face map cache can reuse
+    # shards of an earlier build with the same value; one thread per process. Neither changes the cache name or contents.
+    PIN=""
+    if [[ -n "${TOK_CPU_COUNT:-}" ]]; then
+        PIN="export BEAKER_ASSIGNED_CPU_COUNT=$TOK_CPU_COUNT RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1; echo H161-PINNED-CPU \$BEAKER_ASSIGNED_CPU_COUNT
+"
+    fi
+    SHACHK=""
+    if [[ "$ARM" == c16vs4 ]]; then
+        [[ -z "${VS4_DOLCI_SHA256:-}" ]] || SHACHK="$SHACHK
+echo '$VS4_DOLCI_SHA256  $VD' | sha256sum -c - || { echo H161-SHA-MISMATCH dolci; exit 4; }"
+        [[ -z "${VS4_NEW_SHA256:-}" ]] || SHACHK="$SHACHK
+echo '$VS4_NEW_SHA256  $VN' | sha256sum -c - || { echo H161-SHA-MISMATCH new; exit 4; }"
+    fi
+    CMD="${PIN}F=open_instruct/numpy_dataset_conversion.py$SHACHK
+sed -i 's/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples))/train_dataset_iter = train_dataset.select(range(min(start_idx, total_samples), total_samples)) if start_idx < total_samples else train_dataset.select([])/' \$F
+grep -q 'else train_dataset.select(\[\])' \$F || { echo H161-PATCH-FAILED; exit 2; }
+printf %s '$STATS_PATCH' | base64 -d | gunzip > /tmp/tok_stats_patch.py && python /tmp/tok_stats_patch.py \$F || { echo H161-STATS-PATCH-FAILED; exit 2; }
+printf %s '$COUNT_PATCH' | base64 -d | gunzip > /tmp/tok_count_patch.py && python /tmp/tok_count_patch.py . || { echo H161-COUNT-PATCH-FAILED; exit 2; }
+printf %s '$COLLECT_PATCH' | base64 -d | gunzip > /tmp/tok_collect_patch.py && python /tmp/tok_collect_patch.py \$F && grep -q '_prepare_arrow_batch(' \$F || { echo H161-COLLECT-PATCH-FAILED; exit 2; }
+printf %s '$ROWCACHE_PATCH' | base64 -d | gunzip > /tmp/tok_row_cache_patch.py && python /tmp/tok_row_cache_patch.py . && grep -q 'token_row_cache.cached_map(' open_instruct/dataset_transformation.py && python -c 'import sys; sys.exit(open(sys.argv[1], \"rb\").read() != open(sys.argv[2], \"rb\").read())' /tmp/tok_row_cache_patch.py open_instruct/token_row_cache.py || { echo H161-ROWCACHE-PATCH-FAILED; exit 2; }
+echo H161-ROWCACHE TOK_ROW_CACHE=\$TOK_ROW_CACHE
+echo H161-TOKENIZE-START \$(date -u +%FT%TZ)
+python $ENTRY $ARGS --cache_dataset_only 2>&1 | tee /tmp/tokenize.log; RC=\${PIPESTATUS[0]}
+NC=\$(grep -aoE '(numpy format at|files already present at) [^ ;]+' /tmp/tokenize.log | tail -1 | awk '{print \$NF}' | xargs -r basename)
+echo H161-NUMPY-CACHE \$NC
+ls -la /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/ | tail -5
+echo H161-TOKENIZE-EXIT \$RC \$(date -u +%FT%TZ); exit \$RC"
+    EXTRA_ENV='{"name": "TOK_ROW_CACHE", "value": "'"$ROWCACHE_ROOT"'"},'
 else
     CMD="$WAIT
 $TORCHRUN"
@@ -264,7 +344,6 @@ HOSTS="$HOSTS" CMD="$CMD" python3 - "$SPEC" <<EOF
 import json, os, sys
 env = [
     {"name": "OLMO_SHARED_FS", "value": "1"},
-    {"name": "EXPECTED_NUMPY_CACHE", "value": "$CACHE"},
     {"name": "HF_HOME", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/huggingface"},
     {"name": "HF_DATASETS_CACHE", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/huggingface"},
     {"name": "HF_HUB_CACHE", "value": "/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/c11/hf_cache/hub"},
@@ -273,9 +352,11 @@ env = [
     {"name": "NCCL_IB_HCA", "value": "^=mlx5_bond_0"},
     $EXTRA_ENV
     {"name": "HF_TOKEN", "secret": "${SECRETS}_HF_TOKEN"},
-    {"name": "WANDB_API_KEY", "secret": "${SECRETS}_WANDB_API_KEY"},
+    $([[ "${NO_WANDB_SECRET:-0}" == 1 ]] || echo "{\"name\": \"WANDB_API_KEY\", \"secret\": \"${SECRETS}_WANDB_API_KEY\"},")
     {"name": "BEAKER_TOKEN", "secret": "${SECRETS}_BEAKER_TOKEN"},
 ]
+if "$CACHE":
+    env.insert(1, {"name": "EXPECTED_NUMPY_CACHE", "value": "$CACHE"})
 task = {
     "name": "$RUN_NAME",
     "image": {"beaker": "$IMAGE"},
@@ -301,7 +382,12 @@ spec = {"version": "v2", "budget": "ai2/oe-other",
         "tasks": [task]}
 if int("${MAX_RETRIES:-0}"):
     spec["retry"] = {"allowedTaskRetries": int("${MAX_RETRIES:-0}")}
+if "$MODE" == "tokenize":
+    for k in ("replicas", "leaderSelection", "hostNetworking", "propagateFailure", "propagatePreemption", "synchronizedStartTimeout"):
+        task.pop(k)
+    task["resources"] = {"cpuCount": 64, "memory": "${TOK_MEMORY:-300GiB}"}
+    task["constraints"] = {"cluster": ["ai2/hammond", "ai2/phobos", "ai2/saturn", "ai2/neptune", "ai2/jupiter"]}
 json.dump(spec, open(sys.argv[1], "w"), indent=1)
 EOF
 if [[ "${DRY_RUN:-0}" == 1 ]]; then cat "$SPEC"; exit 0; fi
-beaker experiment create "$SPEC" --workspace ai2/olmo-instruct --name "$RUN_NAME-$(date +%m%d%H%M)"
+beaker experiment create "$SPEC" --workspace "${WORKSPACE:-ai2/olmo-instruct}" --name "$RUN_NAME-$(date +%m%d%H%M)"
