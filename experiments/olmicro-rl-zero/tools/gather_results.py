@@ -117,8 +117,8 @@ with (OUT / "runs.csv").open("w", newline="") as f:
 
 # Minerva MATH + AIME 2026 offline evals (olmo-eval grader "oe", MathVerifier "mv").
 rows = []
-for f in sorted(glob.glob(str(O / "monitor/extra-evals-*-20261118/summary.json"))):
-    tag = Path(f).parent.name.removeprefix("extra-evals-").removesuffix("-20261118")
+for f in sorted(glob.glob(str(O / "monitor/extra-evals-*-2026????/summary.json"))):
+    tag = re.sub(r"-2026\d{4}$", "", Path(f).parent.name.removeprefix("extra-evals-"))
     s = json.loads(Path(f).read_text()); m, a = s["minerva_math"], s["aime2026"]
     rows.append({"checkpoint": tag, "minerva_macro_oe": m["macro_oe"], "minerva_micro_oe": m["acc_oe"], "minerva_macro_mv": m["macro_mv"], "minerva_micro_mv": m["acc_mv"],
                  **{f"minerva_{k}": v for k, v in m.get("subjects_oe", {}).items()},

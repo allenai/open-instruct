@@ -28,13 +28,14 @@ def main():
     parser.add_argument("--template", required=True, choices=sorted(base.TEMPLATES))
     parser.add_argument("--tokenizer", required=True, help="HF checkpoint directory containing tokenizer.json")
     parser.add_argument("--max-prompt-tokens", type=int, default=512)
+    parser.add_argument("--files", nargs="+", default=FILES, help="JSONL files in SOURCE to re-render (e.g. the extra-eval sets)")
     args = parser.parse_args()
     tokenizer = Tokenizer.from_file(str(Path(args.tokenizer) / "tokenizer.json"))
     old, new = base.TEMPLATES[args.source_template][0], base.TEMPLATES[args.template][0]
     args.output.mkdir(parents=True, exist_ok=False)
 
     artifacts, longest = {}, {}
-    for name in FILES:
+    for name in args.files:
         records = [json.loads(line) for line in (args.source / name).read_text().splitlines() if line.strip()]
         for record in records:
             query = record["metadata"]["query"].strip()
@@ -50,7 +51,7 @@ def main():
 
     manifest = {
         "source": str(args.source),
-        "source_train_sha256": hashlib.sha256((args.source / "train.jsonl").read_bytes()).hexdigest(),
+        "source_sha256": {name: hashlib.sha256((args.source / name).read_bytes()).hexdigest() for name in args.files},
         "source_template_name": args.source_template,
         "template_name": args.template,
         "template": new("{problem}"),

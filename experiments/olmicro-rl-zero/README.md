@@ -25,11 +25,13 @@ Offline evals with olmo-eval's Minerva grader. Minerva MATH is the full 5,000-pr
 | 2.7B base | 36.8 | 1.5 | 16.7 | 1.5 |
 | **2.7B 32k final** | **77.1** | **14.5** | 36.7 | 11.5 |
 | 2.7B 8k final (ablation) | 73.0 | 9.8 | 33.3 | 9.8 |
+| 2.7B base, ChatML prompt | 42.5 | 4.0 | 26.7 | 4.0 |
+| 2.7B 8k ChatML final (ablation) | 73.6 | 9.5 | 36.7 | 9.5 |
 | 1.4B base | 21.8 | 0.1 | 3.3 | 0.1 |
 | 1.4B own-band final | 49.6 | 0.9 | 13.3 | 0.8 |
 | 810M / 450M / 275M base | 10.3 / 5.0 / 3.0 | 0.1 / 0 / 0 | 3.3 / 0 / 0 | |
 
-Every checkpoint of the 2.7B 8k and 32k runs and of the 1.4B own-band run is in `tables/minerva_aime_evals.csv`. The 810M, 450M and 275M trained models have no Minerva/AIME evals yet.
+Every checkpoint of the 2.7B 8k and 32k runs and of the 1.4B own-band run is in `tables/minerva_aime_evals.csv`. The ChatML rows use ChatML-rendered prompts (`base-2.7b-chatml`, `8k-chatml-final`). The 810M, 450M and 275M trained models have no Minerva/AIME evals yet.
 
 ## Main findings
 
@@ -98,6 +100,12 @@ Every checkpoint of the 2.7B 8k and 32k runs and of the 1.4B own-band run is in 
      - On MATH-500, ChatML led R1 by 1.2–1.8 points at updates 200–350, then finished 0.8 behind. That gap is within run-to-run noise.
      - On GSM8K, ChatML trailed by 1.2–2.6 points at every eval from update 100 on. That gap is small but consistent.
    - **Cost:** about the same. Updates 100–399 ran at a median of 33 s per update vs 32 s for R1. Total wall time was 5.3 h for the successful attempt, after a first attempt failed on slow Weka reads during startup.
+   - **Offline evals agree.** These use the same protocol as the R1 rows, at a 32k cap, with each model scored in its own template.
+     - **Final:** ChatML 73.6 Minerva MATH vs R1 73.0. AIME pass@1 is 9.5 vs 9.8 and pass@32 is 36.7 vs 33.3, a one-problem difference.
+     - **Base under ChatML** scores *higher* than under R1: 42.5 vs 36.8 Minerva and 4.0 vs 1.5 AIME pass@1.
+       - Its responses are much longer: 8.7k vs 2.8k tokens on Minerva, with 17% truncated even at 32k.
+       - All of its correct AIME answers fit in 16k tokens, so the extra length adds no correct answers.
+     - **Net:** both templates reach the same place after RL at 8k.
 
 ## Setup
 

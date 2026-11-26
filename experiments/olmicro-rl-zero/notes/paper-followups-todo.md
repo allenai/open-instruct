@@ -130,9 +130,10 @@ Actionable follow-up experiments and analyses identified while drafting the RL-z
   - **End tokens:** the model ends with `<|endoftext|>`, never `<|im_end|>`.
 - **For the paper:** this can support a sentence that the R1 template is a convenience, not a requirement. RL-zero from the long-context base learns to end ChatML turns and reach the same accuracy at 8k.
   - **Caveat:** it was tested only at 2.7B and 8k. The original template choice came from the midtrain checkpoint.
-- **Optional follow-ups (not run):**
-  - offline Minerva / AIME on the ChatML final (export at `runs/olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125/export-hf`);
-  - cross-template evals (the ChatML final under R1, and vice versa).
+- **Offline evals (done 2026-11-25):** each model scored in its own template, with the same protocol as the R1 evals (32k cap, T=1.0, top-p 0.95; `tables/minerva_aime_evals.csv`).
+  - **Final:** ChatML 73.6 Minerva MATH, AIME pass@1 9.5, pass@32 36.7. R1 8k final: 73.0 / 9.8 / 33.3.
+  - **Base under ChatML:** 42.5 / 4.0 / 26.7, against R1 base 36.8 / 1.5 / 16.7. Its responses are much longer (8.7k vs 2.8k tokens on Minerva) and 17% are truncated even at 32k.
+- **Optional follow-up (not run):** cross-template evals (the ChatML final under R1, and vice versa).
 
 ## Explicitly deprioritized / skip for the paper
 - **Offline AIME 2026 on 275M / 450M / 810M:** Base scores are 0.0 / 0.0 / 0.1 pass@1; not worth compute.
