@@ -89,6 +89,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 
 from open_instruct import logger_utils
+from open_instruct.utils import max_num_processes
 
 logger = logger_utils.setup_logger(__name__)
 

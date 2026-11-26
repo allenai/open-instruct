@@ -2,6 +2,8 @@ import argparse
 
 import datasets
 
+from open_instruct.utils import max_num_processes
+
 
 def main(push_to_hub: bool, hf_entity: str | None):
     ds = datasets.load_dataset("allenai/tulu-2.5-preference-data", num_proc=max_num_processes())

@@ -28,6 +28,8 @@ import openai
 import requests
 from regenerate_dataset_completions import MODEL_COSTS_PER_1M_TOKENS
 
+from open_instruct.utils import max_num_processes
+
 
 @dataclass
 class TokenUsage:

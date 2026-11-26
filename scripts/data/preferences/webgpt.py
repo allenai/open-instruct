@@ -4,6 +4,8 @@ import multiprocessing
 import datasets
 from huggingface_hub import HfApi
 
+from open_instruct.utils import max_num_processes
+
 
 def is_not_tie(item):
     return item["score_0"] != item["score_1"]

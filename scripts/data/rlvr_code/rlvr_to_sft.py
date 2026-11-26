@@ -2,6 +2,7 @@ import datasets
 from tqdm import tqdm
 
 from open_instruct import logger_utils
+from open_instruct.utils import max_num_processes
 
 """
 Converts a RLVR dataset into a SFT dataset.

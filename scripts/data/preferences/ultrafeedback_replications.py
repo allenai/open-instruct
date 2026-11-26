@@ -3,6 +3,8 @@ import argparse
 import datasets
 import numpy as np
 
+from open_instruct.utils import max_num_processes
+
 
 def main(push_to_hub: bool, hf_entity: str | None):
     ex_url = "https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-pipeline-replication/tree/main/setup_0"

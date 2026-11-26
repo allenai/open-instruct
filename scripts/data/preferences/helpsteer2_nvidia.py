@@ -3,6 +3,8 @@ from collections import defaultdict
 
 import datasets
 
+from open_instruct.utils import max_num_processes
+
 ALL_ASPECTS = ["helpfulness", "correctness", "coherence", "complexity", "verbosity"]
 
 WEIGHT_SETS = [
