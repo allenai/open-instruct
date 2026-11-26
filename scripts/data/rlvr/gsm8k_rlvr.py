@@ -15,6 +15,8 @@ import datasets
 from huggingface_hub import HfApi
 from transformers import HfArgumentParser
 
+from open_instruct.utils import max_num_processes
+
 
 @dataclass
 class Args:

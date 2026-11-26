@@ -2,6 +2,8 @@ import json
 
 import datasets
 
+from open_instruct.utils import max_num_processes
+
 PROMPT = "Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <query> query </query>, and it will return the top searched results between <output> and </output>. You can search up to 3 times. If you search more, you will receive an error message. If you find no further external knowledge needed or have reached the maximum number of searches, you can directly provide the answer inside <finish> and </finish> without detailed illustrations. For example, <finish> xxx </finish>. Question: "
 
 example_data = [

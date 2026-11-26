@@ -23,6 +23,8 @@ import datasets
 import openai
 import tiktoken
 
+from open_instruct.utils import max_num_processes
+
 # Model costs are in USD per million tokens.
 MODEL_COSTS_PER_1M_TOKENS = {
     "o3-batch": {"input": 10 * 0.5, "output": 40 * 0.5},

@@ -4,6 +4,8 @@ import multiprocessing
 import datasets
 from huggingface_hub import HfApi
 
+from open_instruct.utils import max_num_processes
+
 
 def find_all_occurrences(substring, string):
     """Find all occurrences of a substring in a string and return their indices."""
