@@ -41,7 +41,11 @@ can be float32 in a forward: the decay weights `A_log` and `dt_bias`, and the `q
   rounded value; the convolution weights stay bfloat16, so nothing a loader sees of them changes.
 - `fp32`: all five tensors are stored as float32 masters, unrounded. Right for a checkpoint whose forward used them
   in float32: MaxText pre_train.train (pretraining, midtraining, the Small joint SFT), which leaves small tensors
-  in float32, with `kda_conv_in_compute_dtype: false`. Serve such an export with a loader that keeps the five in
+  in float32, with `kda_conv_in_compute_dtype: false`. With `kda_conv_in_compute_dtype: true` the forward used
+  bfloat16 convolution weights beside float32 decay weights, and neither mode stores that exactly: `bf16-grid`
+  rounds the decay weights and `fp32` leaves the convolution weights unrounded. It refuses a model with no KDA
+  layers, and a model config that builds KDA weights in another dtype (the loader would round them before the
+  save). Check the result with check_kda_export.py. Serve such an export with a loader that keeps the five in
   float32, as olmo-sglang's KDA layer allocates them; casting the whole model to bfloat16 rounds them again. It
   needs `--skip-validation`: olmo-core's validation casts its reference model to one dtype, so it would compare
   rounded weights with unrounded ones.
@@ -164,6 +168,19 @@ def cast_for_export(
     missing = sorted((decay_keys | conv_keys) - set(model_state_dict))
     if missing:
         raise KeyError(f"KDA weights missing from the model state dict: {missing}")
+    if kda_decay == "fp32":
+        if not decay_keys:
+            raise ValueError("--kda-decay fp32 on a model with no KDA layers: there is nothing to keep in float32")
+        # The masters must reach this point unrounded. A model config that builds KDA parameters in another dtype
+        # (KimiDeltaAttentionConfig dtype: bfloat16) makes the checkpoint loader round them first; widening those
+        # back to float32 would write rounded values under a float32 dtype.
+        rounded = sorted(key for key in decay_keys | conv_keys if model_state_dict[key].dtype != torch.float32)
+        if rounded:
+            raise RuntimeError(
+                "--kda-decay fp32: the checkpoint loader delivered these KDA weights in another dtype, so their "
+                f"float32 values are already lost: {rounded[:4]}{' ...' if len(rounded) > 4 else ''} "
+                f"({model_state_dict[rounded[0]].dtype}). Convert with a model config whose KDA layers are float32."
+            )
     cast = {}
     off_grid = 0
     for key, value in model_state_dict.items():

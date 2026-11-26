@@ -19,6 +19,7 @@ serving stack holds after loading the export.
 import argparse
 import json
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -39,6 +40,13 @@ def kda_layers(hf_dir: pathlib.Path) -> list[int]:
     """Indices of the export's KDA layers, from its config.json."""
     layer_types = json.loads((hf_dir / "config.json").read_text())["layer_types"]
     return [index for index, kind in enumerate(layer_types) if kind == "linear_attention"]
+
+
+def checkpoint_kda_layers(checkpoint: pathlib.Path) -> list[int]:
+    """Indices of the checkpoint's KDA layers: the blocks that store an ``attention.A_log``."""
+    stored = get_checkpoint_metadata(str(checkpoint / "model_and_optim")).state_dict_metadata
+    found = (re.search(r"(?:^|\.)blocks\.(\d+)\.attention\.A_log(?:\.main)?$", key) for key in stored)
+    return sorted({int(match[1]) for match in found if match})
 
 
 def read_export(hf_dir: pathlib.Path, layers: list[int]) -> dict[tuple[int, str], torch.Tensor]:
@@ -67,8 +75,17 @@ def read_checkpoint(checkpoint: pathlib.Path, layers: list[int]) -> dict[tuple[i
     for layer in layers:
         for weight in (*DECAY, *CONVS):
             name = f"blocks.{layer}.attention.{weight}"
-            candidates = (f"model.{name}", f"model.module.{name}", name, f"module.{name}", f"{name}.main")
-            key = next((k for k in (*candidates, f"module.{name}.main") if k in stored), None)
+            # OLMoDDP's float32 masters first: the converter reads `model.<name>` first, so where a checkpoint holds
+            # both, this compares the export with the master and not with whatever the converter picked.
+            candidates = (
+                f"{name}.main",
+                f"module.{name}.main",
+                f"model.{name}",
+                f"model.module.{name}",
+                name,
+                f"module.{name}",
+            )
+            key = next((k for k in candidates if k in stored), None)
             if key is None:
                 raise KeyError(f"checkpoint has no weight for {name}")
             wanted[layer, weight] = key
@@ -85,7 +102,8 @@ def compare(
         raise ValueError(f"kda_decay must be one of {MODES}, got {kda_decay!r}")
     failures = []
     for (layer, weight), tensor in sorted(exported.items()):
-        master = source[layer, weight].to(torch.float32)
+        stored = source[layer, weight]
+        master = stored.to(torch.float32)
         want_dtype = torch.float32 if kda_decay == "fp32" or weight in DECAY else torch.bfloat16
         want = master if kda_decay == "fp32" else master.to(torch.bfloat16).to(torch.float32)
         got = tensor.to(torch.float32).reshape(-1)
@@ -94,6 +112,12 @@ def compare(
             problem = f"stored as {tensor.dtype}, expected {want_dtype}"
         elif got.numel() != want.numel():
             problem = f"{got.numel()} elements, the checkpoint has {want.numel()}"
+        elif tensor.dim() != (1 if weight in DECAY else 3):
+            # What the HF loader needs: a vector per decay weight, a Conv1d weight (channels, 1, kernel) per convolution.
+            problem = f"shape {tuple(tensor.shape)} is not a {'vector' if weight in DECAY else 'Conv1d weight'}"
+        elif stored.dim() == tensor.dim() and stored.shape != tensor.shape:
+            # A checkpoint may store a tensor flattened (the converter reshapes it), so only like ranks are compared.
+            problem = f"shape {tuple(tensor.shape)}, the checkpoint has {tuple(stored.shape)}"
         elif not torch.equal(got, want.reshape(-1)):
             differ = got != want.reshape(-1)
             problem = f"{int(differ.sum())} of {got.numel()} elements differ, max |diff| {float((got - want.reshape(-1)).abs().max()):.3e}"
@@ -111,6 +135,12 @@ def main() -> None:
     args = parser.parse_args()
 
     layers = kda_layers(args.hf_dir)
+    expected = checkpoint_kda_layers(args.checkpoint)
+    if not layers or layers != expected:
+        # Nothing, or not everything, would be compared: an error, not a pass.
+        raise SystemExit(
+            f"KDA layers differ or are absent: the export's config.json lists {layers}, the checkpoint has {expected}"
+        )
     failures = compare(read_export(args.hf_dir, layers), read_checkpoint(args.checkpoint, layers), args.kda_decay)
     result = {
         "checkpoint": str(args.checkpoint),

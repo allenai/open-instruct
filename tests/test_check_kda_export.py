@@ -101,6 +101,13 @@ def test_fp32_fails_an_export_with_rounded_weights(tmp_path, monkeypatch):
         ("bf16-grid", "model.layers.2.linear_attn.dt_bias", lambda t: t.to(torch.bfloat16), "stored as"),
         ("bf16-grid", "model.layers.0.linear_attn.v_conv1d.weight", lambda t: t * 2, "elements differ"),
         ("fp32", "model.layers.0.linear_attn.dt_bias", lambda t: t[:2], "elements, the checkpoint has"),
+        ("fp32", "model.layers.0.linear_attn.q_conv1d.weight", lambda t: t.reshape(4, 4), "is not a Conv1d weight"),
+        (
+            "fp32",
+            "model.layers.2.linear_attn.v_conv1d.weight",
+            lambda t: t.reshape(2, 1, 8),
+            "the checkpoint has (4, 1, 4)",
+        ),
     ],
 )
 def test_one_wrong_tensor_fails_and_is_named(tmp_path, monkeypatch, kda_decay, name, edit, problem):
@@ -124,3 +131,33 @@ def test_missing_tensor_is_an_error(tmp_path):
     )
     with pytest.raises(KeyError, match="blocks.0.attention.dt_bias"):
         check_script.read_checkpoint(checkpoint, list(KDA_LAYERS))
+
+
+def test_an_export_that_lists_other_kda_layers_is_an_error(tmp_path, monkeypatch):
+    """A config.json that names no KDA layer, or not the checkpoint's, would leave tensors unchecked."""
+    values = masters()
+    checkpoint = write_checkpoint(tmp_path / "step1", values, "{name}.main")
+    assert check_script.checkpoint_kda_layers(checkpoint) == list(KDA_LAYERS)
+    for index, layer_types in enumerate(
+        (["full_attention"] * 3, ["linear_attention", "full_attention", "full_attention"])
+    ):
+        hf_dir = write_export(tmp_path / f"hf{index}", values, "fp32")
+        (hf_dir / "config.json").write_text(json.dumps({"layer_types": layer_types}))
+        argv = ["check", "--checkpoint", str(checkpoint), "--hf-dir", str(hf_dir), "--kda-decay", "fp32"]
+        monkeypatch.setattr("sys.argv", argv)
+        with pytest.raises(SystemExit, match="KDA layers differ or are absent"):
+            check_script.main()
+
+
+def test_the_master_is_read_where_a_checkpoint_holds_both_layouts(tmp_path, monkeypatch):
+    """With a rounded `model.<name>` beside the float32 `<name>.main`, an export of the rounded values fails fp32."""
+    values = masters()
+    rounded = {key: value.to(torch.bfloat16) for key, value in values.items()}
+    state = {f"blocks.{layer}.attention.{weight}.main": value for (layer, weight), value in values.items()}
+    state |= {f"model.blocks.{layer}.attention.{weight}": value for (layer, weight), value in rounded.items()}
+    dist_cp.save(state, checkpoint_id=str(tmp_path / "step1" / "model_and_optim"))
+    good = write_export(tmp_path / "good", values, "fp32")
+    bad = write_export(tmp_path / "bad", {k: v.to(torch.float32) for k, v in rounded.items()}, "fp32")
+    assert run(monkeypatch, tmp_path / "step1", good, "fp32", tmp_path / "good.json")[0] == 0
+    code, result = run(monkeypatch, tmp_path / "step1", bad, "fp32", tmp_path / "bad.json")
+    assert code == 1 and len(result["failures"]) == 10

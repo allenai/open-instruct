@@ -8,6 +8,7 @@ from copy import deepcopy
 
 import pytest
 import torch
+import torch.distributed.checkpoint as dist_cp
 from olmo_core.config import DType
 from olmo_core.nn.attention import AttentionConfig, GateConfig, GateGranularity, KimiDeltaAttentionConfig
 from olmo_core.nn.attention.backend import AttentionBackendName
@@ -188,6 +189,43 @@ def test_cast_refuses_a_state_dict_without_the_decay_weights():
         convert_script.cast_for_export({"w": torch.ones(2)}, set(), {"blocks.0.attention.q_conv1d.weight"}, "fp32")
     with pytest.raises(ValueError, match="kda_decay"):
         convert_script.cast_for_export({"w": torch.ones(2)}, set(), set(), "float32")
+
+
+def test_fp32_refuses_weights_the_loader_rounded_and_a_model_without_kda():
+    decay, convs = {"blocks.0.attention.A_log"}, {"blocks.0.attention.q_conv1d.weight"}
+    state = {"blocks.0.attention.A_log": torch.ones(2), "blocks.0.attention.q_conv1d.weight": torch.ones(2, 1, 2)}
+    assert (
+        convert_script.cast_for_export(state, decay, convs, "fp32")["blocks.0.attention.A_log"].dtype == torch.float32
+    )
+    state["blocks.0.attention.q_conv1d.weight"] = state["blocks.0.attention.q_conv1d.weight"].to(torch.bfloat16)
+    with pytest.raises(RuntimeError, match="already lost.*q_conv1d"):
+        convert_script.cast_for_export(state, decay, convs, "fp32")
+    convert_script.cast_for_export(state, decay, convs, "bf16-grid")
+    with pytest.raises(ValueError, match="no KDA layers"):
+        convert_script.cast_for_export({"w": torch.ones(2)}, set(), set(), "fp32")
+    convert_script.cast_for_export({"w": torch.ones(2)}, set(), set(), "bf16-grid")
+
+
+@requires_fla
+def test_fp32_refuses_a_checkpoint_loaded_through_a_bfloat16_kda_config(checkpoint, tmp_path, monkeypatch):
+    """From disk: float32 convolution masters under OLMoDDP's `.main` keys, and a config whose KDA layers are bfloat16.
+    The loader rounds the masters into the model, so an fp32 export of them must be refused, not written."""
+    config, state = checkpoint
+    config = deepcopy(config)
+    for block in (config["block"], *config["block_overrides"].values()):
+        if "n_v_heads" in block["sequence_mixer"]:
+            block["sequence_mixer"]["dtype"] = "bfloat16"
+    dist_cp.save(
+        {f"module.{key}.main": value for key, value in state.items()},
+        checkpoint_id=str(tmp_path / "step1" / "model_and_optim"),
+    )
+    loaded = convert_script.load_ddp_main_params(str(tmp_path / "step1" / "model_and_optim"), config, str(tmp_path))
+    assert loaded is not None
+    conv = next(key for key in loaded if key.endswith(".attention.q_conv1d.weight"))
+    assert loaded[conv].dtype == torch.bfloat16  # rounded on the way in
+    with pytest.raises(RuntimeError, match="already lost"), convert_script.kda_decay_export("fp32"):
+        core_export((config, loaded), tmp_path / "hf", monkeypatch)
+    assert not (tmp_path / "hf" / "model.safetensors").exists()
 
 
 def test_fp32_needs_skip_validation(monkeypatch, capsys):
