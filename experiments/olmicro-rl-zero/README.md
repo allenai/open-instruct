@@ -33,9 +33,11 @@ Every checkpoint of the 2.7B 8k and 32k runs and of the 1.4B own-band run is in 
 
 ## Main findings
 
-1. **The R1-style prompt is what makes RL-zero work on these base models.** The template is "A conversation between User and Assistant … The final answer is enclosed within \boxed{} … User: {q}\nAssistant:", with stop string `\nUser:`.
-   - A plain "Question/Answer" prompt left most responses truncated.
-   - See `notes/run-log.md` and the format probe in `tools/format_probe.py`.
+1. **Prompt format matters at step 0, but RL closes most of the gap.** Every run uses the R1-style prompt "A conversation between User and Assistant … The final answer is enclosed within \boxed{} … User: {q}\nAssistant:", with stop string `\nUser:`. There is one exception: the ChatML ablation in finding 9.
+   - **Why R1:** we chose it from a 5-template probe on the *midtrain* 2.7B at a 4k cap.
+     - A plain "Question/Answer" prompt left 76% of responses truncated; R1 left 3.5%.
+     - See `notes/run-log.md` and `tools/format_probe.py`.
+   - **ChatML catches up:** on the long-context 2.7B, an 8k ChatML run finished within ~1 point of R1 (finding 9). So R1 is a good default, not a requirement.
 2. **Use the long-context (stage3) final, not the midtrain checkpoint.**
    - At the same 7,680-token eval cap and 4 samples, the long-context base starts at 37.3 on MATH-500 vs 30–31 for midtrain.
    - At update 200 it reaches 68.5 (8k run) vs 60.1 for the best midtrain run (v1b), though the publication mode also differs.
@@ -76,6 +78,26 @@ Every checkpoint of the 2.7B 8k and 32k runs and of the 1.4B own-band run is in 
      - 810M, where 21–37% of groups carry signal: 2.7 h instead of 1.7 h.
    - Not tried at 1.4B, whose own band already has 51–77% signal.
    - So the recipe splits in two: **≥1.4B** trains on its own pass band, and **≤810M** on own band ∪ 2.7B band with the zero-std filter.
+9. **A ChatML prompt learns the format and ends up close to R1 (2.7B, 8k cap).** This was Michael's suggestion.
+   - **Prompt:** `<|im_start|>user\n{q}\n\nPlease reason step by step, and put your final answer within \boxed{}.<|im_end|>\n<|im_start|>assistant\n`. There is no system turn. Responses stop at `<|im_end|>`, `<|im_start|>` or `<|endoftext|>`.
+   - **Setup:** the same 4,353-prompt 8k band and the same recipe as the R1 8k run, re-rendered with `tools/data-prep/rerender_template.py`.
+
+     | in-loop eval | step 0: ChatML / R1 | final (u400): ChatML / R1 |
+     |---|---|---|
+     | MATH-500 | 38.1 / 37.3 | 72.8 / 73.6 (ChatML peak 73.9 @ u350) |
+     | MATH-500 truncated at 7,680 | 30.5% / 7.0% | 1.8% / 1.6% |
+     | MATH-500 mean length | 3.6k / 1.1k | 2.7k / 2.4k |
+     | GSM8K Platinum | 54.0 / 67.3 | 89.7 / 90.9 |
+
+   - **The format problem was length, not accuracy.**
+     - At step 0, ChatML already matches R1 on MATH-500 when it finishes. But 30–47% of its responses run to the cap; some just repeat the question.
+     - RL fixed this. Training-rollout truncation fell from 47% (updates 0–49) to 3% (updates 350–399), and the boxed-answer rate rose from 52% to 99%.
+   - **The model never emits `<|im_end|>`.** It closes its turn with `<|endoftext|>`: 57% of sampled responses early, 99% late. That is the Olmo SFT convention.
+   - **The two runs were close throughout.**
+     - Training reward and signal fraction tracked the R1 run at every stage: at updates 350–399, 45% vs 44% reward and 68% vs 69% signal.
+     - On MATH-500, ChatML led R1 by 1.2–1.8 points at updates 200–350, then finished 0.8 behind. That gap is within run-to-run noise.
+     - On GSM8K, ChatML trailed by 1.2–2.6 points at every eval from update 100 on. That gap is small but consistent.
+   - **Cost:** about the same. Updates 100–399 ran at a median of 33 s per update vs 32 s for R1. Total wall time was 5.3 h for the successful attempt, after a first attempt failed on slow Weka reads during startup.
 
 ## Setup
 
@@ -132,6 +154,7 @@ See `tables/runs.csv` for experiment links, topology, wall time and first/final/
 | 2.7B midtrain v1a / v1b (barrier, 7,680) | 54.2 @ u250 / 60.1 @ u200 | stopped when we switched to the long-context checkpoint |
 | **2.7B long-context 32k** | **77.3** | u0–u99 on 4+4, u100–u399 on 4+12; the u100 point was re-run offline |
 | 2.7B long-context 8k | 73.6 | ablation |
+| 2.7B long-context 8k, ChatML prompt | 72.8 (73.9 @ u350) | same band and recipe as the 8k run; starts at 38.1 with 30% truncation |
 | 2.7B long-context 16k | — | canceled at u4 to free a node |
 | **1.4B own band** | **49.9** (50.7) | |
 | 1.4B combined | 48.1 (48.5) | |

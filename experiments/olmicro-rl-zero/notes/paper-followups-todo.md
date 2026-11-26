@@ -117,6 +117,23 @@ Actionable follow-up experiments and analyses identified while drafting the RL-z
 
 ---
 
+### 9. ChatML prompt ablation at 2.7B, 8k cap (added 2026-11-25, Michael's suggestion) — done
+- **What it tests:** whether RL-zero still works if the base model is prompted in the SFT-style ChatML format instead of R1.
+  - **Prompt:** the format probe's `chatml` template. There is no system turn; the user turn is the question plus "Please reason step by step, and put your final answer within \boxed{}."
+  - **Data:** the same 4,353-prompt 8k band and the same recipe as the R1 8k run.
+  - **Run:** `olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125`, Beaker experiment `01M8A3689ZMXK3WEGT2K9KWHY8`. The successful attempt ran 11:59 AM – 5:17 PM PST.
+  - **Config:** `configs/olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125.toml`.
+- **Result: ChatML ends close to R1.** README finding 9 has the full comparison.
+  - **MATH-500:** 38.1 → 72.8 (peak 73.9 at u350), against R1 37.3 → 73.6.
+  - **GSM8K Platinum:** 54.0 → 89.7, against R1 67.3 → 90.9. ChatML trails by 1.2–2.6 points from u100 on.
+  - **Truncation:** step-0 eval truncation at 7,680 tokens was 30.5% (R1 7.0%). Training-rollout truncation fell from 47% to 3%.
+  - **End tokens:** the model ends with `<|endoftext|>`, never `<|im_end|>`.
+- **For the paper:** this can support a sentence that the R1 template is a convenience, not a requirement. RL-zero from the long-context base learns to end ChatML turns and reach the same accuracy at 8k.
+  - **Caveat:** it was tested only at 2.7B and 8k. The original template choice came from the midtrain checkpoint.
+- **Optional follow-ups (not run):**
+  - offline Minerva / AIME on the ChatML final (export at `runs/olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125/export-hf`);
+  - cross-template evals (the ChatML final under R1, and vice versa).
+
 ## Explicitly deprioritized / skip for the paper
 - **Offline AIME 2026 on 275M / 450M / 810M:** Base scores are 0.0 / 0.0 / 0.1 pass@1; not worth compute.
 - **Offline Minerva MATH on 275M / 450M / 810M:** In-loop MATH-500 tracks full 5,000-problem Minerva MATH within <1 pt at both 1.4B (49.9 vs. 49.6) and 2.7B (77.3 vs. 77.1), and Table 2 in the paper is scoped cleanly to 1.4B and 2.7B without empty cells.

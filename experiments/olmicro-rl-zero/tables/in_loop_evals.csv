@@ -36,6 +36,15 @@ olmicro-2.7b-lc-math-rl-v2-refresh-8k-20261118,2.7B,250,70.77,88.9,in-loop
 olmicro-2.7b-lc-math-rl-v2-refresh-8k-20261118,2.7B,300,70.98,89.66,in-loop
 olmicro-2.7b-lc-math-rl-v2-refresh-8k-20261118,2.7B,350,72.69,90.18,in-loop
 olmicro-2.7b-lc-math-rl-v2-refresh-8k-20261118,2.7B,400,73.59,90.94,in-loop
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,0,38.13,54.01,in-loop
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,50,57.19,79.03,in-loop
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,100,65.49,85.4,in-loop
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,150,68.36,85.32,in-loop
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,200,69.67,86.77,in-loop
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,250,72.54,87.7,in-loop
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,300,72.84,88.32,in-loop
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,350,73.89,89.02,in-loop
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,400,72.84,89.68,in-loop
 olmicro-2.7b-math-rl-v0-r1-20261118,2.7B,0,29.18,50.95,in-loop
 olmicro-2.7b-math-rl-v0-r1-20261118,2.7B,50,45.67,72.62,in-loop
 olmicro-2.7b-math-rl-v0-r1-20261118,2.7B,100,51.11,78.25,in-loop

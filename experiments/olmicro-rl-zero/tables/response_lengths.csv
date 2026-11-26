@@ -35,6 +35,14 @@ olmicro-2.7b-lc-math-rl-v2-refresh-8k-20261118,2.7B,200-249,all,12744,4454,4308,
 olmicro-2.7b-lc-math-rl-v2-refresh-8k-20261118,2.7B,250-299,all,12840,3869,3702,6793,4.67,41.6
 olmicro-2.7b-lc-math-rl-v2-refresh-8k-20261118,2.7B,300-349,all,12808,3974,3845,6602,3.26,44.5
 olmicro-2.7b-lc-math-rl-v2-refresh-8k-20261118,2.7B,350-399,all,12784,3884,3752,6327,2.45,44.4
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,0-49,all,12960,5403,7118,7680,46.82,17.8
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,50-99,all,12808,5899,7316,7680,46.92,26.5
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,100-149,all,12792,5492,6059,7680,34.98,31.5
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,150-199,all,12832,4757,4754,7680,16.62,37.8
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,200-249,all,12768,4304,4176,7175,6.46,41.5
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,250-299,all,12768,4255,4192,6688,3.67,43.8
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,300-349,all,12832,4410,4340,6970,4.89,45.7
+olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125,2.7B,350-399,all,12800,4231,4160,6543,3.14,45.2
 olmicro-2.7b-lc-math-rl-v2-refresh-16k-20261118,2.7B,0-49,all,4104,1790,732,4260,1.22,12.4
 olmicro-1.4b-lc-math-rl-refresh-32k-20261118,1.4B,0-49,all,13024,1347,656,2315,0.21,11.1
 olmicro-1.4b-lc-math-rl-refresh-32k-20261118,1.4B,50-99,all,12880,1200,660,1842,0.08,13.4

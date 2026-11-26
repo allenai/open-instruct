@@ -25,6 +25,7 @@ RUNS = [
     ("olmicro-2.7b-lc-math-rl-v2-refresh-32k-20261118", "2.7B", "long-context", "32k cap, own band, 4+4 (u0-u99; u100 eval timed out)", "passband-lc2.7b-32k (4,900)"),
     ("olmicro-2.7b-lc-math-rl-v2-refresh-32k-4x12-20261118", "2.7B", "long-context", "32k cap, own band, 4+12 resume (u100-u399)", "passband-lc2.7b-32k (4,900)"),
     ("olmicro-2.7b-lc-math-rl-v2-refresh-8k-20261118", "2.7B", "long-context", "7,680 cap, own band (ablation)", "passband-lc2.7b-8k (4,353)"),
+    ("olmicro-2.7b-lc-math-rl-v2-refresh-8k-chatml-20261125", "2.7B", "long-context", "7,680 cap, own band, ChatML prompt (wall time includes a failed first attempt)", "passband-lc2.7b-8k rendered in ChatML (4,353)"),
     ("olmicro-2.7b-lc-math-rl-v2-refresh-16k-20261118", "2.7B", "long-context", "16k cap (canceled at u4 to free a node)", "passband-lc2.7b-16k (4,845)"),
     ("olmicro-1.4b-lc-math-rl-refresh-32k-20261118", "1.4B", "long-context", "32k cap, own band", "passband-lc1.4b-32k (2,281)"),
     ("olmicro-1.4b-lc-math-rl-refresh-32k-combined-20261119", "1.4B", "long-context", "32k cap, own band + 2.7B band", "combined-lc1.4b-32k (4,969)"),
