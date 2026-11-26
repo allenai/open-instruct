@@ -14,7 +14,8 @@ in scanned_blocks with the scan axis at position 1; the padded vocabulary is tri
 a MaxText forward: the decay weights A_log and dt_bias, and the q/k/v_conv1d weights. Every other tensor is bfloat16.
 
 - decay-fp32 (default, the behaviour before this option): A_log and dt_bias are float32 masters; the convolution
-  weights are rounded to bfloat16.
+  weights are rounded to bfloat16. For a forward with float32 decay weights and bfloat16 convolution weights:
+  kda_conv_in_compute_dtype true, without MAXTEXT_FORWARD_BF16_ALL_PARAMS.
 - fp32: all five are float32 masters. For a checkpoint whose forward used them in float32: pre_train.train
   (pretraining, midtraining, the Small joint SFT), which leaves small tensors in float32, with
   kda_conv_in_compute_dtype false.
@@ -39,7 +40,13 @@ parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.R
 parser.add_argument("params_dir")
 parser.add_argument("reference_hf_dir")
 parser.add_argument("out_dir")
-parser.add_argument("--kda-decay", choices=("decay-fp32", "fp32", "bf16-grid"), default="decay-fp32")
+parser.add_argument(
+    "--kda-decay",
+    choices=("decay-fp32", "fp32", "bf16-grid"),
+    default="decay-fp32",
+    help="which KDA weights keep float32 masters, by what the training forward used: decay-fp32 (default) A_log and "
+    "dt_bias; fp32 those and the q/k/v_conv1d weights; bf16-grid none (all rounded to the bfloat16 grid)",
+)
 args = parser.parse_args()
 src, ref, out = args.params_dir, args.reference_hf_dir, os.path.abspath(args.out_dir)
 if os.path.exists(out) and (not os.path.isdir(out) or os.listdir(out)):

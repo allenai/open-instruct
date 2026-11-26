@@ -283,21 +283,28 @@ and CE against the run's current image before migrating those runs.
 
 ```bash
 gcloud storage cp -r gs://ai2-olmo-dev/post-training/runs/<run>/checkpoints/<step>/model_params <local dir>
-python scripts/tpu/maxtext/olmo35/export_maxtext_to_hf.py <local dir>/model_params <reference HF dir> <out>
+python scripts/tpu/maxtext/olmo35/export_maxtext_to_hf.py <local dir>/model_params <reference HF dir> <out> \
+  --kda-decay <bf16-grid|fp32|decay-fp32>
 ```
 
-The export must store the values the training forward used, so add `--kda-decay bf16-grid` for a run launched with
-`MAXTEXT_FORWARD_BF16_ALL_PARAMS=1` (its forward saw every weight rounded to bfloat16), and `--kda-decay fp32` for a
-`pre_train.train` run, whose forward keeps KDA's decay and convolution weights in float32. The default,
-`decay-fp32`, keeps only `A_log` and `dt_bias` as float32 masters.
+The export must store the values the training forward used, so choose `--kda-decay` by the run:
+
+- `bf16-grid`: launched with `MAXTEXT_FORWARD_BF16_ALL_PARAMS=1` (its forward saw every weight rounded to bfloat16).
+- `fp32`: a `pre_train.train` run with `kda_conv_in_compute_dtype: false`, whose forward keeps KDA's decay and
+  convolution weights in float32.
+- `decay-fp32` (the default when the flag is omitted): a forward with float32 `A_log` and `dt_bias` and bfloat16
+  convolution weights, i.e. `kda_conv_in_compute_dtype: true` without `MAXTEXT_FORWARD_BF16_ALL_PARAMS`.
+
+A loader that casts the whole model to bfloat16 rounds the float32 tensors again; olmo-sglang's KDA layer keeps all
+five in float32.
 
 The reference directory supplies tensor names, `config.json`, modeling code, tokenizer and chat template. Use an HF
 export of the same model with the matching tokenizer and chat template, and choose `<out>` under your own output
 location. One existing reference export is H045's:
 `/weka/oe-training-default/ai2-llm/checkpoints/abhishekr/hero-sft-4t/runs/h045-anchor-emo-olmo35-s34521/hf_step11768`.
-Its `config.json` is the HF model config, unlike the run directory's OLMo-core training config. The exporter is
-bit-exact on all 23,441 tensors. For Olmo 3, use `export_hf.sh`, which also takes the base model's `config.json`,
-because MaxText's own is wrong.
+Its `config.json` is the HF model config, unlike the run directory's OLMo-core training config. With the default
+`--kda-decay`, the exporter is bit-exact on all 23,441 tensors. For Olmo 3, use `export_hf.sh`, which also takes
+the base model's `config.json`, because MaxText's own is wrong.
 
 Evaluate the HF export with olmo-eval on Beaker GPUs, as for a GPU run (see [the GPU guide](sft_running_guide.md)).
 HF Olmo 3.5 needs `fla`, so every pass runs on GPU. Where exports and checkpoints go, and what to keep, is the ledger's
