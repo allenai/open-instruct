@@ -228,6 +228,14 @@ def test_fp32_refuses_a_checkpoint_loaded_through_a_bfloat16_kda_config(checkpoi
     assert not (tmp_path / "hf" / "model.safetensors").exists()
 
 
+def test_the_master_is_read_where_a_checkpoint_holds_both_layouts():
+    keys = {"model.blocks.0.attention.A_log", "blocks.0.attention.A_log.main", "model.embeddings.weight"}
+    assert convert_script.checkpoint_key_for("blocks.0.attention.A_log", keys) == "blocks.0.attention.A_log.main"
+    assert convert_script.checkpoint_key_for("embeddings.weight", keys) == "model.embeddings.weight"
+    assert convert_script.checkpoint_key_for("lm_head.weight", keys) is None
+    assert convert_script.checkpoint_key_for("w", {"module.w.main", "module.w"}) == "module.w.main"
+
+
 def test_fp32_needs_skip_validation(monkeypatch, capsys):
     """olmo-core's validation casts its reference model to one dtype, which would round the float32 decay weights."""
     monkeypatch.setattr("sys.argv", ["convert", "-i", "in", "-o", "out", "-c", "config.json", "--kda-decay", "fp32"])

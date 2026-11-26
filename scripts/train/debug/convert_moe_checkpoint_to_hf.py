@@ -78,6 +78,24 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
+def checkpoint_key_for(name: str, checkpoint_keys: set[str]) -> str | None:
+    """The checkpoint key holding parameter ``name``: the optimizer's float32 master where the checkpoint has one.
+
+    The master comes first because a checkpoint may also hold the model's own copy in the compute dtype
+    (``model.<name>`` in bfloat16); read into a float32 parameter, that copy would be rounded values under a
+    float32 dtype, which ``--kda-decay fp32`` could not tell from the master.
+    """
+    candidates = (
+        f"{name}.main",
+        f"module.{name}.main",
+        f"model.{name}",
+        f"model.module.{name}",
+        name,
+        f"module.{name}",
+    )
+    return next((key for key in candidates if key in checkpoint_keys), None)
+
+
 def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir: str) -> dict | None:
     """Gather model weights from an OLMoDDP checkpoint, or return None for a conventional one.
 
@@ -87,7 +105,8 @@ def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir:
     (``_load_ddp_optimizer_model_state``); the Olmo 3.5 hero lineage (89e7dcb7) never got it,
     so every hero SFT conversion died with "Missing key in checkpoint state_dict:
     model.embeddings.weight" (2026-09-16). This is that function,
-    ported: the same key candidates, the converter then takes the gathered state dict.
+    ported: the same key candidates, masters first (checkpoint_key_for); the converter then takes the gathered
+    state dict.
     """
     checkpoint_keys = set(get_checkpoint_metadata(model_and_optim_dir).state_dict_metadata)
     if not any(key.endswith(".main") for key in checkpoint_keys):
@@ -99,15 +118,7 @@ def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir:
     destinations: list[tuple[str, torch.Tensor]] = []
     missing: list[str] = []
     for name, param in model.named_parameters():
-        candidates = (
-            f"model.{name}",
-            f"model.module.{name}",
-            name,
-            f"module.{name}",
-            f"{name}.main",
-            f"module.{name}.main",
-        )
-        key = next((k for k in candidates if k in checkpoint_keys), None)
+        key = checkpoint_key_for(name, checkpoint_keys)
         if key is None:
             missing.append(name)
             continue
