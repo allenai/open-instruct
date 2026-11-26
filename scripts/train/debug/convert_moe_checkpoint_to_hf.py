@@ -105,10 +105,23 @@ def load_ddp_main_params(
     model.embeddings.weight" (2026-09-16). This is that function,
     ported: the same key candidates in the same order (checkpoint_key_for); the converter then takes the gathered
     state dict. With ``kda_decay`` ``fp32``, the KDA weights exported in float32 are read from their float32
-    masters, and a stored KDA tensor that is not float32 is refused.
+    masters, and a stored KDA tensor that is not float32 is refused, in either layout.
     """
-    checkpoint_keys = set(get_checkpoint_metadata(model_and_optim_dir).state_dict_metadata)
+    stored = get_checkpoint_metadata(model_and_optim_dir).state_dict_metadata
+    checkpoint_keys = set(stored)
     if not any(key.endswith(".main") for key in checkpoint_keys):
+        if kda_decay == "fp32":
+            # olmo-core loads this layout itself, into parameters of the config's dtype: a KDA weight stored in
+            # bfloat16 would arrive widened to float32 and pass the save's dtype check. Refuse it from the metadata.
+            model = TransformerConfig.from_dict(model_config).build(init_device="meta")
+            for name in sorted(set().union(*kda_weight_keys(model))):
+                key = checkpoint_key_for(name, checkpoint_keys)
+                dtype = None if key is None else stored[key].properties.dtype
+                if dtype != torch.float32:
+                    raise RuntimeError(
+                        f"--kda-decay fp32: the checkpoint stores '{key or name}' as {dtype}, so there is no float32 "
+                        "value of this KDA weight to export"
+                    )
         return None
     logger.info("OLMoDDP checkpoint layout (<param>.main); gathering weights through the fused optimizer keys")
     model = TransformerConfig.from_dict(model_config).build(init_device="meta")

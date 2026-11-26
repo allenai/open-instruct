@@ -109,7 +109,9 @@ def compare(
         want = master if kda_decay == "fp32" else master.to(torch.bfloat16).to(torch.float32)
         got = tensor.to(torch.float32).reshape(-1)
         problem = None
-        if tensor.dtype != want_dtype:
+        if kda_decay == "fp32" and stored.dtype != torch.float32:
+            problem = f"the checkpoint stores it as {stored.dtype}: there is no float32 master to compare with"
+        elif tensor.dtype != want_dtype:
             problem = f"stored as {tensor.dtype}, expected {want_dtype}"
         elif got.numel() != want.numel():
             problem = f"{got.numel()} elements, the checkpoint has {want.numel()}"
@@ -129,7 +131,13 @@ def compare(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--checkpoint", required=True, type=pathlib.Path, help="OLMo-core checkpoint step directory")
+    parser.add_argument(
+        "--checkpoint",
+        required=True,
+        type=pathlib.Path,
+        help="OLMo-core checkpoint step directory; where it holds both layouts, the float32 <name>.main is the "
+        "source in both modes",
+    )
     parser.add_argument("--hf-dir", required=True, type=pathlib.Path, help="the HF export converted from it")
     parser.add_argument("--kda-decay", required=True, choices=MODES, help="the mode the export was written with")
     parser.add_argument("--output", type=pathlib.Path, help="write the result here as JSON")

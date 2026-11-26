@@ -286,6 +286,31 @@ def test_fp32_refuses_a_kda_weight_the_checkpoint_stores_in_bfloat16(checkpoint,
     assert convert_script.load_ddp_main_params(directory, config, str(tmp_path)) is not None
 
 
+@requires_fla
+def test_fp32_refuses_a_conventional_checkpoint_that_stores_kda_weights_in_bfloat16(checkpoint, tmp_path):
+    """From disk: `model.<name>` keys only, which olmo-core loads itself. With bfloat16 KDA weights and a float32 KDA
+    config it would widen them, and the save could not tell; float32 KDA weights beside bfloat16 others are fine."""
+    config, masters = checkpoint
+    kda = [k for k in masters if ".attention." in k and k.endswith((".A_log", ".dt_bias", "_conv1d.weight"))]
+    assert len(kda) == 10
+    rounded = str(tmp_path / "rounded" / "model_and_optim")
+    dist_cp.save({f"model.{k}": v.to(torch.bfloat16) for k, v in masters.items()}, checkpoint_id=rounded)
+    with pytest.raises(RuntimeError, match="no float32 value of this KDA weight"):
+        convert_script.load_ddp_main_params(rounded, config, str(tmp_path), "fp32")
+    assert convert_script.load_ddp_main_params(rounded, config, str(tmp_path)) is None
+    for missed in kda:  # each of the five tensors per layer is checked
+        directory = str(tmp_path / missed / "model_and_optim")
+        state = {f"model.{k}": v if k in kda and k != missed else v.to(torch.bfloat16) for k, v in masters.items()}
+        dist_cp.save(state, checkpoint_id=directory)
+        with pytest.raises(RuntimeError, match=missed.replace(".", r"\.")):
+            convert_script.load_ddp_main_params(directory, config, str(tmp_path), "fp32")
+    kept = str(tmp_path / "kept" / "model_and_optim")
+    dist_cp.save(
+        {f"model.{k}": v if k in kda else v.to(torch.bfloat16) for k, v in masters.items()}, checkpoint_id=kept
+    )
+    assert convert_script.load_ddp_main_params(kept, config, str(tmp_path), "fp32") is None
+
+
 def test_fp32_needs_skip_validation(monkeypatch, capsys):
     """olmo-core's validation casts its reference model to one dtype, which would round the float32 decay weights."""
     monkeypatch.setattr("sys.argv", ["convert", "-i", "in", "-o", "out", "-c", "config.json", "--kda-decay", "fp32"])

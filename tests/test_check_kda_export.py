@@ -149,6 +149,18 @@ def test_an_export_that_lists_other_kda_layers_is_an_error(tmp_path, monkeypatch
             check_script.main()
 
 
+def test_fp32_fails_a_checkpoint_that_stores_the_weights_in_bfloat16(tmp_path, monkeypatch):
+    """A widened copy of bfloat16 weights equals its source, but there is no float32 master behind it."""
+    rounded = {key: value.to(torch.bfloat16) for key, value in masters().items()}
+    checkpoint = write_checkpoint(tmp_path / "step1", rounded, "model.{name}")
+    widened = write_export(tmp_path / "hf", {k: v.to(torch.float32) for k, v in rounded.items()}, "fp32")
+    code, result = run(monkeypatch, checkpoint, widened, "fp32", tmp_path / "result.json")
+    assert code == 1 and len(result["failures"]) == 10
+    assert all("no float32 master" in failure["problem"] for failure in result["failures"])
+    default = write_export(tmp_path / "default", rounded, "bf16-grid")
+    assert run(monkeypatch, checkpoint, default, "bf16-grid", tmp_path / "default.json")[0] == 0
+
+
 def test_the_master_is_read_where_a_checkpoint_holds_both_layouts(tmp_path, monkeypatch):
     """With a rounded `model.<name>` beside the float32 `<name>.main`, an export of the rounded values fails fp32."""
     values = masters()
