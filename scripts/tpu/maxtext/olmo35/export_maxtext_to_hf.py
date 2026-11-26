@@ -1,6 +1,6 @@
 """Export a MaxText `olmoe3` (Olmo 3.5) parameter checkpoint to HF `Olmo3MoeForCausalLM` safetensors.
 
-  export_maxtext_to_hf.py <params dir> <reference HF dir> <out dir>
+  export_maxtext_to_hf.py <params dir> <reference HF dir> <out dir> [--kda-decay decay-fp32|fp32|bf16-grid]
 
 <params dir> is either to_maxtext's layout (…/0/items, tree under params/params) or a Tunix SFT checkpoint's
 model_params (leaves wrapped as {"value": …}). <reference HF dir> is an OLMo-core HF export of the same
@@ -9,13 +9,26 @@ code, tokenizer and chat template are copied. The inverse of convert_olmocore_to
 OLMo-core's olmo3moe HF converter: kernels (in, out) -> torch Linear (out, in); the full-attention query kernel
 splits into q_proj | g_proj per head; wi_0 is the gate, wi_1 the up projection; layers 0-7 are unscanned, 8-15 sit
 in scanned_blocks with the scan axis at position 1; the padded vocabulary is trimmed to the reference's.
+
+--kda-decay: an export must store the value the training forward used. Five tensors per KDA layer can be float32 in
+a MaxText forward: the decay weights A_log and dt_bias, and the q/k/v_conv1d weights. Every other tensor is bfloat16.
+
+- decay-fp32 (default, the behaviour before this option): A_log and dt_bias are float32 masters; the convolution
+  weights are rounded to bfloat16. For a forward with float32 decay weights and bfloat16 convolution weights:
+  kda_conv_in_compute_dtype true, without MAXTEXT_FORWARD_BF16_ALL_PARAMS.
+- fp32: all five are float32 masters. For a checkpoint whose forward used them in float32: pre_train.train
+  (pretraining, midtraining, the Small joint SFT), which leaves small tensors in float32, with
+  kda_conv_in_compute_dtype false.
+- bf16-grid: every value is rounded to the bfloat16 grid; A_log and dt_bias are stored as float32 holding the rounded
+  value, the convolution weights as bfloat16. For a Tunix SFT checkpoint trained with
+  MAXTEXT_FORWARD_BF16_ALL_PARAMS=1, whose forward saw every weight rounded to bfloat16.
 """
 
+import argparse
 import json
 import os
 import shutil
 import struct
-import sys
 
 import jax
 import numpy as np
@@ -23,7 +36,19 @@ import torch
 from orbax import checkpoint as ocp
 from safetensors.torch import save_file
 
-src, ref, out = sys.argv[1], sys.argv[2], os.path.abspath(sys.argv[3])
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("params_dir")
+parser.add_argument("reference_hf_dir")
+parser.add_argument("out_dir")
+parser.add_argument(
+    "--kda-decay",
+    choices=("decay-fp32", "fp32", "bf16-grid"),
+    default="decay-fp32",
+    help="which KDA weights keep float32 masters, by what the training forward used: decay-fp32 (default) A_log and "
+    "dt_bias; fp32 those and the q/k/v_conv1d weights; bf16-grid none (all rounded to the bfloat16 grid)",
+)
+args = parser.parse_args()
+src, ref, out = args.params_dir, args.reference_hf_dir, os.path.abspath(args.out_dir)
 if os.path.exists(out) and (not os.path.isdir(out) or os.listdir(out)):
     raise ValueError("out must be a new or empty directory; do not mix exports")
 CYCLE = 8
@@ -136,11 +161,16 @@ assert set(hf) == set(target), (sorted(set(target) - set(hf))[:10], sorted(set(h
 bad = [(k, list(np.shape(v)), target[k]) for k, v in hf.items() if list(np.shape(v)) != target[k]]
 assert not bad, bad[:10]
 os.makedirs(out, exist_ok=True)
+DECAY = (".self_attn.A_log", ".self_attn.dt_bias")
+CONVS = tuple(f".self_attn.{c}_conv1d.weight" for c in "qkv")
 tensors = {}
 for name, value in hf.items():
     tensor = torch.from_numpy(np.ascontiguousarray(np.asarray(value, np.float32)))
-    # KDA uses FP32 decay parameters even when its projections run in BF16.
-    if not name.endswith((".self_attn.A_log", ".self_attn.dt_bias")):
+    if name.endswith(DECAY):
+        # Always a float32 container; bf16-grid stores the value the bfloat16-rounding forward used.
+        if args.kda_decay == "bf16-grid":
+            tensor = tensor.to(torch.bfloat16).to(torch.float32)
+    elif not (name.endswith(CONVS) and args.kda_decay == "fp32"):
         tensor = tensor.to(torch.bfloat16)
     tensors[name] = tensor
 save_file(tensors, os.path.join(out, "model.safetensors"), metadata={"format": "pt"})
@@ -152,4 +182,4 @@ for f in os.listdir(ref):
         shutil.copy(os.path.join(ref, f), os.path.join(out, f))
     elif f == "chat_templates":
         shutil.copytree(os.path.join(ref, f), os.path.join(out, f))
-print(f"wrote {len(tensors)} tensors to {out}")
+print(f"wrote {len(tensors)} tensors to {out} (--kda-decay {args.kda_decay})")
