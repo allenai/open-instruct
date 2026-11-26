@@ -309,7 +309,7 @@ def train_config(config, *, export_hf=None, background_evaluation=None):
         args = parse_runtime(config)
     args.background_evaluation = background_evaluation
     checkpoint_export = background_evaluation and background_evaluation.get("checkpoint_export")
-    if checkpoint_export:
+    if background_evaluation is not None and checkpoint_export:
         model_config = json.loads((Path(args.hf_checkpoint) / "config.json").read_text())
         if model_config.get("model_type") != "olmo3moe":
             raise InputError("evaluation.checkpoint_export currently supports only Olmo 3 MoE checkpoints")

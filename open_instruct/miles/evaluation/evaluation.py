@@ -389,12 +389,16 @@ def runtime(spec, options):
     }
 
 
+def runner_source() -> bytes:
+    return Path(__file__).with_name("evaluation_runner.py").read_bytes()
+
+
 def specification(receipt):
     config = receipt["evaluation"]
     validate_scicode_reference_path({"tasks": receipt.get("tasks", [])})
     # Carry the committed runner to the independent evaluator image. No source
     # checkout, dependency resolution or moving branch is used at job startup.
-    runner = Path(__file__).with_name("evaluation_runner.py").read_bytes()
+    runner = runner_source()
     if hashlib.sha256(runner).hexdigest() != receipt["runner_sha256"]:
         raise InputError("Evaluator runner differs from the recorded source; use its committed checkout")
     payload = base64.b64encode(json.dumps(receipt).encode()).decode()
@@ -569,9 +573,7 @@ class Coordinator:
                 evaluation=self.config,
                 training=self.training,
                 status="pending",
-                runner_sha256=hashlib.sha256(
-                    Path(__file__).with_name("evaluation_runner.py").read_bytes()
-                ).hexdigest(),
+                runner_sha256=hashlib.sha256(runner_source()).hexdigest(),
             )
             if busy:
                 receipt.update(status="skipped_busy", diagnostic="Submission worker busy; milestone dropped")

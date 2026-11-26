@@ -218,9 +218,7 @@ def submit_groups(request, path):
             "evaluation": config,
             "training": request["training"],
             "status": "pending",
-            "runner_sha256": hashlib.sha256(
-                Path(evaluation.__file__).with_name("evaluation_runner.py").read_bytes()
-            ).hexdigest(),
+            "runner_sha256": hashlib.sha256(evaluation.runner_source()).hexdigest(),
         }
         evaluation.submit(receipt, receipt_path, reconcile=True)
         if receipt["status"] != "submitted":

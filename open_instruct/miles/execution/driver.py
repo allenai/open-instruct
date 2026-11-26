@@ -325,10 +325,9 @@ async def train(args, *, export_hf=None):
             checkpoint_eval_due = False
             if checkpoint_coordinator is not None:
                 end_update = (rollout_id + 1) * background_eval.updates_per_rollout(args)
+                config = checkpoint_coordinator.config
                 checkpoint_eval_due = bool(
-                    background_eval.groups(
-                        background, end_update, end_update if final_stop else background["total_updates"]
-                    )
+                    background_eval.groups(config, end_update, end_update if final_stop else config["total_updates"])
                 )
             if (
                 checkpoint_eval_due
@@ -410,7 +409,7 @@ async def train(args, *, export_hf=None):
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
         if checkpoint_coordinator is not None:
-            if final_stop and completed and background["final"]:
+            if final_stop and completed and checkpoint_coordinator.config["final"]:
                 last = completed[-1]
                 checkpoint_coordinator.enqueue(
                     (last + 1) * background_eval.updates_per_rollout(args),

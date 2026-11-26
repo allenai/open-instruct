@@ -14,6 +14,7 @@ from olmo_core.config import Config
 from olmo_core.distributed.checkpoint import get_checkpoint_metadata, load_state_dict
 from olmo_core.nn.moe.v2 import olmo3
 from olmo_core.nn.moe.v2.hf.configuration_olmo3moe import Olmo3MoeConfig
+from olmo_core.nn.transformer.config import TransformerConfig
 from safetensors import safe_open
 from safetensors.torch import save_file
 
@@ -87,7 +88,10 @@ def export(native: Path, tokenizer: Path, output: Path, update: int):
     if (output / ".complete").is_file():
         return
     config = Olmo3MoeConfig.from_dict(manifest["hf_config"])
-    model = Config.from_dict(manifest["model_config"]).build(init_device="meta")
+    model_config = Config.from_dict(manifest["model_config"])
+    if not isinstance(model_config, TransformerConfig):
+        raise ValueError(f"Expected a transformer model config, found {type(model_config).__name__}")
+    model = model_config.build(init_device="meta")
     dense_config = olmo3._config_for_native_dense_layout(model, config)
     source = olmo3._GatheredMoEState(model, dense_config)
     output.mkdir(parents=True, exist_ok=True)
