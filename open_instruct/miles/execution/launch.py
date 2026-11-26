@@ -114,6 +114,7 @@ def specification(image, spec, *, hostnames=None, compiled=None):
         "HF_HOME": "/tmp/hf-cache",
         "SGLANG_EXTERNAL_MODEL_PACKAGE": "olmo_sglang.models",
         **spec.launch["env"],
+        "OI_MILES_TRAINING_IMAGE": image,
     }
     task: dict[str, Any] = dict(
         name=spec.name,

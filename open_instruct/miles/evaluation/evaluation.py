@@ -9,6 +9,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -46,6 +47,8 @@ def parse(value, launch):
     value = dict(value)
     allowed = {
         "mode",
+        "checkpoint_export",
+        "export_cluster",
         "interval",
         "initial",
         "final",
@@ -75,6 +78,15 @@ def parse(value, launch):
                 "evaluation settings require mode=background; shared evaluation uses existing data/miles fields"
             )
         return value
+    if type(value.get("checkpoint_export", False)) is not bool:
+        raise InputError("evaluation.checkpoint_export must be boolean")
+    if value.get("checkpoint_export") and not launch["secrets"].get("BEAKER_TOKEN"):
+        raise InputError("evaluation.checkpoint_export requires launch.secrets.BEAKER_TOKEN")
+    if value.get("checkpoint_export"):
+        if value.setdefault("export_cluster", "ai2/saturn") not in {"ai2/saturn", "ai2/jupiter"}:
+            raise InputError("evaluation.export_cluster must be ai2/saturn or ai2/jupiter")
+    elif "export_cluster" in value:
+        raise InputError("evaluation.export_cluster requires evaluation.checkpoint_export")
     defaults = dict(
         interval=20, initial=True, final=True, gpus=1, submit_timeout=30, timeout="3h", secrets={}, provider_kwargs={}
     )
@@ -315,6 +327,8 @@ def groups(config, update, total):
 
 
 def total_updates(options):
+    if options.get("num_rollout") is None:
+        return None
     return (
         options["num_rollout"]
         * options["rollout_batch_size"]
@@ -333,11 +347,12 @@ def plan(spec, options):
         return config
     total = total_updates(options)
     updates = {0} if config["initial"] else set()
-    if config["final"]:
-        updates.add(total)
-    for task in config["tasks"]:
-        if task["interval"] > 0:
-            updates.update(range(task["interval"], total + 1, task["interval"]))
+    if total is not None:
+        if config["final"]:
+            updates.add(total)
+        for task in config["tasks"]:
+            if task["interval"] > 0:
+                updates.update(range(task["interval"], total + 1, task["interval"]))
     return {
         **config,
         "mounts": spec.launch["weka_mounts"],
@@ -355,7 +370,17 @@ def plan(spec, options):
 
 
 def runtime(spec, options):
+    worker = {}
+    if spec.evaluation.get("checkpoint_export"):
+        worker["export_worker"] = {
+            "image": os.environ.get("OI_MILES_TRAINING_IMAGE"),
+            "workspace": spec.launch["workspace"],
+            "budget": spec.launch["budget"],
+            "token_secret": spec.launch["secrets"]["BEAKER_TOKEN"],
+            "cluster": spec.evaluation["export_cluster"],
+        }
     return {
+        **worker,
         **spec.evaluation,
         "root": spec.output["root"],
         "name": spec.name,
@@ -412,7 +437,25 @@ def specification(receipt):
     }
 
 
-def submit(receipt, path):
+def create_experiment(spec, workspace, name, timeout, *, reconcile=False):
+    seconds = infra_timeouts.seconds(timeout)
+    command = [
+        sys.executable,
+        "-m",
+        "open_instruct.miles.evaluation.evaluation_submit",
+        str(spec),
+        workspace,
+        name,
+        str(int(seconds)),
+    ]
+    if reconcile:
+        command.append("--reconcile")
+    result = subprocess.run(command, capture_output=True, text=True, timeout=seconds, check=True)
+    response = json.loads(result.stdout)
+    return response[0] if isinstance(response, list) else response
+
+
+def submit(receipt, path, *, reconcile=False):
     """One attempt with a hard process deadline. Timeout means ambiguous submission."""
     spec_path = path.with_suffix(".beaker.json")
     try:
@@ -422,30 +465,24 @@ def submit(receipt, path):
         with infra_timeouts.watch(
             "background evaluation submission", previous_timeout=receipt["evaluation"]["submit_timeout"]
         ):
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "open_instruct.miles.evaluation.evaluation_submit",
-                    str(spec_path),
-                    receipt["evaluation"]["workspace"],
-                    f"miles-eval-{hashlib.sha256(receipt['evaluation']['root'].encode()).hexdigest()[:10]}-{receipt['update']}-{receipt['group_id']}",
-                    str(int(infra_timeouts.seconds(receipt["evaluation"]["submit_timeout"]))),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=infra_timeouts.seconds(receipt["evaluation"]["submit_timeout"]),
-                check=True,
+            experiment = create_experiment(
+                spec_path,
+                receipt["evaluation"]["workspace"],
+                f"miles-eval-{hashlib.sha256(receipt['evaluation']['root'].encode()).hexdigest()[:10]}-{receipt['update']}-{receipt['group_id']}",
+                receipt["evaluation"]["submit_timeout"],
+                reconcile=reconcile,
             )
-        response = json.loads(result.stdout)
-        experiment = response[0] if isinstance(response, list) else response
         receipt.update(status="submitted", experiment_id=experiment["id"])
     except Exception as error:
         # Do not persist child stdout/stderr: tools may echo credential values.
         receipt.update(
             status="submission_failed",
             error=type(error).__name__,
-            diagnostic="Submission failed or timed out; inspect Beaker before manual resubmission. No automatic retry.",
+            diagnostic=(
+                "Submission failed or timed out; reconcile the deterministic experiment name before retrying."
+                if reconcile
+                else "Submission failed or timed out; inspect Beaker before manual resubmission. No automatic retry."
+            ),
         )
         if isinstance(error, InputError):
             # Our specification InputErrors contain controlled diagnostics, not
