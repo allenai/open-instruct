@@ -235,6 +235,7 @@ if [[ "$ARM" == c16vs4 && "$MODE" != tokenize ]]; then
     # The trainer tokenizes on the GPU nodes if its cache is missing; fail first instead.
     NC=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache/numpy_sft/$CACHE
     WAIT="$WAIT
+for i in \$(seq 1 ${WAIT_FOR_CACHE:-0}); do [ -f $NC/dataset_statistics.json ] && [ -f $NC/dataset_statistics.txt ] && { sleep 60; break; }; echo H161-WAIT-CACHE \$i; sleep 60; done
 [ -f $NC/dataset_statistics.json ] || { echo H161-NO-CACHE $NC; exit 3; }
 ls $NC | head -3"
 fi
