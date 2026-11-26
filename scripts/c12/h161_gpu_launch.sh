@@ -204,6 +204,8 @@ TRACK_ARG=""; [[ "$TRACKING" == 1 ]] && TRACK_ARG="--with_tracking"
 OUTPUT_DIR="$OUT_ROOT/$RUN_NAME"
 DUMP_DIR="$OUTPUT_DIR/step1"
 
+LCD_ARG=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache
+[[ "${LOCAL_CACHE:-0}" == 1 ]] && LCD_ARG='$LCD'
 ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_small_sft.json \
 --tokenizer_name_or_path allenai/dolma2-tokenizer-olmo35 --tokenizer_revision $TOKREV \
 --chat_template_name olmo35 --reserved_slot_tokens '<think>' '</think>' \
@@ -213,7 +215,7 @@ ARGS="--model_name_or_path $MODEL --config_name scripts/train/debug/kda_hero_sma
 --no_compile_model --activation_checkpointing_mode budget --activation_memory_budget 1 \
 --checkpointing_steps $CKPT --ephemeral_save_interval $SAVE_EVERY --keep_last_n_checkpoints 2 --dist_timeout_hours 2 \
 --no_save_async $TRACK_ARG --run_name $RUN_NAME --logging_steps 1 --mixer_list $MIXER \
---local_cache_dir /weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache \
+--local_cache_dir $LCD_ARG \
 --seed 33333 --data_loader_seed $SEED --output_dir $OUTPUT_DIR $EXTRA_ARGS"
 if [[ -n "${RESUME_FROM:-}" ]]; then ARGS="$ARGS --resume_from_checkpoint $RESUME_FROM"; fi
 
@@ -238,6 +240,19 @@ if [[ "$ARM" == c16vs4 && "$MODE" != tokenize ]]; then
 for i in \$(seq 1 ${WAIT_FOR_CACHE:-0}); do [ -f $NC/dataset_statistics.json ] && [ -f $NC/dataset_statistics.txt ] && { sleep 60; break; }; echo H161-WAIT-CACHE \$i; sleep 60; done
 [ -f $NC/dataset_statistics.json ] || { echo H161-NO-CACHE $NC; exit 3; }
 ls $NC | head -3"
+    if [[ "${LOCAL_CACHE:-0}" == 1 ]]; then
+        WAIT="$WAIT
+LCD=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache
+NEED=\$(du -sb $NC | cut -f1); FREE=\$(df -B1 --output=avail /tmp | tail -1); echo H161-LOCAL-CACHE need \$NEED free \$FREE
+if [ \$FREE -gt \$((NEED + 64*1024*1024*1024)) ]; then
+  mkdir -p /tmp/h161c/numpy_sft && T0=\$(date +%s) && cp -r $NC /tmp/h161c/numpy_sft/ && GOT=\$(du -sb /tmp/h161c/numpy_sft/$CACHE | cut -f1) && [ \$GOT = \$NEED ] && LCD=/tmp/h161c && echo H161-LOCAL-CACHE copied \$GOT bytes in \$(( \$(date +%s) - T0 ))s || echo H161-LOCAL-CACHE copy-failed, using WEKA
+else echo H161-LOCAL-CACHE no-space, using WEKA; fi
+echo H161-LCD \$LCD"
+    fi
+    if [[ -n "${DATA_WORKERS:-}" ]]; then
+        WAIT="$WAIT
+sed -i 's/num_workers=4,/num_workers=$DATA_WORKERS,/' open_instruct/olmo_core_finetune.py && grep -q 'num_workers=$DATA_WORKERS,' open_instruct/olmo_core_finetune.py && echo H161-DATA-WORKERS $DATA_WORKERS || { echo H161-WORKERS-PATCH-FAILED; exit 2; }"
+    fi
 fi
 TORCHRUN="torchrun --nnodes=2 --node_rank=\$BEAKER_REPLICA_RANK --master_addr=\$BEAKER_LEADER_REPLICA_HOSTNAME \
 --master_port=29400 --nproc_per_node=8 $ENTRY $ARGS"
