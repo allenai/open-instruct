@@ -75,8 +75,9 @@ def read_checkpoint(checkpoint: pathlib.Path, layers: list[int]) -> dict[tuple[i
     for layer in layers:
         for weight in (*DECAY, *CONVS):
             name = f"blocks.{layer}.attention.{weight}"
-            # OLMoDDP's float32 masters first: the converter reads `model.<name>` first, so where a checkpoint holds
-            # both, this compares the export with the master and not with whatever the converter picked.
+            # OLMoDDP's float32 masters first, in every mode. The converter reads them first only for `fp32`; in the
+            # other modes it reads `model.<name>` first, so where a checkpoint holds both and they disagree on the
+            # bfloat16 grid, this check fails rather than follow whatever the converter picked.
             candidates = (
                 f"{name}.main",
                 f"module.{name}.main",

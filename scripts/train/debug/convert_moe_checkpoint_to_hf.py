@@ -78,25 +78,23 @@ from open_instruct import logger_utils
 logger = logger_utils.setup_logger(__name__)
 
 
-def checkpoint_key_for(name: str, checkpoint_keys: set[str]) -> str | None:
-    """The checkpoint key holding parameter ``name``: the optimizer's float32 master where the checkpoint has one.
+def checkpoint_key_for(name: str, checkpoint_keys: set[str], master_first: bool = False) -> str | None:
+    """The checkpoint key holding parameter ``name``: the model's own tensor first, as olmo-core's converter reads it.
 
-    The master comes first because a checkpoint may also hold the model's own copy in the compute dtype
-    (``model.<name>`` in bfloat16); read into a float32 parameter, that copy would be rounded values under a
-    float32 dtype, which ``--kda-decay fp32`` could not tell from the master.
+    ``master_first`` puts the optimizer's float32 master (``<name>.main``) ahead instead. ``--kda-decay fp32`` asks
+    that for the KDA weights it exports in float32: where a checkpoint also holds the model's copy in the compute
+    dtype (``model.<name>`` in bfloat16), that copy read into a float32 parameter would be rounded values under a
+    float32 dtype. Every other weight, and every weight in the other modes, keeps the original order.
     """
-    candidates = (
-        f"{name}.main",
-        f"module.{name}.main",
-        f"model.{name}",
-        f"model.module.{name}",
-        name,
-        f"module.{name}",
-    )
+    model_copies = (f"model.{name}", f"model.module.{name}", name, f"module.{name}")
+    masters = (f"{name}.main", f"module.{name}.main")
+    candidates = (*masters, *model_copies) if master_first else (*model_copies, *masters)
     return next((key for key in candidates if key in checkpoint_keys), None)
 
 
-def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir: str) -> dict | None:
+def load_ddp_main_params(
+    model_and_optim_dir: str, model_config: dict, work_dir: str, kda_decay: str = "bf16-grid"
+) -> dict | None:
     """Gather model weights from an OLMoDDP checkpoint, or return None for a conventional one.
 
     ``OLMoDDPTrainModule`` stores the authoritative weights as the fused optimizer's fp32
@@ -105,8 +103,9 @@ def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir:
     (``_load_ddp_optimizer_model_state``); the Olmo 3.5 hero lineage (89e7dcb7) never got it,
     so every hero SFT conversion died with "Missing key in checkpoint state_dict:
     model.embeddings.weight" (2026-09-16). This is that function,
-    ported: the same key candidates, masters first (checkpoint_key_for); the converter then takes the gathered
-    state dict.
+    ported: the same key candidates in the same order (checkpoint_key_for); the converter then takes the gathered
+    state dict. With ``kda_decay`` ``fp32``, the KDA weights exported in float32 are read from their float32
+    masters, and a stored KDA tensor that is not float32 is refused.
     """
     checkpoint_keys = set(get_checkpoint_metadata(model_and_optim_dir).state_dict_metadata)
     if not any(key.endswith(".main") for key in checkpoint_keys):
@@ -114,11 +113,12 @@ def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir:
     logger.info("OLMoDDP checkpoint layout (<param>.main); gathering weights through the fused optimizer keys")
     model = TransformerConfig.from_dict(model_config).build(init_device="meta")
     model = model.to_empty(device="cpu")
+    kda_masters = set().union(*kda_weight_keys(model)) if kda_decay == "fp32" else set()
     keys_to_load: list[str] = []
     destinations: list[tuple[str, torch.Tensor]] = []
     missing: list[str] = []
     for name, param in model.named_parameters():
-        key = checkpoint_key_for(name, checkpoint_keys)
+        key = checkpoint_key_for(name, checkpoint_keys, master_first=name in kda_masters)
         if key is None:
             missing.append(name)
             continue
@@ -131,6 +131,11 @@ def load_ddp_main_params(model_and_optim_dir: str, model_config: dict, work_dir:
         for key, (name, destination), value in zip(keys_to_load, destinations, loaded, strict=True):
             if not isinstance(value, torch.Tensor):
                 raise TypeError(f"Checkpoint value '{key}' is not a tensor")
+            if name in kda_masters and value.dtype != torch.float32:
+                raise RuntimeError(
+                    f"--kda-decay fp32: the checkpoint stores '{key}' as {value.dtype}, so there is no float32 "
+                    "value of this KDA weight to export"
+                )
             if value.numel() != destination.numel():
                 raise RuntimeError(
                     f"Checkpoint value '{key}' has {value.numel()} elements, model parameter '{name}' has {destination.numel()}"
@@ -318,7 +323,7 @@ def main() -> None:
     # materialized CPU tensors, so work_dir can go before the conversion. Keep the consumption inside the block.
     with tempfile.TemporaryDirectory() as work_dir:
         model_state_dict = load_ddp_main_params(
-            str(pathlib.Path(args.checkpoint_input_path) / "model_and_optim"), model_config, work_dir
+            str(pathlib.Path(args.checkpoint_input_path) / "model_and_optim"), model_config, work_dir, args.kda_decay
         )
     with kda_decay_export(args.kda_decay):
         convert_checkpoint_to_hf(

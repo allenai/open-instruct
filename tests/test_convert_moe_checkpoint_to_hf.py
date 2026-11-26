@@ -228,12 +228,62 @@ def test_fp32_refuses_a_checkpoint_loaded_through_a_bfloat16_kda_config(checkpoi
     assert not (tmp_path / "hf" / "model.safetensors").exists()
 
 
-def test_the_master_is_read_where_a_checkpoint_holds_both_layouts():
-    keys = {"model.blocks.0.attention.A_log", "blocks.0.attention.A_log.main", "model.embeddings.weight"}
-    assert convert_script.checkpoint_key_for("blocks.0.attention.A_log", keys) == "blocks.0.attention.A_log.main"
-    assert convert_script.checkpoint_key_for("embeddings.weight", keys) == "model.embeddings.weight"
+def test_key_order_is_the_original_unless_the_master_is_asked_for():
+    keys = {"model.blocks.0.attention.A_log", "blocks.0.attention.A_log.main", "module.w.main", "module.w"}
+    name = "blocks.0.attention.A_log"
+    assert convert_script.checkpoint_key_for(name, keys) == f"model.{name}"
+    assert convert_script.checkpoint_key_for(name, keys, master_first=True) == f"{name}.main"
+    assert convert_script.checkpoint_key_for("w", keys) == "module.w"
+    assert convert_script.checkpoint_key_for("w", keys, master_first=True) == "module.w.main"
+    assert convert_script.checkpoint_key_for("w", {"module.w.main"}) == "module.w.main"
     assert convert_script.checkpoint_key_for("lm_head.weight", keys) is None
-    assert convert_script.checkpoint_key_for("w", {"module.w.main", "module.w"}) == "module.w.main"
+
+
+@requires_fla
+def test_a_checkpoint_holding_both_layouts_exports_end_to_end(checkpoint, tmp_path, monkeypatch):
+    """From disk: every weight as a float32 master (`module.<name>.main`) and as a different bfloat16 model copy
+    (`model.<name>`). The default export is the model copy throughout, as before; `fp32` takes the five KDA weights
+    per layer from their masters and everything else from the model copy."""
+    config, masters = checkpoint
+    copies = {key: (value + 1.0).to(torch.bfloat16) for key, value in masters.items()}
+    directory = str(tmp_path / "step1" / "model_and_optim")
+    dist_cp.save(
+        {f"module.{k}.main": v for k, v in masters.items()} | {f"model.{k}": v for k, v in copies.items()},
+        checkpoint_id=directory,
+    )
+    kda = [
+        k
+        for k in masters
+        if k.endswith((".attention.A_log", ".attention.dt_bias"))
+        or k.endswith(tuple(f".attention.{c}.weight" for c in convert_script.KDA_CONVS))
+    ]
+    assert len(kda) == 10
+    for mode in ("bf16-grid", "fp32"):
+        loaded = convert_script.load_ddp_main_params(directory, config, str(tmp_path), mode)
+        with convert_script.kda_decay_export(mode):
+            exported = core_export((config, loaded), tmp_path / f"hf-{mode}", monkeypatch)
+        others = [key for key in loaded if key in masters and key not in kda]
+        assert others
+        for key in others:  # read from the model copy in both modes
+            assert torch.equal(loaded[key].to(torch.float32), copies[key].to(torch.float32)), (mode, key)
+        for key in kda:
+            want = masters[key] if mode == "fp32" else copies[key].to(torch.float32)
+            got = exported[exported_key(exported, key)]
+            assert torch.equal(got.to(torch.float32).reshape(want.shape), want), (mode, key)
+            assert (got.dtype == torch.float32) == (mode == "fp32" or key.endswith((".A_log", ".dt_bias"))), (
+                mode,
+                key,
+            )
+
+
+@requires_fla
+def test_fp32_refuses_a_kda_weight_the_checkpoint_stores_in_bfloat16(checkpoint, tmp_path):
+    config, masters = checkpoint
+    directory = str(tmp_path / "step1" / "model_and_optim")
+    dist_cp.save({f"module.{k}.main": v.to(torch.bfloat16) for k, v in masters.items()}, checkpoint_id=directory)
+    with pytest.raises(RuntimeError, match="no float32 value of this KDA weight"):
+        convert_script.load_ddp_main_params(directory, config, str(tmp_path), "fp32")
+    assert convert_script.load_ddp_main_params(directory, config, str(tmp_path)) is not None
 
 
 def test_fp32_needs_skip_validation(monkeypatch, capsys):
