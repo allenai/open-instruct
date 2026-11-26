@@ -14,6 +14,8 @@ from olmo_core.nn.attention import AttentionBackendName
 from safetensors.torch import load_file
 from torch.distributed import checkpoint as dcp
 
+from open_instruct.miles.configuration.run_spec import RunSpec
+from open_instruct.miles.errors import InputError
 from open_instruct.miles.evaluation import checkpoint_eval, evaluation, evaluation_submit
 
 
@@ -185,3 +187,28 @@ def test_moe_export_resumes_and_matches_live_conversion(tmp_path, monkeypatch):
     expected = dict(exporter.olmo3.iter_olmo3_moe_hf_state(model, hf))
     assert actual.keys() == expected.keys()
     assert all(torch.equal(actual[name], value) for name, value in expected.items())
+
+
+def test_checkpoint_eval_plans_epoch_run():
+    config_path = Path(__file__).resolve().parents[1] / "configs/miles/examples/tiny/three-node.toml"
+    document = RunSpec.load(config_path).to_dict()
+    document["training"].pop("num_rollouts", None)
+    document["training"]["num_epoch"] = 1
+    document["evaluation"]["checkpoint_export"] = True
+    spec = RunSpec.from_dict(document)
+    compiled = spec.compile()
+    assert compiled.miles["num_epoch"] == 1 and "num_rollout" not in compiled.miles
+    assert [point["update"] for point in evaluation.plan(spec, compiled.miles)["milestones"]] == [0]
+    assert evaluation.runtime(spec, compiled.miles)["total_updates"] is None
+    assert spec.evaluation["export_cluster"] == "ai2/saturn"
+
+
+def test_checkpoint_eval_rejects_mid_rollout_interval():
+    config_path = Path(__file__).resolve().parents[1] / "configs/miles/examples/tiny/three-node.toml"
+    spec = RunSpec.load(config_path)
+    document = spec.to_dict()
+    document["evaluation"]["checkpoint_export"] = True
+    document["evaluation"]["tasks"][0]["interval"] = 1
+    document["inference"]["global_batch_size"] //= 2
+    with pytest.raises(InputError, match="aligned to whole rollouts"):
+        RunSpec.from_dict(document)
