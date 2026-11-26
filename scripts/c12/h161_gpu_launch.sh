@@ -245,7 +245,7 @@ ls $NC | head -3"
 LCD=/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache
 NEED=\$(find $NC -type f -printf '%s\\n' | awk '{s+=\$1} END {print s}'); FREE=\$(df -B1 --output=avail /tmp | tail -1); echo H161-LOCAL-CACHE need \$NEED free \$FREE
 if [ \$FREE -gt \$((NEED + 64*1024*1024*1024)) ]; then
-  mkdir -p /tmp/h161c/numpy_sft && T0=\$(date +%s) && cp -r $NC /tmp/h161c/numpy_sft/ && GOT=\$(find /tmp/h161c/numpy_sft/$CACHE -type f -printf '%s\\n' | awk '{s+=\$1} END {print s}') && [ \$GOT = \$NEED ] && LCD=/tmp/h161c && echo H161-LOCAL-CACHE copied \$GOT bytes in \$(( \$(date +%s) - T0 ))s || echo H161-LOCAL-CACHE copy-failed, using WEKA
+  mkdir -p /tmp/h161c/numpy_sft && T0=\$(date +%s) && mkdir -p /tmp/h161c/numpy_sft/$CACHE && (cd $NC && find . -type f -printf '%P\\n' | xargs -P 32 -I{} cp {} /tmp/h161c/numpy_sft/$CACHE/{}) && GOT=\$(find /tmp/h161c/numpy_sft/$CACHE -type f -printf '%s\\n' | awk '{s+=\$1} END {print s}') && [ \$GOT = \$NEED ] && LCD=/tmp/h161c && echo H161-LOCAL-CACHE copied \$GOT bytes in \$(( \$(date +%s) - T0 ))s || echo H161-LOCAL-CACHE copy-failed, using WEKA
 else echo H161-LOCAL-CACHE no-space, using WEKA; fi
 echo H161-LCD \$LCD"
     fi
