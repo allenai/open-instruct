@@ -175,6 +175,7 @@ dev = [
     "beaker-py>=2.6.0",
     "mkdocs-material>=9.6.8",
     "pytest>=8.3.4",
+    "pytest-xdist>=3.6.1",
     "ruff>=0.11.13",
     "ty>=0.0.1a13",
     "parameterized>=0.9.0",
