@@ -27,6 +27,7 @@ from miles.utils.tracking_utils.tracking import define_step_key_metric_group, fi
 
 from open_instruct import logger_utils
 from open_instruct.miles.configuration import throughput
+from open_instruct.miles.evaluation import checkpoint_eval
 from open_instruct.miles.evaluation import evaluation as background_eval
 from open_instruct.miles.execution import serving, shutdown, startup
 from open_instruct.miles.execution.timing import evaluation_stage, stage
@@ -213,8 +214,11 @@ async def train(args, *, export_hf=None):
         background = getattr(args, "background_evaluation", None)
         evaluation = None if background else EvalDispatcher(args, learner, manager)
         coordinator = None
+        checkpoint_coordinator = None
         collection_snapshots = []
         if background:
+            if background["total_updates"] is None:
+                background["total_updates"] = args.num_rollout * background_eval.updates_per_rollout(args)
             tracking = {
                 "id": getattr(args, "wandb_run_id", None),
                 "entity": args.wandb_team,
@@ -228,17 +232,24 @@ async def train(args, *, export_hf=None):
                     project=wandb.run.project,
                     mode="offline" if wandb.run.settings.mode in {"offline", "dryrun"} else "online",
                 )
-            coordinator = background_eval.Coordinator(
-                background,
-                {
-                    "name": background["name"],
-                    "root": background["root"],
-                    "wandb": tracking,
-                    "beaker_experiment_id": os.environ.get("BEAKER_EXPERIMENT_ID"),
-                },
-            )
-            if args.start_rollout_id == 0 and background["initial"]:
-                coordinator.dispatch(0, args.hf_checkpoint)
+            training = {
+                "name": background["name"],
+                "root": background["root"],
+                "wandb": tracking,
+                "beaker_experiment_id": os.environ.get("BEAKER_EXPERIMENT_ID"),
+            }
+            if background.get("checkpoint_export"):
+                checkpoint_coordinator = checkpoint_eval.Coordinator(background, training)
+                if args.start_rollout_id:
+                    checkpoint_coordinator.recover(
+                        args.save, args.hf_checkpoint, background_eval.updates_per_rollout(args)
+                    )
+                elif background["initial"]:
+                    checkpoint_coordinator.enqueue(0, args.hf_checkpoint)
+            else:
+                coordinator = background_eval.Coordinator(background, training)
+                if args.start_rollout_id == 0 and background["initial"]:
+                    coordinator.dispatch(0, args.hf_checkpoint)
         if (
             evaluation is not None
             and args.eval_interval is not None
@@ -310,8 +321,17 @@ async def train(args, *, export_hf=None):
                     await publish(rollout_id)
             sentinel = args.save_trigger_sentinel and os.path.exists(args.save_trigger_sentinel)
             stopped_for_time = deadline is not None and time.monotonic() >= deadline
+            final_stop = stopped_for_time and not resumable
+            checkpoint_eval_due = False
+            if checkpoint_coordinator is not None:
+                end_update = (rollout_id + 1) * background_eval.updates_per_rollout(args)
+                config = checkpoint_coordinator.config
+                checkpoint_eval_due = bool(
+                    background_eval.groups(config, end_update, end_update if final_stop else config["total_updates"])
+                )
             if (
-                (stopped_for_time and getattr(args, "save", None))
+                checkpoint_eval_due
+                or (stopped_for_time and getattr(args, "save", None))
                 or sentinel
                 or (getattr(args.olmo_core, "save_final_checkpoint", False) and rollout_id == args.num_rollout - 1)
                 or should_run_periodic_action(rollout_id, args.save_interval, rollouts_per_epoch, args.num_rollout)
@@ -337,7 +357,12 @@ async def train(args, *, export_hf=None):
                     await evaluation.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
             if stopped_for_time:
                 logger.info("Graceful wall-clock stop after completed rollout %s (budget=%ss)", rollout_id, budget)
-            final_stop = stopped_for_time and not resumable
+            if checkpoint_eval_due:
+                checkpoint_coordinator.enqueue(
+                    end_update, args.hf_checkpoint, save=args.save, rollout=rollout_id, final=final_stop
+                )
+            elif checkpoint_coordinator is not None:
+                checkpoint_coordinator.kick()
             if coordinator is not None and background is not None:
                 per_rollout = background_eval.updates_per_rollout(args)
                 end_update = (rollout_id + 1) * per_rollout
@@ -383,6 +408,17 @@ async def train(args, *, export_hf=None):
                 await manager.core_publication_boundary(True)
             with stage(args, "final_hf_export"):
                 await learner.export_hf(completed[-1] if completed else args.start_rollout_id - 1, export_hf)
+        if checkpoint_coordinator is not None:
+            if final_stop and completed and checkpoint_coordinator.config["final"]:
+                last = completed[-1]
+                checkpoint_coordinator.enqueue(
+                    (last + 1) * background_eval.updates_per_rollout(args),
+                    args.hf_checkpoint,
+                    save=args.save,
+                    rollout=last,
+                    final=True,
+                )
+            checkpoint_coordinator.drain()
         if final_stop and completed and coordinator is not None and background is not None and background["final"]:
             last = completed[-1]
             update = (last + 1) * args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size

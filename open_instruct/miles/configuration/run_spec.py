@@ -786,6 +786,12 @@ class RunSpec:
         if miles.get("use_kl_loss"):
             miles.setdefault("ref_load", prepared.get("hf_checkpoint", self.conversion["hf_output"]))
         save_enabled = _boolean(controls.get("save_checkpoints", (True, ""))[0], "training.save_checkpoints")
+        if self.evaluation.get("checkpoint_export"):
+            if not save_enabled or not miles["rollout_global_dataset"]:
+                raise InputError("evaluation.checkpoint_export requires native recovery checkpoints")
+            per_rollout = miles["rollout_batch_size"] * miles["n_samples_per_prompt"] // miles["global_batch_size"]
+            if per_rollout < 1 or any(task["interval"] % per_rollout for task in self.evaluation["tasks"]):
+                raise InputError("evaluation.checkpoint_export requires task intervals aligned to whole rollouts")
         if save_enabled:
             if miles.get("num_rollout") is not None:
                 miles.setdefault("save_interval", miles["num_rollout"])

@@ -516,3 +516,31 @@ Keep that limitation visible until the evaluator supports it. For benchmarks
 with their own decoding contract (for example RULER or BFCL), preserve that
 contract rather than applying these settings globally. Keep pre-change scores
 labelled by their original protocol when comparing checkpoints.
+
+## Exporting from native checkpoints on a separate job
+
+Set `evaluation.checkpoint_export = true` for a Beaker Olmo 3 MoE run
+to hand periodic and final background evaluation snapshots to an independent
+CPU job. The trainer commits a native checkpoint at each requested rollout
+boundary, then records a durable request under `evaluation/checkpoint-requests`.
+The CPU job runs the same pinned application image as training. It streams
+Hugging Face shards from that checkpoint and submits the configured evaluator
+jobs only after the weight index and completion marker have committed. A
+preempted export resumes at the first incomplete shard. The CPU worker checks
+deterministic experiment names before retrying an eval submission.
+
+Set `launch.secrets.BEAKER_TOKEN` and keep native recovery enabled. Each
+positive task interval must be divisible by the number of optimizer updates
+per rollout. The CPU task runs unallocated at high priority and defaults
+to Saturn. Set `evaluation.export_cluster = "ai2/jupiter"` to use the
+WEKA-capable Jupiter fallback. Export requests point to immutable
+`evaluation-native` snapshots in the checkpoint directory. These hard links
+protect the native tensor files from ordinary checkpoint pruning, so budget
+storage for the native checkpoints associated with evaluation milestones.
+The explicitly requested final artifact under `output.export_hf` still uses
+the existing final-export path.
+
+A request without a submission receipt can be picked up by a training resume.
+The corresponding `*.beaker.json` can also be submitted with a fresh Beaker job
+name to replay a failed CPU worker. Keep the original request and snapshots so
+the worker can reuse committed shards and deduplicate already-submitted groups.

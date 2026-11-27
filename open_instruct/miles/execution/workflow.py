@@ -308,8 +308,17 @@ def train_config(config, *, export_hf=None, background_evaluation=None):
     with stage(SimpleNamespace(save=config.miles.get("save")), "runtime_argument_parsing"):
         args = parse_runtime(config)
     args.background_evaluation = background_evaluation
+    checkpoint_export = background_evaluation and background_evaluation.get("checkpoint_export")
+    if background_evaluation is not None and checkpoint_export:
+        model_config = json.loads((Path(args.hf_checkpoint) / "config.json").read_text())
+        if model_config.get("model_type") != "olmo3moe":
+            raise InputError("evaluation.checkpoint_export currently supports only Olmo 3 MoE checkpoints")
+        if not background_evaluation["export_worker"]["image"]:
+            raise InputError("evaluation.checkpoint_export requires a submitted Beaker training image")
     args.core_evaluation_snapshot = (
-        "open_instruct.miles.evaluation.evaluation.mid_rollout_snapshot" if background_evaluation else None
+        "open_instruct.miles.evaluation.evaluation.mid_rollout_snapshot"
+        if background_evaluation and not checkpoint_export
+        else None
     )
     os.environ.setdefault("SGLANG_EXTERNAL_MODEL_PACKAGE", "olmo_sglang.models")
     with stage(args, "driver_module_import"):
