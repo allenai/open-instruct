@@ -25,6 +25,7 @@ from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
 import open_instruct.utils as open_instruct_utils
+from open_instruct import vllm_utils
 from open_instruct.dataset_transformation import CHAT_TEMPLATES
 
 
@@ -67,7 +68,12 @@ def main():
         for sample in subset
     ]
     # 4. vLLM bulk generate
-    llm = LLM(model=args.model, dtype="bfloat16", enable_prefix_caching=True)
+    llm = LLM(
+        model=args.model,
+        dtype="bfloat16",
+        enable_prefix_caching=True,
+        hf_overrides=vllm_utils.flatten_olmo3_rope_parameters,
+    )
     sampling_params = SamplingParams(temperature=args.temperature, n=args.number_samples, max_tokens=32768)
     outputs = llm.generate(prompts, sampling_params)
 

@@ -37,11 +37,13 @@ import torch
 import torch.distributed
 import uvicorn
 import vllm
+from packaging import version
 from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from transformers import PretrainedConfig
 from vllm.config import WeightTransferConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest, WeightTransferUpdateRequest
 from vllm.distributed.weight_transfer.ipc_engine import IPCTrainerSendWeightsArgs, IPCWeightTransferEngine
@@ -95,6 +97,22 @@ DRAIN_ACTIVE_TASKS_SLEEP_S = 1
 SHOULD_STOP_TIMEOUT_S = 0.1
 INFERENCE_INIT_TIMEOUT_S = 1200
 VLLM_HEALTH_CHECK_TIMEOUT_S = 600.0
+
+
+def flatten_olmo3_rope_parameters(config: PretrainedConfig) -> PretrainedConfig:
+    """`hf_overrides` for vLLM < 0.26, whose native Olmo 3 reads `rope_parameters` as one flat dict and applies YaRN
+    only on full-attention layers itself. transformers >= 5.13 nests it by layer type (`KeyError: 'rope_theta'`), so
+    pass the full-attention entry; the sliding-attention entry would silently drop YaRN. vLLM >= 0.26 serves Olmo 3
+    through the Transformers backend, which reads the nested form."""
+    rope_parameters = getattr(config, "rope_parameters", None)
+    if (
+        version.parse(vllm.__version__).release < (0, 26)
+        and config.model_type == "olmo3"
+        and isinstance(rope_parameters, dict)
+        and "full_attention" in rope_parameters
+    ):
+        config.rope_parameters = dict(rope_parameters["full_attention"])
+    return config
 
 
 def model_dims_from_vllm_config(vllm_config: "vllm.config.VllmConfig") -> utils.ModelDims:
@@ -684,6 +702,7 @@ class LLMRayActor:
         # model-provided HF generation_config (e.g., max_new_tokens=2048)
         # cannot cap request max_tokens via OpenAI serving defaults.
         kwargs["generation_config"] = "vllm"
+        kwargs["hf_overrides"] = flatten_olmo3_rope_parameters
         engine_args = vllm.AsyncEngineArgs(*args, **kwargs)
         engine_args.disable_log_stats = True
         engine_args.disable_cascade_attn = True
