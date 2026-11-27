@@ -1,5 +1,9 @@
 name: Tests
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 on:
   pull_request:
     branches:
@@ -27,6 +31,14 @@ jobs:
           version: "0.8.6"
       - name: Set up Python
         run: uv sync --frozen
+      - name: Cache Hugging Face downloads
+        run: echo "HF_CACHE_WEEK=$(date --utc '+%Y-%W')" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-cache-v1-${{ env.HF_CACHE_WEEK }}
+          restore-keys: |
+            hf-cache-v1-
       - name: Install native instruction tokenizer data
         run: |
           echo "NLTK_DATA=$RUNNER_TEMP/nltk_data" >> "$GITHUB_ENV"

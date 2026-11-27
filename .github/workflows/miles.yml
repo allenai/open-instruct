@@ -1,5 +1,9 @@
 name: MILES contracts
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 on:
   pull_request:
     branches: [main]
@@ -46,4 +50,4 @@ jobs:
       - name: Check structured-output verifiers
         run: >-
           uv run --frozen
-          pytest open_instruct/test_structured_outputs.py open_instruct/test_miles_source_preparation.py
+          pytest open_instruct/test_structured_outputs.py
