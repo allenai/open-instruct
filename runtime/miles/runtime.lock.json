@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "TP2 fused expert sharding validated on two B300s with Core compatibility off (https://beaker.org/ex/01M8A4S67NCTHNHV3R0YE85ZAF). Both ranks loaded the expected weights in place during live publication and decoded successfully afterward. Previous runtime GPU-validated on Open Instruct ecddc97 with Beaker image 01M87GVQ9PZ6YZ2ZMY81S1TXSG. Tiny TP1 refresh (https://beaker.org/ex/01M87GYN9D4H6AB7CTC63WHDH9) and Tiny TP2 refresh with automatic rounding (https://beaker.org/ex/01M87GYN4DZ9GND5SFK9VD6TDB) each completed four optimizer steps and four in-place weight updates with full decode CUDA graphs.",
+  "status": "Pinned miles to e2d95a6e (miles-olmo-core#62 bounded retained group ownership + adaptive JIT pacing, miles-olmo-core#61 KDA FP32); CPU-validated, runtime image rebuild and GPU qualification pending. Prior runtime: TP2 fused expert sharding validated on two B300s with Core compatibility off (https://beaker.org/ex/01M8A4S67NCTHNHV3R0YE85ZAF). Both ranks loaded the expected weights in place during live publication and decoded successfully afterward. Previous runtime GPU-validated on Open Instruct ecddc97 with Beaker image 01M87GVQ9PZ6YZ2ZMY81S1TXSG. Tiny TP1 refresh (https://beaker.org/ex/01M87GYN9D4H6AB7CTC63WHDH9) and Tiny TP2 refresh with automatic rounding (https://beaker.org/ex/01M87GYN4DZ9GND5SFK9VD6TDB) each completed four optimizer steps and four in-place weight updates with full decode CUDA graphs.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -12,7 +12,7 @@
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",
-      "revision": "686cf9b46023d048eac31a9a9bb2c5bc30305f34"
+      "revision": "e2d95a6e5c8876bec88c7f46f95a4fed2c55e302"
     },
     "olmo-sglang": {
       "repository": "https://github.com/allenai/olmo-sglang.git",

@@ -781,6 +781,9 @@ class RunSpec:
             # a finished sibling frees its slot instead of idling until its slowest
             # sibling and rewards finish. Training still consumes whole groups.
             miles.setdefault("rollout_submission_granularity", "sample")
+            # Bound retained group inventory adaptively so startup compilation and
+            # trainer-bound phases stay fresh without starving steady-state inference.
+            miles.setdefault("async_auto_jit_pacing", True)
         if "kl_loss_coef" in miles and miles["kl_loss_coef"] > 0:
             miles.setdefault("use_kl_loss", True)
         if miles.get("use_kl_loss"):
@@ -885,6 +888,10 @@ class RunSpec:
             capacity = miles["async_data_buffer_capacity_factor"]
             if type(capacity) not in (int, float) or not math.isfinite(capacity) or capacity <= 0:
                 raise InputError("async_data_buffer_capacity_factor must be finite and positive")
+        if "async_max_retained_batches" in miles:
+            retained = miles["async_max_retained_batches"]
+            if type(retained) not in (int, float) or not math.isfinite(retained) or retained < 1:
+                raise InputError("async_max_retained_batches must be a finite number >= 1.0")
         profile["values"] = {
             key: {"value": miles[key], "source": origins.get(f"miles.{key}", profile["selected"])}
             for key in inference_profiles.PROFILE_KEYS

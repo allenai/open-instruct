@@ -145,6 +145,9 @@ fully_async = true
 # An explicit value is preserved; e.g. async_max_concurrent_samples = 128.
 async_data_buffer_capacity_factor = 1.0
 rollout_submission_granularity = "sample"
+# Structured async runs default to adaptive JIT retained-group pacing (`async_auto_jit_pacing = true`).
+# Set `async_auto_jit_pacing = false` to opt out, or set `async_max_retained_batches` (>= 1.0)
+# to fix a retained-group cap (or ceiling when paired with JIT pacing).
 ```
 
 `plan` reports `runtime.async_capacity`; structured `validate` prints its warnings.

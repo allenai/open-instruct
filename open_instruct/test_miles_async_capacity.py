@@ -110,10 +110,54 @@ def test_capacity_warning_uses_actual_group_rounding_and_batch_budget():
 
 
 def test_producer_headroom_and_partial_groups_are_explained(tmp_path):
-    config = configured(tmp_path, inference={"gpus": 32}, miles={"rollout_submission_granularity": "sample"}).compile()
+    config = configured(
+        tmp_path,
+        inference={"gpus": 32},
+        miles={"rollout_submission_granularity": "sample", "async_auto_jit_pacing": False},
+    ).compile()
     warnings = config.plan()["async_capacity"]["warnings"]
     assert any("not a predicted age" in w for w in warnings)
     assert any("retained siblings" in w for w in warnings)
+
+
+def test_async_run_spec_defaults_to_auto_jit_pacing_and_allows_override(tmp_path):
+    default_config = configured(tmp_path, inference={"gpus": 8}).compile()
+    assert default_config.miles["async_auto_jit_pacing"] is True
+    assert "--async-auto-jit-pacing" in default_config.arguments()
+    report = default_config.plan()["async_capacity"]
+    assert report["auto_jit_pacing"] is True
+    assert report["jit_min_retained_batches"] == 2.0
+    assert report["jit_initial_retained_batches"] == 3.0
+    assert not any("retained siblings" in w for w in report["warnings"])
+
+    disabled = configured(
+        tmp_path, inference={"gpus": 8}, **{"async": {"fully_async": True, "async_auto_jit_pacing": False}}
+    ).compile()
+    assert disabled.miles["async_auto_jit_pacing"] is False
+    assert "--async-auto-jit-pacing" not in disabled.arguments()
+
+    capped = configured(
+        tmp_path, inference={"gpus": 8}, **{"async": {"fully_async": True, "async_max_retained_batches": 4.0}}
+    ).compile()
+    assert capped.miles["async_max_retained_batches"] == 4.0
+    assert capped.miles["async_auto_jit_pacing"] is True
+    assert "--async-max-retained-batches" in capped.arguments()
+    capped_report = capped.plan()["async_capacity"]
+    assert capped_report["max_retained_batches"] == 4.0
+    assert capped_report["jit_max_retained_batches"] == 4.0
+
+
+@pytest.mark.parametrize("value", [0, 0.5, -1, float("nan"), float("inf"), True])
+def test_invalid_retained_batches_fail_early(value):
+    with pytest.raises(ValueError, match="async_max_retained_batches"):
+        validation.runtime_values({"fully_async": True, "async_max_retained_batches": value})
+
+
+def test_retained_controls_require_fully_async():
+    with pytest.raises(ValueError, match="fully_async"):
+        validation.runtime_values({"fully_async": False, "async_max_retained_batches": 4.0})
+    with pytest.raises(ValueError, match="fully_async"):
+        validation.runtime_values({"fully_async": False, "async_auto_jit_pacing": True})
 
 
 def test_combined_group_backlog_warns_even_when_each_limit_looks_small():
