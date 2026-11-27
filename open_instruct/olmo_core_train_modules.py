@@ -1,6 +1,6 @@
 """OLMo-core TrainModule classes for various training objectives.
 
-This module provides training modules for DPO and GRPO using
+This module provides training modules for Ambient SFT, DPO and GRPO using
 OLMo-core's native training infrastructure.
 """
 
@@ -11,14 +11,15 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict as dist_cp_sd
+import torch.nn.functional as F
 import wandb
 from olmo_core.distributed import utils as dist_utils
 from olmo_core.nn.attention import AttentionBackendName
-from olmo_core.nn.lm_head import LMHead, LMOutputWithLoss
+from olmo_core.nn.lm_head import LMHead, LMLossImplementation, LMOutputWithLoss
 from olmo_core.nn.transformer import Transformer
 from olmo_core.optim import OptimConfig
 from olmo_core.optim.scheduler import Scheduler
-from olmo_core.train.common import ReduceType
+from olmo_core.train.common import MetricMergeStrategy, ReduceType
 from olmo_core.train.train_module import TransformerTrainModule
 from olmo_core.train.train_module.transformer import config as transformer_config
 from torch.distributed.tensor import DTensor, Replicate, Shard
@@ -99,6 +100,81 @@ def split_batch_dpo(batch: dict[str, Any], num_microbatch_instances: int) -> lis
     return [
         {key: value[i] for key, value in micro_batches.items()} for i in range(len(micro_batches["chosen_input_ids"]))
     ]
+
+
+class AmbientSFTTrainModule(TransformerTrainModule):
+    """SFT with the temperature matching of Ambient SFT (https://huggingface.co/papers/2611.23229).
+
+    On a random fraction `1 - clean_probability` of micro-batches, the cross-entropy to the labels is replaced by the
+    cross-entropy from the frozen initial model's next-token distribution at `temperature` to the model's distribution
+    at the same temperature, at every loss token. It is scaled by the ratio of the initial model's entropy at
+    `temperature` to its entropy at temperature 1, and reduced like the cross-entropy, so both kinds of micro-batch
+    share the gradient scale. Every rank draws the same coins from a generator seeded with `seed`, so the ranks agree
+    without communication. The teacher is attached with `set_teacher` once it is parallelized with this module's mesh.
+    """
+
+    def __init__(self, *args, clean_probability: float, temperature: float, seed: int, **kwargs) -> None:
+        if kwargs.get("cp_config") is not None:
+            raise ValueError(
+                "Ambient SFT does not support context parallelism: the loss mask would not match the logits."
+            )
+        super().__init__(*args, **kwargs)
+        if self.model.lm_head.loss_implementation != LMLossImplementation.default:
+            raise ValueError("Ambient SFT needs the logits, so it requires the 'default' loss implementation.")
+        self.clean_probability = clean_probability
+        self.temperature = temperature
+        self.coin_generator = torch.Generator().manual_seed(seed)
+        self.teacher_model: Transformer | None = None
+
+    def set_teacher(self, teacher_model: Transformer) -> None:
+        teacher_model.eval()
+        teacher_model.requires_grad_(False)
+        self.teacher_model = teacher_model
+
+    def model_forward(self, input_ids: torch.Tensor, labels: torch.Tensor | None = None, **kwargs):
+        if labels is None or not self.model.training:
+            return super().model_forward(input_ids, labels=labels, **kwargs)
+        assert self.teacher_model is not None, "call set_teacher before training"
+
+        matching = torch.rand(1, generator=self.coin_generator).item() >= self.clean_probability
+        self.record_metric(
+            "train/ambient_matching_microbatches",
+            float(matching),
+            ReduceType.mean,
+            merge_strategy=MetricMergeStrategy.sum,
+        )
+        if not matching:
+            return super().model_forward(input_ids, labels=labels, **kwargs)
+
+        loss_kwargs = {"ignore_index", "loss_reduction", "z_loss_multiplier", "loss_div_factor", "return_logits"}
+        teacher_kwargs = {k: v for k, v in kwargs.items() if k not in loss_kwargs}
+        with self._model_forward_context():
+            output = self.model(input_ids, labels=labels, **{**kwargs, "return_logits": True})
+            with torch.no_grad():
+                teacher_logits = self.teacher_model(input_ids, **teacher_kwargs)
+
+        logits = output.logits.float()
+        loss_mask = labels.to(logits.device) != kwargs.get("ignore_index", self.label_ignore_index)
+        teacher_probs = F.softmax(teacher_logits.float() / self.temperature, dim=-1)
+        log_probs = F.log_softmax(logits / self.temperature, dim=-1)
+        matching_loss = -((teacher_probs * log_probs).sum(-1) * loss_mask).sum()
+        with torch.no_grad():
+            entropy = -(teacher_probs * teacher_probs.clamp(min=1e-12).log()).sum(-1)
+            teacher_log_probs = F.log_softmax(teacher_logits.float(), dim=-1)
+            base_entropy = -(teacher_log_probs.exp() * teacher_log_probs).sum(-1)
+            entropy_scale = (entropy * loss_mask).sum() / (base_entropy * loss_mask).sum().clamp(min=1e-8)
+        self.record_metric(
+            "train/ambient_entropy_scale", entropy_scale, ReduceType.mean, merge_strategy=MetricMergeStrategy.latest
+        )
+
+        # Same reduction as the cross-entropy: a sum over loss tokens divided by the batch's loss-token count.
+        loss = self.model.lm_head._finalize_loss(
+            entropy_scale * matching_loss,
+            input_ids.shape[0],
+            loss_reduction="sum",
+            loss_div_factor=kwargs.get("loss_div_factor"),
+        )
+        return LMOutputWithLoss(logits=None, loss=loss, ce_loss=output.ce_loss, z_loss=output.z_loss)
 
 
 class DPOTrainModule(TransformerTrainModule):

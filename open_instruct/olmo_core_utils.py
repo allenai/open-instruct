@@ -344,11 +344,21 @@ def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
     `model_utils.seed_embedding_rows` handles that. A no-op when the tokenizer promoted nothing.
     Returns the number of rows written per matrix.
     """
-    rows = model_utils.promoted_token_rows(tokenizer)
+    rows, matrices = seed_promoted_token_embeddings(train_module.model, tokenizer)
     if not rows:
         return 0
+    sync_optimizer_main_params(getattr(train_module, "optim", None), matrices)
 
-    model = train_module.model
+    logger.info(f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices: {rows}")
+    return len(rows)
+
+
+def seed_promoted_token_embeddings(model, tokenizer) -> tuple[list[tuple[int, tuple[int, ...]]], list[torch.Tensor]]:
+    """Seed the rows of reserved-slot-promoted tokens in `model`; returns the rows and the matrices written."""
+    rows = model_utils.promoted_token_rows(tokenizer)
+    if not rows:
+        return rows, []
+
     matrices = [model.embeddings.weight]
     # The olmo2/olmo3 presets leave tie_word_embeddings False, so the head is a second matrix
     # that needs the same seed. The qwen3 presets tie it, where writing the one parameter twice
@@ -357,10 +367,7 @@ def initialize_promoted_token_embeddings(train_module, tokenizer) -> int:
         matrices.append(model.lm_head.w_out.weight)
     for weight in matrices:
         model_utils.seed_embedding_rows(weight, rows)
-    sync_optimizer_main_params(getattr(train_module, "optim", None), matrices)
-
-    logger.info(f"Seeded {len(rows)} promoted token row(s) across {len(matrices)} matrix/matrices: {rows}")
-    return len(rows)
+    return rows, matrices
 
 
 def sync_optimizer_main_params(optimizer, params: list[torch.Tensor]) -> None:

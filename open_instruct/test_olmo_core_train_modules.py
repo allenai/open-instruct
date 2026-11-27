@@ -2,9 +2,12 @@ import unittest
 from unittest.mock import MagicMock
 
 import torch
+from olmo_core import optim
+from olmo_core.nn.transformer import TransformerConfig
+from olmo_core.train.train_module import TransformerTrainModule
 from parameterized import parameterized
 
-from open_instruct import data_types, grpo_utils
+from open_instruct import data_types, grpo_utils, olmo_core_train_modules
 from open_instruct.utils import INVALID_LOGPROB
 
 
@@ -404,3 +407,87 @@ class TestComputeGRPOLoss(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAmbientSFTTrainModule(unittest.TestCase):
+    vocab_size, seq_len = 64, 16
+
+    def _build(self, train_module_cls=olmo_core_train_modules.AmbientSFTTrainModule, **kwargs):
+        torch.manual_seed(0)
+        model_config = TransformerConfig.llama_like(d_model=32, vocab_size=self.vocab_size, n_layers=2, n_heads=2)
+        train_module = train_module_cls(
+            model=model_config.build(init_device="cpu"),
+            optim=optim.AdamWConfig(lr=1e-3),
+            rank_microbatch_size=2 * self.seq_len,
+            max_sequence_length=self.seq_len,
+            device=torch.device("cpu"),
+            **kwargs,
+        )
+        train_module._trainer = MagicMock()  # only receives record_metric calls
+        if isinstance(train_module, olmo_core_train_modules.AmbientSFTTrainModule):
+            teacher = model_config.build(init_device="cpu")
+            teacher.load_state_dict(train_module.model.state_dict())
+            train_module.set_teacher(teacher)
+        train_module.model.train()
+        return train_module
+
+    def _forward(self, train_module, seed=0):
+        generator = torch.Generator().manual_seed(seed)
+        input_ids = torch.randint(0, self.vocab_size, (2, self.seq_len), generator=generator)
+        labels = input_ids.roll(-1, dims=1)
+        labels[:, :5] = -100
+        loss_div_factor = (labels != -100).sum()
+        output = train_module.model_forward(
+            input_ids,
+            labels=labels,
+            ignore_index=-100,
+            loss_reduction="sum",
+            loss_div_factor=loss_div_factor,
+            return_logits=False,
+        )
+        return output.loss, input_ids, labels
+
+    def test_clean_probability_one_is_cross_entropy(self):
+        ambient = self._build(clean_probability=1.0, temperature=2.5, seed=0)
+        stock = self._build(train_module_cls=TransformerTrainModule)
+        for seed in range(3):
+            torch.testing.assert_close(self._forward(ambient, seed)[0], self._forward(stock, seed)[0])
+
+    def test_matching_loss_at_initialization(self):
+        # The student starts at the teacher, so the matching loss is the scaled entropy of the tempered teacher.
+        temperature = 2.5
+        train_module = self._build(clean_probability=0.0, temperature=temperature, seed=0)
+        loss, input_ids, labels = self._forward(train_module)
+        with torch.no_grad():
+            logits = train_module.teacher_model(input_ids).float()
+        mask = labels != -100
+
+        def entropy(t):
+            log_probs = torch.log_softmax(logits / t, dim=-1)
+            return -(log_probs.exp() * log_probs).sum(-1)[mask]
+
+        expected = entropy(temperature).sum() / entropy(1.0).sum() * entropy(temperature).mean()
+        self.assertGreater(entropy(temperature).sum(), entropy(1.0).sum())
+        torch.testing.assert_close(loss, expected)
+        loss.backward()  # gradients reach the student only
+        self.assertTrue(all(p.grad is None for p in train_module.teacher_model.parameters()))
+        self.assertTrue(any(p.grad is not None for p in train_module.model.parameters()))
+
+    def test_one_seeded_coin_per_micro_batch(self):
+        def coins(seed):
+            train_module = self._build(clean_probability=0.5, temperature=2.5, seed=seed)
+            for micro_batch in range(8):
+                self._forward(train_module, micro_batch)
+            calls = train_module._trainer.record_metric.call_args_list
+            return [c.args[1] for c in calls if c.args[0] == "train/ambient_matching_microbatches"]
+
+        self.assertEqual(coins(0), coins(0))  # every rank draws the same coins
+        self.assertEqual(sorted(set(coins(0))), [0.0, 1.0])  # both losses within 8 micro-batches
+        self.assertNotEqual(coins(0), coins(1))
+
+    def test_evaluation_uses_cross_entropy(self):
+        ambient = self._build(clean_probability=0.0, temperature=2.5, seed=0)
+        stock = self._build(train_module_cls=TransformerTrainModule)
+        ambient.model.eval()
+        stock.model.eval()
+        torch.testing.assert_close(self._forward(ambient)[0], self._forward(stock)[0])

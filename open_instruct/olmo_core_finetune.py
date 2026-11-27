@@ -46,13 +46,22 @@ from olmo_core import optim
 from olmo_core.config import DType
 from olmo_core.data import utils as oc_data_utils
 from olmo_core.distributed import parallel
+from olmo_core.distributed.checkpoint import load_model_and_optim_state
 from olmo_core.distributed.utils import is_distributed
 from olmo_core.nn.ddp import model as ddp_model_lib
 from olmo_core.train import Duration, LoadStrategy, TrainerConfig, callbacks, teardown_training_environment
 from olmo_core.train import train_module as train_module_lib
 from olmo_core.train.checkpoint import CheckpointerConfig
+from olmo_core.train.train_module.transformer.common import parallelize_model
 
-from open_instruct import dataset_transformation, logger_utils, numpy_dataset_conversion, olmo_core_utils, utils
+from open_instruct import (
+    dataset_transformation,
+    logger_utils,
+    numpy_dataset_conversion,
+    olmo_core_train_modules,
+    olmo_core_utils,
+    utils,
+)
 
 logger = logger_utils.setup_logger(__name__)
 
@@ -466,6 +475,12 @@ class SFTConfig:
     routes with EMO) follow the rows exactly. Requires `row_aligned_parts`, and an OLMo-core with
     `use_array_if_local` (allenai/OLMo-core#843). `--no_document_boundaries_from_metadata` opts out
     to the EOS scan; with `--no_row_aligned_parts` too, training reads caches exactly as before."""
+    ambient_clean_probability: float = 1.0
+    """Probability that a micro-batch uses the cross-entropy loss; below 1, the rest use the temperature matching
+    of Ambient SFT (https://huggingface.co/papers/2611.23229) to a frozen copy of the initial model. 1 (the default)
+    is standard SFT and loads no copy. The paper uses 0.75."""
+    ambient_temperature: float = 2.5
+    """Temperature at which the model matches the initial model on Ambient SFT micro-batches."""
     extra_numpy_dirs: list[str] = dataclasses.field(default_factory=list)
     """Local pretokenized numpy dirs to train on alongside the chat cache, in the converter's layout:
     `token_ids_part_XXXX.npy` (raw tokens in the dtype OLMo-core picks for the vocab, uint32 for Olmo)
@@ -656,6 +671,9 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     if is_ddp_model:
         _check_ddp_model_args(args, use_hf_ckpt, cp_config)
         olmo_core_utils.require_transformer_engine()
+    use_ambient = args.sft.ambient_clean_probability < 1
+    if use_ambient and is_ddp_model:
+        raise ValueError("Ambient SFT is not wired for OLMoDDPModel (MoE v2) models.")
     cp_degree = args.training.cp_degree or 1
     gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 1
     dp_shard_degree = gpus_per_node // cp_degree
@@ -742,7 +760,28 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
             max_grad_norm=max_grad_norm,
         )
 
-    train_module = train_module_config.build(model)
+    teacher = None
+    if use_ambient:
+        # `build` only makes the stock module; the config's other fields are passed through unchanged.
+        train_module = olmo_core_train_modules.AmbientSFTTrainModule(
+            model=model,
+            clean_probability=args.sft.ambient_clean_probability,
+            temperature=args.sft.ambient_temperature,
+            seed=args.tracking.seed,
+            **train_module_config.as_dict(exclude_none=True, recurse=False),
+        )
+        # A second train module would rebuild the world mesh, so parallelize the teacher with this one's.
+        teacher = parallelize_model(
+            model_config.build(init_device="meta"),
+            world_mesh=train_module.world_mesh,
+            device=train_module.device,
+            max_sequence_length=train_module_config.max_sequence_length,
+            rank_microbatch_size=train_module_config.rank_microbatch_size,
+            compile_model=train_module_config.compile_model,
+            dp_config=train_module_config.dp_config,
+        )
+    else:
+        train_module = train_module_config.build(model)
 
     data_loader_seed = (
         args.tracking.data_loader_seed if args.tracking.data_loader_seed is not None else args.tracking.seed
@@ -842,6 +881,17 @@ def main(args: SFTArguments, tc: dataset_transformation.TokenizerConfig) -> None
     # rows have been trained since they were seeded.
     if not resumed:
         olmo_core_utils.initialize_promoted_token_embeddings(train_module, tc.tokenizer)
+
+    # The teacher is the initial model, so it loads the base weights even when the student resumes.
+    if teacher is not None:
+        if use_hf_ckpt:
+            olmo_core_utils.load_hf_weights_into_model(
+                teacher, args.model.model_name_or_path, work_dir=args.checkpoint.output_dir
+            )
+        else:
+            load_model_and_optim_state(os.path.join(args.model.model_name_or_path, "model_and_optim"), teacher)
+        olmo_core_utils.seed_promoted_token_embeddings(teacher, tc.tokenizer)
+        train_module.set_teacher(teacher)
 
     logger.info("Starting training...")
     trainer.fit()
