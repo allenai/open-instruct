@@ -11,7 +11,7 @@ jobs:
   unit-tests:
     name: Run unit tests
     runs-on: 8-Core-XL-Runner-Ubuntu-Latest
-    timeout-minutes: 20
+    timeout-minutes: 18
     defaults:
       run:
         shell: bash -euo pipefail {0}

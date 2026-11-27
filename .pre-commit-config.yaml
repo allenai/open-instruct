@@ -35,6 +35,20 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
+      - id: ty-check
+        name: Type check with ty
+        entry: uv run ty check
+        language: system
+        pass_filenames: false
+        types: [python]
+        files: ^(open_instruct/|[^/]*mason\.py$)
+      - id: compileall
+        name: Syntax check with compileall
+        entry: uv run python -m compileall -qq open_instruct mason.py
+        language: system
+        pass_filenames: false
+        types: [python]
+        files: ^(open_instruct/|[^/]*mason\.py$)
       - id: export-requirements
         name: Export requirements.txt from uv.lock
         entry: uv export --format requirements-txt --no-hashes --all-extras --group cuda12 --no-emit-project --output-file requirements.txt
