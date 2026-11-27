@@ -8,7 +8,7 @@ import runpy
 import tempfile
 from pathlib import Path
 
-import pyarrow.parquet as pq
+from pyarrow import parquet as pq
 
 # Load only the repository-owned static protocol. The package initializer imports the service.
 PROTOCOL = runpy.run_path(
