@@ -65,13 +65,50 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Resolve pre-built CI image
+      id: ci-image
+      run: |
+        LOCK_HASH=$(sha256sum uv.lock | cut -c1-16)
+        IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}-ci:${LOCK_HASH}"
+        if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+          echo "use_image=true" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+        else
+          echo "use_image=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Run style and quality checks (pre-built CI image)
+      if: steps.ci-image.outputs.use_image == 'true'
+      run: |
+        docker run --rm \
+          -v "$PWD:/workspace" \
+          -w /workspace \
+          "${{ steps.ci-image.outputs.image }}" \
+          bash -euo pipefail -c '
+            make check-keywords
+            ruff format --check --diff open_instruct *mason.py
+            ruff check --exit-non-zero-on-fix open_instruct *mason.py
+            ty check
+            python -m compileall -qq open_instruct *mason.py
+          '
+
     - name: Install uv
+      if: steps.ci-image.outputs.use_image != 'true'
       uses: astral-sh/setup-uv@v4
       with:
         version: "0.8.8"
 
     - name: Style check
+      if: steps.ci-image.outputs.use_image != 'true'
       run: make style-check
 
     - name: Quality check
+      if: steps.ci-image.outputs.use_image != 'true'
       run: make quality-check

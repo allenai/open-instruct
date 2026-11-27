@@ -1,0 +1,34 @@
+# Pre-built CI environment image keyed on uv.lock.
+# Avoids re-downloading ~4.5 GB of PyTorch/CUDA/vLLM wheels on every CI job.
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC \
+    LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    git-lfs \
+    make \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --system --add safe.directory '*'
+
+COPY --from=ghcr.io/astral-sh/uv:0.8.6 /uv /uvx /bin/
+
+WORKDIR /opt/ci-env
+
+ENV UV_PROJECT_ENVIRONMENT=/opt/ci-env/.venv \
+    UV_CACHE_DIR=/root/.cache/uv \
+    UV_COMPILE_BYTECODE=0 \
+    NLTK_DATA=/opt/ci-env/nltk_data \
+    PATH=/opt/ci-env/.venv/bin:$PATH
+
+COPY pyproject.toml uv.lock ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project \
+    && /opt/ci-env/.venv/bin/python -m nltk.downloader --exit-on-error --dir /opt/ci-env/nltk_data punkt_tab
+
+WORKDIR /workspace
