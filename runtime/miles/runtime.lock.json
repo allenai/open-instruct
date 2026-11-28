@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "Pinned miles to e2d95a6e (miles-olmo-core#62 bounded retained group ownership + adaptive JIT pacing, miles-olmo-core#61 KDA FP32); CPU-validated, runtime image rebuild and GPU qualification pending. Prior runtime: TP2 fused expert sharding validated on two B300s with Core compatibility off (https://beaker.org/ex/01M8A4S67NCTHNHV3R0YE85ZAF). Both ranks loaded the expected weights in place during live publication and decoded successfully afterward. Previous runtime GPU-validated on Open Instruct ecddc97 with Beaker image 01M87GVQ9PZ6YZ2ZMY81S1TXSG. Tiny TP1 refresh (https://beaker.org/ex/01M87GYN9D4H6AB7CTC63WHDH9) and Tiny TP2 refresh with automatic rounding (https://beaker.org/ex/01M87GYN4DZ9GND5SFK9VD6TDB) each completed four optimizer steps and four in-place weight updates with full decode CUDA graphs.",
+  "status": "Pinned olmo-core to 05515837 (Olmo-core#967 with folded #969: FP32 KDA decay parameters through OLMoDDP training/optimizer and HF export) and miles to e2d95a6e (miles-olmo-core#61 KDA FP32 + #62 bounded retained group ownership and adaptive JIT pacing); CPU-validated (training FP32 KDA path validated on 7n run 01M8DX3XR01TVFRQ6ACARD0BDY), combined runtime image rebuild pending. Prior runtime: TP2 fused expert sharding validated on two B300s with Core compatibility off (https://beaker.org/ex/01M8A4S67NCTHNHV3R0YE85ZAF). Both ranks loaded the expected weights in place during live publication and decoded successfully afterward. Previous runtime GPU-validated on Open Instruct ecddc97 with Beaker image 01M87GVQ9PZ6YZ2ZMY81S1TXSG. Tiny TP1 refresh (https://beaker.org/ex/01M87GYN9D4H6AB7CTC63WHDH9) and Tiny TP2 refresh with automatic rounding (https://beaker.org/ex/01M87GYN4DZ9GND5SFK9VD6TDB) each completed four optimizer steps and four in-place weight updates with full decode CUDA graphs.",
   "base_image": {
     "beaker": "01M5ZYQZVF7DDJ1VR619KRSS42",
     "docker_id": "sha256:947e615f93cb88f8739ba270f30adc7f012af8bc0abf43e96f11cd5d3b2d6354"
@@ -8,7 +8,7 @@
   "sources": {
     "olmo-core": {
       "repository": "https://github.com/allenai/Olmo-core.git",
-      "revision": "29ab5b92b94322dbd6e28e7d39af5068b89a23dc"
+      "revision": "05515837451a43bcbb743f689a890648d7134204"
     },
     "miles": {
       "repository": "https://github.com/allenai/miles-olmo-core.git",

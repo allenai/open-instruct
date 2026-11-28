@@ -103,6 +103,8 @@ def test_opd_timing_requires_async_driver(fully_async, timing):
         ("miles.colocate=true", "colocate"),
         ('miles.pause_generation_mode="abort"', "abort"),
         ("miles.async_data_buffer_capacity_factor=0.01", "at least one group"),
+        ("miles.async_auto_jit_pacing=true", "async_auto_jit_pacing"),
+        ("miles.async_max_retained_batches=3.0", "async_max_retained_batches"),
     ],
 )
 def test_async_opd_rejects_unqualified_semantics(override, message):
