@@ -15,6 +15,8 @@ import datasets
 from huggingface_hub import HfApi
 from transformers import HfArgumentParser
 
+import open_instruct.utils as open_instruct_utils
+
 
 @dataclass
 class Args:
@@ -23,7 +25,7 @@ class Args:
 
 
 def main(args: Args):
-    dataset = datasets.load_dataset("gsm8k", "main", num_proc=max_num_processes())
+    dataset = datasets.load_dataset("gsm8k", "main", num_proc=open_instruct_utils.max_num_processes())
 
     def process(example):
         # extract answer; it's after #### in the answer

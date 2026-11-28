@@ -3,6 +3,8 @@ from collections import defaultdict
 
 import datasets
 
+import open_instruct.utils as open_instruct_utils
+
 ALL_ASPECTS = ["helpfulness", "correctness", "coherence", "complexity", "verbosity"]
 
 
@@ -60,7 +62,7 @@ def main(
     hf_entity: str | None,
 ):
     # Load the HelpSteer 2 dataset
-    ds = datasets.load_dataset("nvidia/HelpSteer2", num_proc=max_num_processes())
+    ds = datasets.load_dataset("nvidia/HelpSteer2", num_proc=open_instruct_utils.max_num_processes())
 
     # Binarize the dataset
     binarized_ds = binarize_dataset(ds["train"], aspects_to_ignore, min_score, margin)

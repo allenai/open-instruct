@@ -50,6 +50,7 @@ import numpy as np
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
+import open_instruct.utils as open_instruct_utils
 from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
@@ -89,7 +90,7 @@ def main(args):
     dataset = None
     try:
         dataset = datasets.load_dataset(
-            args.dataset_name, split=args.split, streaming=args.streaming, num_proc=max_num_processes()
+            args.dataset_name, split=args.split, streaming=args.streaming, num_proc=open_instruct_utils.max_num_processes()
         )
         if args.streaming:
             logger.info("Processing in streaming mode.")

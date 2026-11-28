@@ -3,6 +3,8 @@ from collections import defaultdict
 
 import datasets
 
+import open_instruct.utils as open_instruct_utils
+
 ALL_ASPECTS = ["helpfulness", "correctness", "coherence", "complexity", "verbosity"]
 
 WEIGHT_SETS = [
@@ -59,7 +61,7 @@ def binarize_dataset(dataset, min_score: float | None):
 
 def main(min_score: float | None, push_to_hub: bool, hf_entity: str | None):
     # Load the HelpSteer 2 dataset
-    ds = datasets.load_dataset("nvidia/HelpSteer2", num_proc=max_num_processes())
+    ds = datasets.load_dataset("nvidia/HelpSteer2", num_proc=open_instruct_utils.max_num_processes())
 
     # Binarize the dataset
     binarized_ds = binarize_dataset(ds["train"], min_score)

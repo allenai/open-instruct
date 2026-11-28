@@ -4,6 +4,8 @@ import multiprocessing
 import datasets
 from huggingface_hub import HfApi
 
+import open_instruct.utils as open_instruct_utils
+
 
 def is_not_tie(item):
     return item["score_0"] != item["score_1"]
@@ -66,7 +68,7 @@ def extract(item):
 def main(push_to_hub: bool, hf_entity: str | None):
     api = HfApi()
 
-    ds = datasets.load_dataset("openai/webgpt_comparisons", num_proc=max_num_processes())
+    ds = datasets.load_dataset("openai/webgpt_comparisons", num_proc=open_instruct_utils.max_num_processes())
 
     # filter out the ties
     ds = ds["train"].filter(is_not_tie, num_proc=multiprocessing.cpu_count(), load_from_cache_file=False)

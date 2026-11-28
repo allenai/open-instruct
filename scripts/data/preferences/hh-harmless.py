@@ -4,6 +4,8 @@ import multiprocessing
 import datasets
 from huggingface_hub import HfApi
 
+import open_instruct.utils as open_instruct_utils
+
 
 def find_all_occurrences(substring, string):
     """Find all occurrences of a substring in a string and return their indices."""
@@ -57,7 +59,7 @@ def filter_fn(data):
 def main(push_to_hub: bool, hf_entity: str | None):
     api = HfApi()
 
-    ds = datasets.load_dataset("Anthropic/hh-rlhf", data_dir="harmless-base", num_proc=max_num_processes())
+    ds = datasets.load_dataset("Anthropic/hh-rlhf", data_dir="harmless-base", num_proc=open_instruct_utils.max_num_processes())
 
     ds = ds.map(extract, num_proc=multiprocessing.cpu_count(), load_from_cache_file=False)
 
