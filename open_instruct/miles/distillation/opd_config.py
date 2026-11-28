@@ -236,6 +236,10 @@ class OPDRunSpec:
                     "native option"
                 )
         native = document["miles"]
+        if native.get("async_auto_jit_pacing"):
+            raise InputError("OPD does not support miles.async_auto_jit_pacing")
+        if native.get("async_max_retained_batches") is not None:
+            raise InputError("OPD does not support miles.async_max_retained_batches")
         if native.get("fully_async", False):
             validation.integer(native.get("max_weight_staleness"), "miles.max_weight_staleness", minimum=1)
             if document["training"]["optimizer_steps_per_rollout"] != 1:

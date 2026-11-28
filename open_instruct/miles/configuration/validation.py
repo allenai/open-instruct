@@ -185,6 +185,15 @@ def runtime_values(values):
             raise InputError("sglang_chunked_prefill_size must be a positive integer or -1 to disable chunking.")
     if values.get("async_max_concurrent_samples") is not None:
         integer(values["async_max_concurrent_samples"], "miles.async_max_concurrent_samples")
+    if values.get("async_max_retained_batches") is not None:
+        number(values["async_max_retained_batches"], "miles.async_max_retained_batches", minimum=1)
+    if "async_auto_jit_pacing" in values:
+        boolean(values["async_auto_jit_pacing"], "miles.async_auto_jit_pacing")
+    if values.get("fully_async") is False:
+        if values.get("async_max_retained_batches") is not None:
+            raise InputError("miles.async_max_retained_batches requires fully_async=true.")
+        if values.get("async_auto_jit_pacing"):
+            raise InputError("miles.async_auto_jit_pacing requires fully_async=true.")
     for key in ("lr_warmup_iters", "seed", "rollout_seed"):
         if key in values:
             integer(values[key], f"miles.{key}", minimum=0)

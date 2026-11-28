@@ -590,6 +590,11 @@ class RunConfig:
                 raise constraints.error("ReMind requires rollout_global_dataset=true")
             if self.core.selection_table is not None:
                 raise constraints.error("ReMind cannot yet be combined with a frozen prompt-exclusion table")
+        if not options.get("fully_async", False):
+            if options.get("async_max_retained_batches") is not None:
+                raise constraints.error("miles.async_max_retained_batches requires fully_async=true")
+            if options.get("async_auto_jit_pacing", False):
+                raise constraints.error("miles.async_auto_jit_pacing requires fully_async=true")
         prompt_limit = options.get("rollout_max_prompt_len")
         context_limit = options.get("rollout_max_context_len")
         if prompt_limit is not None and context_limit is not None and prompt_limit >= context_limit:
@@ -885,7 +890,9 @@ class RunConfig:
         collection = options.get("rollout_batch_size", 0) * options.get("n_samples_per_prompt", 1)
         return {
             "argv": argv,
-            "async_capacity": async_capacity.report(options, self.core.max_policy_lag),
+            "async_capacity": async_capacity.report(
+                options, self.core.max_policy_lag, prepared_batch_overlap=self.core.prepared_batch_overlap
+            ),
             "throughput": throughput.report(options, self.core),
             "inference_profile": self.inference_profile,
             "runtime_validated": False,
